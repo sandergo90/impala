@@ -243,24 +243,28 @@ export function DiffView() {
             const isCollapsed = collapsedFiles.has(file.path);
             return (
               <div key={file.path} className="border-b border-border">
-                <button
-                  onClick={() => {
-                    setCollapsedFiles((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(file.path)) {
-                        next.delete(file.path);
-                      } else {
-                        next.add(file.path);
-                      }
-                      return next;
-                    });
-                  }}
-                  className="w-full px-3 py-1.5 bg-muted/30 border-b border-border flex items-center gap-2 hover:bg-muted/50 text-left"
-                >
-                  <span className="text-[10px] text-muted-foreground">{isCollapsed ? "▶" : "▼"}</span>
-                  <span className="font-mono text-xs font-semibold">{file.path}</span>
-                </button>
-                {!isCollapsed && <PatchDiff patch={patch} options={diffOptions} />}
+                <PatchDiff
+                  patch={patch}
+                  options={{ ...diffOptions, collapsed: isCollapsed }}
+                  renderHeaderPrefix={() => (
+                    <button
+                      onClick={() => {
+                        setCollapsedFiles((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(file.path)) {
+                            next.delete(file.path);
+                          } else {
+                            next.add(file.path);
+                          }
+                          return next;
+                        });
+                      }}
+                      className="text-[10px] text-muted-foreground px-1"
+                    >
+                      {isCollapsed ? "▶" : "▼"}
+                    </button>
+                  )}
+                />
               </div>
             );
           })}
