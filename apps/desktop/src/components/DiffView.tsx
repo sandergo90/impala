@@ -324,11 +324,16 @@ export function DiffView() {
             return (
               <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
                 {isCollapsed ? (
-                  <div className="flex items-center px-3 py-1.5 bg-muted/30 hover:bg-muted/50 cursor-pointer" onClick={toggleCollapse}>
-                    <span className="text-[10px] text-muted-foreground px-1 mr-2">▶</span>
-                    <span className="font-mono text-xs font-semibold flex-1 truncate">{file.path}</span>
-                    <ViewedButton isViewed={isViewed} onClick={(e) => { e.stopPropagation(); toggleViewed(file.path); }} />
-                  </div>
+                  <PatchDiff
+                    patch={patch}
+                    options={{ ...diffOptions, collapsed: true }}
+                    renderHeaderPrefix={() => (
+                      <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">▶</button>
+                    )}
+                    renderHeaderMetadata={() => (
+                      <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+                    )}
+                  />
                 ) : (
                   <LazyPatchDiff
                     patch={patch}
