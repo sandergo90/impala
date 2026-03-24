@@ -140,7 +140,7 @@ function App() {
                 <div className="flex h-full">
                   <div className="flex-1 min-w-0 border-r">
                     {ptySessionId ? (
-                      <GhosttyTerminal sessionId={ptySessionId} />
+                      <GhosttyTerminal key={ptySessionId} sessionId={ptySessionId} />
                     ) : (
                       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                         Starting terminal...
@@ -165,7 +165,7 @@ function App() {
                     </div>
                   )}
                   {activeTab === "terminal" && ptySessionId && (
-                    <GhosttyTerminal sessionId={ptySessionId} />
+                    <GhosttyTerminal key={ptySessionId} sessionId={ptySessionId} />
                   )}
                   {activeTab === "terminal" && !ptySessionId && (
                     <div className="flex items-center justify-center h-full text-muted-foreground text-sm">

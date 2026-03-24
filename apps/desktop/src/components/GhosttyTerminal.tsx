@@ -87,16 +87,18 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
       // Fit terminal to container FIRST (before buffer replay)
       fitAddon.fit();
 
-      // Replay buffered output from previous session (scrollback restoration)
+      // Replay buffered output (scrollback restoration for existing sessions)
       try {
         const buffered = await invoke<string>("pty_get_buffer", { sessionId });
         if (buffered && !cancelled) {
           const binaryStr = atob(buffered);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
-          }
-          if (bytes.length > 0) {
+          if (binaryStr.length > 0) {
+            // Clear terminal first to avoid mixing stale events
+            terminal.clear();
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+              bytes[i] = binaryStr.charCodeAt(i);
+            }
             terminal.write(bytes);
           }
         }
