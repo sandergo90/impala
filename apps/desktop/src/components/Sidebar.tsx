@@ -114,17 +114,17 @@ export function Sidebar() {
   };
 
   return (
-    <div className="flex flex-col h-full border-r text-sm overflow-hidden">
-      <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b">
+    <div className="flex flex-col h-full text-[12px] overflow-hidden">
+      <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
         Projects
       </div>
       {projects.map((project) => (
         <button
           key={project.path}
           onClick={() => selectProject(project)}
-          className={`group px-3 py-1.5 text-left flex items-center justify-between hover:bg-accent/10 ${
+          className={`group px-3 py-1 text-left flex items-center justify-between hover:bg-foreground/5 ${
             selectedProject?.path === project.path
-              ? "bg-accent/10 text-primary font-semibold"
+              ? "bg-foreground/5 text-foreground font-medium"
               : "text-muted-foreground"
           }`}
         >
@@ -139,16 +139,16 @@ export function Sidebar() {
       ))}
       {worktrees.length > 0 && (
         <>
-          <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b mt-2">
+          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground mt-2">
             Worktrees
           </div>
           {worktrees.map((wt) => (
             <button
               key={wt.path}
               onClick={() => selectWorktree(wt)}
-              className={`px-3 py-1.5 pl-5 text-left hover:bg-accent/10 ${
+              className={`px-3 py-1 pl-4 text-left hover:bg-foreground/5 ${
                 selectedWorktree?.path === wt.path
-                  ? "bg-accent/10 text-primary font-semibold"
+                  ? "bg-foreground/5 text-foreground font-medium"
                   : "text-muted-foreground"
               }`}
             >
@@ -160,14 +160,14 @@ export function Sidebar() {
       {selectedProject && (
         <button
           onClick={() => setShowNewWorktree(true)}
-          className="px-3 py-1.5 text-xs text-muted-foreground hover:text-primary border-t"
+          className="px-3 py-1 text-[11px] text-muted-foreground hover:text-foreground"
         >
           + New Worktree
         </button>
       )}
       <button
         onClick={openProject}
-        className="mt-auto px-3 py-2 border-t text-xs text-muted-foreground hover:text-primary"
+        className="mt-auto px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"
       >
         + Open Project
       </button>

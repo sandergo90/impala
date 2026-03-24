@@ -5,16 +5,12 @@ import { CommitPanel } from "./components/CommitPanel";
 import { DiffView } from "./components/DiffView";
 import { GhosttyTerminal } from "./components/GhosttyTerminal";
 import { Toaster } from "./components/ui/sonner";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable";
 import { useAppStore } from "./store";
 
 function App() {
   const [gitError, setGitError] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [showChanges, setShowChanges] = useState(true);
 
   const selectedWorktree = useAppStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path;
@@ -22,7 +18,7 @@ function App() {
     wtPath ? (s.worktreeStates[wtPath] ?? null) : null
   );
 
-  const activeTab = wtState?.activeTab ?? 'diff';
+  const activeTab = wtState?.activeTab ?? "diff";
   const ptySessionId = wtState?.ptySessionId ?? null;
   const showSplit = wtState?.showSplit ?? false;
 
@@ -49,7 +45,9 @@ function App() {
 
   const handleDiffTab = () => {
     if (!selectedWorktree) return;
-    useAppStore.getState().updateWorktreeState(selectedWorktree.path, { activeTab: "diff" });
+    useAppStore
+      .getState()
+      .updateWorktreeState(selectedWorktree.path, { activeTab: "diff" });
   };
 
   const handleSplitToggle = async () => {
@@ -61,7 +59,10 @@ function App() {
     if (newSplit) {
       const currentPty = getWorktreeState(worktreePath).ptySessionId;
       if (!currentPty) {
-        await invoke("pty_spawn", { sessionId: worktreePath, cwd: worktreePath });
+        await invoke("pty_spawn", {
+          sessionId: worktreePath,
+          cwd: worktreePath,
+        });
         updateWorktreeState(worktreePath, { ptySessionId: worktreePath });
       }
     }
@@ -85,110 +86,122 @@ function App() {
     );
   }
 
-  return (
-    <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
-      <ResizablePanelGroup
-        orientation="horizontal"
-        style={{ height: "100vh" }}
-      >
-        <ResizablePanel defaultSize="20%" minSize={180} maxSize={350}>
-          <Sidebar />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize="80%">
-          <div className="flex flex-col h-full">
-            {/* Tab bar */}
-            <div className="flex items-center border-b border-border bg-muted/30 px-2 shrink-0">
-              <button
-                onClick={handleDiffTab}
-                disabled={showSplit}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  !showSplit && activeTab === "diff"
-                    ? "text-foreground border-b-2 border-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                } disabled:opacity-40 disabled:cursor-not-allowed`}
-              >
-                Diff
-              </button>
-              <button
-                onClick={handleTerminalTab}
-                disabled={!selectedWorktree || showSplit}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  !showSplit && activeTab === "terminal"
-                    ? "text-foreground border-b-2 border-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                } disabled:opacity-40 disabled:cursor-not-allowed`}
-              >
-                Terminal
-              </button>
-              <button
-                onClick={handleSplitToggle}
-                disabled={!selectedWorktree}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  showSplit
-                    ? "border-b-2 border-primary text-primary font-semibold"
-                    : "text-muted-foreground hover:text-foreground"
-                } disabled:opacity-40 disabled:cursor-not-allowed`}
-              >
-                Split
-              </button>
-            </div>
+  const tabButton = (
+    label: string,
+    isActive: boolean,
+    onClick: () => void,
+    disabled?: boolean
+  ) => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`px-3 py-1 text-[11px] font-medium rounded transition-colors ${
+        isActive
+          ? "bg-foreground/10 text-foreground"
+          : "text-muted-foreground hover:text-foreground"
+      } disabled:opacity-30 disabled:cursor-not-allowed`}
+    >
+      {label}
+    </button>
+  );
 
-            {/* Tab content */}
-            <div className="flex-1 min-h-0">
-              {showSplit ? (
-                <ResizablePanelGroup orientation="horizontal">
-                  <ResizablePanel defaultSize="50%" minSize={200}>
-                    {ptySessionId ? (
-                      <GhosttyTerminal key={ptySessionId} sessionId={ptySessionId} />
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                        Starting terminal...
-                      </div>
-                    )}
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize="50%" minSize={200}>
-                    <ResizablePanelGroup orientation="horizontal">
-                      <ResizablePanel defaultSize="65%">
-                        <DiffView />
-                      </ResizablePanel>
-                      <ResizableHandle />
-                      <ResizablePanel defaultSize="35%" minSize={150}>
-                        <CommitPanel />
-                      </ResizablePanel>
-                    </ResizablePanelGroup>
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              ) : (
-                <>
-                  {activeTab === "diff" && (
-                    <ResizablePanelGroup orientation="horizontal">
-                      <ResizablePanel defaultSize="75%">
-                        <DiffView />
-                      </ResizablePanel>
-                      <ResizableHandle withHandle />
-                      <ResizablePanel defaultSize="25%" minSize={150} maxSize={400}>
-                        <CommitPanel />
-                      </ResizablePanel>
-                    </ResizablePanelGroup>
-                  )}
-                  {activeTab === "terminal" && ptySessionId && (
-                    <GhosttyTerminal key={ptySessionId} sessionId={ptySessionId} />
-                  )}
-                  {activeTab === "terminal" && !ptySessionId && (
-                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                      {selectedWorktree
-                        ? "Starting terminal..."
-                        : "Select a worktree to open a terminal"}
-                    </div>
-                  )}
-                </>
-              )}
+  return (
+    <div className="h-screen w-screen overflow-hidden bg-background text-foreground flex flex-col">
+      {/* Unified top bar — blends with macOS titlebar */}
+      <div
+        className="flex items-center h-10 shrink-0 border-b border-border/50 bg-background"
+        style={{ paddingLeft: "78px" }}
+        data-tauri-drag-region
+      >
+        <div className="flex items-center gap-1 mr-auto">
+          {tabButton(
+            "Diff",
+            !showSplit && activeTab === "diff",
+            handleDiffTab,
+            showSplit
+          )}
+          {tabButton(
+            "Terminal",
+            !showSplit && activeTab === "terminal",
+            handleTerminalTab,
+            !selectedWorktree || showSplit
+          )}
+          {tabButton(
+            "Split",
+            showSplit,
+            handleSplitToggle,
+            !selectedWorktree
+          )}
+        </div>
+        <div className="flex items-center gap-2 pr-3">
+          <button
+            onClick={() => setShowChanges(!showChanges)}
+            className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
+              showChanges
+                ? "bg-foreground/10 text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Changes
+          </button>
+        </div>
+      </div>
+
+      {/* Main content area */}
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar */}
+        <div className="w-48 min-w-40 shrink-0 border-r border-border/50">
+          <Sidebar />
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0 relative">
+          {showSplit ? (
+            <div className="flex h-full">
+              <div className="flex-1 min-w-0 border-r border-border/50">
+                {ptySessionId ? (
+                  <GhosttyTerminal
+                    key={ptySessionId}
+                    sessionId={ptySessionId}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                    Starting terminal...
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <DiffView />
+              </div>
             </div>
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          ) : (
+            <>
+              {activeTab === "diff" && <DiffView />}
+              {activeTab === "terminal" && ptySessionId && (
+                <GhosttyTerminal
+                  key={ptySessionId}
+                  sessionId={ptySessionId}
+                />
+              )}
+              {activeTab === "terminal" && !ptySessionId && (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  {selectedWorktree
+                    ? "Starting terminal..."
+                    : "Select a worktree to open a terminal"}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Right drawer — Changes/Commits panel */}
+          {showChanges && (
+            <div className="absolute top-0 right-0 h-full w-72 border-l border-border/50 bg-background shadow-xl z-10 overflow-hidden">
+              <CommitPanel />
+            </div>
+          )}
+        </div>
+      </div>
+
       <Toaster />
     </div>
   );
