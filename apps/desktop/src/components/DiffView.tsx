@@ -42,6 +42,7 @@ export function DiffView() {
   const [showResolved, setShowResolved] = useState(false);
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
+  const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
 
   // Load annotations when file/commit context changes
   useEffect(() => {
@@ -240,9 +241,10 @@ export function DiffView() {
           {changedFiles.map((file) => {
             const patch = fileDiffs[file.path];
             if (!patch) return null;
-            const isCollapsed = collapsedFiles.has(file.path);
+            const isViewed = viewedFiles.has(file.path);
+            const isCollapsed = collapsedFiles.has(file.path) || isViewed;
             return (
-              <div key={file.path} className="border-b border-border">
+              <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-60" : ""}`}>
                 <PatchDiff
                   patch={patch}
                   options={{ ...diffOptions, collapsed: isCollapsed }}
@@ -263,6 +265,27 @@ export function DiffView() {
                     >
                       {isCollapsed ? "▶" : "▼"}
                     </button>
+                  )}
+                  renderHeaderMetadata={() => (
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer ml-auto pr-2">
+                      <input
+                        type="checkbox"
+                        checked={isViewed}
+                        onChange={() => {
+                          setViewedFiles((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(file.path)) {
+                              next.delete(file.path);
+                            } else {
+                              next.add(file.path);
+                            }
+                            return next;
+                          });
+                        }}
+                        className="rounded"
+                      />
+                      Viewed
+                    </label>
                   )}
                 />
               </div>
