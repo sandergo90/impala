@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Ghostty, Terminal, FitAddon } from "ghostty-web";
+import wasmUrl from "ghostty-web/ghostty-vt.wasm?url";
 
 interface GhosttyTerminalProps {
   sessionId: string;
@@ -18,7 +19,9 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
   const setupTerminal = useCallback(async () => {
     if (!containerRef.current) return;
 
-    const ghostty = await Ghostty.load("/ghostty-vt.wasm");
+    console.log("Loading Ghostty WASM from:", wasmUrl);
+    const ghostty = await Ghostty.load(wasmUrl);
+    console.log("Ghostty WASM loaded successfully");
 
     const terminal = new Terminal({
       ghostty,
