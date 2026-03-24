@@ -84,6 +84,28 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
 
       setLoading(false);
 
+      // Replay buffered output from previous session (scrollback restoration)
+      try {
+        const buffered = await invoke<string>("pty_get_buffer", { sessionId });
+        if (buffered && !cancelled) {
+          const binaryStr = atob(buffered);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          if (bytes.length > 0) {
+            terminal.write(bytes);
+          }
+        }
+      } catch {
+        // Buffer may not exist yet for new sessions
+      }
+
+      if (cancelled) {
+        terminal.dispose();
+        return;
+      }
+
       fitAddon.fit();
       const dims = fitAddon.proposeDimensions();
       if (dims) {

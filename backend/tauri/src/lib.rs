@@ -195,6 +195,7 @@ pub fn run() {
             update_annotation,
             delete_annotation,
             pty::pty_spawn,
+            pty::pty_get_buffer,
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
