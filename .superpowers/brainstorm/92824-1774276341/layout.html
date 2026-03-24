@@ -1,0 +1,124 @@
+<h2>App Layout</h2>
+<p class="subtitle">Three-panel layout with collapsible sidebar</p>
+
+<div class="mockup" style="height: 520px;">
+  <div class="mockup-header">Differ — ~/Projects/my-app</div>
+  <div class="mockup-body" style="display: flex; height: 100%; padding: 0; gap: 0;">
+
+    <!-- Left sidebar -->
+    <div style="width: 220px; min-width: 220px; border-right: 1px solid var(--border); display: flex; flex-direction: column; font-size: 13px;">
+      <!-- Projects section -->
+      <div style="padding: 10px 12px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); border-bottom: 1px solid var(--border);">Projects</div>
+      <div style="padding: 6px 12px; background: var(--bg-hover); color: var(--accent); font-weight: 600;">my-app</div>
+      <div style="padding: 6px 12px; color: var(--text-secondary);">api-server</div>
+
+      <!-- Worktrees section -->
+      <div style="padding: 10px 12px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); border-bottom: 1px solid var(--border);">Worktrees</div>
+      <div style="padding: 6px 12px 6px 20px; background: var(--bg-hover); color: var(--accent);">
+        <span style="font-weight: 600;">feature/auth</span>
+        <span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">3 commits</span>
+      </div>
+      <div style="padding: 6px 12px 6px 20px; color: var(--text-secondary);">
+        <span>fix/header-bug</span>
+        <span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">1 commit</span>
+      </div>
+      <div style="padding: 6px 12px 6px 20px; color: var(--text-secondary);">
+        <span>refactor/api</span>
+        <span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">7 commits</span>
+      </div>
+
+      <div style="flex: 1;"></div>
+      <div style="padding: 8px 12px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">+ Open Project</div>
+    </div>
+
+    <!-- Middle panel: commits + changed files -->
+    <div style="width: 260px; min-width: 260px; border-right: 1px solid var(--border); display: flex; flex-direction: column; font-size: 13px;">
+      <div style="padding: 10px 12px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); border-bottom: 1px solid var(--border);">
+        Commits on feature/auth
+      </div>
+
+      <!-- Commits -->
+      <div style="padding: 8px 12px; background: var(--bg-hover); border-left: 3px solid var(--accent);">
+        <div style="font-weight: 600; font-size: 12px;">Add login form validation</div>
+        <div style="font-size: 11px; color: var(--text-muted);">a3f2c1d · 2 hours ago</div>
+      </div>
+      <div style="padding: 8px 12px;">
+        <div style="font-size: 12px;">Setup auth middleware</div>
+        <div style="font-size: 11px; color: var(--text-muted);">b7e4a9f · 5 hours ago</div>
+      </div>
+      <div style="padding: 8px 12px;">
+        <div style="font-size: 12px;">Add user model</div>
+        <div style="font-size: 11px; color: var(--text-muted);">c1d8f3a · yesterday</div>
+      </div>
+
+      <!-- Changed files -->
+      <div style="padding: 10px 12px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+        Changed Files
+      </div>
+      <div style="padding: 6px 12px; background: var(--bg-hover); color: var(--accent); font-family: monospace; font-size: 12px;">
+        <span style="color: #4caf50; margin-right: 6px;">M</span> src/auth/login.tsx
+      </div>
+      <div style="padding: 6px 12px; font-family: monospace; font-size: 12px; color: var(--text-secondary);">
+        <span style="color: #4caf50; margin-right: 6px;">M</span> src/auth/validate.ts
+      </div>
+      <div style="padding: 6px 12px; font-family: monospace; font-size: 12px; color: var(--text-secondary);">
+        <span style="color: #66bb6a; margin-right: 6px;">A</span> src/auth/types.ts
+      </div>
+      <div style="padding: 6px 12px; font-family: monospace; font-size: 12px; color: var(--text-secondary);">
+        <span style="color: #ef5350; margin-right: 6px;">D</span> src/old-auth.ts
+      </div>
+    </div>
+
+    <!-- Right panel: diff view -->
+    <div style="flex: 1; display: flex; flex-direction: column; font-size: 13px; overflow: hidden;">
+      <!-- Diff toolbar -->
+      <div style="padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px;">
+        <span style="font-family: monospace; font-weight: 600; font-size: 12px;">src/auth/login.tsx</span>
+        <span style="flex: 1;"></span>
+        <span style="font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; background: var(--bg-hover);">Split</span>
+        <span style="font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">Unified</span>
+        <span style="font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">Wrap</span>
+      </div>
+
+      <!-- Diff content mock -->
+      <div style="flex: 1; display: flex; gap: 0; font-family: monospace; font-size: 11px; line-height: 1.6; overflow: hidden;">
+        <!-- Left side -->
+        <div style="flex: 1; padding: 8px 0; border-right: 1px solid var(--border);">
+          <div style="padding: 0 12px; color: var(--text-muted);">  import { useState } from 'react'</div>
+          <div style="padding: 0 12px; color: var(--text-muted);">  import { Form } from './form'</div>
+          <div style="padding: 0 12px; color: var(--text-muted);"> </div>
+          <div style="padding: 0 12px; background: rgba(239,83,80,0.12); color: var(--text-primary);">- const validate = (v) => {</div>
+          <div style="padding: 0 12px; background: rgba(239,83,80,0.12); color: var(--text-primary);">-   return v.length > 0</div>
+          <div style="padding: 0 12px; background: rgba(239,83,80,0.12); color: var(--text-primary);">- }</div>
+          <div style="padding: 0 12px; color: var(--text-muted);"> </div>
+          <div style="padding: 0 12px; color: var(--text-muted);">  export function Login() {</div>
+        </div>
+        <!-- Right side -->
+        <div style="flex: 1; padding: 8px 0;">
+          <div style="padding: 0 12px; color: var(--text-muted);">  import { useState } from 'react'</div>
+          <div style="padding: 0 12px; color: var(--text-muted);">  import { Form } from './form'</div>
+          <div style="padding: 0 12px; color: var(--text-muted);"> </div>
+          <div style="padding: 0 12px; background: rgba(76,175,80,0.12); color: var(--text-primary);">+ const validate = (input: string) => {</div>
+          <div style="padding: 0 12px; background: rgba(76,175,80,0.12); color: var(--text-primary);">+   if (!input.trim()) return false</div>
+          <div style="padding: 0 12px; background: rgba(76,175,80,0.12); color: var(--text-primary);">+   return input.length >= 3</div>
+          <div style="padding: 0 12px; background: rgba(76,175,80,0.12); color: var(--text-primary);">+ }</div>
+          <div style="padding: 0 12px; color: var(--text-muted);"> </div>
+          <div style="padding: 0 12px; color: var(--text-muted);">  export function Login() {</div>
+        </div>
+      </div>
+
+      <!-- Annotation -->
+      <div style="margin: 0 12px 12px; padding: 10px 12px; background: var(--bg-hover); border: 1px solid var(--border); border-radius: 6px; font-size: 12px;">
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+          <div style="width: 20px; height: 20px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; font-weight: 700;">S</div>
+          <span style="font-weight: 600;">You</span>
+          <span style="color: var(--text-muted); font-size: 11px;">· line 4 · 10 min ago</span>
+        </div>
+        <div style="color: var(--text-secondary);">Should we also validate email format here?</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top: 16px;">Three panels: Projects/Worktrees → Commits/Files → Diff with annotations. Middle and right panels update based on sidebar selection.</p>

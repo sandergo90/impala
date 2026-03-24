@@ -1,0 +1,62 @@
+<h2>Architecture Approaches</h2>
+<p class="subtitle">How should the Tauri app be structured internally?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Monolith Frontend</h3>
+      <p>Single React app handles everything — sidebar, commit list, diff view, annotations. Tauri backend only provides git operations via Rust commands.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Simplest architecture</li>
+          <li>Fast to build v1</li>
+          <li>All state in one place</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Can get complex as features grow</li>
+          <li>Git operations in Rust require more upfront work</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Shell + Webview Panels</h3>
+      <p>Tauri provides a native-feeling shell (sidebar, toolbar). Each diff opens in its own webview panel, like VS Code's editor tabs. Git operations via Rust commands.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Feels more native (window chrome from Tauri)</li>
+          <li>Each diff is isolated — no cross-contamination</li>
+          <li>Can open multiple diffs side by side</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Multi-webview is more complex in Tauri</li>
+          <li>Harder to share state between panels</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>React App + Git CLI Bridge <span style="color: var(--accent); font-size: 0.8em;">(Recommended)</span></h3>
+      <p>Single React app for the UI. Tauri backend is a thin bridge that shells out to <code>git</code> CLI for all git operations (worktree list, log, diff). Avoids the complexity of a Rust git library.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Fast to build — no Rust git library needed</li>
+          <li>Git CLI is battle-tested and complete</li>
+          <li>React handles all UI complexity</li>
+          <li>Easy to add new git operations</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Requires git installed on the system</li>
+          <li>CLI parsing can be fragile (mitigated with <code>--porcelain</code> flags)</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
