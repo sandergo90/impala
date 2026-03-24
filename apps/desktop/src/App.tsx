@@ -155,47 +155,49 @@ function App() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0 relative">
-          {showSplit ? (
-            <div className="flex h-full">
-              <div className="flex-1 min-w-0 border-r border-border/50">
-                {ptySessionId ? (
+        <div className="flex-1 min-w-0 flex">
+          <div className="flex-1 min-w-0">
+            {showSplit ? (
+              <div className="flex h-full">
+                <div className="flex-1 min-w-0 border-r border-border/50">
+                  {ptySessionId ? (
+                    <GhosttyTerminal
+                      key={ptySessionId}
+                      sessionId={ptySessionId}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                      Starting terminal...
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <DiffView />
+                </div>
+              </div>
+            ) : (
+              <>
+                {activeTab === "diff" && <DiffView />}
+                {activeTab === "terminal" && ptySessionId && (
                   <GhosttyTerminal
                     key={ptySessionId}
                     sessionId={ptySessionId}
                   />
-                ) : (
+                )}
+                {activeTab === "terminal" && !ptySessionId && (
                   <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                    Starting terminal...
+                    {selectedWorktree
+                      ? "Starting terminal..."
+                      : "Select a worktree to open a terminal"}
                   </div>
                 )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <DiffView />
-              </div>
-            </div>
-          ) : (
-            <>
-              {activeTab === "diff" && <DiffView />}
-              {activeTab === "terminal" && ptySessionId && (
-                <GhosttyTerminal
-                  key={ptySessionId}
-                  sessionId={ptySessionId}
-                />
-              )}
-              {activeTab === "terminal" && !ptySessionId && (
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  {selectedWorktree
-                    ? "Starting terminal..."
-                    : "Select a worktree to open a terminal"}
-                </div>
-              )}
-            </>
-          )}
+              </>
+            )}
+          </div>
 
-          {/* Right drawer — Changes/Commits panel */}
+          {/* Right panel — Changes/Commits (pushes content) */}
           {showChanges && (
-            <div className="absolute top-0 right-0 h-full w-72 border-l border-border/50 bg-background shadow-xl z-10 overflow-hidden">
+            <div className="w-72 shrink-0 border-l border-border/50 overflow-hidden">
               <CommitPanel />
             </div>
           )}
