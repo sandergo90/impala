@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Worktree, CommitInfo, ChangedFile, Project } from "./types";
 
 interface AppState {
@@ -37,7 +38,9 @@ interface AppState {
   setViewMode: (mode: 'commit' | 'all-changes') => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>()(
+  persist(
+    (set) => ({
   // Projects
   projects: [],
   setProjects: (projects) => set({ projects }),
@@ -115,4 +118,13 @@ export const useAppStore = create<AppState>((set) => ({
   setWrap: (wrap) => set({ wrap }),
   viewMode: 'commit',
   setViewMode: (mode) => set({ viewMode: mode }),
-}));
+    }),
+    {
+      name: "differ-ui-state",
+      partialize: (state) => ({
+        diffStyle: state.diffStyle,
+        wrap: state.wrap,
+      }),
+    }
+  )
+);
