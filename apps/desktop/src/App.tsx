@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Sidebar } from "./components/Sidebar";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffView } from "./components/DiffView";
@@ -119,10 +118,7 @@ function App() {
         style={{ paddingLeft: "78px" }}
       >
         {/* Drag region fills the entire bar behind the buttons */}
-        <div
-          className="absolute inset-0"
-          onMouseDown={() => getCurrentWindow().startDragging()}
-        />
+        <div className="absolute inset-0" data-tauri-drag-region />
         <div className="relative flex items-center gap-1 mr-auto">
           {tabButton(
             "Diff",
