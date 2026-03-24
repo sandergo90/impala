@@ -245,7 +245,7 @@ export function DiffView() {
             const isCollapsed = collapsedFiles.has(file.path) || isViewed;
 
             return (
-              <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-50" : ""}`}>
+              <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
                 <PatchDiff
                   patch={patch}
                   options={{ ...diffOptions, collapsed: isCollapsed }}
