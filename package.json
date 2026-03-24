@@ -4,8 +4,9 @@
   "packageManager": "bun@1.2.10",
   "workspaces": ["apps/*"],
   "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build"
+    "dev": "cd backend/tauri && cargo tauri dev",
+    "build": "cd backend/tauri && cargo tauri build",
+    "typecheck": "turbo typecheck"
   },
   "devDependencies": {
     "turbo": "2.8.20"
