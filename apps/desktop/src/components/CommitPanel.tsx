@@ -1,4 +1,6 @@
+import { useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { useAppStore } from "../store";
 import type { ChangedFile, CommitInfo } from "../types";
@@ -27,7 +29,7 @@ export function CommitPanel() {
   const update = (updates: Partial<typeof wtState>) =>
     useAppStore.getState().updateWorktreeState(worktreePath, updates);
 
-  const splitPatch = (fullDiff: string): Record<string, string> => {
+  const splitPatch = useCallback((fullDiff: string): Record<string, string> => {
     const fileDiffs: Record<string, string> = {};
     const parts = fullDiff.split(/^diff --git /m).filter(Boolean);
     for (const part of parts) {
@@ -36,7 +38,7 @@ export function CommitPanel() {
       if (match) fileDiffs[match[1]] = patch;
     }
     return fileDiffs;
-  };
+  }, []);
 
   const selectAllChanges = async () => {
     update({ viewMode: 'all-changes', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
@@ -108,6 +110,35 @@ export function CommitPanel() {
       toast.error("Failed to load diff");
     }
   };
+
+  // Auto-refresh uncommitted changes when files change on disk
+  const refreshUncommitted = useCallback(async () => {
+    if (viewMode !== 'uncommitted') return;
+    try {
+      const [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: worktreePath }),
+        invoke<string>("get_uncommitted_diff", { worktreePath: worktreePath }),
+      ]);
+      update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+    } catch {
+      // Silently fail on auto-refresh
+    }
+  }, [viewMode, worktreePath, splitPatch, update]);
+
+  useEffect(() => {
+    const safeId = worktreePath.replace(/[^a-zA-Z0-9\-_]/g, "-");
+    let unlisten: (() => void) | null = null;
+
+    listen(`fs-changed-${safeId}`, () => {
+      refreshUncommitted();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [worktreePath, refreshUncommitted]);
 
   return (
     <div className="flex flex-col h-full border-r text-sm overflow-hidden">

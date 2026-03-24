@@ -1,6 +1,7 @@
 mod annotations;
 mod git;
 mod pty;
+mod watcher;
 
 use std::fs;
 use std::path::PathBuf;
@@ -222,6 +223,7 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize database: {}", e))?;
             app.manage(DbState(Mutex::new(conn)));
             app.manage(pty::PtyState::new());
+            app.manage(watcher::WatcherState::new());
             app.manage(DiffCache(Mutex::new(lru::LruCache::new(
                 std::num::NonZeroUsize::new(50).unwrap(),
             ))));
@@ -253,6 +255,8 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
+            watcher::watch_worktree,
+            watcher::unwatch_worktree,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
