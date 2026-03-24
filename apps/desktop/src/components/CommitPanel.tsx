@@ -34,12 +34,24 @@ export function CommitPanel() {
       changedFiles: [],
       selectedFile: null,
       diffText: null,
+      fileDiffs: {},
     });
     try {
       const files = await invoke<ChangedFile[]>("get_all_changed_files", {
         worktreePath: selectedWorktree.path,
       });
       update({ changedFiles: files });
+      // Fetch all file diffs in parallel against the base branch
+      const diffs = await Promise.all(
+        files.map(async (f) => {
+          const diff = await invoke<string>("get_branch_diff", {
+            worktreePath: selectedWorktree.path,
+            filePath: f.path,
+          });
+          return [f.path, diff] as const;
+        })
+      );
+      update({ fileDiffs: Object.fromEntries(diffs) });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
