@@ -1,9 +1,13 @@
+import { Sidebar } from "./components/Sidebar";
+import { CommitPanel } from "./components/CommitPanel";
+import { DiffView } from "./components/DiffView";
+
 function App() {
   return (
     <div className="flex h-screen bg-background text-foreground">
-      <div className="w-56 border-r p-4">Sidebar</div>
-      <div className="w-64 border-r p-4">Commits</div>
-      <div className="flex-1 p-4">Diff View</div>
+      <Sidebar />
+      <CommitPanel />
+      <DiffView />
     </div>
   );
 }

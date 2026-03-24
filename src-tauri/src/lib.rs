@@ -38,6 +38,7 @@ fn get_commit_diff(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_worktrees,
             detect_base_branch,
