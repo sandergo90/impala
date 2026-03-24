@@ -39,7 +39,7 @@ export function CommitPanel() {
   };
 
   const selectAllChanges = async () => {
-    update({ viewMode: 'all-changes', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {} });
+    update({ viewMode: 'all-changes', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_all_changed_files", { worktreePath: selectedWorktree.path }),
@@ -52,7 +52,7 @@ export function CommitPanel() {
   };
 
   const selectCommit = async (commit: CommitInfo) => {
-    update({ viewMode: 'commit', selectedCommit: commit, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {} });
+    update({ viewMode: 'commit', selectedCommit: commit, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_changed_files", { worktreePath: selectedWorktree.path, commitHash: commit.hash }),

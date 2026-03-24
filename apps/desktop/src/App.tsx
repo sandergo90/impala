@@ -10,7 +10,7 @@ import { useAppStore } from "./store";
 function App() {
   const [gitError, setGitError] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [showChanges, setShowChanges] = useState(true);
+  const [showChanges, setShowChanges] = useState(false);
 
   const selectedWorktree = useAppStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path;
