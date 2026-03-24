@@ -18,7 +18,7 @@ export function CommitPanel() {
 
   if (!selectedWorktree) {
     return (
-      <div className="flex items-center justify-center h-full w-64 min-w-64 border-r text-sm text-muted-foreground">
+      <div className="flex items-center justify-center h-full border-r text-sm text-muted-foreground">
         Select a worktree
       </div>
     );
@@ -79,7 +79,7 @@ export function CommitPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full w-64 min-w-64 border-r text-sm">
+    <div className="flex flex-col h-full border-r text-sm">
       <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b">
         Commits on {selectedWorktree.branch}
       </div>

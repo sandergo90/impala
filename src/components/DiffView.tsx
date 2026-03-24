@@ -135,14 +135,14 @@ export function DiffView() {
 
   if (!selectedFile || !diffText) {
     return (
-      <div className="flex items-center justify-center h-full flex-1 text-sm text-muted-foreground">
+      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
         Select a file to view its diff
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full flex-1 overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center gap-3 px-3 py-2 border-b">
         <span className="font-mono font-semibold text-xs flex-1">
           {selectedFile.path}
