@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { useAppStore } from "../store";
-import type { ChangedFile, CommitInfo } from "../types";
+import type { ChangedFile, CommitInfo, WorktreeState } from "../types";
 
 const statusColor: Record<string, string> = {
   M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
@@ -16,18 +16,18 @@ export function CommitPanel() {
     wtPath ? (s.worktreeStates[wtPath] ?? null) : null
   );
 
-  if (!selectedWorktree || !wtState) {
-    return (
-      <div className="flex items-center justify-center h-full border-r text-sm text-muted-foreground">
-        Select a worktree
-      </div>
-    );
-  }
+  const worktreePath = wtPath ?? "";
+  const baseBranch = wtState?.baseBranch ?? null;
+  const commits = wtState?.commits ?? [];
+  const selectedCommit = wtState?.selectedCommit ?? null;
+  const changedFiles = wtState?.changedFiles ?? [];
+  const selectedFile = wtState?.selectedFile ?? null;
+  const viewMode = wtState?.viewMode ?? 'commit';
 
-  const { baseBranch, commits, selectedCommit, changedFiles, selectedFile, viewMode } = wtState;
-  const worktreePath = selectedWorktree.path;
-  const update = (updates: Partial<typeof wtState>) =>
-    useAppStore.getState().updateWorktreeState(worktreePath, updates);
+  const update = useCallback((updates: Partial<WorktreeState>) =>
+    useAppStore.getState().updateWorktreeState(worktreePath, updates),
+    [worktreePath]
+  );
 
   const splitPatch = useCallback((fullDiff: string): Record<string, string> => {
     const fileDiffs: Record<string, string> = {};
@@ -44,8 +44,8 @@ export function CommitPanel() {
     update({ viewMode: 'all-changes', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
     try {
       const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_all_changed_files", { worktreePath: selectedWorktree.path }),
-        invoke<string>("get_full_branch_diff", { worktreePath: selectedWorktree.path }),
+        invoke<ChangedFile[]>("get_all_changed_files", { worktreePath: worktreePath }),
+        invoke<string>("get_full_branch_diff", { worktreePath: worktreePath }),
       ]);
       update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
     } catch (e) {
@@ -57,8 +57,8 @@ export function CommitPanel() {
     update({ viewMode: 'uncommitted', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
     try {
       const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: selectedWorktree.path }),
-        invoke<string>("get_uncommitted_diff", { worktreePath: selectedWorktree.path }),
+        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: worktreePath }),
+        invoke<string>("get_uncommitted_diff", { worktreePath: worktreePath }),
       ]);
       update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
     } catch (e) {
@@ -70,8 +70,8 @@ export function CommitPanel() {
     update({ viewMode: 'commit', selectedCommit: commit, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
     try {
       const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_changed_files", { worktreePath: selectedWorktree.path, commitHash: commit.hash }),
-        invoke<string>("get_full_commit_diff", { worktreePath: selectedWorktree.path, commitHash: commit.hash }),
+        invoke<ChangedFile[]>("get_changed_files", { worktreePath: worktreePath, commitHash: commit.hash }),
+        invoke<string>("get_full_commit_diff", { worktreePath: worktreePath, commitHash: commit.hash }),
       ]);
       update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
     } catch (e) {
@@ -86,7 +86,7 @@ export function CommitPanel() {
       if (viewMode === 'uncommitted') {
         // For uncommitted, get diff of working tree
         diff = await invoke<string>("get_uncommitted_diff", {
-          worktreePath: selectedWorktree.path,
+          worktreePath: worktreePath,
         });
         // Extract just this file's diff from the full output
         const parts = diff.split(/^diff --git /m).filter(Boolean);
@@ -94,13 +94,13 @@ export function CommitPanel() {
         diff = filePart ? "diff --git " + filePart : "";
       } else if (viewMode === 'all-changes') {
         diff = await invoke<string>("get_branch_diff", {
-          worktreePath: selectedWorktree.path,
+          worktreePath: worktreePath,
           filePath: file.path,
         });
       } else {
         if (!selectedCommit) return;
         diff = await invoke<string>("get_commit_diff", {
-          worktreePath: selectedWorktree.path,
+          worktreePath: worktreePath,
           commitHash: selectedCommit.hash,
           filePath: file.path,
         });
@@ -139,6 +139,14 @@ export function CommitPanel() {
       unlisten?.();
     };
   }, [worktreePath, refreshUncommitted]);
+
+  if (!selectedWorktree || !wtState) {
+    return (
+      <div className="flex items-center justify-center h-full border-r text-sm text-muted-foreground">
+        Select a worktree
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full border-r text-sm overflow-hidden">
