@@ -5,6 +5,11 @@ import { CommitPanel } from "./components/CommitPanel";
 import { DiffView } from "./components/DiffView";
 import { GhosttyTerminal } from "./components/GhosttyTerminal";
 import { Toaster } from "./components/ui/sonner";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 import { useAppStore } from "./store";
 
 function App() {
@@ -148,61 +153,64 @@ function App() {
       </div>
 
       {/* Main content area */}
-      <div className="flex flex-1 min-h-0">
+      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
         {/* Sidebar */}
-        <div className="w-48 min-w-40 shrink-0 border-r border-border/50">
+        <ResizablePanel defaultSize="15%" minSize={140} maxSize={300}>
           <Sidebar />
-        </div>
+        </ResizablePanel>
+        <ResizableHandle />
 
         {/* Content */}
-        <div className="flex-1 min-w-0 flex">
-          <div className="flex-1 min-w-0">
-            {showSplit ? (
-              <div className="flex h-full">
-                <div className="flex-1 min-w-0 border-r border-border/50">
-                  {ptySessionId ? (
-                    <GhosttyTerminal
-                      key={ptySessionId}
-                      sessionId={ptySessionId}
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                      Starting terminal...
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <DiffView />
-                </div>
-              </div>
-            ) : (
-              <>
-                {activeTab === "diff" && <DiffView />}
-                {activeTab === "terminal" && ptySessionId && (
+        <ResizablePanel defaultSize={showChanges ? "65%" : "85%"}>
+          {showSplit ? (
+            <ResizablePanelGroup orientation="horizontal">
+              <ResizablePanel defaultSize="50%" minSize={200}>
+                {ptySessionId ? (
                   <GhosttyTerminal
                     key={ptySessionId}
                     sessionId={ptySessionId}
                   />
-                )}
-                {activeTab === "terminal" && !ptySessionId && (
+                ) : (
                   <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                    {selectedWorktree
-                      ? "Starting terminal..."
-                      : "Select a worktree to open a terminal"}
+                    Starting terminal...
                   </div>
                 )}
-              </>
-            )}
-          </div>
-
-          {/* Right panel — Changes/Commits (pushes content) */}
-          {showChanges && (
-            <div className="w-72 shrink-0 border-l border-border/50 overflow-hidden">
-              <CommitPanel />
-            </div>
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel defaultSize="50%" minSize={200}>
+                <DiffView />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          ) : (
+            <>
+              {activeTab === "diff" && <DiffView />}
+              {activeTab === "terminal" && ptySessionId && (
+                <GhosttyTerminal
+                  key={ptySessionId}
+                  sessionId={ptySessionId}
+                />
+              )}
+              {activeTab === "terminal" && !ptySessionId && (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  {selectedWorktree
+                    ? "Starting terminal..."
+                    : "Select a worktree to open a terminal"}
+                </div>
+              )}
+            </>
           )}
-        </div>
-      </div>
+        </ResizablePanel>
+
+        {/* Right panel — Changes/Commits */}
+        {showChanges && (
+          <>
+            <ResizableHandle />
+            <ResizablePanel defaultSize="20%" minSize={180} maxSize={400}>
+              <CommitPanel />
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
 
       <Toaster />
     </div>
