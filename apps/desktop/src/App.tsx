@@ -101,7 +101,7 @@ function App() {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-3 py-1 text-[11px] font-medium rounded transition-colors ${
+      className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${
         isActive
           ? "bg-foreground/10 text-foreground"
           : "text-muted-foreground hover:text-foreground"
