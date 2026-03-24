@@ -137,8 +137,8 @@ function App() {
             {/* Tab content */}
             <div className="flex-1 min-h-0">
               {showSplit ? (
-                <div className="flex h-full">
-                  <div className="flex-1 min-w-0 border-r">
+                <ResizablePanelGroup orientation="horizontal">
+                  <ResizablePanel defaultSize="50%" minSize={200}>
                     {ptySessionId ? (
                       <GhosttyTerminal key={ptySessionId} sessionId={ptySessionId} />
                     ) : (
@@ -146,23 +146,32 @@ function App() {
                         Starting terminal...
                       </div>
                     )}
-                  </div>
-                  <div className="flex-1 min-w-0 flex">
-                    <CommitPanel />
-                    <DiffView />
-                  </div>
-                </div>
+                  </ResizablePanel>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel defaultSize="50%" minSize={200}>
+                    <ResizablePanelGroup orientation="horizontal">
+                      <ResizablePanel defaultSize="35%" minSize={150}>
+                        <CommitPanel />
+                      </ResizablePanel>
+                      <ResizableHandle />
+                      <ResizablePanel defaultSize="65%">
+                        <DiffView />
+                      </ResizablePanel>
+                    </ResizablePanelGroup>
+                  </ResizablePanel>
+                </ResizablePanelGroup>
               ) : (
                 <>
                   {activeTab === "diff" && (
-                    <div className="flex h-full">
-                      <div className="w-64 min-w-48 shrink-0">
+                    <ResizablePanelGroup orientation="horizontal">
+                      <ResizablePanel defaultSize="25%" minSize={150} maxSize={400}>
                         <CommitPanel />
-                      </div>
-                      <div className="flex-1 min-w-0">
+                      </ResizablePanel>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel defaultSize="75%">
                         <DiffView />
-                      </div>
-                    </div>
+                      </ResizablePanel>
+                    </ResizablePanelGroup>
                   )}
                   {activeTab === "terminal" && ptySessionId && (
                     <GhosttyTerminal key={ptySessionId} sessionId={ptySessionId} />
