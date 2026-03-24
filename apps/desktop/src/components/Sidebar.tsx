@@ -18,8 +18,7 @@ export function Sidebar() {
     setWorktrees,
     selectedWorktree,
     setSelectedWorktree,
-    setBaseBranch,
-    setCommits,
+    updateWorktreeState,
   } = useAppStore();
 
   const [showNewWorktree, setShowNewWorktree] = useState(false);
@@ -103,12 +102,12 @@ export function Sidebar() {
       const base = await invoke<string>("detect_base_branch", {
         worktreePath: wt.path,
       });
-      setBaseBranch(base);
+      updateWorktreeState(wt.path, { baseBranch: base });
       const commits = await invoke<CommitInfo[]>("get_diverged_commits", {
         worktreePath: wt.path,
         baseBranch: base,
       });
-      setCommits(commits);
+      updateWorktreeState(wt.path, { commits });
     } catch (e) {
       toast.error("Failed to load commits");
     }

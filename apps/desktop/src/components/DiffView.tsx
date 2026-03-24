@@ -9,24 +9,34 @@ import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation } from "../types";
 
 export function DiffView() {
-  const {
-    selectedFile,
-    diffText,
-    diffStyle,
-    setDiffStyle,
-    wrap,
-    setWrap,
-    selectedProject,
-    selectedCommit,
-    viewMode,
-    changedFiles,
-    fileDiffs,
-    annotations,
-    setAnnotations,
-    addAnnotation,
-    updateAnnotation,
-    removeAnnotation,
-  } = useAppStore();
+  const selectedProject = useAppStore((s) => s.selectedProject);
+  const selectedWorktree = useAppStore((s) => s.selectedWorktree);
+  const diffStyle = useAppStore((s) => s.diffStyle);
+  const setDiffStyle = useAppStore((s) => s.setDiffStyle);
+  const wrap = useAppStore((s) => s.wrap);
+  const setWrap = useAppStore((s) => s.setWrap);
+
+  const wtState = useAppStore((s) =>
+    s.selectedWorktree ? s.getWorktreeState(s.selectedWorktree.path) : null
+  );
+
+  const selectedFile = wtState?.selectedFile ?? null;
+  const diffText = wtState?.diffText ?? null;
+  const selectedCommit = wtState?.selectedCommit ?? null;
+  const viewMode = wtState?.viewMode ?? 'commit';
+  const changedFiles = wtState?.changedFiles ?? [];
+  const fileDiffs = wtState?.fileDiffs ?? {};
+  const annotations = wtState?.annotations ?? [];
+
+  const worktreePath = selectedWorktree?.path;
+  const update = useCallback(
+    (updates: Partial<NonNullable<typeof wtState>>) => {
+      if (worktreePath) {
+        useAppStore.getState().updateWorktreeState(worktreePath, updates);
+      }
+    },
+    [worktreePath]
+  );
 
   const [showResolved, setShowResolved] = useState(false);
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
@@ -34,7 +44,7 @@ export function DiffView() {
   // Load annotations when file/commit context changes
   useEffect(() => {
     if (!selectedProject || !selectedFile) {
-      setAnnotations([]);
+      update({ annotations: [] });
       return;
     }
 
@@ -47,17 +57,17 @@ export function DiffView() {
 
     sqliteProvider
       .list(repoPath, filePath, commitHash)
-      .then(setAnnotations)
+      .then((anns) => update({ annotations: anns }))
       .catch(() => {
         toast.error("Failed to load annotations");
-        setAnnotations([]);
+        update({ annotations: [] });
       });
   }, [
     selectedProject?.path,
     selectedFile?.path,
     selectedCommit?.hash,
     viewMode,
-    setAnnotations,
+    update,
   ]);
 
   // Build Pierre lineAnnotations from our annotations for inline rendering
@@ -113,26 +123,30 @@ export function DiffView() {
         side,
         body,
       });
-      addAnnotation(created);
+      update({ annotations: [...annotations, created] });
       setShowAnnotationForm(false);
     },
-    [selectedProject, selectedFile, selectedCommit, viewMode, addAnnotation]
+    [selectedProject, selectedFile, selectedCommit, viewMode, annotations, update]
   );
 
   const handleResolve = useCallback(
     async (id: string, resolved: boolean) => {
       const updated = await sqliteProvider.update(id, { resolved });
-      updateAnnotation(id, updated);
+      update({
+        annotations: annotations.map((a) => (a.id === id ? updated : a)),
+      });
     },
-    [updateAnnotation]
+    [annotations, update]
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
       await sqliteProvider.delete(id);
-      removeAnnotation(id);
+      update({
+        annotations: annotations.filter((a) => a.id !== id),
+      });
     },
-    [removeAnnotation]
+    [annotations, update]
   );
 
   const hasFileDiffs = Object.keys(fileDiffs).length > 0;

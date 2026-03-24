@@ -48,6 +48,21 @@ export interface NewAnnotation {
   body: string;
 }
 
+export interface WorktreeState {
+  ptySessionId: string | null;
+  activeTab: 'terminal' | 'diff';
+  showSplit: boolean;
+  commits: CommitInfo[];
+  selectedCommit: CommitInfo | null;
+  changedFiles: ChangedFile[];
+  selectedFile: ChangedFile | null;
+  diffText: string | null;
+  fileDiffs: Record<string, string>;
+  baseBranch: string | null;
+  viewMode: 'commit' | 'all-changes';
+  annotations: Annotation[];
+}
+
 export interface CommentProvider {
   list(repo: string, file?: string, commit?: string): Promise<Annotation[]>;
   create(annotation: NewAnnotation): Promise<Annotation>;

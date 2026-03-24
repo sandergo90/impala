@@ -16,11 +16,13 @@ function App() {
   const [gitError, setGitError] = useState(false);
   const [checking, setChecking] = useState(true);
 
-  const activeTab = useAppStore((s) => s.activeTab);
-  const setActiveTab = useAppStore((s) => s.setActiveTab);
-  const ptySessionId = useAppStore((s) => s.ptySessionId);
-  const setPtySessionId = useAppStore((s) => s.setPtySessionId);
   const selectedWorktree = useAppStore((s) => s.selectedWorktree);
+  const wtState = useAppStore((s) =>
+    s.selectedWorktree ? s.getWorktreeState(s.selectedWorktree.path) : null
+  );
+
+  const activeTab = wtState?.activeTab ?? 'diff';
+  const ptySessionId = wtState?.ptySessionId ?? null;
 
   useEffect(() => {
     invoke("check_git")
@@ -29,17 +31,22 @@ function App() {
   }, []);
 
   const handleTerminalTab = async () => {
-    setActiveTab("terminal");
-    if (!ptySessionId && selectedWorktree) {
+    if (!selectedWorktree) return;
+    const worktreePath = selectedWorktree.path;
+    const { updateWorktreeState, getWorktreeState } = useAppStore.getState();
+    updateWorktreeState(worktreePath, { activeTab: "terminal" });
+    const currentPty = getWorktreeState(worktreePath).ptySessionId;
+    if (!currentPty) {
       const id = await invoke<string>("pty_spawn", {
-        worktreePath: selectedWorktree.path,
+        worktreePath,
       });
-      setPtySessionId(id);
+      updateWorktreeState(worktreePath, { ptySessionId: id });
     }
   };
 
   const handleDiffTab = () => {
-    setActiveTab("diff");
+    if (!selectedWorktree) return;
+    useAppStore.getState().updateWorktreeState(selectedWorktree.path, { activeTab: "diff" });
   };
 
   if (checking) return null;
@@ -100,15 +107,14 @@ function App() {
             {/* Tab content */}
             <div className="flex-1 min-h-0">
               {activeTab === "diff" && (
-                <ResizablePanelGroup orientation="horizontal">
-                  <ResizablePanel defaultSize="30%" minSize={200} maxSize={400}>
+                <div className="flex h-full">
+                  <div className="w-64 min-w-48 shrink-0">
                     <CommitPanel />
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize="70%">
+                  </div>
+                  <div className="flex-1 min-w-0">
                     <DiffView />
-                  </ResizablePanel>
-                </ResizablePanelGroup>
+                  </div>
+                </div>
               )}
               {activeTab === "terminal" && ptySessionId && (
                 <GhosttyTerminal sessionId={ptySessionId} />

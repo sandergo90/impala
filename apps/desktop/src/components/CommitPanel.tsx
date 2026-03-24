@@ -8,15 +8,12 @@ const statusColor: Record<string, string> = {
 };
 
 export function CommitPanel() {
-  const {
-    selectedWorktree, baseBranch, commits,
-    selectedCommit, setSelectedCommit,
-    changedFiles, setChangedFiles,
-    selectedFile, setSelectedFile, setDiffText, setFileDiffs,
-    viewMode, setViewMode,
-  } = useAppStore();
+  const selectedWorktree = useAppStore((s) => s.selectedWorktree);
+  const wtState = useAppStore((s) =>
+    s.selectedWorktree ? s.getWorktreeState(s.selectedWorktree.path) : null
+  );
 
-  if (!selectedWorktree) {
+  if (!selectedWorktree || !wtState) {
     return (
       <div className="flex items-center justify-center h-full border-r text-sm text-muted-foreground">
         Select a worktree
@@ -24,35 +21,43 @@ export function CommitPanel() {
     );
   }
 
+  const { baseBranch, commits, selectedCommit, changedFiles, selectedFile, viewMode } = wtState;
+  const worktreePath = selectedWorktree.path;
+  const update = (updates: Partial<typeof wtState>) =>
+    useAppStore.getState().updateWorktreeState(worktreePath, updates);
+
   const selectAllChanges = async () => {
-    setViewMode('all-changes');
-    setSelectedCommit(null);
-    setChangedFiles([]);
-    setSelectedFile(null);
-    setDiffText(null);
+    update({
+      viewMode: 'all-changes',
+      selectedCommit: null,
+      changedFiles: [],
+      selectedFile: null,
+      diffText: null,
+    });
     try {
       const files = await invoke<ChangedFile[]>("get_all_changed_files", {
         worktreePath: selectedWorktree.path,
       });
-      setChangedFiles(files);
+      update({ changedFiles: files });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
   };
 
   const selectCommit = async (commit: CommitInfo) => {
-    setViewMode('commit');
-    setSelectedCommit(commit);
-    setChangedFiles([]);
-    setSelectedFile(null);
-    setDiffText(null);
-    setFileDiffs({});
+    update({
+      viewMode: 'commit',
+      selectedCommit: commit,
+      changedFiles: [],
+      selectedFile: null,
+      diffText: null,
+      fileDiffs: {},
+    });
     try {
       const files = await invoke<ChangedFile[]>("get_changed_files", {
         worktreePath: selectedWorktree.path,
         commitHash: commit.hash,
       });
-      setChangedFiles(files);
       // Fetch all file diffs in parallel for the full commit view
       const diffs = await Promise.all(
         files.map(async (f) => {
@@ -64,14 +69,14 @@ export function CommitPanel() {
           return [f.path, diff] as const;
         })
       );
-      setFileDiffs(Object.fromEntries(diffs));
+      update({ changedFiles: files, fileDiffs: Object.fromEntries(diffs) });
     } catch (e) {
       toast.error("Failed to load commit");
     }
   };
 
   const selectFile = async (file: ChangedFile) => {
-    setSelectedFile(file);
+    update({ selectedFile: file });
     try {
       let diff: string;
       if (viewMode === 'all-changes') {
@@ -87,7 +92,7 @@ export function CommitPanel() {
           filePath: file.path,
         });
       }
-      setDiffText(diff);
+      update({ diffText: diff });
     } catch (e) {
       toast.error("Failed to load diff");
     }
