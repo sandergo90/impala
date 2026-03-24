@@ -69,6 +69,16 @@ fn get_commit_diff(
     git::get_commit_diff(&worktree_path, &commit_hash, &file_path)
 }
 
+#[tauri::command]
+fn get_branch_diff(worktree_path: String, file_path: String) -> Result<String, String> {
+    git::get_branch_diff(&worktree_path, &file_path)
+}
+
+#[tauri::command]
+fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
+    git::get_all_changed_files(&worktree_path)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -79,6 +89,8 @@ pub fn run() {
             get_diverged_commits,
             get_changed_files,
             get_commit_diff,
+            get_branch_diff,
+            get_all_changed_files,
             load_projects,
             save_projects,
         ])

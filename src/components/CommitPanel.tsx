@@ -12,6 +12,7 @@ export function CommitPanel() {
     selectedCommit, setSelectedCommit,
     changedFiles, setChangedFiles,
     selectedFile, setSelectedFile, setDiffText,
+    viewMode, setViewMode,
   } = useAppStore();
 
   if (!selectedWorktree) {
@@ -22,7 +23,24 @@ export function CommitPanel() {
     );
   }
 
+  const selectAllChanges = async () => {
+    setViewMode('all-changes');
+    setSelectedCommit(null);
+    setChangedFiles([]);
+    setSelectedFile(null);
+    setDiffText(null);
+    try {
+      const files = await invoke<ChangedFile[]>("get_all_changed_files", {
+        worktreePath: selectedWorktree.path,
+      });
+      setChangedFiles(files);
+    } catch (e) {
+      console.error("Failed to load all changed files:", e);
+    }
+  };
+
   const selectCommit = async (commit: CommitInfo) => {
+    setViewMode('commit');
     setSelectedCommit(commit);
     setChangedFiles([]);
     try {
@@ -38,13 +56,21 @@ export function CommitPanel() {
 
   const selectFile = async (file: ChangedFile) => {
     setSelectedFile(file);
-    if (!selectedCommit) return;
     try {
-      const diff = await invoke<string>("get_commit_diff", {
-        worktreePath: selectedWorktree.path,
-        commitHash: selectedCommit.hash,
-        filePath: file.path,
-      });
+      let diff: string;
+      if (viewMode === 'all-changes') {
+        diff = await invoke<string>("get_branch_diff", {
+          worktreePath: selectedWorktree.path,
+          filePath: file.path,
+        });
+      } else {
+        if (!selectedCommit) return;
+        diff = await invoke<string>("get_commit_diff", {
+          worktreePath: selectedWorktree.path,
+          commitHash: selectedCommit.hash,
+          filePath: file.path,
+        });
+      }
       setDiffText(diff);
     } catch (e) {
       console.error("Failed to load diff:", e);
@@ -56,23 +82,34 @@ export function CommitPanel() {
       <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b">
         Commits on {selectedWorktree.branch}
       </div>
-      {commits.length === 0 ? (
-        <div className="px-3 py-4 text-muted-foreground text-xs">No commits ahead of {baseBranch}</div>
-      ) : (
-        <div className="overflow-y-auto">
-          {commits.map((commit) => (
+      <div className="overflow-y-auto">
+        <button
+          onClick={selectAllChanges}
+          className={`w-full px-3 py-2 text-left hover:bg-accent/10 ${
+            viewMode === 'all-changes' ? "bg-accent/10 border-l-2 border-primary" : ""
+          }`}
+        >
+          <div className="font-medium text-xs">All Changes</div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            vs {baseBranch || "base"}
+          </div>
+        </button>
+        {commits.length === 0 ? (
+          <div className="px-3 py-4 text-muted-foreground text-xs">No commits ahead of {baseBranch}</div>
+        ) : (
+          commits.map((commit) => (
             <button key={commit.hash} onClick={() => selectCommit(commit)}
               className={`w-full px-3 py-2 text-left hover:bg-accent/10 ${
-                selectedCommit?.hash === commit.hash ? "bg-accent/10 border-l-2 border-primary" : ""
+                viewMode === 'commit' && selectedCommit?.hash === commit.hash ? "bg-accent/10 border-l-2 border-primary" : ""
               }`}>
               <div className="font-medium text-xs truncate">{commit.message}</div>
               <div className="text-[11px] text-muted-foreground mt-0.5">
                 {commit.hash.slice(0, 7)} · {commit.date.split("T")[0]}
               </div>
             </button>
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </div>
       {changedFiles.length > 0 && (
         <>
           <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-t border-b">Changed Files</div>

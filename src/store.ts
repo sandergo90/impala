@@ -27,6 +27,14 @@ interface AppState {
   setSelectedFile: (file: ChangedFile | null) => void;
   diffText: string | null;
   setDiffText: (diff: string | null) => void;
+
+  // Diff view settings
+  diffStyle: 'split' | 'unified';
+  setDiffStyle: (style: 'split' | 'unified') => void;
+  wrap: boolean;
+  setWrap: (wrap: boolean) => void;
+  viewMode: 'commit' | 'all-changes';
+  setViewMode: (mode: 'commit' | 'all-changes') => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -99,4 +107,12 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedFile: (file) => set({ selectedFile: file }),
   diffText: null,
   setDiffText: (diff) => set({ diffText: diff }),
+
+  // Diff view settings
+  diffStyle: 'split',
+  setDiffStyle: (style) => set({ diffStyle: style }),
+  wrap: false,
+  setWrap: (wrap) => set({ wrap }),
+  viewMode: 'commit',
+  setViewMode: (mode) => set({ viewMode: mode }),
 }));

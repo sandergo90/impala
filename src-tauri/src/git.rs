@@ -166,3 +166,26 @@ pub fn get_commit_diff(
     let range = format!("{}~1..{}", commit_hash, commit_hash);
     run_git(worktree_path, &["diff", &range, "--", file_path])
 }
+
+pub fn get_branch_diff(worktree_path: &str, file_path: &str) -> Result<String, String> {
+    let base = detect_base_branch(worktree_path)?;
+    let range = format!("{}...HEAD", base);
+    run_git(worktree_path, &["diff", &range, "--", file_path])
+}
+
+pub fn get_all_changed_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {
+    let base = detect_base_branch(worktree_path)?;
+    let range = format!("{}...HEAD", base);
+    let output = run_git(worktree_path, &["diff", &range, "--name-status"])?;
+    let files = output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let mut parts = line.splitn(2, '\t');
+            let status = parts.next().unwrap_or("?").to_string();
+            let path = parts.next().unwrap_or("").to_string();
+            ChangedFile { status, path }
+        })
+        .collect();
+    Ok(files)
+}
