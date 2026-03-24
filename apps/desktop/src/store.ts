@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import type { Worktree, Project, WorktreeState } from "./types";
 
 const defaultWorktreeState: WorktreeState = {
-  ptySessionId: null, activeTab: 'diff', showSplit: true,
+  ptySessionId: null, activeTab: 'terminal', showSplit: false,
   commits: [], selectedCommit: null, changedFiles: [],
   selectedFile: null, diffText: null, fileDiffs: {},
   baseBranch: null, viewMode: 'commit', annotations: [],
