@@ -14,6 +14,8 @@ export interface CommitInfo {
   message: string;
   author: string;
   date: string;
+  additions: number;
+  deletions: number;
 }
 
 export interface ChangedFile {

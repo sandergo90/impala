@@ -177,8 +177,15 @@ export function CommitPanel() {
                 viewMode === 'commit' && selectedCommit?.hash === commit.hash ? "bg-accent/10 border-l-2 border-primary" : ""
               }`}>
               <div className="font-medium text-xs truncate">{commit.message}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">
-                {commit.hash.slice(0, 7)} · {commit.date.split("T")[0]}
+              <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
+                <span>{commit.hash.slice(0, 7)} · {commit.date.split("T")[0]}</span>
+                {(commit.additions > 0 || commit.deletions > 0) && (
+                  <span className="ml-auto font-mono">
+                    <span className="text-green-400">+{commit.additions}</span>
+                    {" "}
+                    <span className="text-red-400">-{commit.deletions}</span>
+                  </span>
+                )}
               </div>
             </button>
           ))

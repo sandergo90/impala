@@ -14,6 +14,8 @@ pub struct CommitInfo {
     pub message: String,
     pub author: String,
     pub date: String,
+    pub additions: i32,
+    pub deletions: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -108,13 +110,18 @@ pub fn get_diverged_commits(
     let range = format!("{}..HEAD", base);
     let output = run_git(
         worktree_path,
-        &["log", &range, "--format=%H%n%s%n%an%n%aI%n---"],
+        &["log", &range, "--shortstat", "--format=%H%n%s%n%an%n%aI"],
     )?;
 
     let mut commits = Vec::new();
     let mut lines = output.lines().peekable();
 
     while lines.peek().is_some() {
+        // Skip empty lines
+        while lines.peek() == Some(&"") {
+            lines.next();
+        }
+
         let hash = match lines.next() {
             Some(h) if !h.is_empty() => h.to_string(),
             _ => break,
@@ -122,13 +129,37 @@ pub fn get_diverged_commits(
         let message = lines.next().unwrap_or("").to_string();
         let author = lines.next().unwrap_or("").to_string();
         let date = lines.next().unwrap_or("").to_string();
-        let _separator = lines.next();
+
+        // Next non-empty line is the shortstat (e.g., " 3 files changed, 10 insertions(+), 2 deletions(-)")
+        let mut additions = 0i32;
+        let mut deletions = 0i32;
+        while let Some(line) = lines.peek() {
+            if line.is_empty() {
+                lines.next();
+                continue;
+            }
+            if line.contains("changed") {
+                let stat_line = lines.next().unwrap_or("");
+                for part in stat_line.split(',') {
+                    let part = part.trim();
+                    if part.contains("insertion") {
+                        additions = part.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+                    } else if part.contains("deletion") {
+                        deletions = part.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+                    }
+                }
+                break;
+            }
+            break;
+        }
 
         commits.push(CommitInfo {
             hash,
             message,
             author,
             date,
+            additions,
+            deletions,
         });
     }
 
