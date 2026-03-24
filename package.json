@@ -2,10 +2,12 @@
   "name": "differ",
   "private": true,
   "packageManager": "bun@1.2.10",
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "cd apps/desktop && bunx tauri dev --config ../../backend/tauri/tauri.conf.json",
-    "build": "cd apps/desktop && bunx tauri build --config ../../backend/tauri/tauri.conf.json",
+    "dev": "bunx tauri dev",
+    "build": "bunx tauri build",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
