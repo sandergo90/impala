@@ -18,6 +18,19 @@ fn get_projects_file(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
+fn check_git() -> Result<String, String> {
+    let output = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .map_err(|_| "Git is not installed. Please install Git to use Differ.".to_string())?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err("Git is not installed. Please install Git to use Differ.".to_string())
+    }
+}
+
+#[tauri::command]
 fn load_projects(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
     let path = get_projects_file(&app_handle)?;
     if !path.exists() {
@@ -142,6 +155,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            check_git,
             list_worktrees,
             detect_base_branch,
             get_diverged_commits,

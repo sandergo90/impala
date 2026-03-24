@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { toast } from "sonner";
 import { useAppStore } from "../store";
 import type { Worktree, CommitInfo, Project } from "../types";
 
@@ -31,7 +32,7 @@ export function Sidebar() {
         }));
         setProjects(loaded);
       } catch (e) {
-        console.error("Failed to load projects:", e);
+        toast.error("Failed to load projects");
       }
     })();
   }, [setProjects]);
@@ -42,7 +43,7 @@ export function Sidebar() {
         projects: projectList.map((p) => p.path),
       });
     } catch (e) {
-      console.error("Failed to save projects:", e);
+      toast.error("Failed to save projects");
     }
   };
 
@@ -65,7 +66,7 @@ export function Sidebar() {
       await persistProjects(updatedProjects);
       await selectProject(project);
     } catch (e) {
-      console.error("Not a git repository or no worktrees:", e);
+      toast.error("Not a git repository or no worktrees found");
     }
   };
 
@@ -77,7 +78,7 @@ export function Sidebar() {
       });
       setWorktrees(wts);
     } catch (e) {
-      console.error("Failed to load worktrees:", e);
+      toast.error("Failed to load worktrees");
     }
   };
 
@@ -106,7 +107,7 @@ export function Sidebar() {
       });
       setCommits(commits);
     } catch (e) {
-      console.error("Failed to load commits:", e);
+      toast.error("Failed to load commits");
     }
   };
 

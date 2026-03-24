@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { toast } from "sonner";
 import { useAppStore } from "../store";
 import { PatchDiff } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
@@ -45,7 +46,10 @@ export function DiffView() {
     sqliteProvider
       .list(repoPath, filePath, commitHash)
       .then(setAnnotations)
-      .catch(() => setAnnotations([]));
+      .catch(() => {
+        toast.error("Failed to load annotations");
+        setAnnotations([]);
+      });
   }, [
     selectedProject?.path,
     selectedFile?.path,

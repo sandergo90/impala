@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { useAppStore } from "../store";
 import type { ChangedFile, CommitInfo } from "../types";
 
@@ -35,7 +36,7 @@ export function CommitPanel() {
       });
       setChangedFiles(files);
     } catch (e) {
-      console.error("Failed to load all changed files:", e);
+      toast.error("Failed to load changed files");
     }
   };
 
@@ -50,7 +51,7 @@ export function CommitPanel() {
       });
       setChangedFiles(files);
     } catch (e) {
-      console.error("Failed to load changed files:", e);
+      toast.error("Failed to load changed files");
     }
   };
 
@@ -73,7 +74,7 @@ export function CommitPanel() {
       }
       setDiffText(diff);
     } catch (e) {
-      console.error("Failed to load diff:", e);
+      toast.error("Failed to load diff");
     }
   };
 
