@@ -9,8 +9,9 @@ const statusColor: Record<string, string> = {
 
 export function CommitPanel() {
   const selectedWorktree = useAppStore((s) => s.selectedWorktree);
+  const wtPath = selectedWorktree?.path;
   const wtState = useAppStore((s) =>
-    s.selectedWorktree ? s.getWorktreeState(s.selectedWorktree.path) : null
+    wtPath ? (s.worktreeStates[wtPath] ?? null) : null
   );
 
   if (!selectedWorktree || !wtState) {

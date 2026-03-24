@@ -16,8 +16,9 @@ export function DiffView() {
   const wrap = useAppStore((s) => s.wrap);
   const setWrap = useAppStore((s) => s.setWrap);
 
+  const wtPath = useAppStore((s) => s.selectedWorktree?.path);
   const wtState = useAppStore((s) =>
-    s.selectedWorktree ? s.getWorktreeState(s.selectedWorktree.path) : null
+    wtPath ? (s.worktreeStates[wtPath] ?? null) : null
   );
 
   const selectedFile = wtState?.selectedFile ?? null;

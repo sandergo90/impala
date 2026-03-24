@@ -17,8 +17,9 @@ function App() {
   const [checking, setChecking] = useState(true);
 
   const selectedWorktree = useAppStore((s) => s.selectedWorktree);
+  const wtPath = selectedWorktree?.path;
   const wtState = useAppStore((s) =>
-    s.selectedWorktree ? s.getWorktreeState(s.selectedWorktree.path) : null
+    wtPath ? (s.worktreeStates[wtPath] ?? null) : null
   );
 
   const activeTab = wtState?.activeTab ?? 'diff';
@@ -39,7 +40,8 @@ function App() {
     const currentPty = getWorktreeState(worktreePath).ptySessionId;
     if (!currentPty) {
       const id = await invoke<string>("pty_spawn", {
-        worktreePath,
+        sessionId: worktreePath,
+        cwd: worktreePath,
       });
       updateWorktreeState(worktreePath, { ptySessionId: id });
     }
@@ -59,7 +61,7 @@ function App() {
     if (newSplit) {
       const currentPty = getWorktreeState(worktreePath).ptySessionId;
       if (!currentPty) {
-        const id = await invoke<string>("pty_spawn", { worktreePath });
+        const id = await invoke<string>("pty_spawn", { sessionId: worktreePath, cwd: worktreePath });
         updateWorktreeState(worktreePath, { ptySessionId: id });
       }
     }

@@ -83,8 +83,7 @@ export const useAppStore = create<AppState>()(
   // Per-worktree state
   worktreeStates: {},
   getWorktreeState: (path: string): WorktreeState => {
-    const state = get();
-    return state.worktreeStates[path] ?? { ...defaultWorktreeState };
+    return get().worktreeStates[path] ?? defaultWorktreeState;
   },
   updateWorktreeState: (path: string, updates: Partial<WorktreeState>) =>
     set((state) => {
