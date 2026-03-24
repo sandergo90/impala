@@ -18,7 +18,7 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
   const setupTerminal = useCallback(async () => {
     if (!containerRef.current) return;
 
-    const ghostty = await Ghostty.load();
+    const ghostty = await Ghostty.load("/ghostty-vt.wasm");
 
     const terminal = new Terminal({
       ghostty,
@@ -122,7 +122,10 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
   }, [sessionId]);
 
   useEffect(() => {
-    setupTerminal();
+    setupTerminal().catch((err) => {
+      console.error("Terminal setup failed:", err);
+      setLoading(false);
+    });
     return () => {
       // Cleanup terminal but do NOT kill PTY (persists across tab switches)
       cleanupRef.current?.();
