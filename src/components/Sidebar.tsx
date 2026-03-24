@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../store";
-import type { Worktree } from "../types";
+import type { Worktree, CommitInfo } from "../types";
 
 export function Sidebar() {
   const {
@@ -29,7 +29,7 @@ export function Sidebar() {
     try {
       const base = await invoke<string>("detect_base_branch", { worktreePath: wt.path });
       setBaseBranch(base);
-      const commits = await invoke<any[]>("get_diverged_commits", {
+      const commits = await invoke<CommitInfo[]>("get_diverged_commits", {
         worktreePath: wt.path,
         baseBranch: base,
       });
@@ -63,8 +63,7 @@ export function Sidebar() {
           ))}
         </>
       )}
-      <div className="flex-1" />
-      <button onClick={openProject} className="px-3 py-2 border-t text-xs text-muted-foreground hover:text-primary">
+      <button onClick={openProject} className="mt-auto px-3 py-2 border-t text-xs text-muted-foreground hover:text-primary">
         + Open Project
       </button>
     </div>

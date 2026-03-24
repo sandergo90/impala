@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../store";
-import type { ChangedFile } from "../types";
+import type { ChangedFile, CommitInfo } from "../types";
+
+const statusColor: Record<string, string> = {
+  M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
+};
 
 export function CommitPanel() {
   const {
@@ -18,8 +22,9 @@ export function CommitPanel() {
     );
   }
 
-  const selectCommit = async (commit: typeof commits[0]) => {
+  const selectCommit = async (commit: CommitInfo) => {
     setSelectedCommit(commit);
+    setChangedFiles([]);
     try {
       const files = await invoke<ChangedFile[]>("get_changed_files", {
         worktreePath: selectedWorktree.path,
@@ -44,10 +49,6 @@ export function CommitPanel() {
     } catch (e) {
       console.error("Failed to load diff:", e);
     }
-  };
-
-  const statusColor: Record<string, string> = {
-    M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
   };
 
   return (

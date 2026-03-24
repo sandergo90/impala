@@ -44,6 +44,20 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
     let mut branch = String::new();
     let mut head = String::new();
 
+    let flush = |path: &mut String, branch: &mut String, head: &mut String, worktrees: &mut Vec<Worktree>| {
+        if !path.is_empty() {
+            worktrees.push(Worktree {
+                path: std::mem::take(path),
+                branch: if branch.is_empty() {
+                    "HEAD (detached)".to_string()
+                } else {
+                    std::mem::take(branch)
+                },
+                head_commit: std::mem::take(head),
+            });
+        }
+    };
+
     for line in output.lines() {
         if let Some(p) = line.strip_prefix("worktree ") {
             path = p.to_string();
@@ -51,32 +65,11 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
             head = h.to_string();
         } else if let Some(b) = line.strip_prefix("branch ") {
             branch = b.strip_prefix("refs/heads/").unwrap_or(b).to_string();
-        } else if line.is_empty() && !path.is_empty() {
-            worktrees.push(Worktree {
-                path: path.clone(),
-                branch: if branch.is_empty() {
-                    "HEAD (detached)".to_string()
-                } else {
-                    branch.clone()
-                },
-                head_commit: head.clone(),
-            });
-            path.clear();
-            branch.clear();
-            head.clear();
+        } else if line.is_empty() {
+            flush(&mut path, &mut branch, &mut head, &mut worktrees);
         }
     }
-    if !path.is_empty() {
-        worktrees.push(Worktree {
-            path,
-            branch: if branch.is_empty() {
-                "HEAD (detached)".to_string()
-            } else {
-                branch
-            },
-            head_commit: head,
-        });
-    }
+    flush(&mut path, &mut branch, &mut head, &mut worktrees);
 
     Ok(worktrees)
 }
