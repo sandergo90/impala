@@ -44,14 +44,22 @@ export function CommitPanel() {
     setViewMode('commit');
     setSelectedCommit(commit);
     setChangedFiles([]);
+    setSelectedFile(null);
     try {
-      const files = await invoke<ChangedFile[]>("get_changed_files", {
-        worktreePath: selectedWorktree.path,
-        commitHash: commit.hash,
-      });
+      const [files, diff] = await Promise.all([
+        invoke<ChangedFile[]>("get_changed_files", {
+          worktreePath: selectedWorktree.path,
+          commitHash: commit.hash,
+        }),
+        invoke<string>("get_full_commit_diff", {
+          worktreePath: selectedWorktree.path,
+          commitHash: commit.hash,
+        }),
+      ]);
       setChangedFiles(files);
+      setDiffText(diff);
     } catch (e) {
-      toast.error("Failed to load changed files");
+      toast.error("Failed to load commit");
     }
   };
 

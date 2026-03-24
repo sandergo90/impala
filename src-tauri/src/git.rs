@@ -167,6 +167,14 @@ pub fn get_commit_diff(
     run_git(worktree_path, &["diff", &range, "--", file_path])
 }
 
+pub fn get_full_commit_diff(
+    worktree_path: &str,
+    commit_hash: &str,
+) -> Result<String, String> {
+    let range = format!("{}~1..{}", commit_hash, commit_hash);
+    run_git(worktree_path, &["diff", &range])
+}
+
 pub fn get_branch_diff(worktree_path: &str, file_path: &str) -> Result<String, String> {
     let base = detect_base_branch(worktree_path)?;
     let range = format!("{}...HEAD", base);
