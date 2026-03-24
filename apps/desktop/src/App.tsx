@@ -114,11 +114,12 @@ function App() {
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground flex flex-col">
       {/* Unified top bar — blends with macOS titlebar */}
       <div
-        className="flex items-center h-10 shrink-0 border-b border-border/50 bg-background"
+        className="relative flex items-center h-10 shrink-0 border-b border-border/50 bg-background"
         style={{ paddingLeft: "78px" }}
-        data-tauri-drag-region
       >
-        <div className="flex items-center gap-1 mr-auto">
+        {/* Drag region fills the entire bar behind the buttons */}
+        <div className="absolute inset-0" data-tauri-drag-region />
+        <div className="relative flex items-center gap-1 mr-auto">
           {tabButton(
             "Diff",
             !showSplit && activeTab === "diff",
@@ -138,7 +139,7 @@ function App() {
             !selectedWorktree
           )}
         </div>
-        <div className="flex items-center gap-2 pr-3">
+        <div className="relative flex items-center gap-2 pr-3">
           <button
             onClick={() => setShowChanges(!showChanges)}
             className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
