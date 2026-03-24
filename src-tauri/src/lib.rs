@@ -1,8 +1,12 @@
+mod annotations;
 mod git;
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::Manager;
+
+struct DbState(Mutex<rusqlite::Connection>);
 
 fn get_projects_file(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let app_dir = app_handle
@@ -79,10 +83,64 @@ fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::ChangedFile>,
     git::get_all_changed_files(&worktree_path)
 }
 
+#[tauri::command]
+fn create_annotation(
+    state: tauri::State<'_, DbState>,
+    annotation: annotations::NewAnnotation,
+) -> Result<annotations::Annotation, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    annotations::create_annotation(&conn, annotation)
+}
+
+#[tauri::command]
+fn list_annotations(
+    state: tauri::State<'_, DbState>,
+    repo: String,
+    file: Option<String>,
+    commit: Option<String>,
+) -> Result<Vec<annotations::Annotation>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    annotations::list_annotations(&conn, &repo, file.as_deref(), commit.as_deref())
+}
+
+#[tauri::command]
+fn update_annotation(
+    state: tauri::State<'_, DbState>,
+    id: String,
+    changes: annotations::UpdateAnnotation,
+) -> Result<annotations::Annotation, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    annotations::update_annotation(&conn, &id, changes)
+}
+
+#[tauri::command]
+fn delete_annotation(
+    state: tauri::State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    annotations::delete_annotation(&conn, &id)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let app_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+            fs::create_dir_all(&app_dir)
+                .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+            let db_path = app_dir.join("annotations.db");
+            let conn = rusqlite::Connection::open(&db_path)
+                .map_err(|e| format!("Failed to open database: {}", e))?;
+            annotations::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize database: {}", e))?;
+            app.manage(DbState(Mutex::new(conn)));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_worktrees,
             detect_base_branch,
@@ -93,6 +151,10 @@ pub fn run() {
             get_all_changed_files,
             load_projects,
             save_projects,
+            create_annotation,
+            list_annotations,
+            update_annotation,
+            delete_annotation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
