@@ -150,12 +150,12 @@ function App() {
                   <ResizableHandle withHandle />
                   <ResizablePanel defaultSize="50%" minSize={200}>
                     <ResizablePanelGroup orientation="horizontal">
-                      <ResizablePanel defaultSize="35%" minSize={150}>
-                        <CommitPanel />
-                      </ResizablePanel>
-                      <ResizableHandle />
                       <ResizablePanel defaultSize="65%">
                         <DiffView />
+                      </ResizablePanel>
+                      <ResizableHandle />
+                      <ResizablePanel defaultSize="35%" minSize={150}>
+                        <CommitPanel />
                       </ResizablePanel>
                     </ResizablePanelGroup>
                   </ResizablePanel>
@@ -164,12 +164,12 @@ function App() {
                 <>
                   {activeTab === "diff" && (
                     <ResizablePanelGroup orientation="horizontal">
-                      <ResizablePanel defaultSize="25%" minSize={150} maxSize={400}>
-                        <CommitPanel />
-                      </ResizablePanel>
-                      <ResizableHandle withHandle />
                       <ResizablePanel defaultSize="75%">
                         <DiffView />
+                      </ResizablePanel>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel defaultSize="25%" minSize={150} maxSize={400}>
+                        <CommitPanel />
                       </ResizablePanel>
                     </ResizablePanelGroup>
                   )}
