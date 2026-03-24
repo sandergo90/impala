@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import { useAppStore } from "../store";
 import { PatchDiff } from "@pierre/diffs/react";
@@ -7,6 +7,39 @@ import { AnnotationForm } from "./AnnotationForm";
 import { AnnotationDisplay } from "./AnnotationDisplay";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation } from "../types";
+
+function LazyPatchDiff(props: React.ComponentProps<typeof PatchDiff>) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" } // start loading 200px before it's visible
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref}>
+      {visible ? (
+        <PatchDiff {...props} />
+      ) : (
+        <div className="h-24 flex items-center justify-center text-xs text-muted-foreground">
+          Loading diff...
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: React.MouseEvent) => void }) {
   return (
@@ -65,7 +98,7 @@ export function DiffView() {
 
   const [showResolved, setShowResolved] = useState(false);
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
-  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const viewedFilesArr = wtState?.viewedFiles ?? [];
   const viewedFiles = useMemo(() => new Set(viewedFilesArr), [viewedFilesArr]);
   const toggleViewed = useCallback((path: string) => {
@@ -274,10 +307,10 @@ export function DiffView() {
             const patch = fileDiffs[file.path];
             if (!patch) return null;
             const isViewed = viewedFiles.has(file.path);
-            const isExpanded = expandedFiles.has(file.path) && !isViewed;
+            const isCollapsed = collapsedFiles.has(file.path) || isViewed;
 
-            const toggleExpand = () => {
-              setExpandedFiles((prev) => {
+            const toggleCollapse = () => {
+              setCollapsedFiles((prev) => {
                 const next = new Set(prev);
                 if (next.has(file.path)) {
                   next.delete(file.path);
@@ -290,23 +323,23 @@ export function DiffView() {
 
             return (
               <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
-                {isExpanded ? (
-                <PatchDiff
-                  patch={patch}
-                  options={diffOptions}
-                  renderHeaderPrefix={() => (
-                    <button onClick={toggleExpand} className="text-[10px] text-muted-foreground px-1">▼</button>
-                  )}
-                  renderHeaderMetadata={() => (
-                    <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
-                  )}
-                />
-                ) : (
-                  <div className="flex items-center px-3 py-1.5 bg-muted/30 hover:bg-muted/50 cursor-pointer" onClick={toggleExpand}>
+                {isCollapsed ? (
+                  <div className="flex items-center px-3 py-1.5 bg-muted/30 hover:bg-muted/50 cursor-pointer" onClick={toggleCollapse}>
                     <span className="text-[10px] text-muted-foreground px-1 mr-2">▶</span>
                     <span className="font-mono text-xs font-semibold flex-1 truncate">{file.path}</span>
                     <ViewedButton isViewed={isViewed} onClick={(e) => { e.stopPropagation(); toggleViewed(file.path); }} />
                   </div>
+                ) : (
+                  <LazyPatchDiff
+                    patch={patch}
+                    options={diffOptions}
+                    renderHeaderPrefix={() => (
+                      <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">▼</button>
+                    )}
+                    renderHeaderMetadata={() => (
+                      <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+                    )}
+                  />
                 )}
               </div>
             );
