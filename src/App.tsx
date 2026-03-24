@@ -35,8 +35,8 @@ function App() {
   }
 
   return (
-    <>
-      <ResizablePanelGroup orientation="horizontal" className="h-screen">
+    <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
+      <ResizablePanelGroup orientation="horizontal">
         <ResizablePanel defaultSize={20} minSize={12} maxSize={30}>
           <Sidebar />
         </ResizablePanel>
@@ -50,7 +50,7 @@ function App() {
         </ResizablePanel>
       </ResizablePanelGroup>
       <Toaster />
-    </>
+    </div>
   );
 }
 
