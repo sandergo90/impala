@@ -79,7 +79,7 @@ export function CommitPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full border-r text-sm">
+    <div className="flex flex-col h-full border-r text-sm overflow-hidden">
       <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b">
         Commits on {selectedWorktree.branch}
       </div>

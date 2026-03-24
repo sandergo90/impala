@@ -37,15 +37,15 @@ function App() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
       <ResizablePanelGroup orientation="horizontal">
-        <ResizablePanel defaultSize={20} minSize={12} maxSize={30}>
+        <ResizablePanel id="sidebar" defaultSize={20} minSize={12} maxSize={30}>
           <Sidebar />
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={22} minSize={15} maxSize={35}>
+        <ResizablePanel id="commits" defaultSize={22} minSize={15} maxSize={35}>
           <CommitPanel />
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={58}>
+        <ResizablePanel id="diff" defaultSize={58}>
           <DiffView />
         </ResizablePanel>
       </ResizablePanelGroup>
