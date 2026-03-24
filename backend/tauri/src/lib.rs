@@ -1,5 +1,6 @@
 mod annotations;
 mod git;
+mod pty;
 
 use std::fs;
 use std::path::PathBuf;
@@ -157,6 +158,7 @@ pub fn run() {
             annotations::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize database: {}", e))?;
             app.manage(DbState(Mutex::new(conn)));
+            app.manage(pty::PtyState::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -175,6 +177,10 @@ pub fn run() {
             list_annotations,
             update_annotation,
             delete_annotation,
+            pty::pty_spawn,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
