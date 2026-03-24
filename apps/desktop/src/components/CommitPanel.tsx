@@ -37,21 +37,26 @@ export function CommitPanel() {
       fileDiffs: {},
     });
     try {
-      const files = await invoke<ChangedFile[]>("get_all_changed_files", {
-        worktreePath: selectedWorktree.path,
-      });
-      update({ changedFiles: files });
-      // Fetch all file diffs in parallel against the base branch
-      const diffs = await Promise.all(
-        files.map(async (f) => {
-          const diff = await invoke<string>("get_branch_diff", {
-            worktreePath: selectedWorktree.path,
-            filePath: f.path,
-          });
-          return [f.path, diff] as const;
-        })
-      );
-      update({ fileDiffs: Object.fromEntries(diffs) });
+      const [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_all_changed_files", {
+          worktreePath: selectedWorktree.path,
+        }),
+        invoke<string>("get_full_branch_diff", {
+          worktreePath: selectedWorktree.path,
+        }),
+      ]);
+      // Split the full diff into per-file patches
+      const fileDiffs: Record<string, string> = {};
+      const fileParts = fullDiff.split(/^diff --git /m).filter(Boolean);
+      for (const part of fileParts) {
+        const patch = "diff --git " + part;
+        // Extract filename from "diff --git a/path b/path"
+        const match = patch.match(/^diff --git a\/(.*?) b\//);
+        if (match) {
+          fileDiffs[match[1]] = patch;
+        }
+      }
+      update({ changedFiles: files, fileDiffs });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
@@ -67,22 +72,26 @@ export function CommitPanel() {
       fileDiffs: {},
     });
     try {
-      const files = await invoke<ChangedFile[]>("get_changed_files", {
-        worktreePath: selectedWorktree.path,
-        commitHash: commit.hash,
-      });
-      // Fetch all file diffs in parallel for the full commit view
-      const diffs = await Promise.all(
-        files.map(async (f) => {
-          const diff = await invoke<string>("get_commit_diff", {
-            worktreePath: selectedWorktree.path,
-            commitHash: commit.hash,
-            filePath: f.path,
-          });
-          return [f.path, diff] as const;
-        })
-      );
-      update({ changedFiles: files, fileDiffs: Object.fromEntries(diffs) });
+      const [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_changed_files", {
+          worktreePath: selectedWorktree.path,
+          commitHash: commit.hash,
+        }),
+        invoke<string>("get_full_commit_diff", {
+          worktreePath: selectedWorktree.path,
+          commitHash: commit.hash,
+        }),
+      ]);
+      const fileDiffs: Record<string, string> = {};
+      const fileParts = fullDiff.split(/^diff --git /m).filter(Boolean);
+      for (const part of fileParts) {
+        const patch = "diff --git " + part;
+        const match = patch.match(/^diff --git a\/(.*?) b\//);
+        if (match) {
+          fileDiffs[match[1]] = patch;
+        }
+      }
+      update({ changedFiles: files, fileDiffs });
     } catch (e) {
       toast.error("Failed to load commit");
     }

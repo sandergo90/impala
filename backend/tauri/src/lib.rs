@@ -98,6 +98,11 @@ fn get_branch_diff(worktree_path: String, file_path: String) -> Result<String, S
 }
 
 #[tauri::command]
+fn get_full_branch_diff(worktree_path: String) -> Result<String, String> {
+    git::get_full_branch_diff(&worktree_path)
+}
+
+#[tauri::command]
 fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
     git::get_all_changed_files(&worktree_path)
 }
@@ -185,6 +190,7 @@ pub fn run() {
             get_commit_diff,
             get_full_commit_diff,
             get_branch_diff,
+            get_full_branch_diff,
             get_all_changed_files,
             create_worktree,
             list_branches,

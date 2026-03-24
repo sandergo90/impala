@@ -181,6 +181,12 @@ pub fn get_branch_diff(worktree_path: &str, file_path: &str) -> Result<String, S
     run_git(worktree_path, &["diff", &range, "--", file_path])
 }
 
+pub fn get_full_branch_diff(worktree_path: &str) -> Result<String, String> {
+    let base = detect_base_branch(worktree_path)?;
+    let range = format!("{}...HEAD", base);
+    run_git(worktree_path, &["diff", &range])
+}
+
 #[derive(Debug, Serialize)]
 pub struct BranchInfo {
     pub name: String,
