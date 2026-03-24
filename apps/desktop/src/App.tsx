@@ -23,6 +23,7 @@ function App() {
 
   const activeTab = wtState?.activeTab ?? 'diff';
   const ptySessionId = wtState?.ptySessionId ?? null;
+  const showSplit = wtState?.showSplit ?? false;
 
   useEffect(() => {
     invoke("check_git")
@@ -47,6 +48,21 @@ function App() {
   const handleDiffTab = () => {
     if (!selectedWorktree) return;
     useAppStore.getState().updateWorktreeState(selectedWorktree.path, { activeTab: "diff" });
+  };
+
+  const handleSplitToggle = async () => {
+    if (!selectedWorktree) return;
+    const worktreePath = selectedWorktree.path;
+    const { updateWorktreeState, getWorktreeState } = useAppStore.getState();
+    const newSplit = !getWorktreeState(worktreePath).showSplit;
+    updateWorktreeState(worktreePath, { showSplit: newSplit });
+    if (newSplit) {
+      const currentPty = getWorktreeState(worktreePath).ptySessionId;
+      if (!currentPty) {
+        const id = await invoke<string>("pty_spawn", { worktreePath });
+        updateWorktreeState(worktreePath, { ptySessionId: id });
+      }
+    }
   };
 
   if (checking) return null;
@@ -83,48 +99,80 @@ function App() {
             <div className="flex items-center border-b border-border bg-muted/30 px-2 shrink-0">
               <button
                 onClick={handleDiffTab}
+                disabled={showSplit}
                 className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  activeTab === "diff"
+                  !showSplit && activeTab === "diff"
                     ? "text-foreground border-b-2 border-foreground"
                     : "text-muted-foreground hover:text-foreground"
-                }`}
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 Diff
               </button>
               <button
                 onClick={handleTerminalTab}
-                disabled={!selectedWorktree}
+                disabled={!selectedWorktree || showSplit}
                 className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  activeTab === "terminal"
+                  !showSplit && activeTab === "terminal"
                     ? "text-foreground border-b-2 border-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 } disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 Terminal
               </button>
+              <button
+                onClick={handleSplitToggle}
+                disabled={!selectedWorktree}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  showSplit
+                    ? "border-b-2 border-primary text-primary font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                Split
+              </button>
             </div>
 
             {/* Tab content */}
             <div className="flex-1 min-h-0">
-              {activeTab === "diff" && (
+              {showSplit ? (
                 <div className="flex h-full">
-                  <div className="w-64 min-w-48 shrink-0">
-                    <CommitPanel />
+                  <div className="flex-1 min-w-0 border-r">
+                    {ptySessionId ? (
+                      <GhosttyTerminal sessionId={ptySessionId} />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                        Starting terminal...
+                      </div>
+                    )}
                   </div>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 flex">
+                    <CommitPanel />
                     <DiffView />
                   </div>
                 </div>
-              )}
-              {activeTab === "terminal" && ptySessionId && (
-                <GhosttyTerminal sessionId={ptySessionId} />
-              )}
-              {activeTab === "terminal" && !ptySessionId && (
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  {selectedWorktree
-                    ? "Starting terminal..."
-                    : "Select a worktree to open a terminal"}
-                </div>
+              ) : (
+                <>
+                  {activeTab === "diff" && (
+                    <div className="flex h-full">
+                      <div className="w-64 min-w-48 shrink-0">
+                        <CommitPanel />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <DiffView />
+                      </div>
+                    </div>
+                  )}
+                  {activeTab === "terminal" && ptySessionId && (
+                    <GhosttyTerminal sessionId={ptySessionId} />
+                  )}
+                  {activeTab === "terminal" && !ptySessionId && (
+                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                      {selectedWorktree
+                        ? "Starting terminal..."
+                        : "Select a worktree to open a terminal"}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
