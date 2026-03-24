@@ -243,8 +243,18 @@ export function DiffView() {
             if (!patch) return null;
             const isViewed = viewedFiles.has(file.path);
             const isCollapsed = collapsedFiles.has(file.path) || isViewed;
+
+            // Count additions and deletions from the patch
+            const lines = patch.split("\n");
+            let additions = 0;
+            let deletions = 0;
+            for (const line of lines) {
+              if (line.startsWith("+") && !line.startsWith("+++")) additions++;
+              else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
+            }
+
             return (
-              <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-60" : ""}`}>
+              <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-50" : ""}`}>
                 <PatchDiff
                   patch={patch}
                   options={{ ...diffOptions, collapsed: isCollapsed }}
@@ -267,11 +277,14 @@ export function DiffView() {
                     </button>
                   )}
                   renderHeaderMetadata={() => (
-                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer ml-auto pr-2">
-                      <input
-                        type="checkbox"
-                        checked={isViewed}
-                        onChange={() => {
+                    <div className="flex items-center gap-3 ml-auto pr-2">
+                      <span className="text-xs font-mono">
+                        <span className="text-red-400">-{deletions}</span>
+                        {" "}
+                        <span className="text-green-400">+{additions}</span>
+                      </span>
+                      <button
+                        onClick={() => {
                           setViewedFiles((prev) => {
                             const next = new Set(prev);
                             if (next.has(file.path)) {
@@ -282,10 +295,24 @@ export function DiffView() {
                             return next;
                           });
                         }}
-                        className="rounded"
-                      />
-                      Viewed
-                    </label>
+                        className={`flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full border transition-colors ${
+                          isViewed
+                            ? "border-green-500/50 text-green-400 bg-green-500/10"
+                            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                        }`}
+                      >
+                        <span className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
+                          isViewed ? "border-green-400 bg-green-400" : "border-muted-foreground"
+                        }`}>
+                          {isViewed && (
+                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                              <path d="M1.5 4L3 5.5L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </span>
+                        Viewed
+                      </button>
+                    </div>
                   )}
                 />
               </div>
