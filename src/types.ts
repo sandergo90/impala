@@ -1,3 +1,8 @@
+export interface Project {
+  path: string;
+  name: string;
+}
+
 export interface Worktree {
   path: string;
   branch: string;

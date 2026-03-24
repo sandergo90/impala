@@ -1,9 +1,16 @@
 import { create } from "zustand";
-import type { Worktree, CommitInfo, ChangedFile } from "./types";
+import type { Worktree, CommitInfo, ChangedFile, Project } from "./types";
 
 interface AppState {
-  repoPath: string | null;
-  setRepoPath: (path: string) => void;
+  // Projects (multi)
+  projects: Project[];
+  setProjects: (projects: Project[]) => void;
+  addProject: (project: Project) => void;
+  removeProject: (path: string) => void;
+  selectedProject: Project | null;
+  setSelectedProject: (project: Project | null) => void;
+
+  // Worktrees & git state
   worktrees: Worktree[];
   setWorktrees: (worktrees: Worktree[]) => void;
   selectedWorktree: Worktree | null;
@@ -23,13 +30,62 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  repoPath: null,
-  setRepoPath: (path) => set({ repoPath: path }),
+  // Projects
+  projects: [],
+  setProjects: (projects) => set({ projects }),
+  addProject: (project) =>
+    set((state) => {
+      if (state.projects.some((p) => p.path === project.path)) return state;
+      return { projects: [...state.projects, project] };
+    }),
+  removeProject: (path) =>
+    set((state) => {
+      const projects = state.projects.filter((p) => p.path !== path);
+      const selectedProject =
+        state.selectedProject?.path === path ? null : state.selectedProject;
+      return {
+        projects,
+        selectedProject,
+        ...(state.selectedProject?.path === path
+          ? {
+              worktrees: [],
+              selectedWorktree: null,
+              baseBranch: null,
+              commits: [],
+              selectedCommit: null,
+              changedFiles: [],
+              selectedFile: null,
+              diffText: null,
+            }
+          : {}),
+      };
+    }),
+  selectedProject: null,
+  setSelectedProject: (project) =>
+    set({
+      selectedProject: project,
+      worktrees: [],
+      selectedWorktree: null,
+      baseBranch: null,
+      commits: [],
+      selectedCommit: null,
+      changedFiles: [],
+      selectedFile: null,
+      diffText: null,
+    }),
+
+  // Worktrees & git state
   worktrees: [],
   setWorktrees: (worktrees) => set({ worktrees }),
   selectedWorktree: null,
   setSelectedWorktree: (worktree) =>
-    set({ selectedWorktree: worktree, selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null }),
+    set({
+      selectedWorktree: worktree,
+      selectedCommit: null,
+      changedFiles: [],
+      selectedFile: null,
+      diffText: null,
+    }),
   baseBranch: null,
   setBaseBranch: (branch) => set({ baseBranch: branch }),
   commits: [],

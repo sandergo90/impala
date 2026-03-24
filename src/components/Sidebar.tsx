@@ -1,33 +1,104 @@
+import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../store";
-import type { Worktree, CommitInfo } from "../types";
+import type { Worktree, CommitInfo, Project } from "../types";
 
 export function Sidebar() {
   const {
-    repoPath, setRepoPath,
-    worktrees, setWorktrees,
-    selectedWorktree, setSelectedWorktree,
-    setBaseBranch, setCommits,
+    projects,
+    setProjects,
+    addProject,
+    removeProject,
+    selectedProject,
+    setSelectedProject,
+    worktrees,
+    setWorktrees,
+    selectedWorktree,
+    setSelectedWorktree,
+    setBaseBranch,
+    setCommits,
   } = useAppStore();
+
+  // Load persisted projects on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const paths = await invoke<string[]>("load_projects");
+        const loaded: Project[] = paths.map((p) => ({
+          path: p,
+          name: p.split("/").pop() || p,
+        }));
+        setProjects(loaded);
+      } catch (e) {
+        console.error("Failed to load projects:", e);
+      }
+    })();
+  }, [setProjects]);
+
+  const persistProjects = async (projectList: Project[]) => {
+    try {
+      await invoke("save_projects", {
+        projects: projectList.map((p) => p.path),
+      });
+    } catch (e) {
+      console.error("Failed to save projects:", e);
+    }
+  };
 
   const openProject = async () => {
     const selected = await open({ directory: true });
     if (!selected) return;
     const path = selected as string;
     try {
-      const wts = await invoke<Worktree[]>("list_worktrees", { repoPath: path });
-      setRepoPath(path);
-      setWorktrees(wts);
+      // Verify it's a valid git repo by listing worktrees
+      await invoke<Worktree[]>("list_worktrees", { repoPath: path });
+      const project: Project = {
+        path,
+        name: path.split("/").pop() || path,
+      };
+      addProject(project);
+      const updatedProjects = [
+        ...useAppStore.getState().projects.filter((p) => p.path !== path),
+        project,
+      ];
+      await persistProjects(updatedProjects);
+      await selectProject(project);
     } catch (e) {
       console.error("Not a git repository or no worktrees:", e);
     }
   };
 
+  const selectProject = async (project: Project) => {
+    setSelectedProject(project);
+    try {
+      const wts = await invoke<Worktree[]>("list_worktrees", {
+        repoPath: project.path,
+      });
+      setWorktrees(wts);
+    } catch (e) {
+      console.error("Failed to load worktrees:", e);
+    }
+  };
+
+  const handleRemoveProject = async (
+    e: React.MouseEvent,
+    path: string,
+  ) => {
+    e.stopPropagation();
+    removeProject(path);
+    const updated = useAppStore
+      .getState()
+      .projects;
+    await persistProjects(updated);
+  };
+
   const selectWorktree = async (wt: Worktree) => {
     setSelectedWorktree(wt);
     try {
-      const base = await invoke<string>("detect_base_branch", { worktreePath: wt.path });
+      const base = await invoke<string>("detect_base_branch", {
+        worktreePath: wt.path,
+      });
       setBaseBranch(base);
       const commits = await invoke<CommitInfo[]>("get_diverged_commits", {
         worktreePath: wt.path,
@@ -39,23 +110,43 @@ export function Sidebar() {
     }
   };
 
-  const projectName = repoPath ? repoPath.split("/").pop() : null;
-
   return (
     <div className="flex flex-col h-full w-56 min-w-56 border-r text-sm">
-      <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b">Projects</div>
-      {projectName && (
-        <div className="px-3 py-1.5 font-semibold text-primary">{projectName}</div>
-      )}
+      <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b">
+        Projects
+      </div>
+      {projects.map((project) => (
+        <button
+          key={project.path}
+          onClick={() => selectProject(project)}
+          className={`group px-3 py-1.5 text-left flex items-center justify-between hover:bg-accent/10 ${
+            selectedProject?.path === project.path
+              ? "bg-accent/10 text-primary font-semibold"
+              : "text-muted-foreground"
+          }`}
+        >
+          <span className="truncate">{project.name}</span>
+          <span
+            onClick={(e) => handleRemoveProject(e, project.path)}
+            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary ml-1 px-1"
+          >
+            ×
+          </span>
+        </button>
+      ))}
       {worktrees.length > 0 && (
         <>
-          <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b mt-2">Worktrees</div>
+          <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b mt-2">
+            Worktrees
+          </div>
           {worktrees.map((wt) => (
             <button
               key={wt.path}
               onClick={() => selectWorktree(wt)}
               className={`px-3 py-1.5 pl-5 text-left hover:bg-accent/10 ${
-                selectedWorktree?.path === wt.path ? "bg-accent/10 text-primary font-semibold" : "text-muted-foreground"
+                selectedWorktree?.path === wt.path
+                  ? "bg-accent/10 text-primary font-semibold"
+                  : "text-muted-foreground"
               }`}
             >
               {wt.branch}
@@ -63,7 +154,10 @@ export function Sidebar() {
           ))}
         </>
       )}
-      <button onClick={openProject} className="mt-auto px-3 py-2 border-t text-xs text-muted-foreground hover:text-primary">
+      <button
+        onClick={openProject}
+        className="mt-auto px-3 py-2 border-t text-xs text-muted-foreground hover:text-primary"
+      >
         + Open Project
       </button>
     </div>
