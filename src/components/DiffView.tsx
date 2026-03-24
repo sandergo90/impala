@@ -133,25 +133,19 @@ export function DiffView() {
     [removeAnnotation],
   );
 
-  if (!diffText) {
+  if (!selectedFile || !diffText) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-        Select a commit or file to view its diff
+        Select a file to view its diff
       </div>
     );
   }
-
-  const headerLabel = selectedFile
-    ? selectedFile.path
-    : selectedCommit
-      ? selectedCommit.message
-      : "Diff";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center gap-3 px-3 py-2 border-b">
         <span className="font-mono font-semibold text-xs flex-1 truncate">
-          {headerLabel}
+          {selectedFile.path}
         </span>
         <div className="flex items-center gap-1 text-xs">
           <button
