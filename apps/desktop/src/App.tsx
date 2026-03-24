@@ -39,11 +39,11 @@ function App() {
     updateWorktreeState(worktreePath, { activeTab: "terminal" });
     const currentPty = getWorktreeState(worktreePath).ptySessionId;
     if (!currentPty) {
-      const id = await invoke<string>("pty_spawn", {
+      await invoke("pty_spawn", {
         sessionId: worktreePath,
         cwd: worktreePath,
       });
-      updateWorktreeState(worktreePath, { ptySessionId: id });
+      updateWorktreeState(worktreePath, { ptySessionId: worktreePath });
     }
   };
 
@@ -61,8 +61,8 @@ function App() {
     if (newSplit) {
       const currentPty = getWorktreeState(worktreePath).ptySessionId;
       if (!currentPty) {
-        const id = await invoke<string>("pty_spawn", { sessionId: worktreePath, cwd: worktreePath });
-        updateWorktreeState(worktreePath, { ptySessionId: id });
+        await invoke("pty_spawn", { sessionId: worktreePath, cwd: worktreePath });
+        updateWorktreeState(worktreePath, { ptySessionId: worktreePath });
       }
     }
   };
