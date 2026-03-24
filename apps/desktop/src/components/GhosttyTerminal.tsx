@@ -84,6 +84,9 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
 
       setLoading(false);
 
+      // Fit terminal to container FIRST (before buffer replay)
+      fitAddon.fit();
+
       // Replay buffered output from previous session (scrollback restoration)
       try {
         const buffered = await invoke<string>("pty_get_buffer", { sessionId });
@@ -106,10 +109,11 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
         return;
       }
 
-      fitAddon.fit();
+      // Resize PTY to match terminal — this sends SIGWINCH which makes
+      // TUI apps (like Claude Code) redraw cleanly
       const dims = fitAddon.proposeDimensions();
       if (dims) {
-        invoke("pty_resize", {
+        await invoke("pty_resize", {
           sessionId,
           rows: dims.rows,
           cols: dims.cols,
