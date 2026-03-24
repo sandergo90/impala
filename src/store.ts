@@ -28,6 +28,8 @@ interface AppState {
   setSelectedFile: (file: ChangedFile | null) => void;
   diffText: string | null;
   setDiffText: (diff: string | null) => void;
+  fileDiffs: Record<string, string>;
+  setFileDiffs: (diffs: Record<string, string>) => void;
 
   // Diff view settings
   diffStyle: 'split' | 'unified';
@@ -90,6 +92,7 @@ export const useAppStore = create<AppState>()(
       changedFiles: [],
       selectedFile: null,
       diffText: null,
+      fileDiffs: {},
     }),
 
   // Worktrees & git state
@@ -103,6 +106,7 @@ export const useAppStore = create<AppState>()(
       changedFiles: [],
       selectedFile: null,
       diffText: null,
+      fileDiffs: {},
     }),
   baseBranch: null,
   setBaseBranch: (branch) => set({ baseBranch: branch }),
@@ -110,13 +114,15 @@ export const useAppStore = create<AppState>()(
   setCommits: (commits) => set({ commits }),
   selectedCommit: null,
   setSelectedCommit: (commit) =>
-    set({ selectedCommit: commit, selectedFile: null, diffText: null }),
+    set({ selectedCommit: commit, selectedFile: null, diffText: null, fileDiffs: {} }),
   changedFiles: [],
   setChangedFiles: (files) => set({ changedFiles: files }),
   selectedFile: null,
   setSelectedFile: (file) => set({ selectedFile: file }),
   diffText: null,
   setDiffText: (diff) => set({ diffText: diff }),
+  fileDiffs: {},
+  setFileDiffs: (diffs) => set({ fileDiffs: diffs }),
 
   // Diff view settings
   diffStyle: 'split',

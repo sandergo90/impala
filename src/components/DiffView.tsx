@@ -19,6 +19,8 @@ export function DiffView() {
     selectedProject,
     selectedCommit,
     viewMode,
+    changedFiles,
+    fileDiffs,
     annotations,
     setAnnotations,
     addAnnotation,
@@ -133,81 +135,122 @@ export function DiffView() {
     [removeAnnotation],
   );
 
-  if (!selectedFile || !diffText) {
+  const hasFileDiffs = Object.keys(fileDiffs).length > 0;
+  const showAllFiles = !selectedFile && hasFileDiffs;
+  const showSingleFile = selectedFile && diffText;
+
+  if (!showAllFiles && !showSingleFile) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-        Select a file to view its diff
+        Select a commit or file to view its diff
       </div>
     );
   }
 
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex items-center gap-3 px-3 py-2 border-b">
-        <span className="font-mono font-semibold text-xs flex-1 truncate">
-          {selectedFile.path}
-        </span>
-        <div className="flex items-center gap-1 text-xs">
-          <button
-            onClick={() => setDiffStyle("split")}
-            className={`px-2 py-0.5 rounded ${
-              diffStyle === "split"
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Split
-          </button>
-          <button
-            onClick={() => setDiffStyle("unified")}
-            className={`px-2 py-0.5 rounded ${
-              diffStyle === "unified"
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Unified
-          </button>
-          <span className="mx-1 text-border">|</span>
-          <button
-            onClick={() => setWrap(!wrap)}
-            className={`px-2 py-0.5 rounded ${
-              wrap
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Wrap
-          </button>
-          <span className="mx-1 text-border">|</span>
-          <button
-            onClick={() => setShowResolved(!showResolved)}
-            className={`px-2 py-0.5 rounded ${
-              showResolved
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Resolved
-          </button>
-          <button
-            onClick={() => setShowAnnotationForm(!showAnnotationForm)}
-            className="px-2 py-0.5 rounded bg-accent text-accent-foreground hover:opacity-90"
-          >
-            + Comment
-          </button>
+  const diffOptions = {
+    theme: "github-dark" as const,
+    overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
+    diffStyle,
+  };
+
+  const toolbar = (
+    <div className="flex items-center gap-3 px-3 py-2 border-b shrink-0">
+      <span className="font-mono font-semibold text-xs flex-1 truncate">
+        {selectedFile ? selectedFile.path : selectedCommit?.message ?? "Diff"}
+      </span>
+      <div className="flex items-center gap-1 text-xs">
+        <button
+          onClick={() => setDiffStyle("split")}
+          className={`px-2 py-0.5 rounded ${
+            diffStyle === "split"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Split
+        </button>
+        <button
+          onClick={() => setDiffStyle("unified")}
+          className={`px-2 py-0.5 rounded ${
+            diffStyle === "unified"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Unified
+        </button>
+        <span className="mx-1 text-border">|</span>
+        <button
+          onClick={() => setWrap(!wrap)}
+          className={`px-2 py-0.5 rounded ${
+            wrap
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Wrap
+        </button>
+        {showSingleFile && (
+          <>
+            <span className="mx-1 text-border">|</span>
+            <button
+              onClick={() => setShowResolved(!showResolved)}
+              className={`px-2 py-0.5 rounded ${
+                showResolved
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Resolved
+            </button>
+            <button
+              onClick={() => setShowAnnotationForm(!showAnnotationForm)}
+              className="px-2 py-0.5 rounded bg-accent text-accent-foreground hover:opacity-90"
+            >
+              + Comment
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // Full commit view: all files stacked
+  if (showAllFiles) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        {toolbar}
+        <div className="flex-1 overflow-auto">
+          {changedFiles.map((file) => {
+            const patch = fileDiffs[file.path];
+            if (!patch) return null;
+            return (
+              <div key={file.path} className="border-b border-border">
+                <div className="px-3 py-1.5 bg-muted/30 border-b border-border">
+                  <span className="font-mono text-xs font-semibold">{file.path}</span>
+                </div>
+                <PatchDiff
+                  patch={patch}
+                  options={diffOptions}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
+    );
+  }
+
+  // Single file view with annotations
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {toolbar}
       <div className="flex-1 overflow-auto">
         <PatchDiff<Annotation>
-          patch={diffText}
+          patch={diffText!}
           lineAnnotations={lineAnnotations}
           renderAnnotation={renderAnnotation}
-          options={{
-            theme: "github-dark",
-            overflow: wrap ? "wrap" : "scroll",
-            diffStyle,
-          }}
+          options={diffOptions}
         />
       </div>
 

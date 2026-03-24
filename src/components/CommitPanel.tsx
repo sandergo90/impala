@@ -12,7 +12,7 @@ export function CommitPanel() {
     selectedWorktree, baseBranch, commits,
     selectedCommit, setSelectedCommit,
     changedFiles, setChangedFiles,
-    selectedFile, setSelectedFile, setDiffText,
+    selectedFile, setSelectedFile, setDiffText, setFileDiffs,
     viewMode, setViewMode,
   } = useAppStore();
 
@@ -46,23 +46,25 @@ export function CommitPanel() {
     setChangedFiles([]);
     setSelectedFile(null);
     setDiffText(null);
+    setFileDiffs({});
     try {
       const files = await invoke<ChangedFile[]>("get_changed_files", {
         worktreePath: selectedWorktree.path,
         commitHash: commit.hash,
       });
       setChangedFiles(files);
-      // Auto-select the first file to show its diff immediately
-      if (files.length > 0) {
-        const firstFile = files[0];
-        setSelectedFile(firstFile);
-        const diff = await invoke<string>("get_commit_diff", {
-          worktreePath: selectedWorktree.path,
-          commitHash: commit.hash,
-          filePath: firstFile.path,
-        });
-        setDiffText(diff);
-      }
+      // Fetch all file diffs in parallel for the full commit view
+      const diffs = await Promise.all(
+        files.map(async (f) => {
+          const diff = await invoke<string>("get_commit_diff", {
+            worktreePath: selectedWorktree.path,
+            commitHash: commit.hash,
+            filePath: f.path,
+          });
+          return [f.path, diff] as const;
+        })
+      );
+      setFileDiffs(Object.fromEntries(diffs));
     } catch (e) {
       toast.error("Failed to load commit");
     }
