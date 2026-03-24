@@ -27,6 +27,14 @@ pub fn pty_spawn(
     session_id: String,
     cwd: String,
 ) -> Result<(), String> {
+    // Don't spawn if session already exists
+    {
+        let sessions = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+        if sessions.contains_key(&session_id) {
+            return Ok(());
+        }
+    }
+
     let pty_system = native_pty_system();
 
     let pair = pty_system
