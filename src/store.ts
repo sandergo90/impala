@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Worktree, CommitInfo, ChangedFile, Project } from "./types";
+import type { Worktree, CommitInfo, ChangedFile, Project, Annotation } from "./types";
 
 interface AppState {
   // Projects (multi)
@@ -36,6 +36,13 @@ interface AppState {
   setWrap: (wrap: boolean) => void;
   viewMode: 'commit' | 'all-changes';
   setViewMode: (mode: 'commit' | 'all-changes') => void;
+
+  // Annotations
+  annotations: Annotation[];
+  setAnnotations: (annotations: Annotation[]) => void;
+  addAnnotation: (annotation: Annotation) => void;
+  updateAnnotation: (id: string, updated: Annotation) => void;
+  removeAnnotation: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -118,6 +125,20 @@ export const useAppStore = create<AppState>()(
   setWrap: (wrap) => set({ wrap }),
   viewMode: 'commit',
   setViewMode: (mode) => set({ viewMode: mode }),
+
+  // Annotations
+  annotations: [],
+  setAnnotations: (annotations) => set({ annotations }),
+  addAnnotation: (annotation) =>
+    set((state) => ({ annotations: [...state.annotations, annotation] })),
+  updateAnnotation: (id, updated) =>
+    set((state) => ({
+      annotations: state.annotations.map((a) => (a.id === id ? updated : a)),
+    })),
+  removeAnnotation: (id) =>
+    set((state) => ({
+      annotations: state.annotations.filter((a) => a.id !== id),
+    })),
     }),
     {
       name: "differ-ui-state",
