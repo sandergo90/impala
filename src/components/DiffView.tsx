@@ -87,7 +87,7 @@ export function DiffView() {
         </div>
       );
     },
-    [showResolved],
+    [showResolved]
   );
 
   // Filtered and sorted annotations for the panel
@@ -116,7 +116,7 @@ export function DiffView() {
       addAnnotation(created);
       setShowAnnotationForm(false);
     },
-    [selectedProject, selectedFile, selectedCommit, viewMode, addAnnotation],
+    [selectedProject, selectedFile, selectedCommit, viewMode, addAnnotation]
   );
 
   const handleResolve = useCallback(
@@ -124,7 +124,7 @@ export function DiffView() {
       const updated = await sqliteProvider.update(id, { resolved });
       updateAnnotation(id, updated);
     },
-    [updateAnnotation],
+    [updateAnnotation]
   );
 
   const handleDelete = useCallback(
@@ -132,7 +132,7 @@ export function DiffView() {
       await sqliteProvider.delete(id);
       removeAnnotation(id);
     },
-    [removeAnnotation],
+    [removeAnnotation]
   );
 
   const hasFileDiffs = Object.keys(fileDiffs).length > 0;
@@ -148,7 +148,7 @@ export function DiffView() {
   }
 
   const diffOptions = {
-    theme: "github-dark" as const,
+    theme: "pierre-dark" as const,
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
   };
@@ -227,12 +227,11 @@ export function DiffView() {
             return (
               <div key={file.path} className="border-b border-border">
                 <div className="px-3 py-1.5 bg-muted/30 border-b border-border">
-                  <span className="font-mono text-xs font-semibold">{file.path}</span>
+                  <span className="font-mono text-xs font-semibold">
+                    {file.path}
+                  </span>
                 </div>
-                <PatchDiff
-                  patch={patch}
-                  options={diffOptions}
-                />
+                <PatchDiff patch={patch} options={diffOptions} />
               </div>
             );
           })}
