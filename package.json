@@ -1,0 +1,13 @@
+{
+  "name": "differ",
+  "private": true,
+  "packageManager": "bun@1.2.10",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build"
+  },
+  "devDependencies": {
+    "turbo": "2.8.20"
+  }
+}

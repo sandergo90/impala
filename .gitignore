@@ -5,8 +5,9 @@ node_modules/
 dist/
 
 # Tauri build output
-src-tauri/target/
-src-tauri/gen/
+backend/tauri/target/
+backend/tauri/gen/
+.turbo/
 
 # Environment
 .env
