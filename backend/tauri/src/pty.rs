@@ -69,8 +69,11 @@ pub fn pty_spawn(
         sessions.insert(session_id.clone(), session);
     }
 
+    // Sanitize session ID for use in event names (Tauri only allows alphanumeric, -, /, :, _)
+    let safe_id: String = session_id.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect();
+
     // Background thread to read PTY output
-    let sid = session_id.clone();
+    let sid = safe_id.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
         loop {

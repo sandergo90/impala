@@ -8,6 +8,10 @@ interface GhosttyTerminalProps {
   sessionId: string;
 }
 
+function sanitizeEventId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9\-_]/g, "-");
+}
+
 export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -91,8 +95,9 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
     });
 
     // Listen for PTY output events (Base64 encoded)
+    const safeId = sanitizeEventId(sessionId);
     const unlistenOutput: UnlistenFn = await listen<string>(
-      `pty-output-${sessionId}`,
+      `pty-output-${safeId}`,
       (event) => {
         const binaryStr = atob(event.payload);
         const bytes = new Uint8Array(binaryStr.length);
@@ -105,7 +110,7 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
 
     // Listen for PTY exit events
     const unlistenExit: UnlistenFn = await listen<number>(
-      `pty-exit-${sessionId}`,
+      `pty-exit-${safeId}`,
       (event) => {
         setExited(event.payload);
       }
