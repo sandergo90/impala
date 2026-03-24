@@ -61,6 +61,7 @@ export interface WorktreeState {
   baseBranch: string | null;
   viewMode: 'commit' | 'all-changes';
   annotations: Annotation[];
+  viewedFiles: string[];
 }
 
 export interface CommentProvider {

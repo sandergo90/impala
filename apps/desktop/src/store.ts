@@ -7,6 +7,7 @@ const defaultWorktreeState: WorktreeState = {
   commits: [], selectedCommit: null, changedFiles: [],
   selectedFile: null, diffText: null, fileDiffs: {},
   baseBranch: null, viewMode: 'commit', annotations: [],
+  viewedFiles: [],
 };
 
 interface AppState {

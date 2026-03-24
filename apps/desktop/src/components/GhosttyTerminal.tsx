@@ -131,34 +131,28 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
       dataDisposable = terminal.onData((data: string) => {
         const encoded = btoa(
           Array.from(new TextEncoder().encode(data), (b) =>
-            String.fromCharCode(b),
-          ).join(""),
+            String.fromCharCode(b)
+          ).join("")
         );
         invoke("pty_write", { sessionId, data: encoded });
       });
 
       const safeId = sanitizeEventId(sessionId);
 
-      unlistenOutput = await listen<string>(
-        `pty-output-${safeId}`,
-        (event) => {
-          if (cancelled || !terminal) return;
-          const binaryStr = atob(event.payload);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
-          }
-          terminal.write(bytes);
-        },
-      );
+      unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
+        if (cancelled || !terminal) return;
+        const binaryStr = atob(event.payload);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        terminal.write(bytes);
+      });
 
-      unlistenExit = await listen<number>(
-        `pty-exit-${safeId}`,
-        (event) => {
-          if (cancelled) return;
-          setExited(event.payload);
-        },
-      );
+      unlistenExit = await listen<number>(`pty-exit-${safeId}`, (event) => {
+        if (cancelled) return;
+        setExited(event.payload);
+      });
 
       if (cancelled) {
         unlistenOutput();

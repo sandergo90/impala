@@ -42,7 +42,15 @@ export function DiffView() {
   const [showResolved, setShowResolved] = useState(false);
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
-  const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
+  const viewedFilesArr = wtState?.viewedFiles ?? [];
+  const viewedFiles = useMemo(() => new Set(viewedFilesArr), [viewedFilesArr]);
+  const toggleViewed = useCallback((path: string) => {
+    const current = wtState?.viewedFiles ?? [];
+    const next = current.includes(path)
+      ? current.filter((f) => f !== path)
+      : [...current, path];
+    update({ viewedFiles: next });
+  }, [wtState?.viewedFiles, update]);
 
   // Load annotations when file/commit context changes
   useEffect(() => {
@@ -269,17 +277,7 @@ export function DiffView() {
                   )}
                   renderHeaderMetadata={() => (
                     <button
-                      onClick={() => {
-                        setViewedFiles((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(file.path)) {
-                            next.delete(file.path);
-                          } else {
-                            next.add(file.path);
-                          }
-                          return next;
-                        });
-                      }}
+                      onClick={() => toggleViewed(file.path)}
                       className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded border transition-colors ${
                         isViewed
                           ? "border-blue-500/60 text-blue-400"
