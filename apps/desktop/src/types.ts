@@ -59,7 +59,7 @@ export interface WorktreeState {
   diffText: string | null;
   fileDiffs: Record<string, string>;
   baseBranch: string | null;
-  viewMode: 'commit' | 'all-changes';
+  viewMode: 'commit' | 'all-changes' | 'uncommitted';
   annotations: Annotation[];
   viewedFiles: string[];
 }

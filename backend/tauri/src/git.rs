@@ -187,6 +187,27 @@ pub fn get_full_branch_diff(worktree_path: &str) -> Result<String, String> {
     run_git(worktree_path, &["diff", &range])
 }
 
+pub fn get_uncommitted_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {
+    let output = run_git(worktree_path, &["status", "--porcelain"])?;
+    let files = output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let status = line[..2].trim().to_string();
+            let path = line[3..].to_string();
+            ChangedFile { status, path }
+        })
+        .collect();
+    Ok(files)
+}
+
+pub fn get_uncommitted_diff(worktree_path: &str) -> Result<String, String> {
+    // Get both staged and unstaged changes
+    let unstaged = run_git(worktree_path, &["diff"]).unwrap_or_default();
+    let staged = run_git(worktree_path, &["diff", "--cached"]).unwrap_or_default();
+    Ok(format!("{}{}", staged, unstaged))
+}
+
 #[derive(Debug, Serialize)]
 pub struct BranchInfo {
     pub name: String,

@@ -115,6 +115,16 @@ fn get_branch_diff(worktree_path: String, file_path: String) -> Result<String, S
 }
 
 #[tauri::command]
+fn get_uncommitted_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
+    git::get_uncommitted_files(&worktree_path)
+}
+
+#[tauri::command]
+fn get_uncommitted_diff(worktree_path: String) -> Result<String, String> {
+    git::get_uncommitted_diff(&worktree_path)
+}
+
+#[tauri::command]
 fn get_full_branch_diff(
     cache: tauri::State<'_, DiffCache>,
     worktree_path: String,
@@ -228,6 +238,8 @@ pub fn run() {
             get_branch_diff,
             get_full_branch_diff,
             get_all_changed_files,
+            get_uncommitted_files,
+            get_uncommitted_diff,
             create_worktree,
             list_branches,
             load_projects,

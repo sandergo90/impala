@@ -51,6 +51,19 @@ export function CommitPanel() {
     }
   };
 
+  const selectUncommitted = async () => {
+    update({ viewMode: 'uncommitted', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
+    try {
+      const [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: selectedWorktree.path }),
+        invoke<string>("get_uncommitted_diff", { worktreePath: selectedWorktree.path }),
+      ]);
+      update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+    } catch (e) {
+      toast.error("Failed to load uncommitted changes");
+    }
+  };
+
   const selectCommit = async (commit: CommitInfo) => {
     update({ viewMode: 'commit', selectedCommit: commit, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
     try {
@@ -68,7 +81,16 @@ export function CommitPanel() {
     update({ selectedFile: file });
     try {
       let diff: string;
-      if (viewMode === 'all-changes') {
+      if (viewMode === 'uncommitted') {
+        // For uncommitted, get diff of working tree
+        diff = await invoke<string>("get_uncommitted_diff", {
+          worktreePath: selectedWorktree.path,
+        });
+        // Extract just this file's diff from the full output
+        const parts = diff.split(/^diff --git /m).filter(Boolean);
+        const filePart = parts.find(p => p.includes(`a/${file.path} b/${file.path}`));
+        diff = filePart ? "diff --git " + filePart : "";
+      } else if (viewMode === 'all-changes') {
         diff = await invoke<string>("get_branch_diff", {
           worktreePath: selectedWorktree.path,
           filePath: file.path,
@@ -93,6 +115,17 @@ export function CommitPanel() {
         Commits on {selectedWorktree.branch}
       </div>
       <div className="overflow-y-auto">
+        <button
+          onClick={selectUncommitted}
+          className={`w-full px-3 py-2 text-left hover:bg-accent/10 ${
+            viewMode === 'uncommitted' ? "bg-accent/10 border-l-2 border-primary" : ""
+          }`}
+        >
+          <div className="font-medium text-xs">Uncommitted Changes</div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            Working tree
+          </div>
+        </button>
         <button
           onClick={selectAllChanges}
           className={`w-full px-3 py-2 text-left hover:bg-accent/10 ${
