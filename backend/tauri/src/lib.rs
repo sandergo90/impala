@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 struct DbState(Mutex<rusqlite::Connection>);
+struct DiffCache(Mutex<lru::LruCache<String, String>>);
 
 fn get_projects_file(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let app_dir = app_handle
@@ -88,8 +89,24 @@ fn get_commit_diff(
 }
 
 #[tauri::command]
-fn get_full_commit_diff(worktree_path: String, commit_hash: String) -> Result<String, String> {
-    git::get_full_commit_diff(&worktree_path, &commit_hash)
+fn get_full_commit_diff(
+    cache: tauri::State<'_, DiffCache>,
+    worktree_path: String,
+    commit_hash: String,
+) -> Result<String, String> {
+    let key = format!("commit:{}:{}", worktree_path, commit_hash);
+    {
+        let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        if let Some(cached) = c.get(&key) {
+            return Ok(cached.clone());
+        }
+    }
+    let result = git::get_full_commit_diff(&worktree_path, &commit_hash)?;
+    {
+        let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        c.put(key, result.clone());
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -98,8 +115,23 @@ fn get_branch_diff(worktree_path: String, file_path: String) -> Result<String, S
 }
 
 #[tauri::command]
-fn get_full_branch_diff(worktree_path: String) -> Result<String, String> {
-    git::get_full_branch_diff(&worktree_path)
+fn get_full_branch_diff(
+    cache: tauri::State<'_, DiffCache>,
+    worktree_path: String,
+) -> Result<String, String> {
+    let key = format!("branch:{}", worktree_path);
+    {
+        let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        if let Some(cached) = c.get(&key) {
+            return Ok(cached.clone());
+        }
+    }
+    let result = git::get_full_branch_diff(&worktree_path)?;
+    {
+        let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        c.put(key, result.clone());
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -179,6 +211,9 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize database: {}", e))?;
             app.manage(DbState(Mutex::new(conn)));
             app.manage(pty::PtyState::new());
+            app.manage(DiffCache(Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(50).unwrap(),
+            ))));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

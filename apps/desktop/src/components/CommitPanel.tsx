@@ -27,71 +27,38 @@ export function CommitPanel() {
   const update = (updates: Partial<typeof wtState>) =>
     useAppStore.getState().updateWorktreeState(worktreePath, updates);
 
+  const splitPatch = (fullDiff: string): Record<string, string> => {
+    const fileDiffs: Record<string, string> = {};
+    const parts = fullDiff.split(/^diff --git /m).filter(Boolean);
+    for (const part of parts) {
+      const patch = "diff --git " + part;
+      const match = patch.match(/^diff --git a\/(.*?) b\//);
+      if (match) fileDiffs[match[1]] = patch;
+    }
+    return fileDiffs;
+  };
+
   const selectAllChanges = async () => {
-    update({
-      viewMode: 'all-changes',
-      selectedCommit: null,
-      changedFiles: [],
-      selectedFile: null,
-      diffText: null,
-      fileDiffs: {},
-    });
+    update({ viewMode: 'all-changes', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {} });
     try {
       const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_all_changed_files", {
-          worktreePath: selectedWorktree.path,
-        }),
-        invoke<string>("get_full_branch_diff", {
-          worktreePath: selectedWorktree.path,
-        }),
+        invoke<ChangedFile[]>("get_all_changed_files", { worktreePath: selectedWorktree.path }),
+        invoke<string>("get_full_branch_diff", { worktreePath: selectedWorktree.path }),
       ]);
-      // Split the full diff into per-file patches
-      const fileDiffs: Record<string, string> = {};
-      const fileParts = fullDiff.split(/^diff --git /m).filter(Boolean);
-      for (const part of fileParts) {
-        const patch = "diff --git " + part;
-        // Extract filename from "diff --git a/path b/path"
-        const match = patch.match(/^diff --git a\/(.*?) b\//);
-        if (match) {
-          fileDiffs[match[1]] = patch;
-        }
-      }
-      update({ changedFiles: files, fileDiffs });
+      update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
   };
 
   const selectCommit = async (commit: CommitInfo) => {
-    update({
-      viewMode: 'commit',
-      selectedCommit: commit,
-      changedFiles: [],
-      selectedFile: null,
-      diffText: null,
-      fileDiffs: {},
-    });
+    update({ viewMode: 'commit', selectedCommit: commit, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {} });
     try {
       const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_changed_files", {
-          worktreePath: selectedWorktree.path,
-          commitHash: commit.hash,
-        }),
-        invoke<string>("get_full_commit_diff", {
-          worktreePath: selectedWorktree.path,
-          commitHash: commit.hash,
-        }),
+        invoke<ChangedFile[]>("get_changed_files", { worktreePath: selectedWorktree.path, commitHash: commit.hash }),
+        invoke<string>("get_full_commit_diff", { worktreePath: selectedWorktree.path, commitHash: commit.hash }),
       ]);
-      const fileDiffs: Record<string, string> = {};
-      const fileParts = fullDiff.split(/^diff --git /m).filter(Boolean);
-      for (const part of fileParts) {
-        const patch = "diff --git " + part;
-        const match = patch.match(/^diff --git a\/(.*?) b\//);
-        if (match) {
-          fileDiffs[match[1]] = patch;
-        }
-      }
-      update({ changedFiles: files, fileDiffs });
+      update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
     } catch (e) {
       toast.error("Failed to load commit");
     }
