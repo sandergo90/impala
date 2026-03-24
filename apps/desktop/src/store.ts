@@ -45,6 +45,12 @@ interface AppState {
   addAnnotation: (annotation: Annotation) => void;
   updateAnnotation: (id: string, updated: Annotation) => void;
   removeAnnotation: (id: string) => void;
+
+  // Terminal
+  activeTab: 'terminal' | 'diff';
+  setActiveTab: (tab: 'terminal' | 'diff') => void;
+  ptySessionId: string | null;
+  setPtySessionId: (id: string | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -145,6 +151,12 @@ export const useAppStore = create<AppState>()(
     set((state) => ({
       annotations: state.annotations.filter((a) => a.id !== id),
     })),
+
+  // Terminal (not persisted)
+  activeTab: 'diff',
+  setActiveTab: (tab) => set({ activeTab: tab }),
+  ptySessionId: null,
+  setPtySessionId: (id) => set({ ptySessionId: id }),
     }),
     {
       name: "differ-ui-state",
