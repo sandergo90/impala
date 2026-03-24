@@ -99,6 +99,13 @@ export function Sidebar() {
   const selectWorktree = async (wt: Worktree) => {
     setSelectedWorktree(wt);
     try {
+      // Auto-spawn PTY for split view (default)
+      const wtState = useAppStore.getState().getWorktreeState(wt.path);
+      if (!wtState.ptySessionId) {
+        await invoke("pty_spawn", { sessionId: wt.path, cwd: wt.path });
+        updateWorktreeState(wt.path, { ptySessionId: wt.path });
+      }
+
       const base = await invoke<string>("detect_base_branch", {
         worktreePath: wt.path,
       });
