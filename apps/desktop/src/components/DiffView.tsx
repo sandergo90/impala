@@ -41,6 +41,7 @@ export function DiffView() {
 
   const [showResolved, setShowResolved] = useState(false);
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
 
   // Load annotations when file/commit context changes
   useEffect(() => {
@@ -239,14 +240,27 @@ export function DiffView() {
           {changedFiles.map((file) => {
             const patch = fileDiffs[file.path];
             if (!patch) return null;
+            const isCollapsed = collapsedFiles.has(file.path);
             return (
               <div key={file.path} className="border-b border-border">
-                <div className="px-3 py-1.5 bg-muted/30 border-b border-border">
-                  <span className="font-mono text-xs font-semibold">
-                    {file.path}
-                  </span>
-                </div>
-                <PatchDiff patch={patch} options={diffOptions} />
+                <button
+                  onClick={() => {
+                    setCollapsedFiles((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(file.path)) {
+                        next.delete(file.path);
+                      } else {
+                        next.add(file.path);
+                      }
+                      return next;
+                    });
+                  }}
+                  className="w-full px-3 py-1.5 bg-muted/30 border-b border-border flex items-center gap-2 hover:bg-muted/50 text-left"
+                >
+                  <span className="text-[10px] text-muted-foreground">{isCollapsed ? "▶" : "▼"}</span>
+                  <span className="font-mono text-xs font-semibold">{file.path}</span>
+                </button>
+                {!isCollapsed && <PatchDiff patch={patch} options={diffOptions} />}
               </div>
             );
           })}
