@@ -103,6 +103,21 @@ fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::ChangedFile>,
 }
 
 #[tauri::command]
+fn create_worktree(
+    repo_path: String,
+    branch_name: String,
+    base_branch: Option<String>,
+    existing: bool,
+) -> Result<git::Worktree, String> {
+    git::create_worktree(&repo_path, &branch_name, base_branch, existing)
+}
+
+#[tauri::command]
+fn list_branches(repo_path: String) -> Result<Vec<git::BranchInfo>, String> {
+    git::list_branches(&repo_path)
+}
+
+#[tauri::command]
 fn create_annotation(
     state: tauri::State<'_, DbState>,
     annotation: annotations::NewAnnotation,
@@ -171,6 +186,8 @@ pub fn run() {
             get_full_commit_diff,
             get_branch_diff,
             get_all_changed_files,
+            create_worktree,
+            list_branches,
             load_projects,
             save_projects,
             create_annotation,

@@ -21,6 +21,11 @@ export interface ChangedFile {
   path: string;
 }
 
+export interface BranchInfo {
+  name: string;
+  is_remote: boolean;
+}
+
 export interface Annotation {
   id: string;
   repo_path: string;

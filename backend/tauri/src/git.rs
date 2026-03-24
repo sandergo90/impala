@@ -181,6 +181,57 @@ pub fn get_branch_diff(worktree_path: &str, file_path: &str) -> Result<String, S
     run_git(worktree_path, &["diff", &range, "--", file_path])
 }
 
+#[derive(Debug, Serialize)]
+pub struct BranchInfo {
+    pub name: String,
+    pub is_remote: bool,
+}
+
+pub fn create_worktree(
+    repo_path: &str,
+    branch_name: &str,
+    base_branch: Option<String>,
+    existing: bool,
+) -> Result<Worktree, String> {
+    let wt_path = format!("{}/.worktrees/{}", repo_path, branch_name);
+
+    if existing {
+        run_git(repo_path, &["worktree", "add", &wt_path, branch_name])?;
+    } else {
+        let base = base_branch.unwrap_or_else(|| "HEAD".to_string());
+        run_git(
+            repo_path,
+            &["worktree", "add", &wt_path, "-b", branch_name, &base],
+        )?;
+    }
+
+    // Read back the worktree info
+    let head = run_git(&wt_path, &["rev-parse", "HEAD"])
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    Ok(Worktree {
+        path: wt_path,
+        branch: branch_name.to_string(),
+        head_commit: head,
+    })
+}
+
+pub fn list_branches(repo_path: &str) -> Result<Vec<BranchInfo>, String> {
+    let output = run_git(repo_path, &["branch", "-a", "--format=%(refname:short)"])?;
+    let branches = output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let name = line.trim().to_string();
+            let is_remote = name.starts_with("origin/");
+            BranchInfo { name, is_remote }
+        })
+        .collect();
+    Ok(branches)
+}
+
 pub fn get_all_changed_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {
     let base = detect_base_branch(worktree_path)?;
     let range = format!("{}...HEAD", base);

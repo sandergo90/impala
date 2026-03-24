@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { useAppStore } from "../store";
 import type { Worktree, CommitInfo, Project } from "../types";
+import { NewWorktreeDialog } from "./NewWorktreeDialog";
 
 export function Sidebar() {
   const {
@@ -20,6 +21,8 @@ export function Sidebar() {
     setBaseBranch,
     setCommits,
   } = useAppStore();
+
+  const [showNewWorktree, setShowNewWorktree] = useState(false);
 
   // Load persisted projects on mount
   useEffect(() => {
@@ -155,12 +158,38 @@ export function Sidebar() {
           ))}
         </>
       )}
+      {selectedProject && (
+        <button
+          onClick={() => setShowNewWorktree(true)}
+          className="px-3 py-1.5 text-xs text-muted-foreground hover:text-primary border-t"
+        >
+          + New Worktree
+        </button>
+      )}
       <button
         onClick={openProject}
         className="mt-auto px-3 py-2 border-t text-xs text-muted-foreground hover:text-primary"
       >
         + Open Project
       </button>
+      {showNewWorktree && selectedProject && (
+        <NewWorktreeDialog
+          repoPath={selectedProject.path}
+          onCreated={async (worktree) => {
+            setShowNewWorktree(false);
+            try {
+              const wts = await invoke<Worktree[]>("list_worktrees", {
+                repoPath: selectedProject.path,
+              });
+              setWorktrees(wts);
+              selectWorktree(worktree);
+            } catch (e) {
+              toast.error("Failed to refresh worktrees");
+            }
+          }}
+          onCancel={() => setShowNewWorktree(false)}
+        />
+      )}
     </div>
   );
 }
