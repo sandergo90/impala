@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.differ.app",
   "build": {
-    "beforeDevCommand": "cd ../../apps/desktop && bun run dev",
+    "beforeDevCommand": "cd apps/desktop && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "cd ../../apps/desktop && bun run build",
+    "beforeBuildCommand": "cd apps/desktop && bun run build",
     "frontendDist": "../../apps/desktop/dist"
   },
   "app": {
@@ -24,10 +24,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png"
-    ]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"]
   }
 }
