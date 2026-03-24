@@ -4,8 +4,8 @@
   "packageManager": "bun@1.2.10",
   "workspaces": ["apps/*"],
   "scripts": {
-    "dev": "cd backend/tauri && cargo tauri dev",
-    "build": "cd backend/tauri && cargo tauri build",
+    "dev": "cd apps/desktop && bunx tauri dev --config ../../backend/tauri/tauri.conf.json",
+    "build": "cd apps/desktop && bunx tauri build --config ../../backend/tauri/tauri.conf.json",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
