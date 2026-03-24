@@ -37,15 +37,15 @@ function App() {
   return (
     <>
       <ResizablePanelGroup orientation="horizontal" className="h-screen">
-        <ResizablePanel defaultSize={15} minSize={10} maxSize={25}>
+        <ResizablePanel defaultSize={20} minSize={12} maxSize={30}>
           <Sidebar />
         </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel defaultSize={20} minSize={15} maxSize={35}>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={22} minSize={15} maxSize={35}>
           <CommitPanel />
         </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel defaultSize={65}>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={58}>
           <DiffView />
         </ResizablePanel>
       </ResizablePanelGroup>
