@@ -4,6 +4,12 @@ import { Sidebar } from "./components/Sidebar";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffView } from "./components/DiffView";
 import { Toaster } from "./components/ui/sonner";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
+
 function App() {
   const [gitError, setGitError] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -29,16 +35,20 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-      <div className="w-56 min-w-48 max-w-72 shrink-0">
-        <Sidebar />
-      </div>
-      <div className="w-64 min-w-56 max-w-96 shrink-0">
-        <CommitPanel />
-      </div>
-      <div className="flex-1 min-w-0">
-        <DiffView />
-      </div>
+    <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
+      <ResizablePanelGroup orientation="horizontal" style={{ height: "100vh" }}>
+        <ResizablePanel defaultSize="20%" minSize={180} maxSize={350}>
+          <Sidebar />
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize="22%" minSize={200} maxSize={400}>
+          <CommitPanel />
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize="58%">
+          <DiffView />
+        </ResizablePanel>
+      </ResizablePanelGroup>
       <Toaster />
     </div>
   );
