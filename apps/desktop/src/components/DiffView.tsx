@@ -244,15 +244,6 @@ export function DiffView() {
             const isViewed = viewedFiles.has(file.path);
             const isCollapsed = collapsedFiles.has(file.path) || isViewed;
 
-            // Count additions and deletions from the patch
-            const lines = patch.split("\n");
-            let additions = 0;
-            let deletions = 0;
-            for (const line of lines) {
-              if (line.startsWith("+") && !line.startsWith("+++")) additions++;
-              else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
-            }
-
             return (
               <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-50" : ""}`}>
                 <PatchDiff
@@ -277,42 +268,35 @@ export function DiffView() {
                     </button>
                   )}
                   renderHeaderMetadata={() => (
-                    <div className="flex items-center gap-3 ml-auto pr-2">
-                      <span className="text-xs font-mono">
-                        <span className="text-red-400">-{deletions}</span>
-                        {" "}
-                        <span className="text-green-400">+{additions}</span>
+                    <button
+                      onClick={() => {
+                        setViewedFiles((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(file.path)) {
+                            next.delete(file.path);
+                          } else {
+                            next.add(file.path);
+                          }
+                          return next;
+                        });
+                      }}
+                      className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded border transition-colors ${
+                        isViewed
+                          ? "border-blue-500/60 text-blue-400"
+                          : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                      }`}
+                    >
+                      <span className={`w-3.5 h-3.5 rounded flex items-center justify-center ${
+                        isViewed ? "bg-blue-500" : "border border-muted-foreground"
+                      }`}>
+                        {isViewed && (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                            <path d="M2 5L4 7L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        )}
                       </span>
-                      <button
-                        onClick={() => {
-                          setViewedFiles((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(file.path)) {
-                              next.delete(file.path);
-                            } else {
-                              next.add(file.path);
-                            }
-                            return next;
-                          });
-                        }}
-                        className={`flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full border transition-colors ${
-                          isViewed
-                            ? "border-green-500/50 text-green-400 bg-green-500/10"
-                            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
-                        }`}
-                      >
-                        <span className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
-                          isViewed ? "border-green-400 bg-green-400" : "border-muted-foreground"
-                        }`}>
-                          {isViewed && (
-                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                              <path d="M1.5 4L3 5.5L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          )}
-                        </span>
-                        Viewed
-                      </button>
-                    </div>
+                      Viewed
+                    </button>
                   )}
                 />
               </div>
