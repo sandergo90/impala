@@ -15,13 +15,15 @@ function sanitizeEventId(id: string): string {
 export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const initializedRef = useRef(false);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const [loading, setLoading] = useState(true);
   const [exited, setExited] = useState<number | null>(null);
 
   const setupTerminal = useCallback(async () => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || initializedRef.current) return;
+    initializedRef.current = true;
 
     console.log("Loading Ghostty WASM from:", wasmUrl);
     const ghostty = await Ghostty.load(wasmUrl);
@@ -138,6 +140,7 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
       // Cleanup terminal but do NOT kill PTY (persists across tab switches)
       cleanupRef.current?.();
       cleanupRef.current = null;
+      initializedRef.current = false;
     };
   }, [setupTerminal]);
 
