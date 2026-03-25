@@ -365,8 +365,17 @@ export function DiffView() {
               });
             };
 
+            const scrollToNextFile = () => {
+              const idx = changedFiles.indexOf(file);
+              const nextFile = changedFiles[idx + 1];
+              if (nextFile) {
+                const el = document.querySelector(`[data-file-path="${CSS.escape(nextFile.path)}"]`);
+                el?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }
+            };
+
             return (
-              <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
+              <div key={file.path} data-file-path={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
                 <PatchDiff
                   patch={patch}
                   options={{ ...diffOptions, collapsed: isCollapsed }}
@@ -376,7 +385,7 @@ export function DiffView() {
                     </button>
                   )}
                   renderHeaderMetadata={() => (
-                    <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+                    <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToNextFile(); }} />
                   )}
                 />
               </div>
