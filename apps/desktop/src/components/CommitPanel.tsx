@@ -6,7 +6,7 @@ import { useAppStore } from "../store";
 import type { ChangedFile, CommitInfo, WorktreeState } from "../types";
 
 const statusColor: Record<string, string> = {
-  M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
+  M: "text-[#4ade80]", A: "text-[#34d399]", D: "text-[#f87171]", R: "text-yellow-500",
 };
 
 export function CommitPanel() {
@@ -155,76 +155,127 @@ export function CommitPanel() {
 
   if (!selectedWorktree || !wtState) {
     return (
-      <div className="flex items-center justify-center h-full border-r text-sm text-muted-foreground">
+      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
         Select a worktree
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full border-r text-sm overflow-hidden">
-      <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-b">
-        Commits on {selectedWorktree.branch}
+    <div className="flex flex-col h-full text-sm overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-[9px] uppercase tracking-[1.2px] text-[#555]"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+        Commits on <span className="font-mono text-[10px] text-[#888] normal-case tracking-normal">{selectedWorktree.branch}</span>
       </div>
-      <div className="overflow-y-auto">
+
+      <div className="overflow-y-auto flex-1">
+        {/* Uncommitted Changes */}
         <button
           onClick={selectUncommitted}
-          className={`w-full px-3 py-2 text-left hover:bg-accent/10 ${
-            viewMode === 'uncommitted' ? "bg-accent/10 border-l-2 border-primary" : ""
+          className={`w-full px-3.5 py-2 text-left transition-colors ${
+            viewMode === 'uncommitted'
+              ? "border-l-2 border-[#3b82f6] pl-3"
+              : "hover:bg-white/[0.02]"
           }`}
+          style={{
+            ...(viewMode === 'uncommitted' ? { background: "rgba(59,130,246,0.06)" } : {}),
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}
         >
-          <div className="font-medium text-xs">Uncommitted Changes</div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            Working tree
+          <div className={`text-[11px] font-medium ${viewMode === 'uncommitted' ? "text-[#e5e5e5]" : "text-[#888]"}`}>
+            Uncommitted Changes
           </div>
+          <div className="text-[9px] text-[#555] mt-0.5 font-mono">Working tree</div>
         </button>
+
+        {/* All Changes */}
         <button
           onClick={selectAllChanges}
-          className={`w-full px-3 py-2 text-left hover:bg-accent/10 ${
-            viewMode === 'all-changes' ? "bg-accent/10 border-l-2 border-primary" : ""
+          className={`w-full px-3.5 py-2 text-left transition-colors ${
+            viewMode === 'all-changes'
+              ? "border-l-2 border-[#3b82f6] pl-3"
+              : "hover:bg-white/[0.02]"
           }`}
+          style={{
+            ...(viewMode === 'all-changes' ? { background: "rgba(59,130,246,0.06)" } : {}),
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}
         >
-          <div className="font-medium text-xs">All Changes</div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            vs {baseBranch || "base"}
+          <div className={`text-[11px] font-medium ${viewMode === 'all-changes' ? "text-[#e5e5e5]" : "text-[#888]"}`}>
+            All Changes
           </div>
+          <div className="text-[9px] text-[#555] mt-0.5 font-mono">vs {baseBranch || "base"}</div>
         </button>
+
+        {/* Commits */}
         {commits.length === 0 ? (
-          <div className="px-3 py-4 text-muted-foreground text-xs">No commits ahead of {baseBranch}</div>
+          <div className="px-3.5 py-4 text-[#555] text-[11px]">No commits ahead of {baseBranch}</div>
         ) : (
-          commits.map((commit) => (
-            <button key={commit.hash} onClick={() => selectCommit(commit)}
-              className={`w-full px-3 py-2 text-left hover:bg-accent/10 ${
-                viewMode === 'commit' && selectedCommit?.hash === commit.hash ? "bg-accent/10 border-l-2 border-primary" : ""
-              }`}>
-              <div className="font-medium text-xs truncate">{commit.message}</div>
-              <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
-                <span>{commit.hash.slice(0, 7)} · {commit.date.split("T")[0]}</span>
-                {(commit.additions > 0 || commit.deletions > 0) && (
-                  <span className="ml-auto font-mono">
-                    <span className="text-green-400">+{commit.additions}</span>
-                    {" "}
-                    <span className="text-red-400">-{commit.deletions}</span>
-                  </span>
-                )}
-              </div>
-            </button>
-          ))
+          commits.map((commit) => {
+            const isSelected = viewMode === 'commit' && selectedCommit?.hash === commit.hash;
+            return (
+              <button
+                key={commit.hash}
+                onClick={() => selectCommit(commit)}
+                className={`w-full px-3.5 py-2 text-left transition-colors ${
+                  isSelected
+                    ? "border-l-2 border-[#3b82f6] pl-3"
+                    : "hover:bg-white/[0.02]"
+                }`}
+                style={{
+                  ...(isSelected ? { background: "rgba(59,130,246,0.06)" } : {}),
+                  borderBottom: "1px solid rgba(255,255,255,0.03)",
+                }}
+              >
+                <div className={`text-[11px] font-medium truncate ${isSelected ? "text-[#e5e5e5]" : "text-[#bbb]"}`}>
+                  {commit.message}
+                </div>
+                <div className="flex items-center gap-1 text-[9px] text-[#555] mt-0.5 font-mono">
+                  <span>{commit.hash.slice(0, 7)} &middot; {commit.date.split("T")[0]}</span>
+                  {(commit.additions > 0 || commit.deletions > 0) && (
+                    <span className="ml-auto">
+                      <span className="text-[#4ade80]">+{commit.additions}</span>
+                      {" "}
+                      <span className="text-[#f87171]">-{commit.deletions}</span>
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })
         )}
       </div>
+
+      {/* Changed Files */}
       {changedFiles.length > 0 && (
         <>
-          <div className="px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground border-t border-b">Changed Files</div>
+          <div className="px-3.5 py-2 text-[9px] uppercase tracking-[1.2px] text-[#555]"
+            style={{
+              borderTop: "1px solid rgba(255,255,255,0.06)",
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}>
+            Changed Files
+          </div>
           <div className="overflow-y-auto">
-            {changedFiles.map((file) => (
-              <button key={file.path} onClick={() => selectFile(file)}
-                className={`w-full px-3 py-1.5 text-left font-mono text-xs hover:bg-accent/10 ${
-                  selectedFile?.path === file.path ? "bg-accent/10 text-primary" : "text-muted-foreground"
-                }`}>
-                <span className={`mr-1.5 ${statusColor[file.status] || ""}`}>{file.status}</span>
-                {file.path.split("/").pop()}
-              </button>
-            ))}
+            {changedFiles.map((file) => {
+              const isSelected = selectedFile?.path === file.path;
+              return (
+                <button
+                  key={file.path}
+                  onClick={() => selectFile(file)}
+                  className={`w-full px-3.5 py-1.5 text-left font-mono text-[10px] flex items-center gap-1.5 transition-colors truncate ${
+                    isSelected ? "text-[#3b82f6]" : "text-[#888] hover:bg-white/[0.02]"
+                  }`}
+                  style={isSelected ? { background: "rgba(59,130,246,0.06)" } : undefined}
+                >
+                  <span className={`text-[9px] font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
+                    {file.status}
+                  </span>
+                  {file.path.split("/").pop()}
+                </button>
+              );
+            })}
           </div>
         </>
       )}
