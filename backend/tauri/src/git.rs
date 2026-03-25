@@ -77,6 +77,14 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
 }
 
 pub fn detect_base_branch(worktree_path: &str) -> Result<String, String> {
+    // Prefer remote tracking branches for accurate comparison (local branches may be stale)
+    for branch in &["origin/develop", "origin/main", "origin/master"] {
+        let result = run_git(worktree_path, &["rev-parse", "--verify", branch]);
+        if result.is_ok() {
+            return Ok(branch.to_string());
+        }
+    }
+    // Fall back to local branches
     for branch in &["develop", "main", "master"] {
         let result = run_git(worktree_path, &["rev-parse", "--verify", branch]);
         if result.is_ok() {
@@ -236,7 +244,27 @@ pub fn get_uncommitted_diff(worktree_path: &str) -> Result<String, String> {
     // Get both staged and unstaged changes
     let unstaged = run_git(worktree_path, &["diff"]).unwrap_or_default();
     let staged = run_git(worktree_path, &["diff", "--cached"]).unwrap_or_default();
-    Ok(format!("{}{}", staged, unstaged))
+
+    // Generate diffs for untracked files (git diff doesn't include them)
+    let status = run_git(worktree_path, &["status", "--porcelain"]).unwrap_or_default();
+    let mut untracked_diffs = String::new();
+    for line in status.lines() {
+        if line.starts_with("??") {
+            let file_path = &line[3..];
+            let full_path = std::path::Path::new(worktree_path).join(file_path);
+            if let Ok(content) = std::fs::read_to_string(&full_path) {
+                let line_count = content.lines().count();
+                untracked_diffs.push_str(&format!("diff --git a/{f} b/{f}\nnew file mode 100644\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1,{line_count} @@\n", f = file_path));
+                for line in content.lines() {
+                    untracked_diffs.push('+');
+                    untracked_diffs.push_str(line);
+                    untracked_diffs.push('\n');
+                }
+            }
+        }
+    }
+
+    Ok(format!("{}{}{}", staged, unstaged, untracked_diffs))
 }
 
 #[derive(Debug, Serialize)]
