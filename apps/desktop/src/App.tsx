@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffView } from "./components/DiffView";
 import { GhosttyTerminal } from "./components/GhosttyTerminal";
+import { SettingsView } from "./components/SettingsView";
 import { Toaster } from "./components/ui/sonner";
 import {
   ResizablePanelGroup,
@@ -15,9 +16,10 @@ import { useUIStore, useDataStore } from "./store";
 function App() {
   const [gitError, setGitError] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [showChanges, setShowChanges] = useState(false);
+  const [showChanges, setShowChanges] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  const currentView = useUIStore((s) => s.currentView);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const selectedProject = useUIStore((s) => s.selectedProject);
   const wtPath = selectedWorktree?.path;
@@ -36,6 +38,18 @@ function App() {
     invoke("check_git")
       .catch(() => setGitError(true))
       .finally(() => setChecking(false));
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === ",") {
+        e.preventDefault();
+        const view = useUIStore.getState().currentView;
+        useUIStore.getState().setCurrentView(view === "settings" ? "main" : "settings");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   const handleTerminalTab = async () => {
@@ -122,119 +136,131 @@ function App() {
         style={{ paddingLeft: "78px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
-        {/* Sidebar toggle */}
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="relative text-[#666] hover:text-[#aaa] px-2 py-1 rounded hover:bg-white/5"
-          title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-        >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.4" fill="none" />
-            <line x1="5.5" y1="2" x2="5.5" y2="14" stroke="currentColor" strokeWidth="1.4" />
-          </svg>
-        </button>
-
-        {/* Center context: project / branch · N ahead of base */}
-        <div className="flex-1 flex items-center justify-center gap-1.5 text-[11px]" data-tauri-drag-region>
-          {selectedWorktree && (
-            <>
-              <span className="text-[#555]">{selectedProject?.name}</span>
-              <span className="text-[#444]">/</span>
-              <span className="text-[#bbb] font-medium font-mono">{selectedWorktree.branch}</span>
-              {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
-                <>
-                  <span className="text-[#444]">&middot;</span>
-                  <span className="text-[#555]">{dataState.commits.length} ahead of {dataState.baseBranch}</span>
-                </>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Right: tabs + changes toggle */}
-        <div className="relative flex items-center gap-1 pr-3">
-          {selectedWorktree && (
-            <>
-              {tabPill("Diff", !showSplit && activeTab === "diff", handleDiffTab, showSplit)}
-              {tabPill("Terminal", !showSplit && activeTab === "terminal", handleTerminalTab, showSplit)}
-              {tabPill("Split", showSplit, handleSplitToggle)}
-              <span className="mx-1 w-px h-3.5" style={{ background: "rgba(255,255,255,0.08)" }} />
-            </>
-          )}
-          {tabPill("Changes", showChanges, () => setShowChanges(!showChanges))}
-        </div>
-      </div>
-
-      {/* Main content area */}
-      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
-        {/* Sidebar */}
-        {!sidebarCollapsed && (
+        {currentView === "main" ? (
           <>
-            <ResizablePanel defaultSize="15%" minSize={140} maxSize={300}>
-              <Sidebar />
-            </ResizablePanel>
-            <ResizableHandle />
-          </>
-        )}
+            {/* Sidebar toggle */}
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="relative text-[#666] hover:text-[#aaa] px-2 py-1 rounded hover:bg-white/5"
+              title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.4" fill="none" />
+                <line x1="5.5" y1="2" x2="5.5" y2="14" stroke="currentColor" strokeWidth="1.4" />
+              </svg>
+            </button>
 
-        {/* Content */}
-        <ResizablePanel defaultSize={showChanges ? "65%" : "85%"}>
-          <div className="flex flex-col h-full">
-            {/* Tab content */}
-            <div className="flex-1 min-h-0">
-              {!selectedWorktree ? (
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  Select a worktree
-                </div>
-              ) : showSplit ? (
-                <ResizablePanelGroup orientation="horizontal">
-                  <ResizablePanel defaultSize="50%" minSize={200}>
-                    {ptySessionId ? (
-                      <GhosttyTerminal
-                        key={ptySessionId}
-                        sessionId={ptySessionId}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                        Starting terminal...
-                      </div>
-                    )}
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize="50%" minSize={200}>
-                    <DiffView />
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              ) : (
+            {/* Center context: project / branch · N ahead of base */}
+            <div className="flex-1 flex items-center justify-center gap-1.5 text-[11px]" data-tauri-drag-region>
+              {selectedWorktree && (
                 <>
-                  {activeTab === "diff" && <DiffView />}
-                  {activeTab === "terminal" && ptySessionId && (
-                    <GhosttyTerminal
-                      key={ptySessionId}
-                      sessionId={ptySessionId}
-                    />
-                  )}
-                  {activeTab === "terminal" && !ptySessionId && (
-                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                      Starting terminal...
-                    </div>
+                  <span className="text-[#555]">{selectedProject?.name}</span>
+                  <span className="text-[#444]">/</span>
+                  <span className="text-[#bbb] font-medium font-mono">{selectedWorktree.branch}</span>
+                  {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
+                    <>
+                      <span className="text-[#444]">&middot;</span>
+                      <span className="text-[#555]">{dataState.commits.length} ahead of {dataState.baseBranch}</span>
+                    </>
                   )}
                 </>
               )}
             </div>
-          </div>
-        </ResizablePanel>
 
-        {/* Right panel — Changes/Commits */}
-        {showChanges && (
-          <>
-            <ResizableHandle />
-            <ResizablePanel defaultSize="20%" minSize={180} maxSize={400}>
-              <CommitPanel />
-            </ResizablePanel>
+            {/* Right: tabs + changes toggle */}
+            <div className="relative flex items-center gap-1 pr-3">
+              {selectedWorktree && (
+                <>
+                  {tabPill("Diff", !showSplit && activeTab === "diff", handleDiffTab, showSplit)}
+                  {tabPill("Terminal", !showSplit && activeTab === "terminal", handleTerminalTab, showSplit)}
+                  {tabPill("Split", showSplit, handleSplitToggle)}
+                  <span className="mx-1 w-px h-3.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+                </>
+              )}
+              {tabPill("Changes", showChanges, () => setShowChanges(!showChanges))}
+            </div>
           </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-[11px] text-[#888] font-medium" data-tauri-drag-region>
+            Settings
+          </div>
         )}
-      </ResizablePanelGroup>
+      </div>
+
+      {currentView === "settings" ? (
+        <SettingsView />
+      ) : (
+        /* Main content area */
+        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
+          {/* Sidebar */}
+          {!sidebarCollapsed && (
+            <>
+              <ResizablePanel defaultSize="15%" minSize={140} maxSize={300}>
+                <Sidebar />
+              </ResizablePanel>
+              <ResizableHandle />
+            </>
+          )}
+
+          {/* Content */}
+          <ResizablePanel defaultSize={showChanges ? "65%" : "85%"}>
+            <div className="flex flex-col h-full">
+              {/* Tab content */}
+              <div className="flex-1 min-h-0">
+                {!selectedWorktree ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                    Select a worktree
+                  </div>
+                ) : showSplit ? (
+                  <ResizablePanelGroup orientation="horizontal">
+                    <ResizablePanel defaultSize="50%" minSize={200}>
+                      {ptySessionId ? (
+                        <GhosttyTerminal
+                          key={ptySessionId}
+                          sessionId={ptySessionId}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                          Starting terminal...
+                        </div>
+                      )}
+                    </ResizablePanel>
+                    <ResizableHandle withHandle />
+                    <ResizablePanel defaultSize="50%" minSize={200}>
+                      <DiffView />
+                    </ResizablePanel>
+                  </ResizablePanelGroup>
+                ) : (
+                  <>
+                    {activeTab === "diff" && <DiffView />}
+                    {activeTab === "terminal" && ptySessionId && (
+                      <GhosttyTerminal
+                        key={ptySessionId}
+                        sessionId={ptySessionId}
+                      />
+                    )}
+                    {activeTab === "terminal" && !ptySessionId && (
+                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                        Starting terminal...
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </ResizablePanel>
+
+          {/* Right panel — Changes/Commits */}
+          {showChanges && (
+            <>
+              <ResizableHandle />
+              <ResizablePanel defaultSize="20%" minSize={180} maxSize={400}>
+                <CommitPanel />
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
+      )}
 
       <Toaster />
     </div>
