@@ -77,24 +77,19 @@ const CSS_VAR_MAP: Record<keyof ResolvedCSS, string> = {
 
 /** Derive Pierre diff CSS variable overrides from theme colors */
 function getDiffOverrides(theme: Theme): Record<string, string> {
-  const { background, accent, border } = theme.ui;
+  const { background, foreground } = theme.ui;
   const { green, red } = theme.terminal;
-  const mix = (color: string, pct: number) =>
-    `color-mix(in lab, ${color} ${pct}%, ${background})`;
+  const isDark = theme.type === "dark";
+
+  // Pierre uses --diffs-dark-* / --diffs-light-* as base theme variables.
+  // These are the source from which it derives all diff backgrounds/colors.
+  const prefix = isDark ? "--diffs-dark" : "--diffs-light";
 
   return {
-    "--diffs-bg": background,
-    "--diffs-bg-context-override": background,
-    "--diffs-bg-buffer-override": background,
-    "--diffs-bg-separator-override": mix(accent, 30),
-    "--diffs-bg-hover-override": mix(accent, 40),
-    "--diffs-fg-number-override": border,
-    "--diffs-bg-addition-override": mix(green, 10),
-    "--diffs-bg-addition-hover-override": mix(green, 15),
-    "--diffs-bg-addition-emphasis-override": mix(green, 25),
-    "--diffs-bg-deletion-override": mix(red, 10),
-    "--diffs-bg-deletion-hover-override": mix(red, 15),
-    "--diffs-bg-deletion-emphasis-override": mix(red, 25),
+    [`${prefix}`]: foreground,
+    [`${prefix}-bg`]: background,
+    [`${prefix}-addition-color`]: green,
+    [`${prefix}-deletion-color`]: red,
   };
 }
 
