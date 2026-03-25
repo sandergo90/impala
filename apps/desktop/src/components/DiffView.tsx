@@ -258,7 +258,8 @@ export function DiffView() {
     );
   }
 
-  const pierreTheme = resolveThemeById(activeThemeId, customThemes).type === "dark"
+  const activeTheme = resolveThemeById(activeThemeId, customThemes);
+  const pierreTheme = activeTheme.type === "dark"
     ? ("pierre-dark" as const)
     : ("pierre-light" as const);
 
@@ -266,7 +267,10 @@ export function DiffView() {
     theme: pierreTheme,
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
-    unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
+    unsafeCSS: `
+      [data-diffs-header] { position: sticky; top: 0; z-index: 10; }
+      pre, code { background-color: var(--diffs-bg) !important; }
+    `,
   };
 
   const toolbar = (
