@@ -16,6 +16,30 @@ function projectColor(name: string): string {
   return `hsl(${hue}, 60%, 50%)`;
 }
 
+function ProjectBadge({ name }: { name: string }) {
+  return (
+    <div
+      className="w-5 h-5 rounded-[5px] flex items-center justify-center text-white text-[10px] font-bold shrink-0"
+      style={{ background: projectColor(name) }}
+    >
+      {name[0]?.toUpperCase()}
+    </div>
+  );
+}
+
+function BranchIcon({ active }: { active: boolean }) {
+  const color = active ? "#3b82f6" : "#555";
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0">
+      <circle cx="4" cy="4" r="2" stroke={color} strokeWidth="1.4" fill="none"/>
+      <circle cx="4" cy="12" r="2" stroke={color} strokeWidth="1.4" fill="none"/>
+      <line x1="4" y1="6" x2="4" y2="10" stroke={color} strokeWidth="1.4"/>
+      <path d="M4 8 L10 4" stroke={color} strokeWidth="1.4"/>
+      <circle cx="12" cy="4" r="2" stroke={color} strokeWidth="1.4" fill="none"/>
+    </svg>
+  );
+}
+
 export function Sidebar() {
   const {
     projects,
@@ -31,18 +55,9 @@ export function Sidebar() {
     updateWorktreeState,
   } = useAppStore();
 
+  const worktreeStates = useAppStore((s) => s.worktreeStates);
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-
-  const branchIcon = (active: boolean) => (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0">
-      <circle cx="4" cy="4" r="2" stroke={active ? "#3b82f6" : "#555"} strokeWidth="1.4" fill="none"/>
-      <circle cx="4" cy="12" r="2" stroke={active ? "#3b82f6" : "#555"} strokeWidth="1.4" fill="none"/>
-      <line x1="4" y1="6" x2="4" y2="10" stroke={active ? "#3b82f6" : "#555"} strokeWidth="1.4"/>
-      <path d="M4 8 L10 4" stroke={active ? "#3b82f6" : "#555"} strokeWidth="1.4"/>
-      <circle cx="12" cy="4" r="2" stroke={active ? "#3b82f6" : "#555"} strokeWidth="1.4" fill="none"/>
-    </svg>
-  );
 
   // Load persisted projects on mount
   useEffect(() => {
@@ -159,12 +174,7 @@ export function Sidebar() {
       >
         {selectedProject ? (
           <>
-            <div
-              className="w-5 h-5 rounded-[5px] flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-              style={{ background: projectColor(selectedProject.name) }}
-            >
-              {selectedProject.name[0]?.toUpperCase()}
-            </div>
+            <ProjectBadge name={selectedProject.name} />
             <span className="text-[#e5e5e5] text-[12px] font-medium truncate">{selectedProject.name}</span>
           </>
         ) : (
@@ -187,12 +197,7 @@ export function Sidebar() {
                 onClick={() => { selectProject(project); setShowDropdown(false); }}
                 className="group flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-white/5"
               >
-                <div
-                  className="w-5 h-5 rounded-[5px] flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-                  style={{ background: projectColor(project.name) }}
-                >
-                  {project.name[0]?.toUpperCase()}
-                </div>
+                <ProjectBadge name={project.name} />
                 <span className={`text-[12px] truncate ${selectedProject?.path === project.path ? "text-[#e5e5e5] font-medium" : "text-[#999]"}`}>
                   {project.name}
                 </span>
@@ -231,8 +236,7 @@ export function Sidebar() {
 
           {worktrees.map((wt) => {
             const isSelected = selectedWorktree?.path === wt.path;
-            const wtCommits = useAppStore.getState().getWorktreeState(wt.path).commits;
-            const aheadCount = wtCommits?.length ?? 0;
+            const aheadCount = worktreeStates[wt.path]?.commits?.length ?? 0;
 
             return (
               <button
@@ -245,7 +249,7 @@ export function Sidebar() {
                 }`}
                 style={isSelected ? { background: "rgba(59,130,246,0.08)" } : undefined}
               >
-                {branchIcon(isSelected)}
+                <BranchIcon active={isSelected} />
                 <div className="min-w-0">
                   <div className={`text-[11px] truncate ${isSelected ? "text-[#e5e5e5] font-medium" : "text-[#999]"}`}>
                     {wt.branch}
