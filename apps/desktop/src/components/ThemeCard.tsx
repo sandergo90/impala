@@ -4,9 +4,10 @@ interface ThemeCardProps {
   theme: Theme;
   isActive: boolean;
   onSelect: () => void;
+  onDelete?: () => void;
 }
 
-export function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
+export function ThemeCard({ theme, isActive, onSelect, onDelete }: ThemeCardProps) {
   const { ui } = theme;
 
   return (
@@ -46,6 +47,7 @@ export function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
       </div>
       {/* Label */}
       <div
+        className="group/card"
         style={{
           padding: "6px 8px",
           background: ui.background,
@@ -55,11 +57,21 @@ export function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
         }}
       >
         <span style={{ color: ui.foreground, fontSize: 11, fontWeight: 500 }}>{theme.name}</span>
-        {isActive && (
+        {isActive && !onDelete && (
           <svg width="14" height="14" viewBox="0 0 16 16">
             <circle cx="8" cy="8" r="6" stroke="var(--primary)" strokeWidth="1.5" fill="none" />
             <circle cx="8" cy="8" r="3.5" fill="var(--primary)" />
           </svg>
+        )}
+        {onDelete && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="opacity-0 group-hover/card:opacity-100 transition-opacity"
+            style={{ color: ui.foreground, fontSize: 11, lineHeight: 1 }}
+            title="Delete theme"
+          >
+            ×
+          </button>
         )}
       </div>
     </button>

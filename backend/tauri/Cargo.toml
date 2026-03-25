@@ -26,3 +26,4 @@ base64 = "0.22.1"
 lru = "0.16.3"
 tauri-plugin-window-state = "2.4.1"
 notify = { version = "8.2.0", features = ["macos_fsevent"] }
+tauri-plugin-fs = "2"

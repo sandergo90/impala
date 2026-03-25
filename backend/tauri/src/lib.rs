@@ -1,6 +1,7 @@
 mod annotations;
 mod git;
 mod pty;
+mod viewed_files;
 mod watcher;
 
 use std::fs;
@@ -215,10 +216,53 @@ fn delete_annotation(
     annotations::delete_annotation(&conn, &id)
 }
 
+#[tauri::command]
+fn set_file_viewed(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+    commit_hash: String,
+    file_path: String,
+    patch_hash: String,
+) -> Result<viewed_files::ViewedFile, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    viewed_files::set_viewed(&conn, &worktree_path, &commit_hash, &file_path, &patch_hash)
+}
+
+#[tauri::command]
+fn unset_file_viewed(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+    commit_hash: String,
+    file_path: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    viewed_files::unset_viewed(&conn, &worktree_path, &commit_hash, &file_path)
+}
+
+#[tauri::command]
+fn list_viewed_files(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+    commit_hash: String,
+) -> Result<Vec<viewed_files::ViewedFile>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    viewed_files::list_viewed(&conn, &worktree_path, &commit_hash)
+}
+
+#[tauri::command]
+fn clear_viewed_files(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    viewed_files::clear_for_worktree(&conn, &worktree_path)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             let app_dir = app
@@ -232,6 +276,8 @@ pub fn run() {
                 .map_err(|e| format!("Failed to open database: {}", e))?;
             annotations::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize database: {}", e))?;
+            viewed_files::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize viewed_files table: {}", e))?;
             app.manage(DbState(Mutex::new(conn)));
             app.manage(pty::PtyState::new());
             app.manage(watcher::WatcherState::new());
@@ -262,6 +308,10 @@ pub fn run() {
             list_annotations,
             update_annotation,
             delete_annotation,
+            set_file_viewed,
+            unset_file_viewed,
+            list_viewed_files,
+            clear_viewed_files,
             pty::pty_spawn,
             pty::pty_get_buffer,
             pty::pty_write,
