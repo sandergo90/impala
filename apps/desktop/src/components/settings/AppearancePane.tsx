@@ -2,12 +2,12 @@ import { useUIStore } from "../../store";
 import { builtInThemes } from "../../themes/built-in";
 import { ThemeCard } from "../ThemeCard";
 
+const darkThemes = builtInThemes.filter((t) => t.type === "dark");
+const lightThemes = builtInThemes.filter((t) => t.type === "light");
+
 export function AppearancePane() {
   const activeThemeId = useUIStore((s) => s.activeThemeId);
   const setActiveThemeId = useUIStore((s) => s.setActiveThemeId);
-
-  const darkThemes = builtInThemes.filter((t) => t.type === "dark");
-  const lightThemes = builtInThemes.filter((t) => t.type === "light");
 
   return (
     <div>

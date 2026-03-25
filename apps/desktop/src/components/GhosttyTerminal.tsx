@@ -4,14 +4,11 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Ghostty, Terminal, FitAddon } from "ghostty-web";
 import wasmUrl from "ghostty-web/ghostty-vt.wasm?url";
 import { useUIStore } from "../store";
-import { getBuiltInTheme, defaultDark } from "../themes/built-in";
+import { resolveThemeById } from "../themes/apply";
 
 function getTerminalTheme() {
   const state = useUIStore.getState();
-  const theme = getBuiltInTheme(state.activeThemeId)
-    ?? state.customThemes.find((t) => t.id === state.activeThemeId)
-    ?? defaultDark;
-  return theme.terminal;
+  return resolveThemeById(state.activeThemeId, state.customThemes).terminal;
 }
 
 interface GhosttyTerminalProps {
@@ -36,6 +33,7 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
   const terminalRef = useRef<Terminal | null>(null);
   const [loading, setLoading] = useState(true);
   const [exited, setExited] = useState<number | null>(null);
+  const [termBg, setTermBg] = useState(() => getTerminalTheme().background);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -180,8 +178,10 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
     const unsubscribe = useUIStore.subscribe((state) => {
       if (state.activeThemeId !== prevThemeId) {
         prevThemeId = state.activeThemeId;
+        const termTheme = getTerminalTheme();
+        setTermBg(termTheme.background);
         if (terminalRef.current?.renderer) {
-          terminalRef.current.renderer.setTheme(getTerminalTheme());
+          terminalRef.current.renderer.setTheme(termTheme);
         }
       }
     });
@@ -189,7 +189,7 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
   }, []);
 
   return (
-    <div className="relative h-full w-full" style={{ background: getTerminalTheme().background }}>
+    <div className="relative h-full w-full" style={{ background: termBg }}>
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground z-10">
           Loading terminal...

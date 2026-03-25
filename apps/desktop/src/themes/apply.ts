@@ -32,7 +32,7 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
     sidebar: isDark ? "oklch(0.205 0 0)" : "oklch(0.985 0 0)",
     sidebarForeground: foreground,
     sidebarPrimary: primary,
-    sidebarPrimaryForeground: isDark ? "oklch(0.985 0 0)" : "oklch(0.985 0 0)",
+    sidebarPrimaryForeground: "oklch(0.985 0 0)",
     sidebarAccent: accent,
     sidebarAccentForeground: foreground,
     sidebarBorder: border,
@@ -87,7 +87,11 @@ export function applyTheme(theme: Theme): void {
   root.classList.remove("dark");
 }
 
+/** Resolve a theme by ID, checking built-ins then custom themes, falling back to defaultDark */
+export function resolveThemeById(id: string, customThemes: Theme[]): Theme {
+  return getBuiltInTheme(id) ?? customThemes.find((t) => t.id === id) ?? defaultDark;
+}
+
 export function initThemeFromStore(activeThemeId: string, customThemes: Theme[]): void {
-  const theme = getBuiltInTheme(activeThemeId) ?? customThemes.find((t) => t.id === activeThemeId) ?? defaultDark;
-  applyTheme(theme);
+  applyTheme(resolveThemeById(activeThemeId, customThemes));
 }

@@ -2,8 +2,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Worktree, Project, WorktreeNavState, WorktreeDataState } from "./types";
 import type { Theme } from "./themes/types";
-import { getBuiltInTheme, defaultDark } from "./themes/built-in";
-import { applyTheme, initThemeFromStore } from "./themes/apply";
+import { defaultDark } from "./themes/built-in";
+import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
 
 const defaultNavState: WorktreeNavState = {
   activeTab: 'diff',
@@ -72,19 +72,21 @@ export const useUIStore = create<UIState>()(
       activeThemeId: "default-dark",
       setActiveThemeId: (id) => {
         set({ activeThemeId: id });
-        const theme = getBuiltInTheme(id) ?? get().customThemes.find((t) => t.id === id) ?? defaultDark;
-        applyTheme(theme);
+        applyTheme(resolveThemeById(id, get().customThemes));
       },
       customThemes: [],
       addCustomTheme: (theme) =>
         set((state) => ({
           customThemes: [...state.customThemes, theme],
         })),
-      removeCustomTheme: (id) =>
+      removeCustomTheme: (id) => {
+        const wasActive = get().activeThemeId === id;
         set((state) => ({
           customThemes: state.customThemes.filter((t) => t.id !== id),
-          activeThemeId: state.activeThemeId === id ? "default-dark" : state.activeThemeId,
-        })),
+          activeThemeId: wasActive ? "default-dark" : state.activeThemeId,
+        }));
+        if (wasActive) applyTheme(defaultDark);
+      },
       currentView: 'main',
       setCurrentView: (view) => set({ currentView: view }),
     }),
