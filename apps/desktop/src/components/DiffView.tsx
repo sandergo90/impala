@@ -1,44 +1,20 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { toast } from "sonner";
-import { useAppStore } from "../store";
-import { PatchDiff } from "@pierre/diffs/react";
+import { useUIStore, useDataStore } from "../store";
+import { PatchDiff, Virtualizer } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
+import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { AnnotationForm } from "./AnnotationForm";
 import { AnnotationDisplay } from "./AnnotationDisplay";
 import type { DiffLineAnnotation } from "@pierre/diffs";
-import type { Annotation } from "../types";
+import type { Annotation, WorktreeDataState } from "../types";
 
-function LazyPatchDiff(props: React.ComponentProps<typeof PatchDiff>) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "200px" } // start loading 200px before it's visible
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <div ref={ref}>
-      {visible ? (
-        <PatchDiff {...props} />
-      ) : (
-        <div className="h-24 flex items-center justify-center text-xs text-muted-foreground">
-          Loading diff...
-        </div>
-      )}
-    </div>
-  );
+function hashPatch(patch: string): string {
+  let hash = 0;
+  for (let i = 0; i < patch.length; i++) {
+    hash = ((hash << 5) - hash + patch.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
 }
 
 function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: React.MouseEvent) => void }) {
@@ -66,31 +42,34 @@ function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: R
 }
 
 export function DiffView() {
-  const selectedProject = useAppStore((s) => s.selectedProject);
-  const selectedWorktree = useAppStore((s) => s.selectedWorktree);
-  const diffStyle = useAppStore((s) => s.diffStyle);
-  const setDiffStyle = useAppStore((s) => s.setDiffStyle);
-  const wrap = useAppStore((s) => s.wrap);
-  const setWrap = useAppStore((s) => s.setWrap);
+  const selectedProject = useUIStore((s) => s.selectedProject);
+  const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+  const diffStyle = useUIStore((s) => s.diffStyle);
+  const setDiffStyle = useUIStore((s) => s.setDiffStyle);
+  const wrap = useUIStore((s) => s.wrap);
+  const setWrap = useUIStore((s) => s.setWrap);
 
-  const wtPath = useAppStore((s) => s.selectedWorktree?.path);
-  const wtState = useAppStore((s) =>
-    wtPath ? (s.worktreeStates[wtPath] ?? null) : null
+  const wtPath = useUIStore((s) => s.selectedWorktree?.path);
+  const navState = useUIStore((s) =>
+    wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null
+  );
+  const dataState = useDataStore((s) =>
+    wtPath ? (s.worktreeDataStates[wtPath] ?? null) : null
   );
 
-  const selectedFile = wtState?.selectedFile ?? null;
-  const diffText = wtState?.diffText ?? null;
-  const selectedCommit = wtState?.selectedCommit ?? null;
-  const viewMode = wtState?.viewMode ?? 'commit';
-  const changedFiles = wtState?.changedFiles ?? [];
-  const fileDiffs = wtState?.fileDiffs ?? {};
-  const annotations = wtState?.annotations ?? [];
+  const selectedFile = navState?.selectedFile ?? null;
+  const diffText = dataState?.diffText ?? null;
+  const selectedCommit = navState?.selectedCommit ?? null;
+  const viewMode = navState?.viewMode ?? 'commit';
+  const changedFiles = dataState?.changedFiles ?? [];
+  const fileDiffs = dataState?.fileDiffs ?? {};
+  const annotations = dataState?.annotations ?? [];
 
   const worktreePath = selectedWorktree?.path;
-  const update = useCallback(
-    (updates: Partial<NonNullable<typeof wtState>>) => {
+  const updateData = useCallback(
+    (updates: Partial<WorktreeDataState>) => {
       if (worktreePath) {
-        useAppStore.getState().updateWorktreeState(worktreePath, updates);
+        useDataStore.getState().updateWorktreeDataState(worktreePath, updates);
       }
     },
     [worktreePath]
@@ -99,20 +78,67 @@ export function DiffView() {
   const [showResolved, setShowResolved] = useState(false);
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
-  const viewedFilesArr = wtState?.viewedFiles ?? [];
-  const viewedFiles = useMemo(() => new Set(viewedFilesArr), [viewedFilesArr]);
+  const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
+
+  // Determine the commit hash for viewed-files scoping
+  const commitHashForViewed =
+    viewMode === "commit" && selectedCommit ? selectedCommit.hash
+    : viewMode === "all-changes" ? "all-changes"
+    : viewMode === "uncommitted" ? "uncommitted"
+    : null;
+
+  // Load viewed files from SQLite when commit context changes
+  useEffect(() => {
+    if (!worktreePath || !commitHashForViewed) {
+      setViewedFiles(new Set());
+      return;
+    }
+    viewedFilesProvider
+      .list(worktreePath, commitHashForViewed)
+      .then((rows) => {
+        // Filter out stale entries where the patch has changed
+        const valid = new Set<string>();
+        const staleIds: string[] = [];
+        for (const row of rows) {
+          const currentPatch = fileDiffs[row.file_path];
+          if (currentPatch && hashPatch(currentPatch) === row.patch_hash) {
+            valid.add(row.file_path);
+          } else if (currentPatch) {
+            staleIds.push(row.file_path);
+          }
+        }
+        setViewedFiles(valid);
+        // Lazily clean up stale entries
+        for (const fp of staleIds) {
+          viewedFilesProvider.unset(worktreePath, commitHashForViewed, fp);
+        }
+      })
+      .catch(() => setViewedFiles(new Set()));
+  }, [worktreePath, commitHashForViewed, fileDiffs]);
+
   const toggleViewed = useCallback((path: string) => {
-    const current = wtState?.viewedFiles ?? [];
-    const next = current.includes(path)
-      ? current.filter((f) => f !== path)
-      : [...current, path];
-    update({ viewedFiles: next });
-  }, [wtState?.viewedFiles, update]);
+    if (!worktreePath || !commitHashForViewed) return;
+    const patch = fileDiffs[path];
+    if (!patch) return;
+
+    const isCurrentlyViewed = viewedFiles.has(path);
+    if (isCurrentlyViewed) {
+      viewedFilesProvider.unset(worktreePath, commitHashForViewed, path);
+      setViewedFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    } else {
+      viewedFilesProvider.set(worktreePath, commitHashForViewed, path, hashPatch(patch));
+      setViewedFiles((prev) => new Set(prev).add(path));
+    }
+  }, [worktreePath, commitHashForViewed, fileDiffs, viewedFiles]);
 
   // Load annotations when file/commit context changes
   useEffect(() => {
     if (!selectedProject || !selectedFile) {
-      update({ annotations: [] });
+      updateData({ annotations: [] });
       return;
     }
 
@@ -125,17 +151,17 @@ export function DiffView() {
 
     sqliteProvider
       .list(repoPath, filePath, commitHash)
-      .then((anns) => update({ annotations: anns }))
+      .then((anns) => updateData({ annotations: anns }))
       .catch(() => {
         toast.error("Failed to load annotations");
-        update({ annotations: [] });
+        updateData({ annotations: [] });
       });
   }, [
     selectedProject?.path,
     selectedFile?.path,
     selectedCommit?.hash,
     viewMode,
-    update,
+    updateData,
   ]);
 
   // Build Pierre lineAnnotations from our annotations for inline rendering
@@ -191,30 +217,30 @@ export function DiffView() {
         side,
         body,
       });
-      update({ annotations: [...annotations, created] });
+      updateData({ annotations: [...annotations, created] });
       setShowAnnotationForm(false);
     },
-    [selectedProject, selectedFile, selectedCommit, viewMode, annotations, update]
+    [selectedProject, selectedFile, selectedCommit, viewMode, annotations, updateData]
   );
 
   const handleResolve = useCallback(
     async (id: string, resolved: boolean) => {
       const updated = await sqliteProvider.update(id, { resolved });
-      update({
+      updateData({
         annotations: annotations.map((a) => (a.id === id ? updated : a)),
       });
     },
-    [annotations, update]
+    [annotations, updateData]
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
       await sqliteProvider.delete(id);
-      update({
+      updateData({
         annotations: annotations.filter((a) => a.id !== id),
       });
     },
-    [annotations, update]
+    [annotations, updateData]
   );
 
   const hasFileDiffs = Object.keys(fileDiffs).length > 0;
@@ -233,7 +259,7 @@ export function DiffView() {
     theme: "pierre-dark" as const,
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
-    unsafeCSS: `[data-file-header] { position: sticky; top: 0; z-index: 10; }`,
+    unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
   };
 
   const toolbar = (
@@ -298,22 +324,33 @@ export function DiffView() {
     </div>
   );
 
-  // Full commit view: all files stacked
+  // Full commit view: all files stacked with virtualization
   if (showAllFiles) {
     return (
       <div className="flex flex-col h-full overflow-hidden">
         {toolbar}
-        <div className="flex-1 overflow-auto">
+        <Virtualizer
+          className="flex-1 overflow-auto"
+          config={{ overscrollSize: 500 }}
+        >
           {changedFiles.map((file) => {
             const patch = fileDiffs[file.path];
             if (!patch) return null;
             const isViewed = viewedFiles.has(file.path);
-            const isCollapsed = collapsedFiles.has(file.path) || isViewed;
+            const isLargeFile = patch.length > 100_000;
+            const isCollapsed = collapsedFiles.has(file.path) || isViewed || (isLargeFile && !collapsedFiles.has(`expanded:${file.path}`));
 
             const toggleCollapse = () => {
               setCollapsedFiles((prev) => {
                 const next = new Set(prev);
-                if (next.has(file.path)) {
+                if (isLargeFile) {
+                  const expandKey = `expanded:${file.path}`;
+                  if (next.has(expandKey)) {
+                    next.delete(expandKey);
+                  } else {
+                    next.add(expandKey);
+                  }
+                } else if (next.has(file.path)) {
                   next.delete(file.path);
                 } else {
                   next.add(file.path);
@@ -324,33 +361,22 @@ export function DiffView() {
 
             return (
               <div key={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
-                {isCollapsed ? (
-                  <PatchDiff
-                    patch={patch}
-                    options={{ ...diffOptions, collapsed: true }}
-                    renderHeaderPrefix={() => (
-                      <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">▶</button>
-                    )}
-                    renderHeaderMetadata={() => (
-                      <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
-                    )}
-                  />
-                ) : (
-                  <LazyPatchDiff
-                    patch={patch}
-                    options={diffOptions}
-                    renderHeaderPrefix={() => (
-                      <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">▼</button>
-                    )}
-                    renderHeaderMetadata={() => (
-                      <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
-                    )}
-                  />
-                )}
+                <PatchDiff
+                  patch={patch}
+                  options={{ ...diffOptions, collapsed: isCollapsed }}
+                  renderHeaderPrefix={() => (
+                    <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
+                      {isCollapsed ? "▶" : "▼"}
+                    </button>
+                  )}
+                  renderHeaderMetadata={() => (
+                    <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+                  )}
+                />
               </div>
             );
           })}
-        </div>
+        </Virtualizer>
       </div>
     );
   }
