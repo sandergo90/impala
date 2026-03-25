@@ -10,7 +10,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { useAppStore } from "./store";
+import { useUIStore, useDataStore } from "./store";
 
 function App() {
   const [gitError, setGitError] = useState(false);
@@ -18,16 +18,19 @@ function App() {
   const [showChanges, setShowChanges] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const selectedWorktree = useAppStore((s) => s.selectedWorktree);
-  const selectedProject = useAppStore((s) => s.selectedProject);
+  const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+  const selectedProject = useUIStore((s) => s.selectedProject);
   const wtPath = selectedWorktree?.path;
-  const wtState = useAppStore((s) =>
-    wtPath ? (s.worktreeStates[wtPath] ?? null) : null
+  const navState = useUIStore((s) =>
+    wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null
+  );
+  const dataState = useDataStore((s) =>
+    wtPath ? (s.worktreeDataStates[wtPath] ?? null) : null
   );
 
-  const activeTab = wtState?.activeTab ?? "diff";
-  const ptySessionId = wtState?.ptySessionId ?? null;
-  const showSplit = wtState?.showSplit ?? false;
+  const activeTab = navState?.activeTab ?? "diff";
+  const ptySessionId = dataState?.ptySessionId ?? null;
+  const showSplit = navState?.showSplit ?? false;
 
   useEffect(() => {
     invoke("check_git")
@@ -38,39 +41,37 @@ function App() {
   const handleTerminalTab = async () => {
     if (!selectedWorktree) return;
     const worktreePath = selectedWorktree.path;
-    const { updateWorktreeState, getWorktreeState } = useAppStore.getState();
-    updateWorktreeState(worktreePath, { activeTab: "terminal" });
-    const currentPty = getWorktreeState(worktreePath).ptySessionId;
+    useUIStore.getState().updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
+    const currentPty = useDataStore.getState().getWorktreeDataState(worktreePath).ptySessionId;
     if (!currentPty) {
       await invoke("pty_spawn", {
         sessionId: worktreePath,
         cwd: worktreePath,
       });
-      updateWorktreeState(worktreePath, { ptySessionId: worktreePath });
+      useDataStore.getState().updateWorktreeDataState(worktreePath, { ptySessionId: worktreePath });
     }
   };
 
   const handleDiffTab = () => {
     if (!selectedWorktree) return;
-    useAppStore
+    useUIStore
       .getState()
-      .updateWorktreeState(selectedWorktree.path, { activeTab: "diff" });
+      .updateWorktreeNavState(selectedWorktree.path, { activeTab: "diff" });
   };
 
   const handleSplitToggle = async () => {
     if (!selectedWorktree) return;
     const worktreePath = selectedWorktree.path;
-    const { updateWorktreeState, getWorktreeState } = useAppStore.getState();
-    const newSplit = !getWorktreeState(worktreePath).showSplit;
-    updateWorktreeState(worktreePath, { showSplit: newSplit });
+    const newSplit = !useUIStore.getState().getWorktreeNavState(worktreePath).showSplit;
+    useUIStore.getState().updateWorktreeNavState(worktreePath, { showSplit: newSplit });
     if (newSplit) {
-      const currentPty = getWorktreeState(worktreePath).ptySessionId;
+      const currentPty = useDataStore.getState().getWorktreeDataState(worktreePath).ptySessionId;
       if (!currentPty) {
         await invoke("pty_spawn", {
           sessionId: worktreePath,
           cwd: worktreePath,
         });
-        updateWorktreeState(worktreePath, { ptySessionId: worktreePath });
+        useDataStore.getState().updateWorktreeDataState(worktreePath, { ptySessionId: worktreePath });
       }
     }
   };
@@ -140,10 +141,10 @@ function App() {
               <span className="text-[#555]">{selectedProject?.name}</span>
               <span className="text-[#444]">/</span>
               <span className="text-[#bbb] font-medium font-mono">{selectedWorktree.branch}</span>
-              {wtState?.baseBranch && (wtState?.commits?.length ?? 0) > 0 && (
+              {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
                 <>
                   <span className="text-[#444]">&middot;</span>
-                  <span className="text-[#555]">{wtState.commits.length} ahead of {wtState.baseBranch}</span>
+                  <span className="text-[#555]">{dataState.commits.length} ahead of {dataState.baseBranch}</span>
                 </>
               )}
             </>

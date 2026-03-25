@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { useAppStore } from "../store";
+import { useUIStore, useDataStore } from "../store";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import type { Worktree, CommitInfo, Project } from "../types";
 import { NewWorktreeDialog } from "./NewWorktreeDialog";
@@ -41,39 +42,24 @@ function BranchIcon({ active }: { active: boolean }) {
 }
 
 export function Sidebar() {
-  const {
-    projects,
-    setProjects,
-    addProject,
-    removeProject,
-    selectedProject,
-    setSelectedProject,
-    worktrees,
-    setWorktrees,
-    selectedWorktree,
-    setSelectedWorktree,
-    updateWorktreeState,
-  } = useAppStore();
+  const projects = useDataStore((s) => s.projects);
+  const addProject = useDataStore((s) => s.addProject);
+  const selectedProject = useUIStore((s) => s.selectedProject);
+  const worktrees = useDataStore((s) => s.worktrees);
+  const setWorktrees = useDataStore((s) => s.setWorktrees);
+  const selectedWorktree = useUIStore((s) => s.selectedWorktree);
 
-  const worktreeStates = useAppStore((s) => s.worktreeStates);
+  const commitCounts = useDataStore(
+    useShallow((s) => {
+      const counts: Record<string, number> = {};
+      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
+        counts[path] = state.commits?.length ?? 0;
+      }
+      return counts;
+    })
+  );
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-
-  // Load persisted projects on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const paths = await invoke<string[]>("load_projects");
-        const loaded: Project[] = paths.map((p) => ({
-          path: p,
-          name: p.split("/").pop() || p,
-        }));
-        setProjects(loaded);
-      } catch (e) {
-        toast.error("Failed to load projects");
-      }
-    })();
-  }, [setProjects]);
 
   const persistProjects = async (projectList: Project[]) => {
     try {
@@ -84,6 +70,61 @@ export function Sidebar() {
       toast.error("Failed to save projects");
     }
   };
+
+  const selectWorktree = async (wt: Worktree) => {
+    useUIStore.getState().setSelectedWorktree(wt);
+    try {
+      const dataState = useDataStore.getState().getWorktreeDataState(wt.path);
+      if (!dataState.ptySessionId) {
+        await invoke("pty_spawn", { sessionId: wt.path, cwd: wt.path });
+        useDataStore.getState().updateWorktreeDataState(wt.path, { ptySessionId: wt.path });
+      }
+      await invoke("watch_worktree", { worktreePath: wt.path });
+      const base = await invoke<string>("detect_base_branch", { worktreePath: wt.path });
+      useDataStore.getState().updateWorktreeDataState(wt.path, { baseBranch: base });
+      const commits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath: wt.path, baseBranch: base });
+      useDataStore.getState().updateWorktreeDataState(wt.path, { commits });
+    } catch (e) {
+      toast.error("Failed to load commits");
+    }
+  };
+
+  // Load persisted projects on mount and restore selections
+  useEffect(() => {
+    (async () => {
+      try {
+        const paths = await invoke<string[]>("load_projects");
+        const loaded: Project[] = paths.map((p) => ({
+          path: p,
+          name: p.split("/").pop() || p,
+        }));
+        useDataStore.getState().setProjects(loaded);
+
+        const persistedProject = useUIStore.getState().selectedProject;
+        if (persistedProject && loaded.some((p) => p.path === persistedProject.path)) {
+          try {
+            const wts = await invoke<Worktree[]>("list_worktrees", { repoPath: persistedProject.path });
+            useDataStore.getState().setWorktrees(wts);
+
+            const persistedWorktree = useUIStore.getState().selectedWorktree;
+            if (persistedWorktree && wts.some((wt) => wt.path === persistedWorktree.path)) {
+              await selectWorktree(persistedWorktree);
+            } else {
+              useUIStore.getState().setSelectedWorktree(null);
+            }
+          } catch {
+            useUIStore.getState().setSelectedProject(null);
+            useUIStore.getState().setSelectedWorktree(null);
+          }
+        } else if (persistedProject) {
+          useUIStore.getState().setSelectedProject(null);
+          useUIStore.getState().setSelectedWorktree(null);
+        }
+      } catch (e) {
+        toast.error("Failed to load projects");
+      }
+    })();
+  }, []);
 
   const openProject = async () => {
     const selected = await open({ directory: true });
@@ -98,7 +139,7 @@ export function Sidebar() {
       };
       addProject(project);
       const updatedProjects = [
-        ...useAppStore.getState().projects.filter((p) => p.path !== path),
+        ...useDataStore.getState().projects.filter((p) => p.path !== path),
         project,
       ];
       await persistProjects(updatedProjects);
@@ -109,12 +150,14 @@ export function Sidebar() {
   };
 
   const selectProject = async (project: Project) => {
-    setSelectedProject(project);
+    useUIStore.getState().setSelectedProject(project);
+    useUIStore.getState().setSelectedWorktree(null);
+    useDataStore.getState().setWorktrees([]);
     try {
       const wts = await invoke<Worktree[]>("list_worktrees", {
         repoPath: project.path,
       });
-      setWorktrees(wts);
+      useDataStore.getState().setWorktrees(wts);
     } catch (e) {
       toast.error("Failed to load worktrees");
     }
@@ -132,36 +175,14 @@ export function Sidebar() {
     } catch {
       // Best-effort cleanup
     }
-    removeProject(path);
-    const updated = useAppStore
-      .getState()
-      .projects;
-    await persistProjects(updated);
-  };
-
-  const selectWorktree = async (wt: Worktree) => {
-    setSelectedWorktree(wt);
-    try {
-      // Auto-spawn PTY and start file watcher
-      const wtState = useAppStore.getState().getWorktreeState(wt.path);
-      if (!wtState.ptySessionId) {
-        await invoke("pty_spawn", { sessionId: wt.path, cwd: wt.path });
-        updateWorktreeState(wt.path, { ptySessionId: wt.path });
-      }
-      await invoke("watch_worktree", { worktreePath: wt.path });
-
-      const base = await invoke<string>("detect_base_branch", {
-        worktreePath: wt.path,
-      });
-      updateWorktreeState(wt.path, { baseBranch: base });
-      const commits = await invoke<CommitInfo[]>("get_diverged_commits", {
-        worktreePath: wt.path,
-        baseBranch: base,
-      });
-      updateWorktreeState(wt.path, { commits });
-    } catch (e) {
-      toast.error("Failed to load commits");
+    useDataStore.getState().removeProject(path);
+    if (useUIStore.getState().selectedProject?.path === path) {
+      useUIStore.getState().setSelectedProject(null);
+      useUIStore.getState().setSelectedWorktree(null);
+      useDataStore.getState().setWorktrees([]);
     }
+    const updated = useDataStore.getState().projects;
+    await persistProjects(updated);
   };
 
   return (
@@ -236,7 +257,7 @@ export function Sidebar() {
 
           {worktrees.map((wt) => {
             const isSelected = selectedWorktree?.path === wt.path;
-            const aheadCount = worktreeStates[wt.path]?.commits?.length ?? 0;
+            const aheadCount = commitCounts[wt.path] ?? 0;
 
             return (
               <button
