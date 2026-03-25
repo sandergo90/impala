@@ -20,5 +20,8 @@ backend/tauri/gen/
 # OS
 .DS_Store
 
+# Brainstorming
+.superpowers/
+
 docs/plans
 superpowers/specs
