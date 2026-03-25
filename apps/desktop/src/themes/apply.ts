@@ -4,6 +4,8 @@ import { getBuiltInTheme, defaultDark } from "./built-in";
 export function resolveTheme(theme: Theme): ResolvedCSS {
   const { background, foreground, primary, border, accent } = theme.ui;
   const isDark = theme.type === "dark";
+  const mix = (color: string, pct: number, base: string = background) =>
+    `color-mix(in lab, ${color} ${pct}%, ${base})`;
 
   return {
     background,
@@ -13,30 +15,30 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
     popover: background,
     popoverForeground: foreground,
     primary,
-    primaryForeground: isDark ? "oklch(0.205 0 0)" : "oklch(0.985 0 0)",
+    primaryForeground: isDark ? "#191c22" : "#ffffff",
     secondary: accent,
     secondaryForeground: foreground,
     muted: accent,
-    mutedForeground: isDark ? "oklch(0.708 0 0)" : "oklch(0.556 0 0)",
+    mutedForeground: mix(foreground, isDark ? 55 : 45),
     accent,
     accentForeground: foreground,
-    destructive: isDark ? "oklch(0.704 0.191 22.216)" : "oklch(0.577 0.245 27.325)",
+    destructive: isDark ? "#FC6B83" : "#E34671",
     border,
     input: border,
-    ring: isDark ? "oklch(0.556 0 0)" : "oklch(0.708 0 0)",
-    chart1: "oklch(0.87 0 0)",
-    chart2: "oklch(0.556 0 0)",
-    chart3: "oklch(0.439 0 0)",
-    chart4: "oklch(0.371 0 0)",
-    chart5: "oklch(0.269 0 0)",
-    sidebar: isDark ? "oklch(0.205 0 0)" : "oklch(0.985 0 0)",
+    ring: mix(foreground, 35),
+    chart1: mix(foreground, 85),
+    chart2: mix(foreground, 55),
+    chart3: mix(foreground, 45),
+    chart4: mix(foreground, 35),
+    chart5: mix(foreground, 25),
+    sidebar: mix(background, 80, isDark ? "#000000" : "#ffffff"),
     sidebarForeground: foreground,
     sidebarPrimary: primary,
-    sidebarPrimaryForeground: "oklch(0.985 0 0)",
+    sidebarPrimaryForeground: "#ffffff",
     sidebarAccent: accent,
     sidebarAccentForeground: foreground,
     sidebarBorder: border,
-    sidebarRing: isDark ? "oklch(0.556 0 0)" : "oklch(0.708 0 0)",
+    sidebarRing: mix(foreground, 35),
   };
 }
 
