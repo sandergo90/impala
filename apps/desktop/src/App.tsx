@@ -19,6 +19,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const selectedWorktree = useAppStore((s) => s.selectedWorktree);
+  const selectedProject = useAppStore((s) => s.selectedProject);
   const wtPath = selectedWorktree?.path;
   const wtState = useAppStore((s) =>
     wtPath ? (s.worktreeStates[wtPath] ?? null) : null
@@ -92,7 +93,7 @@ function App() {
     );
   }
 
-  const tabButton = (
+  const tabPill = (
     label: string,
     isActive: boolean,
     onClick: () => void,
@@ -101,11 +102,12 @@ function App() {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${
+      className={`px-2.5 py-1 text-[11px] font-medium rounded-[5px] transition-colors ${
         isActive
-          ? "bg-foreground/10 text-foreground"
-          : "text-muted-foreground hover:text-foreground"
+          ? "text-[#ddd]"
+          : "text-[#666] hover:text-[#aaa]"
       } disabled:opacity-30 disabled:cursor-not-allowed`}
+      style={isActive ? { background: "rgba(255,255,255,0.08)" } : undefined}
     >
       {label}
     </button>
@@ -113,34 +115,52 @@ function App() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground flex flex-col">
-      {/* Title bar — minimal, with sidebar toggle and Changes */}
+      {/* Title bar — branch context center, tab pills right */}
       <div
         className="relative flex items-center h-10 shrink-0 border-b border-border/50 bg-background"
         style={{ paddingLeft: "78px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
+        {/* Sidebar toggle */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="relative text-muted-foreground hover:text-foreground px-2 py-1 text-sm"
+          className="relative text-[#666] hover:text-[#aaa] px-2 py-1 rounded hover:bg-white/5"
           title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
-            <line x1="5.5" y1="2" x2="5.5" y2="14" stroke="currentColor" strokeWidth="1.5" />
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.4" fill="none" />
+            <line x1="5.5" y1="2" x2="5.5" y2="14" stroke="currentColor" strokeWidth="1.4" />
           </svg>
         </button>
-        <div className="flex-1" />
-        <div className="relative flex items-center gap-2 pr-3">
-          <button
-            onClick={() => setShowChanges(!showChanges)}
-            className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
-              showChanges
-                ? "bg-foreground/10 text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Changes
-          </button>
+
+        {/* Center context: project / branch · N ahead of base */}
+        <div className="flex-1 flex items-center justify-center gap-1.5 text-[11px]" data-tauri-drag-region>
+          {selectedWorktree && (
+            <>
+              <span className="text-[#555]">{selectedProject?.name}</span>
+              <span className="text-[#444]">/</span>
+              <span className="text-[#bbb] font-medium font-mono">{selectedWorktree.branch}</span>
+              {wtState?.baseBranch && (wtState?.commits?.length ?? 0) > 0 && (
+                <>
+                  <span className="text-[#444]">&middot;</span>
+                  <span className="text-[#555]">{wtState.commits.length} ahead of {wtState.baseBranch}</span>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Right: tabs + changes toggle */}
+        <div className="relative flex items-center gap-1 pr-3">
+          {selectedWorktree && (
+            <>
+              {tabPill("Diff", !showSplit && activeTab === "diff", handleDiffTab, showSplit)}
+              {tabPill("Terminal", !showSplit && activeTab === "terminal", handleTerminalTab, showSplit)}
+              {tabPill("Split", showSplit, handleSplitToggle)}
+              <span className="mx-1 w-px h-3.5" style={{ background: "rgba(255,255,255,0.08)" }} />
+            </>
+          )}
+          {tabPill("Changes", showChanges, () => setShowChanges(!showChanges))}
         </div>
       </div>
 
@@ -159,29 +179,6 @@ function App() {
         {/* Content */}
         <ResizablePanel defaultSize={showChanges ? "65%" : "85%"}>
           <div className="flex flex-col h-full">
-            {/* Tab bar — only shown when a worktree is selected */}
-            {selectedWorktree && (
-              <div className="flex items-center gap-1 px-2 py-1 border-b border-border/50 shrink-0">
-                {tabButton(
-                  "Diff",
-                  !showSplit && activeTab === "diff",
-                  handleDiffTab,
-                  showSplit
-                )}
-                {tabButton(
-                  "Terminal",
-                  !showSplit && activeTab === "terminal",
-                  handleTerminalTab,
-                  showSplit
-                )}
-                {tabButton(
-                  "Split",
-                  showSplit,
-                  handleSplitToggle
-                )}
-              </div>
-            )}
-
             {/* Tab content */}
             <div className="flex-1 min-h-0">
               {!selectedWorktree ? (
