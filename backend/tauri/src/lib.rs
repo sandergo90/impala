@@ -146,6 +146,17 @@ fn get_full_branch_diff(
 }
 
 #[tauri::command]
+fn invalidate_branch_cache(
+    cache: tauri::State<'_, DiffCache>,
+    worktree_path: String,
+) -> Result<(), String> {
+    let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+    let key = format!("branch:{}", worktree_path);
+    c.pop(&key);
+    Ok(())
+}
+
+#[tauri::command]
 fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
     git::get_all_changed_files(&worktree_path)
 }
@@ -240,6 +251,7 @@ pub fn run() {
             get_branch_diff,
             get_full_branch_diff,
             get_all_changed_files,
+            invalidate_branch_cache,
             get_uncommitted_files,
             get_uncommitted_diff,
             create_worktree,

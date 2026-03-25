@@ -112,16 +112,27 @@ export function CommitPanel() {
   };
 
   // Auto-refresh uncommitted changes when files change on disk
-  const refreshUncommitted = useCallback(async () => {
-    if (viewMode !== 'uncommitted') return;
-    try {
-      const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: worktreePath }),
-        invoke<string>("get_uncommitted_diff", { worktreePath: worktreePath }),
-      ]);
-      update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
-    } catch {
-      // Silently fail on auto-refresh
+  const refreshCurrentView = useCallback(async () => {
+    if (viewMode === 'uncommitted') {
+      try {
+        const [files, fullDiff] = await Promise.all([
+          invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
+          invoke<string>("get_uncommitted_diff", { worktreePath }),
+        ]);
+        update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+      } catch {
+        // Silently fail on auto-refresh
+      }
+    } else if (viewMode === 'all-changes') {
+      try {
+        const [files, fullDiff] = await Promise.all([
+          invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
+          invoke<string>("get_full_branch_diff", { worktreePath }),
+        ]);
+        update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+      } catch {
+        // Silently fail on auto-refresh
+      }
     }
   }, [viewMode, worktreePath, splitPatch, update]);
 
@@ -130,7 +141,9 @@ export function CommitPanel() {
     let unlisten: (() => void) | null = null;
 
     listen(`fs-changed-${safeId}`, () => {
-      refreshUncommitted();
+      // Invalidate branch cache so next "All Changes" fetch is fresh
+      invoke("invalidate_branch_cache", { worktreePath });
+      refreshCurrentView();
     }).then((fn) => {
       unlisten = fn;
     });
@@ -138,7 +151,7 @@ export function CommitPanel() {
     return () => {
       unlisten?.();
     };
-  }, [worktreePath, refreshUncommitted]);
+  }, [worktreePath, refreshCurrentView]);
 
   if (!selectedWorktree || !wtState) {
     return (
