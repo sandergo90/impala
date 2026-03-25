@@ -232,18 +232,21 @@ function App() {
                   </ResizablePanelGroup>
                 ) : (
                   <>
-                    {activeTab === "diff" && <DiffView />}
-                    {activeTab === "terminal" && ptySessionId && (
-                      <GhosttyTerminal
-                        key={ptySessionId}
-                        sessionId={ptySessionId}
-                      />
-                    )}
-                    {activeTab === "terminal" && !ptySessionId && (
-                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                        Starting terminal...
-                      </div>
-                    )}
+                    <div className={activeTab === "diff" ? "h-full" : "hidden"}>
+                      <DiffView />
+                    </div>
+                    <div className={activeTab === "terminal" ? "h-full" : "hidden"}>
+                      {ptySessionId ? (
+                        <GhosttyTerminal
+                          key={ptySessionId}
+                          sessionId={ptySessionId}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                          Starting terminal...
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>

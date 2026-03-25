@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
@@ -9,9 +9,6 @@ import { AnnotationForm } from "./AnnotationForm";
 import { AnnotationDisplay } from "./AnnotationDisplay";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
-
-/** Persists diff scroll positions across tab switches, keyed by worktree path */
-const scrollPositions = new Map<string, number>();
 
 function hashPatch(patch: string): string {
   let hash = 0;
@@ -46,7 +43,6 @@ function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: R
 }
 
 export function DiffView() {
-  const scrollRef = useRef<HTMLElement | null>(null);
   const selectedProject = useUIStore((s) => s.selectedProject);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const diffStyle = useUIStore((s) => s.diffStyle);
@@ -82,24 +78,6 @@ export function DiffView() {
     [worktreePath]
   );
 
-  // Save scroll position on unmount, restore on mount
-  useEffect(() => {
-    return () => {
-      if (scrollRef.current && worktreePath) {
-        scrollPositions.set(worktreePath, scrollRef.current.scrollTop);
-      }
-    };
-  }, [worktreePath]);
-
-  const scrollContainerRef = useCallback((el: HTMLElement | null) => {
-    scrollRef.current = el;
-    if (el && worktreePath) {
-      const saved = scrollPositions.get(worktreePath);
-      if (saved != null) {
-        el.scrollTop = saved;
-      }
-    }
-  }, [worktreePath]);
 
   const [showResolved, setShowResolved] = useState(false);
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
@@ -356,7 +334,7 @@ export function DiffView() {
   // Full commit view: all files stacked with virtualization
   if (showAllFiles) {
     return (
-      <div ref={(el) => scrollContainerRef(el?.querySelector(".overflow-auto") as HTMLElement | null)} className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col h-full overflow-hidden">
         {toolbar}
         <Virtualizer
           className="flex-1 overflow-auto"
@@ -429,7 +407,7 @@ export function DiffView() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
-      <div ref={scrollContainerRef} className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto">
         <PatchDiff<Annotation>
           patch={diffText!}
           lineAnnotations={lineAnnotations}
