@@ -2,30 +2,34 @@ import { useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
-import { useAppStore } from "../store";
-import type { ChangedFile, CommitInfo, WorktreeState } from "../types";
+import { useUIStore, useDataStore } from "../store";
+import type { ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
 
 const statusColor: Record<string, string> = {
   M: "text-[#4ade80]", A: "text-[#34d399]", D: "text-[#f87171]", R: "text-yellow-500",
 };
 
 export function CommitPanel() {
-  const selectedWorktree = useAppStore((s) => s.selectedWorktree);
+  const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path;
-  const wtState = useAppStore((s) =>
-    wtPath ? (s.worktreeStates[wtPath] ?? null) : null
-  );
+  const navState = useUIStore((s) => wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null);
+  const dataState = useDataStore((s) => wtPath ? (s.worktreeDataStates[wtPath] ?? null) : null);
 
   const worktreePath = wtPath ?? "";
-  const baseBranch = wtState?.baseBranch ?? null;
-  const commits = wtState?.commits ?? [];
-  const selectedCommit = wtState?.selectedCommit ?? null;
-  const changedFiles = wtState?.changedFiles ?? [];
-  const selectedFile = wtState?.selectedFile ?? null;
-  const viewMode = wtState?.viewMode ?? 'commit';
+  const baseBranch = dataState?.baseBranch ?? null;
+  const commits = dataState?.commits ?? [];
+  const selectedCommit = navState?.selectedCommit ?? null;
+  const changedFiles = dataState?.changedFiles ?? [];
+  const selectedFile = navState?.selectedFile ?? null;
+  const viewMode = navState?.viewMode ?? 'commit';
 
-  const update = useCallback((updates: Partial<WorktreeState>) =>
-    useAppStore.getState().updateWorktreeState(worktreePath, updates),
+  const updateNav = useCallback((updates: Partial<WorktreeNavState>) =>
+    useUIStore.getState().updateWorktreeNavState(worktreePath, updates),
+    [worktreePath]
+  );
+
+  const updateData = useCallback((updates: Partial<WorktreeDataState>) =>
+    useDataStore.getState().updateWorktreeDataState(worktreePath, updates),
     [worktreePath]
   );
 
@@ -41,46 +45,46 @@ export function CommitPanel() {
   }, []);
 
   const selectAllChanges = async () => {
-    update({ viewMode: 'all-changes', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
+    updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
     try {
-      const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_all_changed_files", { worktreePath: worktreePath }),
-        invoke<string>("get_full_branch_diff", { worktreePath: worktreePath }),
-      ]);
-      update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+      const filesPromise = invoke<ChangedFile[]>("get_all_changed_files", { worktreePath });
+      const diffPromise = invoke<string>("get_full_branch_diff", { worktreePath });
+      updateData({ changedFiles: await filesPromise });
+      updateData({ fileDiffs: splitPatch(await diffPromise) });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
   };
 
   const selectUncommitted = async () => {
-    update({ viewMode: 'uncommitted', selectedCommit: null, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
+    updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
     try {
-      const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: worktreePath }),
-        invoke<string>("get_uncommitted_diff", { worktreePath: worktreePath }),
-      ]);
-      update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+      const filesPromise = invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath });
+      const diffPromise = invoke<string>("get_uncommitted_diff", { worktreePath });
+      updateData({ changedFiles: await filesPromise });
+      updateData({ fileDiffs: splitPatch(await diffPromise) });
     } catch (e) {
       toast.error("Failed to load uncommitted changes");
     }
   };
 
   const selectCommit = async (commit: CommitInfo) => {
-    update({ viewMode: 'commit', selectedCommit: commit, changedFiles: [], selectedFile: null, diffText: null, fileDiffs: {}, activeTab: 'diff' });
+    updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: 'diff' });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
     try {
-      const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_changed_files", { worktreePath: worktreePath, commitHash: commit.hash }),
-        invoke<string>("get_full_commit_diff", { worktreePath: worktreePath, commitHash: commit.hash }),
-      ]);
-      update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+      const filesPromise = invoke<ChangedFile[]>("get_changed_files", { worktreePath, commitHash: commit.hash });
+      const diffPromise = invoke<string>("get_full_commit_diff", { worktreePath, commitHash: commit.hash });
+      updateData({ changedFiles: await filesPromise });
+      updateData({ fileDiffs: splitPatch(await diffPromise) });
     } catch (e) {
       toast.error("Failed to load commit");
     }
   };
 
   const selectFile = async (file: ChangedFile) => {
-    update({ selectedFile: file });
+    updateNav({ selectedFile: file });
     try {
       let diff: string;
       if (viewMode === 'uncommitted') {
@@ -105,7 +109,7 @@ export function CommitPanel() {
           filePath: file.path,
         });
       }
-      update({ diffText: diff });
+      updateData({ diffText: diff });
     } catch (e) {
       toast.error("Failed to load diff");
     }
@@ -119,7 +123,7 @@ export function CommitPanel() {
           invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
           invoke<string>("get_uncommitted_diff", { worktreePath }),
         ]);
-        update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+        updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
       } catch {
         // Silently fail on auto-refresh
       }
@@ -129,12 +133,12 @@ export function CommitPanel() {
           invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
           invoke<string>("get_full_branch_diff", { worktreePath }),
         ]);
-        update({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+        updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
       } catch {
         // Silently fail on auto-refresh
       }
     }
-  }, [viewMode, worktreePath, splitPatch, update]);
+  }, [viewMode, worktreePath, splitPatch, updateData]);
 
   useEffect(() => {
     const safeId = worktreePath.replace(/[^a-zA-Z0-9\-_]/g, "-");
@@ -153,7 +157,7 @@ export function CommitPanel() {
     };
   }, [worktreePath, refreshCurrentView]);
 
-  if (!selectedWorktree || !wtState) {
+  if (!selectedWorktree || (!navState && !dataState)) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
         Select a worktree
@@ -163,13 +167,14 @@ export function CommitPanel() {
 
   return (
     <div className="flex flex-col h-full text-sm overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-[9px] uppercase tracking-[1.2px] text-[#555]"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        Commits on <span className="font-mono text-[10px] text-[#888] normal-case tracking-normal">{selectedWorktree.branch}</span>
-      </div>
+      {/* Commits section — top half */}
+      <div className="flex flex-col min-h-0 flex-1">
+        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-[9px] uppercase tracking-[1.2px] text-[#555] shrink-0"
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          Commits on <span className="font-mono text-[10px] text-[#888] normal-case tracking-normal">{selectedWorktree.branch}</span>
+        </div>
 
-      <div className="overflow-y-auto flex-1">
+        <div className="overflow-y-auto flex-1 min-h-0">
         {/* Uncommitted Changes */}
         <button
           onClick={selectUncommitted}
@@ -245,40 +250,39 @@ export function CommitPanel() {
             );
           })
         )}
+        </div>
       </div>
 
-      {/* Changed Files */}
-      {changedFiles.length > 0 && (
-        <>
-          <div className="px-3.5 py-2 text-[9px] uppercase tracking-[1.2px] text-[#555]"
-            style={{
-              borderTop: "1px solid rgba(255,255,255,0.06)",
-              borderBottom: "1px solid rgba(255,255,255,0.06)",
-            }}>
-            Changed Files
-          </div>
-          <div className="overflow-y-auto">
-            {changedFiles.map((file) => {
-              const isSelected = selectedFile?.path === file.path;
-              return (
-                <button
-                  key={file.path}
-                  onClick={() => selectFile(file)}
-                  className={`w-full px-3.5 py-1.5 text-left font-mono text-[10px] flex items-center gap-1.5 transition-colors truncate ${
-                    isSelected ? "text-[#3b82f6]" : "text-[#888] hover:bg-white/[0.02]"
-                  }`}
-                  style={isSelected ? { background: "rgba(59,130,246,0.06)" } : undefined}
-                >
-                  <span className={`text-[9px] font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
-                    {file.status}
-                  </span>
-                  {file.path.split("/").pop()}
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
+      {/* Changed Files — bottom half */}
+      <div className="flex flex-col min-h-0 flex-1">
+        <div className="px-3.5 py-2 text-[9px] uppercase tracking-[1.2px] text-[#555] shrink-0"
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}>
+          Changed Files
+        </div>
+        <div className="overflow-y-auto flex-1 min-h-0">
+          {changedFiles.map((file) => {
+            const isSelected = selectedFile?.path === file.path;
+            return (
+              <button
+                key={file.path}
+                onClick={() => selectFile(file)}
+                className={`w-full px-3.5 py-1.5 text-left font-mono text-[10px] flex items-center gap-1.5 transition-colors truncate ${
+                  isSelected ? "text-[#3b82f6]" : "text-[#888] hover:bg-white/[0.02]"
+                }`}
+                style={isSelected ? { background: "rgba(59,130,246,0.06)" } : undefined}
+              >
+                <span className={`text-[9px] font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
+                  {file.status}
+                </span>
+                {file.path.split("/").pop()}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
