@@ -61,21 +61,32 @@ pub fn watch_worktree(
     let watcher = RecommendedWatcher::new(
         move |res: Result<Event, notify::Error>| {
             if let Ok(event) = res {
-                // Ignore .git directory changes
-                let dominated_by_git = event.paths.iter().all(|p| {
-                    p.to_string_lossy().contains("/.git/") || p.to_string_lossy().contains("\\.git\\")
-                });
-                if dominated_by_git {
-                    return;
-                }
-
-                // Ignore node_modules and target
-                let dominated_by_ignore = event.paths.iter().all(|p| {
+                // Check if any path is a git ref change (new commits, branch switches)
+                let has_git_ref_change = event.paths.iter().any(|p| {
                     let s = p.to_string_lossy();
-                    s.contains("/node_modules/") || s.contains("/target/")
+                    // Allow .git/refs/, .git/HEAD, .git/MERGE_HEAD through
+                    (s.contains("/.git/refs/") || s.contains("\\.git\\refs\\"))
+                        || s.ends_with("/.git/HEAD")
+                        || s.ends_with("\\.git\\HEAD")
                 });
-                if dominated_by_ignore {
-                    return;
+
+                if !has_git_ref_change {
+                    // Ignore other .git directory changes (index, objects, etc.)
+                    let dominated_by_git = event.paths.iter().all(|p| {
+                        p.to_string_lossy().contains("/.git/") || p.to_string_lossy().contains("\\.git\\")
+                    });
+                    if dominated_by_git {
+                        return;
+                    }
+
+                    // Ignore node_modules and target
+                    let dominated_by_ignore = event.paths.iter().all(|p| {
+                        let s = p.to_string_lossy();
+                        s.contains("/node_modules/") || s.contains("/target/")
+                    });
+                    if dominated_by_ignore {
+                        return;
+                    }
                 }
 
                 // Update last event time and schedule emit

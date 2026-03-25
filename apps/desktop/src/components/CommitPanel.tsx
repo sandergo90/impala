@@ -115,8 +115,18 @@ export function CommitPanel() {
     }
   };
 
-  // Auto-refresh uncommitted changes when files change on disk
+  // Auto-refresh when files or git refs change on disk
   const refreshCurrentView = useCallback(async () => {
+    // Always refresh commit list so sidebar counts stay accurate
+    if (baseBranch) {
+      try {
+        const commits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath, baseBranch });
+        updateData({ commits });
+      } catch {
+        // Silently fail on auto-refresh
+      }
+    }
+
     if (viewMode === 'uncommitted') {
       try {
         const [files, fullDiff] = await Promise.all([
@@ -138,7 +148,7 @@ export function CommitPanel() {
         // Silently fail on auto-refresh
       }
     }
-  }, [viewMode, worktreePath, splitPatch, updateData]);
+  }, [viewMode, worktreePath, baseBranch, splitPatch, updateData]);
 
   useEffect(() => {
     const safeId = worktreePath.replace(/[^a-zA-Z0-9\-_]/g, "-");
