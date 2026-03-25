@@ -83,6 +83,7 @@ function getDiffOverrides(theme: Theme): Record<string, string> {
     `color-mix(in lab, ${color} ${pct}%, ${background})`;
 
   return {
+    "--diffs-bg": background,
     "--diffs-bg-context-override": background,
     "--diffs-bg-buffer-override": background,
     "--diffs-bg-separator-override": mix(accent, 30),
