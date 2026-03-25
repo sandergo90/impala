@@ -3,6 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Ghostty, Terminal, FitAddon } from "ghostty-web";
 import wasmUrl from "ghostty-web/ghostty-vt.wasm?url";
+import { useUIStore } from "../store";
+import { getBuiltInTheme, defaultDark } from "../themes/built-in";
+
+function getTerminalTheme() {
+  const state = useUIStore.getState();
+  const theme = getBuiltInTheme(state.activeThemeId)
+    ?? state.customThemes.find((t) => t.id === state.activeThemeId)
+    ?? defaultDark;
+  return theme.terminal;
+}
 
 interface GhosttyTerminalProps {
   sessionId: string;
@@ -23,6 +33,7 @@ function getGhostty(): Promise<Ghostty> {
 
 export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
   const [loading, setLoading] = useState(true);
   const [exited, setExited] = useState<number | null>(null);
 
@@ -49,29 +60,10 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
         fontSize: 14,
         fontFamily:
           "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
-        theme: {
-          background: "#1a1a2e",
-          foreground: "#e0e0e0",
-          cursor: "#c0c0c0",
-          selectionBackground: "rgba(255, 255, 255, 0.2)",
-          black: "#1a1a2e",
-          red: "#ff6b6b",
-          green: "#51cf66",
-          yellow: "#ffd43b",
-          blue: "#748ffc",
-          magenta: "#da77f2",
-          cyan: "#66d9e8",
-          white: "#e0e0e0",
-          brightBlack: "#555577",
-          brightRed: "#ff8787",
-          brightGreen: "#69db7c",
-          brightYellow: "#ffe066",
-          brightBlue: "#91a7ff",
-          brightMagenta: "#e599f7",
-          brightCyan: "#99e9f2",
-          brightWhite: "#ffffff",
-        },
+        theme: getTerminalTheme(),
       });
+
+      terminalRef.current = terminal;
 
       fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
@@ -179,11 +171,25 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
         terminal.dispose();
         terminal = null;
       }
+      terminalRef.current = null;
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    let prevThemeId = useUIStore.getState().activeThemeId;
+    const unsubscribe = useUIStore.subscribe((state) => {
+      if (state.activeThemeId !== prevThemeId) {
+        prevThemeId = state.activeThemeId;
+        if (terminalRef.current?.renderer) {
+          terminalRef.current.renderer.setTheme(getTerminalTheme());
+        }
+      }
+    });
+    return unsubscribe;
+  }, []);
+
   return (
-    <div className="relative h-full w-full bg-[#1a1a2e]">
+    <div className="relative h-full w-full" style={{ background: getTerminalTheme().background }}>
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground z-10">
           Loading terminal...
