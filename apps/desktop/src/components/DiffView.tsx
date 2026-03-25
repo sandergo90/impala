@@ -233,6 +233,7 @@ export function DiffView() {
     theme: "pierre-dark" as const,
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
+    unsafeCSS: `[data-file-header] { position: sticky; top: 0; z-index: 10; }`,
   };
 
   const toolbar = (
