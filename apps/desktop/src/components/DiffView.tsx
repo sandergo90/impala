@@ -339,7 +339,7 @@ export function DiffView() {
           className="flex-1 overflow-auto"
           config={{ overscrollSize: 500 }}
         >
-          {changedFiles.map((file, fileIndex) => {
+          {changedFiles.map((file) => {
             const patch = fileDiffs[file.path];
             if (!patch) return null;
             const isViewed = viewedFiles.has(file.path);
@@ -365,24 +365,15 @@ export function DiffView() {
               });
             };
 
-            // Find next file that has a patch
-            const nextFilePath = (() => {
-              for (let i = fileIndex + 1; i < changedFiles.length; i++) {
-                if (fileDiffs[changedFiles[i].path]) return changedFiles[i].path;
-              }
-              return null;
-            })();
-
             const scrollToNextFile = () => {
-              if (!nextFilePath) return;
-              // Double rAF: first for React re-render, second for layout
+              // Scroll so the current file's collapsed header stays at top, next file visible below
               requestAnimationFrame(() => requestAnimationFrame(() => {
-                const el = document.querySelector(`[data-file-path="${CSS.escape(nextFilePath)}"]`);
-                if (!el) return;
-                const container = el.closest(".overflow-auto");
+                const currentEl = document.querySelector(`[data-file-path="${CSS.escape(file.path)}"]`);
+                if (!currentEl) return;
+                const container = currentEl.closest(".overflow-auto");
                 if (container) {
                   const containerRect = container.getBoundingClientRect();
-                  const elRect = el.getBoundingClientRect();
+                  const elRect = currentEl.getBoundingClientRect();
                   const offset = elRect.top - containerRect.top + container.scrollTop;
                   container.scrollTo({ top: offset, behavior: "smooth" });
                 }
