@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
+import { resolveThemeById } from "../themes/apply";
 import { PatchDiff, Virtualizer } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
@@ -255,8 +256,14 @@ export function DiffView() {
     );
   }
 
+  const activeThemeId = useUIStore((s) => s.activeThemeId);
+  const customThemes = useUIStore((s) => s.customThemes);
+  const pierreTheme = resolveThemeById(activeThemeId, customThemes).type === "dark"
+    ? ("pierre-dark" as const)
+    : ("pierre-light" as const);
+
   const diffOptions = {
-    theme: "pierre-dark" as const,
+    theme: pierreTheme,
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
     unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,

@@ -75,12 +75,38 @@ const CSS_VAR_MAP: Record<keyof ResolvedCSS, string> = {
   sidebarRing: "--sidebar-ring",
 };
 
+/** Derive Pierre diff CSS variable overrides from theme colors */
+function getDiffOverrides(theme: Theme): Record<string, string> {
+  const { background, accent, border } = theme.ui;
+  const { green, red } = theme.terminal;
+  const mix = (color: string, pct: number) =>
+    `color-mix(in lab, ${color} ${pct}%, ${background})`;
+
+  return {
+    "--diffs-bg-context-override": background,
+    "--diffs-bg-buffer-override": background,
+    "--diffs-bg-separator-override": mix(accent, 30),
+    "--diffs-bg-hover-override": mix(accent, 40),
+    "--diffs-fg-number-override": border,
+    "--diffs-bg-addition-override": mix(green, 10),
+    "--diffs-bg-addition-hover-override": mix(green, 15),
+    "--diffs-bg-addition-emphasis-override": mix(green, 25),
+    "--diffs-bg-deletion-override": mix(red, 10),
+    "--diffs-bg-deletion-hover-override": mix(red, 15),
+    "--diffs-bg-deletion-emphasis-override": mix(red, 25),
+  };
+}
+
 export function applyTheme(theme: Theme): void {
   const resolved = resolveTheme(theme);
   const root = document.documentElement;
 
   for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
     root.style.setProperty(cssVar, resolved[key as keyof ResolvedCSS]);
+  }
+
+  for (const [cssVar, value] of Object.entries(getDiffOverrides(theme))) {
+    root.style.setProperty(cssVar, value);
   }
 
   root.setAttribute("data-theme-type", theme.type);
