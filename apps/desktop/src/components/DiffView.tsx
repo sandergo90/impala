@@ -369,8 +369,18 @@ export function DiffView() {
               const idx = changedFiles.indexOf(file);
               const nextFile = changedFiles[idx + 1];
               if (nextFile) {
-                const el = document.querySelector(`[data-file-path="${CSS.escape(nextFile.path)}"]`);
-                el?.scrollIntoView({ behavior: "smooth", block: "start" });
+                // Defer until after the current file collapses
+                requestAnimationFrame(() => {
+                  const el = document.querySelector(`[data-file-path="${CSS.escape(nextFile.path)}"]`);
+                  if (!el) return;
+                  const container = el.closest(".overflow-auto");
+                  if (container) {
+                    const containerRect = container.getBoundingClientRect();
+                    const elRect = el.getBoundingClientRect();
+                    const offset = elRect.top - containerRect.top + container.scrollTop;
+                    container.scrollTo({ top: offset, behavior: "smooth" });
+                  }
+                });
               }
             };
 
