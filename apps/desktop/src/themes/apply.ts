@@ -1,5 +1,43 @@
+import { registerCustomTheme } from "@pierre/diffs";
 import type { Theme, ResolvedCSS } from "./types";
 import { getBuiltInTheme, defaultDark } from "./built-in";
+
+/** Current theme reference for Pierre's async theme loaders */
+let currentTheme: Theme = defaultDark;
+
+// Register custom Pierre themes that dynamically use our app theme colors.
+// The loaders clone Pierre's syntax tokens but override editor bg/fg/diff colors.
+registerCustomTheme("differ-dark", async () => {
+  const base = await import("@pierre/theme/themes/pierre-dark.json").then((m) => m.default ?? m);
+  return {
+    ...base,
+    name: "differ-dark",
+    type: "dark" as const,
+    colors: {
+      ...base.colors,
+      "editor.background": currentTheme.ui.background,
+      "editor.foreground": currentTheme.ui.foreground,
+      "diffEditor.insertedTextBackground": currentTheme.terminal.green + "1a",
+      "diffEditor.removedTextBackground": currentTheme.terminal.red + "1a",
+    },
+  };
+});
+
+registerCustomTheme("differ-light", async () => {
+  const base = await import("@pierre/theme/themes/pierre-light.json").then((m) => m.default ?? m);
+  return {
+    ...base,
+    name: "differ-light",
+    type: "light" as const,
+    colors: {
+      ...base.colors,
+      "editor.background": currentTheme.ui.background,
+      "editor.foreground": currentTheme.ui.foreground,
+      "diffEditor.insertedTextBackground": currentTheme.terminal.green + "1a",
+      "diffEditor.removedTextBackground": currentTheme.terminal.red + "1a",
+    },
+  };
+});
 
 export function resolveTheme(theme: Theme): ResolvedCSS {
   const { background, foreground, primary, border, accent } = theme.ui;
@@ -96,6 +134,8 @@ function getDiffOverrides(theme: Theme): Record<string, string> {
 }
 
 export function applyTheme(theme: Theme): void {
+  currentTheme = theme;
+
   const resolved = resolveTheme(theme);
   const root = document.documentElement;
 

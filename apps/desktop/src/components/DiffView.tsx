@@ -259,18 +259,13 @@ export function DiffView() {
   }
 
   const activeTheme = resolveThemeById(activeThemeId, customThemes);
-  const pierreTheme = activeTheme.type === "dark"
-    ? ("pierre-dark" as const)
-    : ("pierre-light" as const);
+  const differTheme = activeTheme.type === "dark" ? "differ-dark" : "differ-light";
 
   const diffOptions = {
-    theme: pierreTheme,
+    theme: differTheme,
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
-    unsafeCSS: `
-      [data-diffs-header] { position: sticky; top: 0; z-index: 10; }
-      pre, code { background-color: var(--diffs-bg) !important; }
-    `,
+    unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
   };
 
   const toolbar = (
