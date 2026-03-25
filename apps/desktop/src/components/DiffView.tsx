@@ -49,6 +49,8 @@ export function DiffView() {
   const setDiffStyle = useUIStore((s) => s.setDiffStyle);
   const wrap = useUIStore((s) => s.wrap);
   const setWrap = useUIStore((s) => s.setWrap);
+  const activeThemeId = useUIStore((s) => s.activeThemeId);
+  const customThemes = useUIStore((s) => s.customThemes);
 
   const wtPath = useUIStore((s) => s.selectedWorktree?.path);
   const navState = useUIStore((s) =>
@@ -256,8 +258,6 @@ export function DiffView() {
     );
   }
 
-  const activeThemeId = useUIStore((s) => s.activeThemeId);
-  const customThemes = useUIStore((s) => s.customThemes);
   const pierreTheme = resolveThemeById(activeThemeId, customThemes).type === "dark"
     ? ("pierre-dark" as const)
     : ("pierre-light" as const);
