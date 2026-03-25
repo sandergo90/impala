@@ -1,114 +1,109 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Worktree, Project, WorktreeState } from "./types";
+import type { Worktree, Project, WorktreeNavState, WorktreeDataState } from "./types";
 
-const defaultWorktreeState: WorktreeState = {
-  ptySessionId: null, activeTab: 'terminal', showSplit: false,
-  commits: [], selectedCommit: null, changedFiles: [],
-  selectedFile: null, diffText: null, fileDiffs: {},
-  baseBranch: null, viewMode: 'commit', annotations: [],
-  viewedFiles: [],
+const defaultNavState: WorktreeNavState = {
+  activeTab: 'diff',
+  showSplit: false,
+  viewMode: 'commit',
+  selectedCommit: null,
+  selectedFile: null,
 };
 
-interface AppState {
-  // Projects (multi)
-  projects: Project[];
-  setProjects: (projects: Project[]) => void;
-  addProject: (project: Project) => void;
-  removeProject: (path: string) => void;
+const defaultDataState: WorktreeDataState = {
+  ptySessionId: null,
+  commits: [],
+  changedFiles: [],
+  baseBranch: null,
+  diffText: null,
+  fileDiffs: {},
+  annotations: [],
+};
+
+interface UIState {
   selectedProject: Project | null;
   setSelectedProject: (project: Project | null) => void;
-
-  // Worktrees
-  worktrees: Worktree[];
-  setWorktrees: (worktrees: Worktree[]) => void;
   selectedWorktree: Worktree | null;
   setSelectedWorktree: (worktree: Worktree | null) => void;
-
-  // Per-worktree state
-  worktreeStates: Record<string, WorktreeState>;
-  getWorktreeState: (path: string) => WorktreeState;
-  updateWorktreeState: (path: string, updates: Partial<WorktreeState>) => void;
-
-  // Diff view settings (global)
   diffStyle: 'split' | 'unified';
   setDiffStyle: (style: 'split' | 'unified') => void;
   wrap: boolean;
   setWrap: (wrap: boolean) => void;
+  worktreeNavStates: Record<string, WorktreeNavState>;
+  getWorktreeNavState: (path: string) => WorktreeNavState;
+  updateWorktreeNavState: (path: string, updates: Partial<WorktreeNavState>) => void;
 }
 
-export const useAppStore = create<AppState>()(
+export const useUIStore = create<UIState>()(
   persist(
     (set, get) => ({
-  // Projects
-  projects: [],
-  setProjects: (projects) => set({ projects }),
-  addProject: (project) =>
-    set((state) => {
-      if (state.projects.some((p) => p.path === project.path)) return state;
-      return { projects: [...state.projects, project] };
-    }),
-  removeProject: (path) =>
-    set((state) => {
-      const projects = state.projects.filter((p) => p.path !== path);
-      const selectedProject =
-        state.selectedProject?.path === path ? null : state.selectedProject;
-      return {
-        projects,
-        selectedProject,
-        ...(state.selectedProject?.path === path
-          ? {
-              worktrees: [],
-              selectedWorktree: null,
-            }
-          : {}),
-      };
-    }),
-  selectedProject: null,
-  setSelectedProject: (project) =>
-    set({
-      selectedProject: project,
-      worktrees: [],
+      selectedProject: null,
+      setSelectedProject: (project) => set({ selectedProject: project }),
       selectedWorktree: null,
+      setSelectedWorktree: (worktree) => set({ selectedWorktree: worktree }),
+      diffStyle: 'split',
+      setDiffStyle: (style) => set({ diffStyle: style }),
+      wrap: false,
+      setWrap: (wrap) => set({ wrap }),
+      worktreeNavStates: {},
+      getWorktreeNavState: (path: string): WorktreeNavState => {
+        return get().worktreeNavStates[path] ?? defaultNavState;
+      },
+      updateWorktreeNavState: (path: string, updates: Partial<WorktreeNavState>) =>
+        set((state) => {
+          const current = state.worktreeNavStates[path] ?? { ...defaultNavState };
+          return {
+            worktreeNavStates: {
+              ...state.worktreeNavStates,
+              [path]: { ...current, ...updates },
+            },
+          };
+        }),
     }),
-
-  // Worktrees
-  worktrees: [],
-  setWorktrees: (worktrees) => set({ worktrees }),
-  selectedWorktree: null,
-  setSelectedWorktree: (worktree) =>
-    set({
-      selectedWorktree: worktree,
-    }),
-
-  // Per-worktree state
-  worktreeStates: {},
-  getWorktreeState: (path: string): WorktreeState => {
-    return get().worktreeStates[path] ?? defaultWorktreeState;
-  },
-  updateWorktreeState: (path: string, updates: Partial<WorktreeState>) =>
-    set((state) => {
-      const current = state.worktreeStates[path] ?? { ...defaultWorktreeState };
-      return {
-        worktreeStates: {
-          ...state.worktreeStates,
-          [path]: { ...current, ...updates },
-        },
-      };
-    }),
-
-  // Diff view settings
-  diffStyle: 'split',
-  setDiffStyle: (style) => set({ diffStyle: style }),
-  wrap: false,
-  setWrap: (wrap) => set({ wrap }),
-    }),
-    {
-      name: "differ-ui-state",
-      partialize: (state) => ({
-        diffStyle: state.diffStyle,
-        wrap: state.wrap,
-      }),
-    }
+    { name: "differ-ui-state" }
   )
+);
+
+interface DataState {
+  projects: Project[];
+  setProjects: (projects: Project[]) => void;
+  addProject: (project: Project) => void;
+  removeProject: (path: string) => void;
+  worktrees: Worktree[];
+  setWorktrees: (worktrees: Worktree[]) => void;
+  worktreeDataStates: Record<string, WorktreeDataState>;
+  getWorktreeDataState: (path: string) => WorktreeDataState;
+  updateWorktreeDataState: (path: string, updates: Partial<WorktreeDataState>) => void;
+}
+
+export const useDataStore = create<DataState>()(
+  (set, get) => ({
+    projects: [],
+    setProjects: (projects) => set({ projects }),
+    addProject: (project) =>
+      set((state) => {
+        if (state.projects.some((p) => p.path === project.path)) return state;
+        return { projects: [...state.projects, project] };
+      }),
+    removeProject: (path) =>
+      set((state) => ({
+        projects: state.projects.filter((p) => p.path !== path),
+      })),
+    worktrees: [],
+    setWorktrees: (worktrees) => set({ worktrees }),
+    worktreeDataStates: {},
+    getWorktreeDataState: (path: string): WorktreeDataState => {
+      return get().worktreeDataStates[path] ?? defaultDataState;
+    },
+    updateWorktreeDataState: (path: string, updates: Partial<WorktreeDataState>) =>
+      set((state) => {
+        const current = state.worktreeDataStates[path] ?? { ...defaultDataState };
+        return {
+          worktreeDataStates: {
+            ...state.worktreeDataStates,
+            [path]: { ...current, ...updates },
+          },
+        };
+      }),
+  })
 );

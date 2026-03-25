@@ -50,20 +50,22 @@ export interface NewAnnotation {
   body: string;
 }
 
-export interface WorktreeState {
-  ptySessionId: string | null;
+export interface WorktreeNavState {
   activeTab: 'terminal' | 'diff';
   showSplit: boolean;
-  commits: CommitInfo[];
+  viewMode: 'commit' | 'all-changes' | 'uncommitted';
   selectedCommit: CommitInfo | null;
-  changedFiles: ChangedFile[];
   selectedFile: ChangedFile | null;
+}
+
+export interface WorktreeDataState {
+  ptySessionId: string | null;
+  commits: CommitInfo[];
+  changedFiles: ChangedFile[];
+  baseBranch: string | null;
   diffText: string | null;
   fileDiffs: Record<string, string>;
-  baseBranch: string | null;
-  viewMode: 'commit' | 'all-changes' | 'uncommitted';
   annotations: Annotation[];
-  viewedFiles: string[];
 }
 
 export interface CommentProvider {
