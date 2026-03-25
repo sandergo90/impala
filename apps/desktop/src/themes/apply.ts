@@ -1,4 +1,5 @@
 import type { Theme, ResolvedCSS } from "./types";
+import { getBuiltInTheme, defaultDark } from "./built-in";
 
 export function resolveTheme(theme: Theme): ResolvedCSS {
   const { background, foreground, primary, border, accent } = theme.ui;
@@ -84,4 +85,9 @@ export function applyTheme(theme: Theme): void {
 
   root.setAttribute("data-theme-type", theme.type);
   root.classList.remove("dark");
+}
+
+export function initThemeFromStore(activeThemeId: string, customThemes: Theme[]): void {
+  const theme = getBuiltInTheme(activeThemeId) ?? customThemes.find((t) => t.id === activeThemeId) ?? defaultDark;
+  applyTheme(theme);
 }

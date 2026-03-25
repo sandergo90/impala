@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Worktree, Project, WorktreeNavState, WorktreeDataState } from "./types";
+import type { Theme } from "./themes/types";
+import { getBuiltInTheme, defaultDark } from "./themes/built-in";
+import { applyTheme, initThemeFromStore } from "./themes/apply";
 
 const defaultNavState: WorktreeNavState = {
   activeTab: 'diff',
@@ -32,6 +35,13 @@ interface UIState {
   worktreeNavStates: Record<string, WorktreeNavState>;
   getWorktreeNavState: (path: string) => WorktreeNavState;
   updateWorktreeNavState: (path: string, updates: Partial<WorktreeNavState>) => void;
+  activeThemeId: string;
+  setActiveThemeId: (id: string) => void;
+  customThemes: Theme[];
+  addCustomTheme: (theme: Theme) => void;
+  removeCustomTheme: (id: string) => void;
+  currentView: 'main' | 'settings';
+  setCurrentView: (view: 'main' | 'settings') => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -59,8 +69,37 @@ export const useUIStore = create<UIState>()(
             },
           };
         }),
+      activeThemeId: "default-dark",
+      setActiveThemeId: (id) => {
+        set({ activeThemeId: id });
+        const theme = getBuiltInTheme(id) ?? get().customThemes.find((t) => t.id === id) ?? defaultDark;
+        applyTheme(theme);
+      },
+      customThemes: [],
+      addCustomTheme: (theme) =>
+        set((state) => ({
+          customThemes: [...state.customThemes, theme],
+        })),
+      removeCustomTheme: (id) =>
+        set((state) => ({
+          customThemes: state.customThemes.filter((t) => t.id !== id),
+          activeThemeId: state.activeThemeId === id ? "default-dark" : state.activeThemeId,
+        })),
+      currentView: 'main',
+      setCurrentView: (view) => set({ currentView: view }),
     }),
-    { name: "differ-ui-state" }
+    {
+      name: "differ-ui-state",
+      partialize: (state) => {
+        const { currentView, ...rest } = state;
+        return rest;
+      },
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          initThemeFromStore(state.activeThemeId, state.customThemes);
+        }
+      },
+    }
   )
 );
 

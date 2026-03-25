@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" data-theme-type="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
@@ -8,6 +8,17 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      try {
+        const raw = localStorage.getItem("differ-ui-state");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const state = parsed.state || parsed;
+          const themeType = state.activeThemeId?.includes("light") ? "light" : "dark";
+          document.documentElement.setAttribute("data-theme-type", themeType);
+        }
+      } catch {}
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
