@@ -11,9 +11,14 @@ import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
 
 function hashPatch(patch: string): string {
+  // Strip the diff header (index line contains abbreviated blob hashes whose
+  // length can change as the git object database grows). Only hash from the
+  // first hunk marker onward so the hash stays stable when metadata changes.
+  const hunkStart = patch.indexOf("\n@@");
+  const body = hunkStart >= 0 ? patch.slice(hunkStart) : patch;
   let hash = 0;
-  for (let i = 0; i < patch.length; i++) {
-    hash = ((hash << 5) - hash + patch.charCodeAt(i)) | 0;
+  for (let i = 0; i < body.length; i++) {
+    hash = ((hash << 5) - hash + body.charCodeAt(i)) | 0;
   }
   return hash.toString(36);
 }
@@ -83,6 +88,10 @@ export function DiffView() {
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
+  const [pendingAnnotation, setPendingAnnotation] = useState<{
+    lineNumber: number;
+    side: 'deletions' | 'additions';
+  } | null>(null);
 
   // Determine the commit hash for viewed-files scoping
   const commitHashForViewed =
@@ -196,6 +205,33 @@ export function DiffView() {
       );
     },
     [showResolved]
+  );
+
+  const renderGutterUtility = useCallback(
+    (getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
+      return (
+        <button
+          className="flex items-center justify-center w-5 h-5 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 transition-colors text-sm font-bold leading-none"
+          onClick={() => {
+            const hovered = getHoveredLine();
+            if (!hovered) return;
+            // Toggle off if clicking the same line
+            if (
+              pendingAnnotation &&
+              pendingAnnotation.lineNumber === hovered.lineNumber &&
+              pendingAnnotation.side === hovered.side
+            ) {
+              setPendingAnnotation(null);
+            } else {
+              setPendingAnnotation(hovered);
+            }
+          }}
+        >
+          +
+        </button>
+      );
+    },
+    [pendingAnnotation]
   );
 
   // Filtered and sorted annotations for the panel
@@ -412,6 +448,7 @@ export function DiffView() {
           patch={diffText!}
           lineAnnotations={lineAnnotations}
           renderAnnotation={renderAnnotation}
+          renderGutterUtility={renderGutterUtility}
           options={diffOptions}
         />
       </div>
