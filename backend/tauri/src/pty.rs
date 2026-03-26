@@ -213,6 +213,12 @@ pub fn pty_kill(
     session_id: String,
 ) -> Result<(), String> {
     let mut sessions = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
-    sessions.remove(&session_id);
+    if let Some(mut session) = sessions.remove(&session_id) {
+        // Kill child and drop session in background to avoid blocking on process exit
+        std::thread::spawn(move || {
+            let _ = session._child.kill();
+            drop(session);
+        });
+    }
     Ok(())
 }
