@@ -57,6 +57,16 @@ export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
     let unlistenOutput: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
 
+    // Intercept split keybindings in capture phase before Ghostty consumes them
+    const interceptKeys = (e: KeyboardEvent) => {
+      if (e.metaKey) {
+        if (e.key === "d" || e.key === "D" || e.key === "[" || e.key === "]" || e.key === "w" || e.key === ",") {
+          e.stopPropagation();
+        }
+      }
+    };
+    container.addEventListener("keydown", interceptKeys, true);
+
     const setup = async () => {
       const ghostty = await getGhostty();
       if (cancelled) return;
@@ -72,17 +82,6 @@ export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
       });
 
       terminalRef.current = terminal;
-
-      // Let split keybindings pass through to the app instead of being consumed by the terminal
-      terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-        if (e.metaKey && e.type === "keydown") {
-          // Cmd+D, Cmd+Shift+D, Cmd+[, Cmd+], Cmd+W, Cmd+,
-          if (e.key === "d" || e.key === "D" || e.key === "[" || e.key === "]" || e.key === "w" || e.key === ",") {
-            return false; // don't let terminal handle it
-          }
-        }
-        return true;
-      });
 
       fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
@@ -169,6 +168,7 @@ export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
       if (onFocus) {
         container.addEventListener("mousedown", onFocus);
       }
+
     };
 
     setup().catch((err) => {
@@ -178,6 +178,7 @@ export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
 
     return () => {
       cancelled = true;
+      container.removeEventListener("keydown", interceptKeys, true);
       if (onFocus && container) {
         container.removeEventListener("mousedown", onFocus);
       }
