@@ -6,16 +6,17 @@ import { defaultDark } from "./themes/built-in";
 import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
 import { createLeaf } from "./lib/split-tree";
 
-const initialLeaf = createLeaf("claude");
-
-const defaultNavState: WorktreeNavState = {
-  activeTab: "diff",
-  splitTree: initialLeaf,
-  focusedPaneId: initialLeaf.id,
-  viewMode: "commit",
-  selectedCommit: null,
-  selectedFile: null,
-};
+function createDefaultNavState(): WorktreeNavState {
+  const leaf = createLeaf("claude");
+  return {
+    activeTab: "diff",
+    splitTree: leaf,
+    focusedPaneId: leaf.id,
+    viewMode: "commit",
+    selectedCommit: null,
+    selectedFile: null,
+  };
+}
 
 const defaultDataState: WorktreeDataState = {
   paneSessions: {},
@@ -63,11 +64,18 @@ export const useUIStore = create<UIState>()(
       setWrap: (wrap) => set({ wrap }),
       worktreeNavStates: {},
       getWorktreeNavState: (path: string): WorktreeNavState => {
-        return get().worktreeNavStates[path] ?? defaultNavState;
+        const stored = get().worktreeNavStates[path];
+        if (!stored) return createDefaultNavState();
+        const defaults = createDefaultNavState();
+        // Merge with defaults to handle old persisted state missing new fields (splitTree, focusedPaneId)
+        return {
+          ...defaults,
+          ...Object.fromEntries(Object.entries(stored).filter(([, v]) => v !== undefined)),
+        } as WorktreeNavState;
       },
       updateWorktreeNavState: (path: string, updates: Partial<WorktreeNavState>) =>
         set((state) => {
-          const current = state.worktreeNavStates[path] ?? { ...defaultNavState };
+          const current = state.worktreeNavStates[path] ?? { ...createDefaultNavState() };
           return {
             worktreeNavStates: {
               ...state.worktreeNavStates,
