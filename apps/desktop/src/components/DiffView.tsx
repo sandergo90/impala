@@ -516,6 +516,7 @@ export function DiffView() {
                 <PatchDiff
                   patch={patch}
                   options={{ ...diffOptions, collapsed: isCollapsed }}
+                  renderGutterUtility={renderGutterUtility}
                   renderHeaderPrefix={() => (
                     <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
                       {isCollapsed ? "▶" : "▼"}
