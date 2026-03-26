@@ -12,6 +12,7 @@ function createDefaultNavState(): WorktreeNavState {
     activeTab: "diff",
     splitTree: leaf,
     focusedPaneId: leaf.id,
+    claudeLaunched: false,
     viewMode: "commit",
     selectedCommit: null,
     selectedFile: null,

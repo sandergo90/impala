@@ -8,6 +8,7 @@ import {
 import { GhosttyTerminal } from "./GhosttyTerminal";
 import type { SplitNode } from "../types";
 import { paneSessionId } from "../lib/split-tree";
+import { useUIStore } from "../store";
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -127,16 +128,25 @@ function LeafPane({
     if (sessionId) return;
 
     const ptyId = paneSessionId(paneId);
-    const command = paneType === "claude"
-      ? ["claude", "--dangerously-skip-permissions", "--continue"]
-      : null;
+    let command: string[] | null = null;
+    if (paneType === "claude") {
+      const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
+      command = claudeLaunched
+        ? ["claude", "--dangerously-skip-permissions", "--continue"]
+        : ["claude", "--dangerously-skip-permissions"];
+    }
 
     invoke("pty_spawn", {
       sessionId: ptyId,
       cwd: worktreePath,
       command,
     })
-      .then(() => onSessionSpawned(ptyId))
+      .then(() => {
+        onSessionSpawned(ptyId);
+        if (paneType === "claude") {
+          useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
+        }
+      })
       .catch((err) => console.error("Failed to spawn PTY:", err));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: backend deduplicates spawns
   }, [paneId, paneType, worktreePath, sessionId]);
