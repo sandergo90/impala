@@ -135,8 +135,9 @@ function App() {
         return;
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    // Capture phase so split keybindings fire before the terminal consumes them
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [wtPath]);
 
   const handleTerminalTab = () => {
