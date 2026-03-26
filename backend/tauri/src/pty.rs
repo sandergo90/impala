@@ -41,6 +41,7 @@ pub fn pty_spawn(
     state: tauri::State<'_, PtyState>,
     session_id: String,
     cwd: String,
+    command: Option<Vec<String>>,
 ) -> Result<(), String> {
     // Don't spawn if session already exists
     {
@@ -61,7 +62,16 @@ pub fn pty_spawn(
         })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-    let mut cmd = CommandBuilder::new_default_prog();
+    let mut cmd = match &command {
+        Some(args) if !args.is_empty() => {
+            let mut c = CommandBuilder::new(&args[0]);
+            for arg in &args[1..] {
+                c.arg(arg);
+            }
+            c
+        }
+        _ => CommandBuilder::new_default_prog(),
+    };
     cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
