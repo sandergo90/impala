@@ -327,11 +327,16 @@ export function DiffView() {
     async (prompt: string) => {
       if (!worktreePath) return;
 
-      let sessionId = useDataStore.getState().getWorktreeDataState(worktreePath).ptySessionId;
+      const paneSessions = useDataStore.getState().getWorktreeDataState(worktreePath).paneSessions;
+      const focusedPaneId = useUIStore.getState().getWorktreeNavState(worktreePath).focusedPaneId;
+      let sessionId = paneSessions[focusedPaneId] ?? Object.values(paneSessions)[0] ?? null;
       if (!sessionId) {
-        await invoke("pty_spawn", { sessionId: worktreePath, cwd: worktreePath });
-        useDataStore.getState().updateWorktreeDataState(worktreePath, { ptySessionId: worktreePath });
-        sessionId = worktreePath;
+        // Spawn a session for the focused pane if none exist
+        sessionId = `pty-${focusedPaneId}`;
+        await invoke("pty_spawn", { sessionId, cwd: worktreePath });
+        useDataStore.getState().updateWorktreeDataState(worktreePath, {
+          paneSessions: { ...paneSessions, [focusedPaneId]: sessionId },
+        });
       }
 
       await invoke("pty_write", { sessionId, data: encodeForPty(prompt) });

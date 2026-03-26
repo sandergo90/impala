@@ -73,11 +73,6 @@ export function Sidebar() {
   const selectWorktree = async (wt: Worktree) => {
     useUIStore.getState().setSelectedWorktree(wt);
     try {
-      const dataState = useDataStore.getState().getWorktreeDataState(wt.path);
-      if (!dataState.ptySessionId) {
-        await invoke("pty_spawn", { sessionId: wt.path, cwd: wt.path });
-        useDataStore.getState().updateWorktreeDataState(wt.path, { ptySessionId: wt.path });
-      }
       await invoke("watch_worktree", { worktreePath: wt.path });
       const base = await invoke<string>("detect_base_branch", { worktreePath: wt.path });
       useDataStore.getState().updateWorktreeDataState(wt.path, { baseBranch: base });
@@ -87,7 +82,7 @@ export function Sidebar() {
       // Auto-load uncommitted changes in split view if no persisted nav state
       const navState = useUIStore.getState().getWorktreeNavState(wt.path);
       if (!navState.selectedCommit && navState.viewMode === 'commit') {
-        useUIStore.getState().updateWorktreeNavState(wt.path, { viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, showSplit: true });
+        useUIStore.getState().updateWorktreeNavState(wt.path, { viewMode: 'uncommitted', selectedCommit: null, selectedFile: null });
         try {
           const [files, fullDiff] = await Promise.all([
             invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: wt.path }),

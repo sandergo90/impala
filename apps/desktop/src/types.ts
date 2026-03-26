@@ -70,7 +70,7 @@ export interface WorktreeNavState {
 }
 
 export interface WorktreeDataState {
-  ptySessionId: string | null;
+  paneSessions: Record<string, string>;
   commits: CommitInfo[];
   changedFiles: ChangedFile[];
   baseBranch: string | null;

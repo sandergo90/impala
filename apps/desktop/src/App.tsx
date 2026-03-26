@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Sidebar } from "./components/Sidebar";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffView } from "./components/DiffView";
-import { GhosttyTerminal } from "./components/GhosttyTerminal";
+import { SplitTreeRenderer } from "./components/SplitTreeRenderer";
 import { SettingsView } from "./components/SettingsView";
 import { Toaster } from "./components/ui/sonner";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/resizable";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { useUIStore, useDataStore } from "./store";
+import { splitNode, removeNode, getAdjacentLeafId, getLeaves } from "./lib/split-tree";
 
 function App() {
   const [gitError, setGitError] = useState(false);
@@ -32,8 +33,6 @@ function App() {
   );
 
   const activeTab = navState?.activeTab ?? "diff";
-  const ptySessionId = dataState?.ptySessionId ?? null;
-  const showSplit = navState?.showSplit ?? false;
 
   useEffect(() => {
     invoke("check_git")
@@ -47,24 +46,94 @@ function App() {
         e.preventDefault();
         const view = useUIStore.getState().currentView;
         useUIStore.getState().setCurrentView(view === "settings" ? "main" : "settings");
+        return;
+      }
+
+      // Split keybindings only apply when terminal tab is active
+      if (!wtPath) return;
+      const nav = useUIStore.getState().getWorktreeNavState(wtPath);
+      if (nav.activeTab !== "terminal") return;
+
+      const focusedId = nav.focusedPaneId;
+      const tree = nav.splitTree;
+
+      // Cmd+D → split vertical
+      if (e.metaKey && !e.shiftKey && e.key === "d") {
+        e.preventDefault();
+        const result = splitNode(tree, focusedId, "vertical");
+        if (result) {
+          useUIStore.getState().updateWorktreeNavState(wtPath, {
+            splitTree: result.tree,
+            focusedPaneId: result.newLeafId,
+          });
+        }
+        return;
+      }
+
+      // Cmd+Shift+D → split horizontal
+      if (e.metaKey && e.shiftKey && (e.key === "D" || e.key === "d")) {
+        e.preventDefault();
+        const result = splitNode(tree, focusedId, "horizontal");
+        if (result) {
+          useUIStore.getState().updateWorktreeNavState(wtPath, {
+            splitTree: result.tree,
+            focusedPaneId: result.newLeafId,
+          });
+        }
+        return;
+      }
+
+      // Cmd+] → next pane
+      if (e.metaKey && e.key === "]") {
+        e.preventDefault();
+        const nextId = getAdjacentLeafId(tree, focusedId, 1);
+        useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: nextId });
+        return;
+      }
+
+      // Cmd+[ → previous pane
+      if (e.metaKey && e.key === "[") {
+        e.preventDefault();
+        const prevId = getAdjacentLeafId(tree, focusedId, -1);
+        useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: prevId });
+        return;
+      }
+
+      // Cmd+W → close focused pane (don't close last)
+      if (e.metaKey && e.key === "w") {
+        e.preventDefault();
+        const leaves = getLeaves(tree);
+        if (leaves.length <= 1) return; // don't close last pane
+
+        const newTree = removeNode(tree, focusedId);
+        if (!newTree) return;
+
+        // Kill the PTY session for the closed pane
+        const data = useDataStore.getState().getWorktreeDataState(wtPath);
+        const sessionId = data.paneSessions[focusedId];
+        if (sessionId) {
+          invoke("pty_kill", { sessionId }).catch(() => {});
+          const { [focusedId]: _, ...remaining } = data.paneSessions;
+          useDataStore.getState().updateWorktreeDataState(wtPath, { paneSessions: remaining });
+        }
+
+        // Focus adjacent pane
+        const newLeaves = getLeaves(newTree);
+        const newFocusId = newLeaves[0]?.id ?? "default";
+        useUIStore.getState().updateWorktreeNavState(wtPath, {
+          splitTree: newTree,
+          focusedPaneId: newFocusId,
+        });
+        return;
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [wtPath]);
 
-  const handleTerminalTab = async () => {
+  const handleTerminalTab = () => {
     if (!selectedWorktree) return;
-    const worktreePath = selectedWorktree.path;
-    useUIStore.getState().updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
-    const currentPty = useDataStore.getState().getWorktreeDataState(worktreePath).ptySessionId;
-    if (!currentPty) {
-      await invoke("pty_spawn", {
-        sessionId: worktreePath,
-        cwd: worktreePath,
-      });
-      useDataStore.getState().updateWorktreeDataState(worktreePath, { ptySessionId: worktreePath });
-    }
+    useUIStore.getState().updateWorktreeNavState(selectedWorktree.path, { activeTab: "terminal" });
   };
 
   const handleDiffTab = () => {
@@ -74,21 +143,17 @@ function App() {
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: "diff" });
   };
 
-  const handleSplitToggle = async () => {
-    if (!selectedWorktree) return;
-    const worktreePath = selectedWorktree.path;
-    const newSplit = !useUIStore.getState().getWorktreeNavState(worktreePath).showSplit;
-    useUIStore.getState().updateWorktreeNavState(worktreePath, { showSplit: newSplit });
-    if (newSplit) {
-      const currentPty = useDataStore.getState().getWorktreeDataState(worktreePath).ptySessionId;
-      if (!currentPty) {
-        await invoke("pty_spawn", {
-          sessionId: worktreePath,
-          cwd: worktreePath,
-        });
-        useDataStore.getState().updateWorktreeDataState(worktreePath, { ptySessionId: worktreePath });
-      }
-    }
+  const handleFocusPane = (paneId: string) => {
+    if (!wtPath) return;
+    useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: paneId });
+  };
+
+  const handleSessionSpawned = (paneId: string, sessionId: string) => {
+    if (!wtPath) return;
+    const current = useDataStore.getState().getWorktreeDataState(wtPath);
+    useDataStore.getState().updateWorktreeDataState(wtPath, {
+      paneSessions: { ...current.paneSessions, [paneId]: sessionId },
+    });
   };
 
   if (checking) return null;
@@ -172,9 +237,8 @@ function App() {
             <div className="relative flex items-center gap-1 pr-3">
               {selectedWorktree && (
                 <>
-                  {tabPill("Diff", !showSplit && activeTab === "diff", handleDiffTab, showSplit)}
-                  {tabPill("Terminal", !showSplit && activeTab === "terminal", handleTerminalTab, showSplit)}
-                  {tabPill("Split", showSplit, handleSplitToggle)}
+                  {tabPill("Diff", activeTab === "diff", handleDiffTab)}
+                  {tabPill("Terminal", activeTab === "terminal", handleTerminalTab)}
                   <span className="mx-1 w-px h-3.5 bg-border" />
                 </>
               )}
@@ -222,41 +286,20 @@ function App() {
                   <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                     Select a worktree
                   </div>
-                ) : showSplit ? (
-                  <ResizablePanelGroup orientation="horizontal">
-                    <ResizablePanel defaultSize="50%" minSize={200}>
-                      {ptySessionId ? (
-                        <GhosttyTerminal
-                          key={ptySessionId}
-                          sessionId={ptySessionId}
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                          Starting terminal...
-                        </div>
-                      )}
-                    </ResizablePanel>
-                    <ResizableHandle withHandle />
-                    <ResizablePanel defaultSize="50%" minSize={200}>
-                      <DiffView />
-                    </ResizablePanel>
-                  </ResizablePanelGroup>
                 ) : (
                   <>
                     <div className={activeTab === "diff" ? "h-full" : "hidden"}>
                       <DiffView />
                     </div>
                     <div className={activeTab === "terminal" ? "h-full" : "hidden"}>
-                      {ptySessionId ? (
-                        <GhosttyTerminal
-                          key={ptySessionId}
-                          sessionId={ptySessionId}
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                          Starting terminal...
-                        </div>
-                      )}
+                      <SplitTreeRenderer
+                        tree={navState?.splitTree ?? { type: "leaf", id: "default", paneType: "shell" }}
+                        worktreePath={wtPath!}
+                        focusedPaneId={navState?.focusedPaneId ?? "default"}
+                        paneSessions={dataState?.paneSessions ?? {}}
+                        onFocusPane={handleFocusPane}
+                        onSessionSpawned={handleSessionSpawned}
+                      />
                     </div>
                   </>
                 )}

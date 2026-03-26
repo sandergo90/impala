@@ -18,7 +18,7 @@ const defaultNavState: WorktreeNavState = {
 };
 
 const defaultDataState: WorktreeDataState = {
-  ptySessionId: null,
+  paneSessions: {},
   commits: [],
   changedFiles: [],
   baseBranch: null,
