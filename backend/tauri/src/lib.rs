@@ -260,6 +260,66 @@ fn clear_viewed_files(
     viewed_files::clear_for_worktree(&conn, &worktree_path)
 }
 
+#[tauri::command]
+fn setup_claude_integration() -> Result<String, String> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| "Could not determine home directory".to_string())?;
+
+    let mcp_binary = which_mcp_binary(&home)?;
+
+    let settings_path = home.join(".claude").join("settings.local.json");
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        let contents = fs::read_to_string(&settings_path)
+            .map_err(|e| format!("Failed to read settings: {}", e))?;
+        serde_json::from_str(&contents)
+            .map_err(|e| format!("Failed to parse settings: {}", e))?
+    } else {
+        serde_json::json!({})
+    };
+
+    let mcp_servers = settings
+        .as_object_mut()
+        .ok_or_else(|| "Settings is not a JSON object".to_string())?
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+
+    mcp_servers
+        .as_object_mut()
+        .ok_or_else(|| "mcpServers is not a JSON object".to_string())?
+        .insert("differ".to_string(), serde_json::json!({
+            "command": mcp_binary,
+            "args": []
+        }));
+
+    fs::create_dir_all(settings_path.parent().unwrap())
+        .map_err(|e| format!("Failed to create .claude directory: {}", e))?;
+
+    let formatted = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    fs::write(&settings_path, formatted)
+        .map_err(|e| format!("Failed to write settings: {}", e))?;
+
+    Ok(mcp_binary)
+}
+
+fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
+    if let Ok(output) = std::process::Command::new("which").arg("differ-mcp").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Ok(path);
+            }
+        }
+    }
+
+    let cargo_bin = home.join(".cargo").join("bin").join("differ-mcp");
+    if cargo_bin.exists() {
+        return Ok(cargo_bin.to_string_lossy().to_string());
+    }
+
+    Err("differ-mcp binary not found. Build it with: cd backend/mcp && cargo install --path .".to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -371,6 +431,7 @@ pub fn run() {
             unset_file_viewed,
             list_viewed_files,
             clear_viewed_files,
+            setup_claude_integration,
             pty::pty_spawn,
             pty::pty_get_buffer,
             pty::pty_write,

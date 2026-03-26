@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { useUIStore } from "../store";
 import { AppearancePane } from "./settings/AppearancePane";
+import { ClaudeIntegrationPane } from "./settings/ClaudeIntegrationPane";
 
 const navItems = [
   { id: "appearance", label: "Appearance", enabled: true },
+  { id: "claude", label: "Claude Integration", enabled: true },
   { id: "general", label: "General", enabled: false },
   { id: "editor", label: "Editor", enabled: false },
   { id: "keyboard", label: "Keyboard", enabled: false },
@@ -11,12 +14,11 @@ const navItems = [
 
 export function SettingsView() {
   const setCurrentView = useUIStore((s) => s.setCurrentView);
+  const [selectedPane, setSelectedPane] = useState("appearance");
 
   return (
     <div className="flex h-full">
-      {/* Settings sidebar */}
       <div className="w-[200px] border-r border-border/50 py-4 flex flex-col shrink-0">
-        {/* Back button */}
         <button
           onClick={() => setCurrentView("main")}
           className="flex items-center gap-2 px-4 pb-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -27,24 +29,27 @@ export function SettingsView() {
           Back
         </button>
 
-        {/* Nav items */}
         {navItems.map((item) => (
-          <div
+          <button
             key={item.id}
-            className={`px-4 py-1.5 text-xs ${
-              item.enabled
+            onClick={() => item.enabled && setSelectedPane(item.id)}
+            disabled={!item.enabled}
+            className={`px-4 py-1.5 text-xs text-left w-full ${
+              item.enabled && item.id === selectedPane
                 ? "text-foreground font-medium border-l-2 border-primary"
-                : "text-muted-foreground/50 cursor-not-allowed"
+                : item.enabled
+                  ? "text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground/50 cursor-not-allowed"
             }`}
           >
             {item.label}
-          </div>
+          </button>
         ))}
       </div>
 
-      {/* Content area */}
       <div className="flex-1 overflow-y-auto p-8">
-        <AppearancePane />
+        {selectedPane === "appearance" && <AppearancePane />}
+        {selectedPane === "claude" && <ClaudeIntegrationPane />}
       </div>
     </div>
   );
