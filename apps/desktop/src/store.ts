@@ -4,11 +4,15 @@ import type { Worktree, Project, WorktreeNavState, WorktreeDataState } from "./t
 import type { Theme } from "./themes/types";
 import { defaultDark } from "./themes/built-in";
 import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
+import { createLeaf } from "./lib/split-tree";
+
+const initialLeaf = createLeaf("shell");
 
 const defaultNavState: WorktreeNavState = {
-  activeTab: 'diff',
-  showSplit: false,
-  viewMode: 'commit',
+  activeTab: "diff",
+  splitTree: initialLeaf,
+  focusedPaneId: initialLeaf.id,
+  viewMode: "commit",
   selectedCommit: null,
   selectedFile: null,
 };

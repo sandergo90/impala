@@ -50,10 +50,21 @@ export interface NewAnnotation {
   body: string;
 }
 
+export type SplitNode =
+  | { type: "leaf"; id: string; paneType: "claude" | "shell" }
+  | {
+      type: "split";
+      orientation: "horizontal" | "vertical";
+      ratio: number;
+      first: SplitNode;
+      second: SplitNode;
+    };
+
 export interface WorktreeNavState {
-  activeTab: 'terminal' | 'diff';
-  showSplit: boolean;
-  viewMode: 'commit' | 'all-changes' | 'uncommitted';
+  activeTab: "terminal" | "diff";
+  splitTree: SplitNode;
+  focusedPaneId: string;
+  viewMode: "commit" | "all-changes" | "uncommitted";
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
 }
