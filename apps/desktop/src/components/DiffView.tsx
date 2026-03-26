@@ -102,6 +102,7 @@ export function DiffView() {
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [pendingAnnotation, setPendingAnnotation] = useState<{
+    filePath?: string;
     lineNumber: number;
     side: 'deletions' | 'additions';
   } | null>(null);
@@ -231,15 +232,15 @@ export function DiffView() {
   const pendingAnnotationRef = useRef(pendingAnnotation);
   pendingAnnotationRef.current = pendingAnnotation;
 
-  const handleGutterUtilityClick = useCallback(
-    (range: { start: number; side?: 'deletions' | 'additions'; end: number }) => {
+  const makeGutterUtilityClickHandler = useCallback(
+    (filePath?: string) => (range: { start: number; side?: 'deletions' | 'additions'; end: number }) => {
       const lineNumber = range.start;
       const side = range.side ?? 'additions';
       const pa = pendingAnnotationRef.current;
-      if (pa && pa.lineNumber === lineNumber && pa.side === side) {
+      if (pa && pa.lineNumber === lineNumber && pa.side === side && pa.filePath === filePath) {
         setPendingAnnotation(null);
       } else {
-        setPendingAnnotation({ lineNumber, side });
+        setPendingAnnotation({ filePath, lineNumber, side });
       }
     },
     []
@@ -254,15 +255,17 @@ export function DiffView() {
   }, [annotations, showResolved]);
 
   const handleCreate = useCallback(
-    async (body: string, lineNumber: number, side: "left" | "right") => {
-      if (!selectedProject || !selectedFile) return;
+    async (body: string, lineNumber: number, side: "left" | "right", filePath?: string) => {
+      if (!selectedProject) return;
+      const resolvedFilePath = filePath ?? selectedFile?.path;
+      if (!resolvedFilePath) return;
       const commitHash =
         viewMode === "commit" && selectedCommit
           ? selectedCommit.hash
           : "all-changes";
       const created = await sqliteProvider.create({
         repo_path: selectedProject.path,
-        file_path: selectedFile.path,
+        file_path: resolvedFilePath,
         commit_hash: commitHash,
         line_number: lineNumber,
         side,
@@ -283,7 +286,7 @@ export function DiffView() {
           <InlineAnnotationForm
             onSubmit={(body) => {
               const side = diffAnnotation.side === "deletions" ? "left" as const : "right" as const;
-              handleCreate(body, diffAnnotation.lineNumber, side);
+              handleCreate(body, diffAnnotation.lineNumber, side, pendingAnnotation?.filePath);
               setPendingAnnotation(null);
             }}
             onCancel={() => setPendingAnnotation(null)}
@@ -305,7 +308,7 @@ export function DiffView() {
         </div>
       );
     },
-    [showResolved, handleCreate]
+    [showResolved, handleCreate, pendingAnnotation?.filePath]
   );
 
   const handleResolve = useCallback(
@@ -382,7 +385,6 @@ export function DiffView() {
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
     enableGutterUtility: true,
-    onGutterUtilityClick: handleGutterUtilityClick,
     unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
   };
 
@@ -502,9 +504,15 @@ export function DiffView() {
 
             return (
               <div key={file.path} data-file-path={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
-                <PatchDiff
+                <PatchDiff<AnnotationMeta>
                   patch={patch}
-                  options={{ ...diffOptions, collapsed: isCollapsed }}
+                  options={{ ...diffOptions, collapsed: isCollapsed, onGutterUtilityClick: makeGutterUtilityClickHandler(file.path) }}
+                  lineAnnotations={pendingAnnotation?.filePath === file.path ? [{
+                    side: pendingAnnotation.side,
+                    lineNumber: pendingAnnotation.lineNumber,
+                    metadata: { type: 'form' as const },
+                  }] : undefined}
+                  renderAnnotation={renderAnnotation}
                   renderHeaderPrefix={() => (
                     <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
                       {isCollapsed ? "▶" : "▼"}
@@ -531,7 +539,7 @@ export function DiffView() {
           patch={diffText!}
           lineAnnotations={lineAnnotations}
           renderAnnotation={renderAnnotation}
-          options={diffOptions}
+          options={{ ...diffOptions, onGutterUtilityClick: makeGutterUtilityClickHandler() }}
         />
       </div>
 
