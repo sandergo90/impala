@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ResizablePanelGroup,
@@ -121,26 +121,24 @@ function LeafPane({
   onFocus: () => void;
   onSessionSpawned: (sessionId: string) => void;
 }) {
-  const hasSpawned = useRef(false);
-
-  // Auto-spawn PTY session when leaf mounts
+  // Auto-spawn PTY session when leaf has no session
+  // Backend deduplicates via sessions.contains_key — safe to call multiple times
   useEffect(() => {
-    if (sessionId || hasSpawned.current) return;
-    hasSpawned.current = true;
+    if (sessionId) return;
 
-    const ptySessionId = paneSessionId(paneId);
+    const ptyId = paneSessionId(paneId);
     const command = paneType === "claude"
       ? ["claude", "--dangerously-skip-permissions", "--continue"]
       : null;
 
     invoke("pty_spawn", {
-      sessionId: ptySessionId,
+      sessionId: ptyId,
       cwd: worktreePath,
       command,
     })
-      .then(() => onSessionSpawned(ptySessionId))
+      .then(() => onSessionSpawned(ptyId))
       .catch((err) => console.error("Failed to spawn PTY:", err));
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: hasSpawned ref prevents re-spawn
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: backend deduplicates spawns
   }, [paneId, paneType, worktreePath, sessionId]);
 
   return (
