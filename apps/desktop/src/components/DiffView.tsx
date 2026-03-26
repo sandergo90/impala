@@ -11,6 +11,7 @@ import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { AnnotationDisplay } from "./AnnotationDisplay";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
+import { paneSessionId } from "../lib/split-tree";
 
 type AnnotationMeta =
   | { type: 'comment'; annotation: Annotation }
@@ -332,7 +333,7 @@ export function DiffView() {
       let sessionId = paneSessions[focusedPaneId] ?? Object.values(paneSessions)[0] ?? null;
       if (!sessionId) {
         // Spawn a session for the focused pane if none exist
-        sessionId = `pty-${focusedPaneId}`;
+        sessionId = paneSessionId(focusedPaneId);
         await invoke("pty_spawn", { sessionId, cwd: worktreePath });
         useDataStore.getState().updateWorktreeDataState(worktreePath, {
           paneSessions: { ...paneSessions, [focusedPaneId]: sessionId },

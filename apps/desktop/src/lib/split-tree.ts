@@ -2,6 +2,11 @@ import type { SplitNode } from "../types";
 
 let paneCounter = 0;
 
+/** Derive a PTY session ID from a pane ID */
+export function paneSessionId(paneId: string): string {
+  return `pty-${paneId}`;
+}
+
 /** Create a new leaf node with a unique ID */
 export function createLeaf(paneType: "claude" | "shell" = "shell"): Extract<SplitNode, { type: "leaf" }> {
   return { type: "leaf", id: `pane-${Date.now()}-${paneCounter++}`, paneType };

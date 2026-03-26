@@ -20,6 +20,15 @@ function sanitizeEventId(id: string): string {
   return id.replace(/[^a-zA-Z0-9\-_]/g, "-");
 }
 
+function decodeBase64(encoded: string): Uint8Array {
+  const binaryStr = atob(encoded);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes;
+}
+
 // Cache the Ghostty WASM instance so it's only loaded once
 let ghosttyPromise: Promise<Ghostty> | null = null;
 function getGhostty(): Promise<Ghostty> {
@@ -82,14 +91,10 @@ export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
       try {
         const buffered = await invoke<string>("pty_get_buffer", { sessionId });
         if (buffered && !cancelled) {
-          const binaryStr = atob(buffered);
-          if (binaryStr.length > 0) {
+          const bytes = decodeBase64(buffered);
+          if (bytes.length > 0) {
             // Clear terminal first to avoid mixing stale events
             terminal.clear();
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) {
-              bytes[i] = binaryStr.charCodeAt(i);
-            }
             terminal.write(bytes);
           }
         }
@@ -132,12 +137,7 @@ export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
 
       unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
         if (cancelled || !terminal) return;
-        const binaryStr = atob(event.payload);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) {
-          bytes[i] = binaryStr.charCodeAt(i);
-        }
-        terminal.write(bytes);
+        terminal.write(decodeBase64(event.payload));
       });
 
       unlistenExit = await listen<number>(`pty-exit-${safeId}`, (event) => {

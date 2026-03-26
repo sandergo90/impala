@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/resizable";
 import { GhosttyTerminal } from "./GhosttyTerminal";
 import type { SplitNode } from "../types";
+import { paneSessionId } from "../lib/split-tree";
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -124,14 +125,15 @@ function LeafPane({
     if (sessionId || hasSpawned.current) return;
     hasSpawned.current = true;
 
-    const ptySessionId = `pty-${paneId}`;
+    const ptySessionId = paneSessionId(paneId);
     invoke("pty_spawn", {
       sessionId: ptySessionId,
       cwd: worktreePath,
     })
       .then(() => onSessionSpawned(ptySessionId))
       .catch((err) => console.error("Failed to spawn PTY:", err));
-  }, [paneId, worktreePath, sessionId, onSessionSpawned]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: hasSpawned ref prevents re-spawn
+  }, [paneId, worktreePath, sessionId]);
 
   return (
     <div
