@@ -15,6 +15,73 @@ import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { useUIStore, useDataStore } from "./store";
 import { splitNode, removeNode, getAdjacentLeafId, getLeaves } from "./lib/split-tree";
 
+/** Keeps all visited worktree terminals mounted (hidden when inactive) to avoid remounting */
+function WorktreeTerminals({
+  activeWorktreePath,
+  onFocusPane,
+  onSessionSpawned,
+}: {
+  activeWorktreePath: string | null;
+  onFocusPane: (paneId: string) => void;
+  onSessionSpawned: (paneId: string, sessionId: string) => void;
+}) {
+  const [visitedPaths, setVisitedPaths] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (activeWorktreePath) {
+      setVisitedPaths((prev) => {
+        if (prev.has(activeWorktreePath)) return prev;
+        return new Set([...prev, activeWorktreePath]);
+      });
+    }
+  }, [activeWorktreePath]);
+
+  return (
+    <>
+      {[...visitedPaths].map((path) => {
+        const isActive = path === activeWorktreePath;
+        return (
+          <div key={path} className={isActive ? "h-full" : "hidden"}>
+            <WorktreeTerminalPane
+              worktreePath={path}
+              isActive={isActive}
+              onFocusPane={onFocusPane}
+              onSessionSpawned={onSessionSpawned}
+            />
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function WorktreeTerminalPane({
+  worktreePath,
+  isActive,
+  onFocusPane,
+  onSessionSpawned,
+}: {
+  worktreePath: string;
+  isActive: boolean;
+  onFocusPane: (paneId: string) => void;
+  onSessionSpawned: (paneId: string, sessionId: string) => void;
+}) {
+  // Subscribe to both stores so component re-renders on state changes
+  const nav = useUIStore((s) => s.getWorktreeNavState(worktreePath));
+  const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
+
+  return (
+    <SplitTreeRenderer
+      tree={nav.splitTree}
+      worktreePath={worktreePath}
+      focusedPaneId={isActive ? nav.focusedPaneId : ""}
+      paneSessions={dataState?.paneSessions ?? {}}
+      onFocusPane={onFocusPane}
+      onSessionSpawned={onSessionSpawned}
+    />
+  );
+}
+
 function App() {
   const [gitError, setGitError] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -300,16 +367,11 @@ function App() {
                     <div className={activeTab === "diff" ? "h-full" : "hidden"}>
                       <DiffView />
                     </div>
-                    <div className={activeTab === "terminal" ? "h-full" : "hidden"}>
-                      <SplitTreeRenderer
-                        tree={navState?.splitTree ?? { type: "leaf", id: "default", paneType: "shell" }}
-                        worktreePath={wtPath!}
-                        focusedPaneId={navState?.focusedPaneId ?? "default"}
-                        paneSessions={dataState?.paneSessions ?? {}}
-                        onFocusPane={handleFocusPane}
-                        onSessionSpawned={handleSessionSpawned}
-                      />
-                    </div>
+                    <WorktreeTerminals
+                      activeWorktreePath={activeTab === "terminal" ? wtPath! : null}
+                      onFocusPane={handleFocusPane}
+                      onSessionSpawned={handleSessionSpawned}
+                    />
                   </>
                 )}
               </div>
