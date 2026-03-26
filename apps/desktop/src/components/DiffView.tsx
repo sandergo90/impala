@@ -16,19 +16,6 @@ type AnnotationMeta =
   | { type: 'comment'; annotation: Annotation }
   | { type: 'form' };
 
-function hashPatch(patch: string): string {
-  // Strip the diff header (index line contains abbreviated blob hashes whose
-  // length can change as the git object database grows). Only hash from the
-  // first hunk marker onward so the hash stays stable when metadata changes.
-  const hunkStart = patch.indexOf("\n@@");
-  const body = hunkStart >= 0 ? patch.slice(hunkStart) : patch;
-  let hash = 0;
-  for (let i = 0; i < body.length; i++) {
-    hash = ((hash << 5) - hash + body.charCodeAt(i)) | 0;
-  }
-  return hash.toString(36);
-}
-
 function encodeForPty(text: string): string {
   return btoa(
     Array.from(new TextEncoder().encode(text), (b) =>
@@ -85,6 +72,7 @@ export function DiffView() {
   const viewMode = navState?.viewMode ?? 'commit';
   const changedFiles = dataState?.changedFiles ?? [];
   const fileDiffs = dataState?.fileDiffs ?? {};
+  const fileDiffHashes = dataState?.fileDiffHashes ?? {};
   const annotations = dataState?.annotations ?? [];
 
   const worktreePath = selectedWorktree?.path;
@@ -128,7 +116,8 @@ export function DiffView() {
         const staleIds: string[] = [];
         for (const row of rows) {
           const currentPatch = fileDiffs[row.file_path];
-          if (currentPatch && hashPatch(currentPatch) === row.patch_hash) {
+          const currentHash = fileDiffHashes[row.file_path];
+          if (currentPatch && currentHash === row.patch_hash) {
             valid.add(row.file_path);
           } else if (currentPatch) {
             staleIds.push(row.file_path);
@@ -141,12 +130,14 @@ export function DiffView() {
         }
       })
       .catch(() => setViewedFiles(new Set()));
-  }, [worktreePath, commitHashForViewed, fileDiffs]);
+  }, [worktreePath, commitHashForViewed, fileDiffHashes]);
 
   const toggleViewed = useCallback((path: string) => {
     if (!worktreePath || !commitHashForViewed) return;
     const patch = fileDiffs[path];
     if (!patch) return;
+    const patchHash = fileDiffHashes[path];
+    if (!patchHash) return;
 
     const isCurrentlyViewed = viewedFiles.has(path);
     if (isCurrentlyViewed) {
@@ -157,10 +148,10 @@ export function DiffView() {
         return next;
       });
     } else {
-      viewedFilesProvider.set(worktreePath, commitHashForViewed, path, hashPatch(patch));
+      viewedFilesProvider.set(worktreePath, commitHashForViewed, path, patchHash);
       setViewedFiles((prev) => new Set(prev).add(path));
     }
-  }, [worktreePath, commitHashForViewed, fileDiffs, viewedFiles]);
+  }, [worktreePath, commitHashForViewed, fileDiffs, fileDiffHashes, viewedFiles]);
 
   // Load annotations when file/commit context changes
   useEffect(() => {

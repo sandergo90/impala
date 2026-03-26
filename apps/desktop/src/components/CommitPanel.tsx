@@ -9,6 +9,16 @@ const statusColor: Record<string, string> = {
   M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
 };
 
+function hashPatch(patch: string): string {
+  const hunkStart = patch.indexOf("\n@@");
+  const body = hunkStart >= 0 ? patch.slice(hunkStart) : patch;
+  let hash = 0;
+  for (let i = 0; i < body.length; i++) {
+    hash = ((hash << 5) - hash + body.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
+}
+
 export function CommitPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path;
@@ -33,26 +43,31 @@ export function CommitPanel() {
     [worktreePath]
   );
 
-  const splitPatch = useCallback((fullDiff: string): Record<string, string> => {
+  const splitPatch = useCallback((fullDiff: string): { fileDiffs: Record<string, string>; fileDiffHashes: Record<string, string> } => {
     const fileDiffs: Record<string, string> = {};
+    const fileDiffHashes: Record<string, string> = {};
     const parts = fullDiff.split(/^diff --git /m).filter(Boolean);
     for (const part of parts) {
       const patch = "diff --git " + part;
       const match = patch.match(/^diff --git a\/(.*?) b\//);
-      if (match) fileDiffs[match[1]] = patch;
+      if (match) {
+        fileDiffs[match[1]] = patch;
+        fileDiffHashes[match[1]] = hashPatch(patch);
+      }
     }
-    return fileDiffs;
+    return { fileDiffs, fileDiffHashes };
   }, []);
 
   const selectAllChanges = async () => {
     updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {} });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
         invoke<string>("get_full_branch_diff", { worktreePath }),
       ]);
-      updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+      const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+      updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
@@ -60,13 +75,14 @@ export function CommitPanel() {
 
   const selectUncommitted = async () => {
     updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {} });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
         invoke<string>("get_uncommitted_diff", { worktreePath }),
       ]);
-      updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+      const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+      updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
     } catch (e) {
       toast.error("Failed to load uncommitted changes");
     }
@@ -74,13 +90,14 @@ export function CommitPanel() {
 
   const selectCommit = async (commit: CommitInfo) => {
     updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {} });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_changed_files", { worktreePath, commitHash: commit.hash }),
         invoke<string>("get_full_commit_diff", { worktreePath, commitHash: commit.hash }),
       ]);
-      updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+      const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+      updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
     } catch (e) {
       toast.error("Failed to load commit");
     }
@@ -111,7 +128,8 @@ export function CommitPanel() {
           invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
           invoke<string>("get_uncommitted_diff", { worktreePath }),
         ]);
-        updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+        const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+        updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
       } catch {
         // Silently fail on auto-refresh
       }
@@ -121,7 +139,8 @@ export function CommitPanel() {
           invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
           invoke<string>("get_full_branch_diff", { worktreePath }),
         ]);
-        updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
+        const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+        updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
       } catch {
         // Silently fail on auto-refresh
       }

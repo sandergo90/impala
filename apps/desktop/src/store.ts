@@ -20,6 +20,7 @@ const defaultDataState: WorktreeDataState = {
   baseBranch: null,
   diffText: null,
   fileDiffs: {},
+  fileDiffHashes: {},
   annotations: [],
 };
 
