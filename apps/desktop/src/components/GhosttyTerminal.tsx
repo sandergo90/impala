@@ -13,6 +13,7 @@ function getTerminalTheme() {
 
 interface GhosttyTerminalProps {
   sessionId: string;
+  isFocused?: boolean;
   onFocus?: () => void;
 }
 
@@ -38,7 +39,7 @@ function getGhostty(): Promise<Ghostty> {
   return ghosttyPromise;
 }
 
-export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
+export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: GhosttyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const [loading, setLoading] = useState(true);
@@ -193,6 +194,15 @@ export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
       terminalRef.current = null;
     };
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!terminalRef.current) return;
+    if (isFocused) {
+      terminalRef.current.focus();
+    } else {
+      terminalRef.current.blur();
+    }
+  }, [isFocused]);
 
   useEffect(() => {
     let prevThemeId = useUIStore.getState().activeThemeId;

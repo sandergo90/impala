@@ -178,6 +178,7 @@ function LeafPane({
         <GhosttyTerminal
           key={sessionId}
           sessionId={sessionId}
+          isFocused={isFocused}
           onFocus={onFocus}
         />
       ) : (
