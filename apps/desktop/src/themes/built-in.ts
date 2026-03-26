@@ -70,7 +70,42 @@ export const defaultLight: Theme = {
   },
 };
 
-export const builtInThemes: Theme[] = [defaultDark, defaultLight];
+export const monokai: Theme = {
+  id: "monokai",
+  name: "Monokai",
+  type: "dark",
+  ui: {
+    background: "#272822",
+    foreground: "#f8f8f2",
+    primary: "#A6E22E",
+    border: "#3e3d32",
+    accent: "#3e3d32",
+  },
+  terminal: {
+    background: "#272822",
+    foreground: "#f8f8f2",
+    cursor: "#f8f8f2",
+    selectionBackground: "#75715E80",
+    black: "#333333",
+    red: "#f92672",
+    green: "#A6E22E",
+    yellow: "#e2e22e",
+    blue: "#819aff",
+    magenta: "#AE81FF",
+    cyan: "#66D9EF",
+    white: "#e3e3dd",
+    brightBlack: "#666666",
+    brightRed: "#f92672",
+    brightGreen: "#A6E22E",
+    brightYellow: "#e2e22e",
+    brightBlue: "#819aff",
+    brightMagenta: "#AE81FF",
+    brightCyan: "#66D9EF",
+    brightWhite: "#f8f8f2",
+  },
+};
+
+export const builtInThemes: Theme[] = [defaultDark, defaultLight, monokai];
 
 export function getBuiltInTheme(id: string): Theme | undefined {
   return builtInThemes.find((t) => t.id === id);
