@@ -28,6 +28,14 @@ function hashPatch(patch: string): string {
   return hash.toString(36);
 }
 
+function encodeForPty(text: string): string {
+  return btoa(
+    Array.from(new TextEncoder().encode(text), (b) =>
+      String.fromCharCode(b)
+    ).join("")
+  );
+}
+
 function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: React.MouseEvent) => void }) {
   return (
     <button
@@ -313,11 +321,10 @@ export function DiffView() {
     [annotations, updateData]
   );
 
-  const handleSendToClaude = useCallback(
-    async (annotation: Annotation) => {
+  const sendPromptToClaude = useCallback(
+    async (prompt: string) => {
       if (!worktreePath) return;
 
-      // Ensure PTY session exists
       let sessionId = useDataStore.getState().getWorktreeDataState(worktreePath).ptySessionId;
       if (!sessionId) {
         await invoke("pty_spawn", { sessionId: worktreePath, cwd: worktreePath });
@@ -325,19 +332,27 @@ export function DiffView() {
         sessionId = worktreePath;
       }
 
-      // Compose and send prompt
-      const prompt = `Review and address the annotation on ${annotation.file_path} line ${annotation.line_number}: ${annotation.body}\n`;
-      const encoded = btoa(
-        Array.from(new TextEncoder().encode(prompt), (b) =>
-          String.fromCharCode(b)
-        ).join("")
-      );
-      await invoke("pty_write", { sessionId, data: encoded });
-
-      // Switch to terminal tab
+      await invoke("pty_write", { sessionId, data: encodeForPty(prompt) });
       useUIStore.getState().updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
     },
     [worktreePath]
+  );
+
+  const handleSendToClaude = useCallback(
+    async (annotation: Annotation) => {
+      const prompt = `Review and address the annotation on ${annotation.file_path} line ${annotation.line_number}: ${annotation.body}\n`;
+      await sendPromptToClaude(prompt);
+    },
+    [sendPromptToClaude]
+  );
+
+  const handleSendAllToClaude = useCallback(
+    async () => {
+      if (!selectedFile || !annotations.some((a) => !a.resolved)) return;
+      const prompt = `Review and address the annotations on ${selectedFile.path}\n`;
+      await sendPromptToClaude(prompt);
+    },
+    [sendPromptToClaude, selectedFile, annotations]
   );
 
   const hasFileDiffs = Object.keys(fileDiffs).length > 0;
@@ -412,6 +427,14 @@ export function DiffView() {
             >
               Resolved
             </button>
+            {annotations.some((a) => !a.resolved) && (
+              <button
+                onClick={handleSendAllToClaude}
+                className="px-2 py-0.5 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/20"
+              >
+                Send to Claude
+              </button>
+            )}
           </>
         )}
       </div>
