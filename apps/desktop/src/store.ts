@@ -21,6 +21,7 @@ const defaultDataState: WorktreeDataState = {
   diffText: null,
   fileDiffs: {},
   fileDiffHashes: {},
+  generatedFiles: [],
   annotations: [],
 };
 

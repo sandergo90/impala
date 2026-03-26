@@ -60,14 +60,18 @@ export function CommitPanel() {
 
   const selectAllChanges = async () => {
     updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {} });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
         invoke<string>("get_full_branch_diff", { worktreePath }),
       ]);
       const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
-      updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
+      const generatedFiles = await invoke<string[]>("check_generated_files", {
+        worktreePath,
+        files: files.map(f => f.path),
+      });
+      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
@@ -75,14 +79,18 @@ export function CommitPanel() {
 
   const selectUncommitted = async () => {
     updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {} });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
         invoke<string>("get_uncommitted_diff", { worktreePath }),
       ]);
       const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
-      updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
+      const generatedFiles = await invoke<string[]>("check_generated_files", {
+        worktreePath,
+        files: files.map(f => f.path),
+      });
+      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
     } catch (e) {
       toast.error("Failed to load uncommitted changes");
     }
@@ -90,14 +98,18 @@ export function CommitPanel() {
 
   const selectCommit = async (commit: CommitInfo) => {
     updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {} });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_changed_files", { worktreePath, commitHash: commit.hash }),
         invoke<string>("get_full_commit_diff", { worktreePath, commitHash: commit.hash }),
       ]);
       const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
-      updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
+      const generatedFiles = await invoke<string[]>("check_generated_files", {
+        worktreePath,
+        files: files.map(f => f.path),
+      });
+      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
     } catch (e) {
       toast.error("Failed to load commit");
     }
@@ -129,7 +141,11 @@ export function CommitPanel() {
           invoke<string>("get_uncommitted_diff", { worktreePath }),
         ]);
         const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
-        updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
+        const generatedFiles = await invoke<string[]>("check_generated_files", {
+          worktreePath,
+          files: files.map(f => f.path),
+        });
+        updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
       } catch {
         // Silently fail on auto-refresh
       }
@@ -140,7 +156,11 @@ export function CommitPanel() {
           invoke<string>("get_full_branch_diff", { worktreePath }),
         ]);
         const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
-        updateData({ changedFiles: files, fileDiffs, fileDiffHashes });
+        const generatedFiles = await invoke<string[]>("check_generated_files", {
+          worktreePath,
+          files: files.map(f => f.path),
+        });
+        updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
       } catch {
         // Silently fail on auto-refresh
       }

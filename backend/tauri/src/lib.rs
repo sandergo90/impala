@@ -340,6 +340,11 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
     Err("differ-mcp binary not found. Build it with: cd backend/mcp && cargo install --path .".to_string())
 }
 
+#[tauri::command]
+fn check_generated_files(worktree_path: String, files: Vec<String>) -> Result<Vec<String>, String> {
+    git::check_generated_files(&worktree_path, &files)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -457,6 +462,7 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
+            check_generated_files,
             watcher::watch_worktree,
             watcher::unwatch_worktree,
         ])

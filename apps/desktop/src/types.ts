@@ -66,6 +66,7 @@ export interface WorktreeDataState {
   diffText: string | null;
   fileDiffs: Record<string, string>;
   fileDiffHashes: Record<string, string>;
+  generatedFiles: string[];
   annotations: Annotation[];
 }
 

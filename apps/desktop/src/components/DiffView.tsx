@@ -73,6 +73,7 @@ export function DiffView() {
   const changedFiles = dataState?.changedFiles ?? [];
   const fileDiffs = dataState?.fileDiffs ?? {};
   const fileDiffHashes = dataState?.fileDiffHashes ?? {};
+  const generatedFiles = dataState?.generatedFiles ?? [];
   const annotations = dataState?.annotations ?? [];
 
   const worktreePath = selectedWorktree?.path;
@@ -471,12 +472,13 @@ export function DiffView() {
             if (!patch) return null;
             const isViewed = viewedFiles.has(file.path);
             const isLargeFile = patch.length > 100_000;
-            const isCollapsed = collapsedFiles.has(file.path) || isViewed || (isLargeFile && !collapsedFiles.has(`expanded:${file.path}`));
+            const isGenerated = generatedFiles.includes(file.path);
+            const isCollapsed = collapsedFiles.has(file.path) || isViewed || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
 
             const toggleCollapse = () => {
               setCollapsedFiles((prev) => {
                 const next = new Set(prev);
-                if (isLargeFile) {
+                if (isLargeFile || isGenerated) {
                   const expandKey = `expanded:${file.path}`;
                   if (next.has(expandKey)) {
                     next.delete(expandKey);
@@ -524,7 +526,14 @@ export function DiffView() {
                     </button>
                   )}
                   renderHeaderMetadata={() => (
-                    <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToNextFile(); }} />
+                    <div className="flex items-center gap-2">
+                      {isGenerated && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                          Generated
+                        </span>
+                      )}
+                      <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToNextFile(); }} />
+                    </div>
                   )}
                 />
               </div>

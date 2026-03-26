@@ -318,6 +318,29 @@ pub fn list_branches(repo_path: &str) -> Result<Vec<BranchInfo>, String> {
     Ok(branches)
 }
 
+pub fn check_generated_files(worktree_path: &str, files: &[String]) -> Result<Vec<String>, String> {
+    if files.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut args = vec!["check-attr", "linguist-generated", "--"];
+    let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
+    args.extend(file_refs);
+
+    let output = run_git(worktree_path, &args)?;
+    let mut generated = Vec::new();
+
+    for line in output.lines() {
+        // Format: "path: linguist-generated: true"
+        let parts: Vec<&str> = line.splitn(3, ": ").collect();
+        if parts.len() == 3 && parts[2].trim() == "true" {
+            generated.push(parts[0].to_string());
+        }
+    }
+
+    Ok(generated)
+}
+
 pub fn get_all_changed_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {
     let base = detect_base_branch(worktree_path)?;
     let range = format!("{}...HEAD", base);
