@@ -6,7 +6,7 @@ import { defaultDark } from "./themes/built-in";
 import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
 import { createLeaf } from "./lib/split-tree";
 
-const initialLeaf = createLeaf("shell");
+const initialLeaf = createLeaf("claude");
 
 const defaultNavState: WorktreeNavState = {
   activeTab: "diff",

@@ -105,6 +105,10 @@ function App() {
         const leaves = getLeaves(tree);
         if (leaves.length <= 1) return; // don't close last pane
 
+        // Don't close Claude panes
+        const focusedLeaf = leaves.find((l) => l.id === focusedId);
+        if (focusedLeaf?.paneType === "claude") return;
+
         // Determine adjacent pane BEFORE removing, so we know the neighbor
         const adjacentId = getAdjacentLeafId(tree, focusedId, -1);
 

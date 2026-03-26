@@ -58,6 +58,7 @@ function SplitNodeRenderer({
     return (
       <LeafPane
         paneId={node.id}
+        paneType={node.paneType}
         worktreePath={worktreePath}
         isFocused={node.id === focusedPaneId}
         sessionId={paneSessions[node.id] ?? null}
@@ -105,6 +106,7 @@ function SplitNodeRenderer({
 
 function LeafPane({
   paneId,
+  paneType,
   worktreePath,
   isFocused,
   sessionId,
@@ -112,6 +114,7 @@ function LeafPane({
   onSessionSpawned,
 }: {
   paneId: string;
+  paneType: "claude" | "shell";
   worktreePath: string;
   isFocused: boolean;
   sessionId: string | null;
@@ -126,14 +129,19 @@ function LeafPane({
     hasSpawned.current = true;
 
     const ptySessionId = paneSessionId(paneId);
+    const command = paneType === "claude"
+      ? ["claude", "--dangerously-skip-permissions", "--continue"]
+      : null;
+
     invoke("pty_spawn", {
       sessionId: ptySessionId,
       cwd: worktreePath,
+      command,
     })
       .then(() => onSessionSpawned(ptySessionId))
       .catch((err) => console.error("Failed to spawn PTY:", err));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: hasSpawned ref prevents re-spawn
-  }, [paneId, worktreePath, sessionId]);
+  }, [paneId, paneType, worktreePath, sessionId]);
 
   return (
     <div
@@ -152,6 +160,11 @@ function LeafPane({
             borderRadius: "2px",
           }}
         />
+      )}
+      {paneType === "claude" && (
+        <div className="absolute top-1 right-2 text-[9px] font-medium text-muted-foreground/40 z-10 pointer-events-none">
+          Claude
+        </div>
       )}
       {sessionId ? (
         <GhosttyTerminal
