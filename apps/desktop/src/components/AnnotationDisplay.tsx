@@ -4,6 +4,7 @@ interface AnnotationDisplayProps {
   annotation: Annotation;
   onResolve: (id: string, resolved: boolean) => void;
   onDelete: (id: string) => void;
+  onSendToClaude?: (annotation: Annotation) => void;
 }
 
 function formatRelativeTime(isoDate: string): string {
@@ -25,6 +26,7 @@ export function AnnotationDisplay({
   annotation,
   onResolve,
   onDelete,
+  onSendToClaude,
 }: AnnotationDisplayProps) {
   const sideLabel = annotation.side === "left" ? "L" : "R";
   const resolved = annotation.resolved;
@@ -64,6 +66,15 @@ export function AnnotationDisplay({
         >
           {resolved ? "Resolved" : "Resolve"}
         </button>
+        {onSendToClaude && (
+          <button
+            onClick={() => onSendToClaude(annotation)}
+            title="Send to Claude"
+            className="px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:text-blue-400 hover:bg-blue-900/20"
+          >
+            Claude
+          </button>
+        )}
         <button
           onClick={() => onDelete(annotation.id)}
           title="Delete"

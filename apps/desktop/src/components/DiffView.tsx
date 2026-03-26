@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { toast } from "sonner";
+import { invoke } from "@tauri-apps/api/core";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
 import { PatchDiff, Virtualizer } from "@pierre/diffs/react";
@@ -312,6 +313,33 @@ export function DiffView() {
     [annotations, updateData]
   );
 
+  const handleSendToClaude = useCallback(
+    async (annotation: Annotation) => {
+      if (!worktreePath) return;
+
+      // Ensure PTY session exists
+      let sessionId = useDataStore.getState().getWorktreeDataState(worktreePath).ptySessionId;
+      if (!sessionId) {
+        await invoke("pty_spawn", { sessionId: worktreePath, cwd: worktreePath });
+        useDataStore.getState().updateWorktreeDataState(worktreePath, { ptySessionId: worktreePath });
+        sessionId = worktreePath;
+      }
+
+      // Compose and send prompt
+      const prompt = `Review and address the annotation on ${annotation.file_path} line ${annotation.line_number}: ${annotation.body}\n`;
+      const encoded = btoa(
+        Array.from(new TextEncoder().encode(prompt), (b) =>
+          String.fromCharCode(b)
+        ).join("")
+      );
+      await invoke("pty_write", { sessionId, data: encoded });
+
+      // Switch to terminal tab
+      useUIStore.getState().updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
+    },
+    [worktreePath]
+  );
+
   const hasFileDiffs = Object.keys(fileDiffs).length > 0;
   const showAllFiles = !selectedFile && hasFileDiffs;
   const showSingleFile = selectedFile && diffText;
@@ -485,6 +513,7 @@ export function DiffView() {
                 annotation={a}
                 onResolve={handleResolve}
                 onDelete={handleDelete}
+                onSendToClaude={handleSendToClaude}
               />
             ))}
           </div>
