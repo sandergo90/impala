@@ -73,6 +73,17 @@ export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
 
       terminalRef.current = terminal;
 
+      // Let split keybindings pass through to the app instead of being consumed by the terminal
+      terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+        if (e.metaKey && e.type === "keydown") {
+          // Cmd+D, Cmd+Shift+D, Cmd+[, Cmd+], Cmd+W, Cmd+,
+          if (e.key === "d" || e.key === "D" || e.key === "[" || e.key === "]" || e.key === "w" || e.key === ",") {
+            return false; // don't let terminal handle it
+          }
+        }
+        return true;
+      });
+
       fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
