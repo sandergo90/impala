@@ -6,7 +6,7 @@ import { useUIStore, useDataStore } from "../store";
 import type { ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
 
 const statusColor: Record<string, string> = {
-  M: "text-[#4ade80]", A: "text-[#34d399]", D: "text-[#f87171]", R: "text-yellow-500",
+  M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
 };
 
 export function CommitPanel() {
@@ -179,53 +179,44 @@ export function CommitPanel() {
     <div className="flex flex-col h-full text-sm overflow-hidden">
       {/* Commits section — top half */}
       <div className="flex flex-col min-h-0 flex-1">
-        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-[9px] uppercase tracking-[1.2px] text-[#555] shrink-0"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          Commits on <span className="font-mono text-[10px] text-[#888] normal-case tracking-normal">{selectedWorktree.branch}</span>
+        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-[9px] uppercase tracking-[1.2px] text-muted-foreground/50 shrink-0 border-b border-border">
+          Commits on <span className="font-mono text-[10px] text-muted-foreground normal-case tracking-normal">{selectedWorktree.branch}</span>
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0">
         {/* Uncommitted Changes */}
         <button
           onClick={selectUncommitted}
-          className={`w-full px-3.5 py-2 text-left transition-colors ${
+          className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
             viewMode === 'uncommitted'
-              ? "border-l-2 border-[#3b82f6] pl-3"
-              : "hover:bg-white/[0.02]"
+              ? "border-l-2 border-l-primary pl-3 bg-primary/[0.06]"
+              : "hover:bg-accent"
           }`}
-          style={{
-            ...(viewMode === 'uncommitted' ? { background: "rgba(59,130,246,0.06)" } : {}),
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-          }}
         >
-          <div className={`text-[11px] font-medium ${viewMode === 'uncommitted' ? "text-[#e5e5e5]" : "text-[#888]"}`}>
+          <div className={`text-[11px] font-medium ${viewMode === 'uncommitted' ? "text-foreground" : "text-muted-foreground"}`}>
             Uncommitted Changes
           </div>
-          <div className="text-[9px] text-[#555] mt-0.5 font-mono">Working tree</div>
+          <div className="text-[9px] text-muted-foreground/50 mt-0.5 font-mono">Working tree</div>
         </button>
 
         {/* All Changes */}
         <button
           onClick={selectAllChanges}
-          className={`w-full px-3.5 py-2 text-left transition-colors ${
+          className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
             viewMode === 'all-changes'
-              ? "border-l-2 border-[#3b82f6] pl-3"
-              : "hover:bg-white/[0.02]"
+              ? "border-l-2 border-l-primary pl-3 bg-primary/[0.06]"
+              : "hover:bg-accent"
           }`}
-          style={{
-            ...(viewMode === 'all-changes' ? { background: "rgba(59,130,246,0.06)" } : {}),
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-          }}
         >
-          <div className={`text-[11px] font-medium ${viewMode === 'all-changes' ? "text-[#e5e5e5]" : "text-[#888]"}`}>
+          <div className={`text-[11px] font-medium ${viewMode === 'all-changes' ? "text-foreground" : "text-muted-foreground"}`}>
             All Changes
           </div>
-          <div className="text-[9px] text-[#555] mt-0.5 font-mono">vs {baseBranch || "base"}</div>
+          <div className="text-[9px] text-muted-foreground/50 mt-0.5 font-mono">vs {baseBranch || "base"}</div>
         </button>
 
         {/* Commits */}
         {commits.length === 0 ? (
-          <div className="px-3.5 py-4 text-[#555] text-[11px]">No commits ahead of {baseBranch}</div>
+          <div className="px-3.5 py-4 text-muted-foreground/50 text-[11px]">No commits ahead of {baseBranch}</div>
         ) : (
           commits.map((commit) => {
             const isSelected = viewMode === 'commit' && selectedCommit?.hash === commit.hash;
@@ -233,26 +224,22 @@ export function CommitPanel() {
               <button
                 key={commit.hash}
                 onClick={() => selectCommit(commit)}
-                className={`w-full px-3.5 py-2 text-left transition-colors ${
+                className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border/50 ${
                   isSelected
-                    ? "border-l-2 border-[#3b82f6] pl-3"
-                    : "hover:bg-white/[0.02]"
+                    ? "border-l-2 border-l-primary pl-3 bg-primary/[0.06]"
+                    : "hover:bg-accent"
                 }`}
-                style={{
-                  ...(isSelected ? { background: "rgba(59,130,246,0.06)" } : {}),
-                  borderBottom: "1px solid rgba(255,255,255,0.03)",
-                }}
               >
-                <div className={`text-[11px] font-medium truncate ${isSelected ? "text-[#e5e5e5]" : "text-[#bbb]"}`}>
+                <div className={`text-[11px] font-medium truncate ${isSelected ? "text-foreground" : "text-foreground/80"}`}>
                   {commit.message}
                 </div>
-                <div className="flex items-center gap-1 text-[9px] text-[#555] mt-0.5 font-mono">
+                <div className="flex items-center gap-1 text-[9px] text-muted-foreground/50 mt-0.5 font-mono">
                   <span>{commit.hash.slice(0, 7)} &middot; {commit.date.split("T")[0]}</span>
                   {(commit.additions > 0 || commit.deletions > 0) && (
                     <span className="ml-auto">
-                      <span className="text-[#4ade80]">+{commit.additions}</span>
+                      <span className="text-green-500">+{commit.additions}</span>
                       {" "}
-                      <span className="text-[#f87171]">-{commit.deletions}</span>
+                      <span className="text-red-500">-{commit.deletions}</span>
                     </span>
                   )}
                 </div>
@@ -265,11 +252,7 @@ export function CommitPanel() {
 
       {/* Changed Files — bottom half */}
       <div className="flex flex-col min-h-0 flex-1">
-        <div className="px-3.5 py-2 text-[9px] uppercase tracking-[1.2px] text-[#555] shrink-0"
-          style={{
-            borderTop: "1px solid rgba(255,255,255,0.06)",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-          }}>
+        <div className="px-3.5 py-2 text-[9px] uppercase tracking-[1.2px] text-muted-foreground/50 shrink-0 border-y border-border">
           Changed Files
         </div>
         <div className="overflow-y-auto flex-1 min-h-0">
@@ -280,9 +263,8 @@ export function CommitPanel() {
                 key={file.path}
                 onClick={() => selectFile(file)}
                 className={`w-full px-3.5 py-1.5 text-left font-mono text-[10px] flex items-center gap-1.5 transition-colors truncate ${
-                  isSelected ? "text-[#3b82f6]" : "text-[#888] hover:bg-white/[0.02]"
+                  isSelected ? "text-primary bg-primary/[0.06]" : "text-muted-foreground hover:bg-accent"
                 }`}
-                style={isSelected ? { background: "rgba(59,130,246,0.06)" } : undefined}
               >
                 <span className={`text-[9px] font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
                   {file.status}
