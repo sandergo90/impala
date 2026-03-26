@@ -448,6 +448,20 @@ export function DiffView() {
             )}
           </>
         )}
+        {showAllFiles && changedFiles.length > 0 && (
+          <>
+            <span className="mx-1 text-border">|</span>
+            <span className="text-muted-foreground tabular-nums">
+              {viewedFiles.size} / {changedFiles.length} viewed
+            </span>
+            <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden">
+              <div
+                className="h-full rounded-full bg-green-500 transition-all duration-300"
+                style={{ width: `${changedFiles.length > 0 ? (viewedFiles.size / changedFiles.length) * 100 : 0}%` }}
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
