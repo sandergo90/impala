@@ -198,8 +198,10 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: Ghostt
   useEffect(() => {
     if (!terminalRef.current) return;
     if (isFocused) {
+      terminalRef.current.write("\x1b[?25h"); // DECTCEM: show cursor
       terminalRef.current.focus();
     } else {
+      terminalRef.current.write("\x1b[?25l"); // DECTCEM: hide cursor
       terminalRef.current.blur();
     }
   }, [isFocused]);
