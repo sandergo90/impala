@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
@@ -181,7 +181,6 @@ export function DiffView() {
     updateData,
   ]);
 
-  // Build Pierre lineAnnotations from our annotations for inline rendering
   const lineAnnotations = useMemo((): DiffLineAnnotation<AnnotationMeta>[] => {
     const items: DiffLineAnnotation<AnnotationMeta>[] = annotations.map((a) => ({
       side: a.side === "left" ? ("deletions" as const) : ("additions" as const),
@@ -200,6 +199,9 @@ export function DiffView() {
     return items;
   }, [annotations, pendingAnnotation]);
 
+  const pendingAnnotationRef = useRef(pendingAnnotation);
+  pendingAnnotationRef.current = pendingAnnotation;
+
   const renderGutterUtility = useCallback(
     (getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
       return (
@@ -208,11 +210,11 @@ export function DiffView() {
           onClick={() => {
             const hovered = getHoveredLine();
             if (!hovered) return;
-            // Toggle off if clicking the same line
+            const pa = pendingAnnotationRef.current;
             if (
-              pendingAnnotation &&
-              pendingAnnotation.lineNumber === hovered.lineNumber &&
-              pendingAnnotation.side === hovered.side
+              pa &&
+              pa.lineNumber === hovered.lineNumber &&
+              pa.side === hovered.side
             ) {
               setPendingAnnotation(null);
             } else {
@@ -224,7 +226,7 @@ export function DiffView() {
         </button>
       );
     },
-    [pendingAnnotation]
+    []
   );
 
   // Filtered and sorted annotations for the panel
@@ -255,7 +257,6 @@ export function DiffView() {
     [selectedProject, selectedFile, selectedCommit, viewMode, annotations, updateData]
   );
 
-  // Render inline annotation via Pierre's renderAnnotation slot
   const renderAnnotation = useCallback(
     (diffAnnotation: DiffLineAnnotation<AnnotationMeta>) => {
       const meta = diffAnnotation.metadata;
@@ -265,8 +266,8 @@ export function DiffView() {
         return (
           <InlineAnnotationForm
             onSubmit={(body) => {
-              const side = diffAnnotation.side === "deletions" ? "left" : "right";
-              handleCreate(body, diffAnnotation.lineNumber, side as "left" | "right");
+              const side = diffAnnotation.side === "deletions" ? "left" as const : "right" as const;
+              handleCreate(body, diffAnnotation.lineNumber, side);
               setPendingAnnotation(null);
             }}
             onCancel={() => setPendingAnnotation(null)}
@@ -475,9 +476,8 @@ export function DiffView() {
         />
       </div>
 
-      {/* Annotation panel below the diff */}
-      <div className="border-t bg-background">
-        {visibleAnnotations.length > 0 && (
+      {visibleAnnotations.length > 0 && (
+        <div className="border-t bg-background">
           <div className="flex flex-col gap-1.5 p-3 max-h-48 overflow-y-auto">
             {visibleAnnotations.map((a) => (
               <AnnotationDisplay
@@ -488,8 +488,8 @@ export function DiffView() {
               />
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -13,16 +13,6 @@ export function InlineAnnotationForm({ onSubmit, onCancel }: InlineAnnotationFor
     textareaRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = body.trim();
@@ -44,10 +34,12 @@ export function InlineAnnotationForm({ onSubmit, onCancel }: InlineAnnotationFor
         rows={3}
         className="px-2 py-1.5 text-xs rounded border border-border bg-background text-foreground resize-y focus:outline-none focus:border-blue-500/50"
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          if (e.key === "Escape") {
             e.preventDefault();
-            const trimmed = body.trim();
-            if (trimmed) onSubmit(trimmed);
+            onCancel();
+          } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            e.currentTarget.form?.requestSubmit();
           }
         }}
       />
