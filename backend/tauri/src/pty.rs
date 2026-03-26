@@ -64,10 +64,12 @@ pub fn pty_spawn(
 
     let mut cmd = match &command {
         Some(args) if !args.is_empty() => {
-            let mut c = CommandBuilder::new(&args[0]);
-            for arg in &args[1..] {
-                c.arg(arg);
-            }
+            // Spawn through login shell so PATH includes user-installed binaries
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+            let mut c = CommandBuilder::new(&shell);
+            c.arg("-l");
+            c.arg("-c");
+            c.arg(args.join(" "));
             c
         }
         _ => CommandBuilder::new_default_prog(),
