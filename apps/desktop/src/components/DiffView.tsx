@@ -394,6 +394,7 @@ export function DiffView() {
     theme: differTheme,
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
+    enableGutterUtility: true,
     unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
   };
 
