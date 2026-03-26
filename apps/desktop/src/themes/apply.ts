@@ -94,7 +94,7 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
     chart3: mix(foreground, 45),
     chart4: mix(foreground, 35),
     chart5: mix(foreground, 25),
-    sidebar: isDark ? mix(background, 80, "#000000") : mix(background, 92, "#000000"),
+    sidebar: isDark ? mix(background, 80, "#000000") : accent,
     sidebarForeground: foreground,
     sidebarPrimary: primary,
     sidebarPrimaryForeground: "#ffffff",

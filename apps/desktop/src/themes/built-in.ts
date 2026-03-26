@@ -42,9 +42,9 @@ export const defaultLight: Theme = {
   ui: {
     background: "#ffffff",
     foreground: "#1f2328",
-    primary: "#005FB8",
-    border: "#d0d7de",
-    accent: "#f0f2f5",
+    primary: "#0969da",
+    border: "#d1d9e0",
+    accent: "#f6f8fa",
   },
   terminal: {
     background: "#ffffff",
