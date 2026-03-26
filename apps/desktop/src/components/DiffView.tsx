@@ -231,29 +231,16 @@ export function DiffView() {
   const pendingAnnotationRef = useRef(pendingAnnotation);
   pendingAnnotationRef.current = pendingAnnotation;
 
-  const renderGutterUtility = useCallback(
-    (getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
-      return (
-        <button
-          className="flex items-center justify-center w-5 h-5 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 transition-colors text-sm font-bold leading-none"
-          onClick={() => {
-            const hovered = getHoveredLine();
-            if (!hovered) return;
-            const pa = pendingAnnotationRef.current;
-            if (
-              pa &&
-              pa.lineNumber === hovered.lineNumber &&
-              pa.side === hovered.side
-            ) {
-              setPendingAnnotation(null);
-            } else {
-              setPendingAnnotation(hovered);
-            }
-          }}
-        >
-          +
-        </button>
-      );
+  const handleGutterUtilityClick = useCallback(
+    (range: { start: number; side?: 'deletions' | 'additions'; end: number }) => {
+      const lineNumber = range.start;
+      const side = range.side ?? 'additions';
+      const pa = pendingAnnotationRef.current;
+      if (pa && pa.lineNumber === lineNumber && pa.side === side) {
+        setPendingAnnotation(null);
+      } else {
+        setPendingAnnotation({ lineNumber, side });
+      }
     },
     []
   );
@@ -394,8 +381,8 @@ export function DiffView() {
     theme: differTheme,
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
-    enableGutterUtility: true,
-    unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; } [data-gutter-utility-slot] { z-index: 1; }`,
+    onGutterUtilityClick: handleGutterUtilityClick,
+    unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
   };
 
   const toolbar = (
@@ -517,7 +504,6 @@ export function DiffView() {
                 <PatchDiff
                   patch={patch}
                   options={{ ...diffOptions, collapsed: isCollapsed }}
-                  renderGutterUtility={renderGutterUtility}
                   renderHeaderPrefix={() => (
                     <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
                       {isCollapsed ? "▶" : "▼"}
@@ -544,7 +530,6 @@ export function DiffView() {
           patch={diffText!}
           lineAnnotations={lineAnnotations}
           renderAnnotation={renderAnnotation}
-          renderGutterUtility={renderGutterUtility}
           options={diffOptions}
         />
       </div>
