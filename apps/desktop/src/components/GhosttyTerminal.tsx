@@ -13,6 +13,7 @@ function getTerminalTheme() {
 
 interface GhosttyTerminalProps {
   sessionId: string;
+  onFocus?: () => void;
 }
 
 function sanitizeEventId(id: string): string {
@@ -28,7 +29,7 @@ function getGhostty(): Promise<Ghostty> {
   return ghosttyPromise;
 }
 
-export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
+export function GhosttyTerminal({ sessionId, onFocus }: GhosttyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const [loading, setLoading] = useState(true);
@@ -152,6 +153,11 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
       }
 
       terminal.focus();
+
+      // Notify parent when terminal receives focus
+      if (onFocus) {
+        container.addEventListener("mousedown", onFocus);
+      }
     };
 
     setup().catch((err) => {
@@ -161,6 +167,9 @@ export function GhosttyTerminal({ sessionId }: GhosttyTerminalProps) {
 
     return () => {
       cancelled = true;
+      if (onFocus && container) {
+        container.removeEventListener("mousedown", onFocus);
+      }
       resizeDisposable?.dispose();
       dataDisposable?.dispose();
       unlistenOutput?.();
