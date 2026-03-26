@@ -23,41 +23,50 @@ export function InlineAnnotationForm({ onSubmit, onCancel }: InlineAnnotationFor
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-2 p-3 border-t border-border bg-card/80"
+      className="mx-4 my-3 p-4 rounded-lg border border-border bg-card"
       onClick={(e) => e.stopPropagation()}
     >
-      <textarea
-        ref={textareaRef}
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        placeholder="Write a comment..."
-        rows={3}
-        className="px-2 py-1.5 text-xs rounded border border-border bg-background text-foreground resize-y focus:outline-none focus:border-blue-500/50"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            onCancel();
-          } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            e.currentTarget.form?.requestSubmit();
-          }
-        }}
-      />
-      <div className="flex items-center gap-2 justify-end">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-3 py-1 text-xs rounded text-muted-foreground hover:text-foreground"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={!body.trim()}
-          className="px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
-        >
-          Comment
-        </button>
+      <div className="flex gap-3">
+        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M8 8a3 3 0 100-6 3 3 0 000 6zM2 14a6 6 0 0112 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" className="text-muted-foreground"/>
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <textarea
+            ref={textareaRef}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Leave a comment"
+            rows={3}
+            className="w-full px-3 py-2 text-xs rounded-md border border-border bg-background text-foreground resize-y focus:outline-none focus:border-muted-foreground/50 placeholder:text-muted-foreground/50"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onCancel();
+              } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
+          <div className="flex items-center gap-3 mt-3">
+            <button
+              type="submit"
+              disabled={!body.trim()}
+              className="px-3.5 py-1.5 text-xs font-medium rounded-md border border-border bg-card text-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Comment
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       </div>
     </form>
   );
