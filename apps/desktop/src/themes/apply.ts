@@ -5,23 +5,26 @@ import { getBuiltInTheme, defaultDark } from "./built-in";
 /** Current theme reference for Pierre's async theme loaders */
 let currentTheme: Theme = defaultDark;
 
-/** Map terminal ANSI colors to syntax token scopes */
-function buildTokenColors(t: Theme["terminal"]): Array<{ scope: string | string[]; settings: { foreground: string; fontStyle?: string } }> {
+/**
+ * Map terminal ANSI colors to syntax token scopes.
+ * Mapping follows superset.sh's convention (getEditorTheme):
+ *   keyword→magenta, function→blue, string→green, number→yellow,
+ *   type→cyan, constant→cyan, tag→red, comment→brightBlack
+ */
+function buildTokenColors(t: Theme["terminal"], isDark: boolean): Array<{ scope: string | string[]; settings: { foreground: string; fontStyle?: string } }> {
   return [
     { scope: "comment", settings: { foreground: t.brightBlack, fontStyle: "italic" } },
-    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: t.red } },
+    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: t.magenta } },
     { scope: ["string", "string.quoted"], settings: { foreground: t.green } },
-    { scope: ["constant.numeric", "constant.language"], settings: { foreground: t.cyan } },
-    { scope: ["variable.other.constant", "constant.other"], settings: { foreground: t.brightYellow } },
-    { scope: ["entity.name.function", "support.function"], settings: { foreground: t.magenta } },
-    { scope: ["entity.name.type", "support.type", "support.class"], settings: { foreground: t.brightMagenta } },
-    { scope: ["variable", "variable.other"], settings: { foreground: t.yellow } },
-    { scope: "variable.parameter", settings: { foreground: t.brightCyan } },
+    { scope: ["constant.numeric", "constant.language"], settings: { foreground: t.yellow } },
+    { scope: ["variable.other.constant", "constant.other"], settings: { foreground: t.cyan } },
+    { scope: ["entity.name.function", "support.function"], settings: { foreground: t.blue } },
+    { scope: ["entity.name.type", "support.type", "support.class"], settings: { foreground: t.cyan } },
+    { scope: "entity.name.class", settings: { foreground: t.yellow } },
     { scope: ["entity.name.tag", "punctuation.definition.tag"], settings: { foreground: t.red } },
     { scope: "entity.other.attribute-name", settings: { foreground: t.yellow } },
-    { scope: ["keyword.operator"], settings: { foreground: t.brightBlack } },
-    { scope: "string.regexp", settings: { foreground: t.brightCyan } },
-    { scope: "invalid.illegal", settings: { foreground: t.brightRed } },
+    { scope: "string.regexp", settings: { foreground: t.red } },
+    { scope: "invalid.illegal", settings: { foreground: isDark ? t.brightRed : t.red } },
   ];
 }
 
@@ -31,6 +34,9 @@ function patchTheme(
   type: "dark" | "light",
 ): Record<string, unknown> {
   const t = currentTheme;
+  const isDark = type === "dark";
+  const additionColor = isDark ? t.terminal.brightGreen : t.terminal.green;
+  const deletionColor = isDark ? t.terminal.brightRed : t.terminal.red;
   return {
     ...base,
     name,
@@ -39,10 +45,10 @@ function patchTheme(
       ...base.colors,
       "editor.background": t.ui.background,
       "editor.foreground": t.ui.foreground,
-      "diffEditor.insertedTextBackground": t.terminal.green + "1a",
-      "diffEditor.removedTextBackground": t.terminal.red + "1a",
+      "diffEditor.insertedTextBackground": additionColor + "1a",
+      "diffEditor.removedTextBackground": deletionColor + "1a",
     },
-    tokenColors: buildTokenColors(t.terminal),
+    tokenColors: buildTokenColors(t.terminal, isDark),
   };
 }
 
@@ -137,18 +143,18 @@ const CSS_VAR_MAP: Record<keyof ResolvedCSS, string> = {
 /** Derive Pierre diff CSS variable overrides from theme colors */
 function getDiffOverrides(theme: Theme): Record<string, string> {
   const { background, foreground } = theme.ui;
-  const { green, red } = theme.terminal;
   const isDark = theme.type === "dark";
+  const additionColor = isDark ? theme.terminal.brightGreen : theme.terminal.green;
+  const deletionColor = isDark ? theme.terminal.brightRed : theme.terminal.red;
 
   // Pierre uses --diffs-dark-* / --diffs-light-* as base theme variables.
-  // These are the source from which it derives all diff backgrounds/colors.
   const prefix = isDark ? "--diffs-dark" : "--diffs-light";
 
   return {
     [`${prefix}`]: foreground,
     [`${prefix}-bg`]: background,
-    [`${prefix}-addition-color`]: green,
-    [`${prefix}-deletion-color`]: red,
+    [`${prefix}-addition-color`]: additionColor,
+    [`${prefix}-deletion-color`]: deletionColor,
   };
 }
 
