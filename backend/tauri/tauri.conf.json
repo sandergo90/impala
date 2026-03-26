@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.differ.app",
   "build": {
-    "beforeDevCommand": "cd apps/desktop && bun run dev",
+    "beforeDevCommand": "cargo build --manifest-path backend/mcp/Cargo.toml && cd apps/desktop && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "cd apps/desktop && bun run build",
+    "beforeBuildCommand": "cargo build --release --manifest-path backend/mcp/Cargo.toml && cd apps/desktop && bun run build",
     "frontendDist": "../../apps/desktop/dist"
   },
   "app": {

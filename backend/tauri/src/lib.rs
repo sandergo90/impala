@@ -303,6 +303,7 @@ fn setup_claude_integration() -> Result<String, String> {
 }
 
 fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
+    // Check PATH first
     if let Ok(output) = std::process::Command::new("which").arg("differ-mcp").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -312,9 +313,28 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
         }
     }
 
+    // Check cargo install location
     let cargo_bin = home.join(".cargo").join("bin").join("differ-mcp");
     if cargo_bin.exists() {
         return Ok(cargo_bin.to_string_lossy().to_string());
+    }
+
+    // Check local dev build (built by `bun run dev` / `bun run build`)
+    let exe = std::env::current_exe().ok();
+    if let Some(exe_path) = exe {
+        // Tauri binary is in backend/tauri/target/... — MCP binary is in backend/mcp/target/...
+        if let Some(tauri_target) = exe_path.ancestors().find(|p| p.ends_with("target")) {
+            let mcp_debug = tauri_target.parent().unwrap().parent().unwrap()
+                .join("mcp").join("target").join("debug").join("differ-mcp");
+            if mcp_debug.exists() {
+                return Ok(mcp_debug.to_string_lossy().to_string());
+            }
+            let mcp_release = tauri_target.parent().unwrap().parent().unwrap()
+                .join("mcp").join("target").join("release").join("differ-mcp");
+            if mcp_release.exists() {
+                return Ok(mcp_release.to_string_lossy().to_string());
+            }
+        }
     }
 
     Err("differ-mcp binary not found. Build it with: cd backend/mcp && cargo install --path .".to_string())
