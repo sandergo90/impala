@@ -395,7 +395,7 @@ export function DiffView() {
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
     enableGutterUtility: true,
-    unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
+    unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; } [data-gutter-utility-slot] { z-index: 1; }`,
   };
 
   const toolbar = (
