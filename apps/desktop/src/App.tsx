@@ -66,9 +66,11 @@ function WorktreeTerminalPane({
   onFocusPane: (paneId: string) => void;
   onSessionSpawned: (paneId: string, sessionId: string) => void;
 }) {
-  // Subscribe to both stores so component re-renders on state changes
-  const nav = useUIStore((s) => s.getWorktreeNavState(worktreePath));
+  // Subscribe to raw stored state to trigger re-renders when nav state changes
+  useUIStore((s) => s.worktreeNavStates[worktreePath]);
   const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
+  // Compute merged nav state synchronously (getWorktreeNavState creates new objects, can't use in selector)
+  const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
 
   return (
     <SplitTreeRenderer
