@@ -42,6 +42,8 @@ function getGhostty(): Promise<Ghostty> {
 export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: GhosttyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const isFocusedRef = useRef(isFocused);
+  isFocusedRef.current = isFocused;
   const [loading, setLoading] = useState(true);
   const [exited, setExited] = useState<number | null>(null);
   const [termBg, setTermBg] = useState(() => getTerminalTheme().background);
@@ -163,7 +165,12 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: Ghostt
         return;
       }
 
-      terminal.focus();
+      if (isFocusedRef.current) {
+        terminal.focus();
+      } else {
+        terminal.write("\x1b[?25l"); // hide cursor for unfocused pane
+        terminal.blur();
+      }
 
       // Notify parent when terminal receives focus
       if (onFocus) {
