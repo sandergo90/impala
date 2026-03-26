@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Sidebar } from "./components/Sidebar";
 import { CommitPanel } from "./components/CommitPanel";
@@ -105,6 +105,9 @@ function App() {
         const leaves = getLeaves(tree);
         if (leaves.length <= 1) return; // don't close last pane
 
+        // Determine adjacent pane BEFORE removing, so we know the neighbor
+        const adjacentId = getAdjacentLeafId(tree, focusedId, -1);
+
         const newTree = removeNode(tree, focusedId);
         if (!newTree) return;
 
@@ -117,9 +120,10 @@ function App() {
           useDataStore.getState().updateWorktreeDataState(wtPath, { paneSessions: remaining });
         }
 
-        // Focus adjacent pane
+        // Focus adjacent pane (fall back to first leaf if adjacent was the one removed)
         const newLeaves = getLeaves(newTree);
-        const newFocusId = newLeaves[0]?.id ?? "default";
+        const newLeafIds = new Set(newLeaves.map((l) => l.id));
+        const newFocusId = newLeafIds.has(adjacentId) ? adjacentId : (newLeaves[0]?.id ?? "default");
         useUIStore.getState().updateWorktreeNavState(wtPath, {
           splitTree: newTree,
           focusedPaneId: newFocusId,
@@ -143,18 +147,18 @@ function App() {
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: "diff" });
   };
 
-  const handleFocusPane = (paneId: string) => {
+  const handleFocusPane = useCallback((paneId: string) => {
     if (!wtPath) return;
     useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: paneId });
-  };
+  }, [wtPath]);
 
-  const handleSessionSpawned = (paneId: string, sessionId: string) => {
+  const handleSessionSpawned = useCallback((paneId: string, sessionId: string) => {
     if (!wtPath) return;
     const current = useDataStore.getState().getWorktreeDataState(wtPath);
     useDataStore.getState().updateWorktreeDataState(wtPath, {
       paneSessions: { ...current.paneSessions, [paneId]: sessionId },
     });
-  };
+  }, [wtPath]);
 
   if (checking) return null;
 
