@@ -5,10 +5,15 @@ import { resolveThemeById } from "../themes/apply";
 import { PatchDiff, Virtualizer } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
+import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { AnnotationForm } from "./AnnotationForm";
 import { AnnotationDisplay } from "./AnnotationDisplay";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
+
+type AnnotationMeta =
+  | { type: 'comment'; annotation: Annotation }
+  | { type: 'form' };
 
 function hashPatch(patch: string): string {
   // Strip the diff header (index line contains abbreviated blob hashes whose
@@ -178,34 +183,23 @@ export function DiffView() {
   ]);
 
   // Build Pierre lineAnnotations from our annotations for inline rendering
-  const lineAnnotations = useMemo((): DiffLineAnnotation<Annotation>[] => {
-    return annotations.map((a) => ({
+  const lineAnnotations = useMemo((): DiffLineAnnotation<AnnotationMeta>[] => {
+    const items: DiffLineAnnotation<AnnotationMeta>[] = annotations.map((a) => ({
       side: a.side === "left" ? ("deletions" as const) : ("additions" as const),
       lineNumber: a.line_number,
-      metadata: a,
+      metadata: { type: 'comment' as const, annotation: a },
     }));
-  }, [annotations]);
 
-  // Render inline annotation via Pierre's renderAnnotation slot
-  const renderAnnotation = useCallback(
-    (diffAnnotation: DiffLineAnnotation<Annotation>) => {
-      const a = diffAnnotation.metadata;
-      if (!a) return null;
-      if (a.resolved && !showResolved) return null;
-      return (
-        <div className="px-3 py-1.5 border-t border-border bg-card/60 text-xs">
-          <span className="font-mono text-muted-foreground mr-2">
-            {a.side === "left" ? "L" : "R"}:{a.line_number}
-          </span>
-          <span className="text-foreground">{a.body}</span>
-          {a.resolved && (
-            <span className="ml-2 text-green-400 text-[10px]">(resolved)</span>
-          )}
-        </div>
-      );
-    },
-    [showResolved]
-  );
+    if (pendingAnnotation) {
+      items.push({
+        side: pendingAnnotation.side,
+        lineNumber: pendingAnnotation.lineNumber,
+        metadata: { type: 'form' as const },
+      });
+    }
+
+    return items;
+  }, [annotations, pendingAnnotation]);
 
   const renderGutterUtility = useCallback(
     (getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
@@ -261,6 +255,42 @@ export function DiffView() {
       setShowAnnotationForm(false);
     },
     [selectedProject, selectedFile, selectedCommit, viewMode, annotations, updateData]
+  );
+
+  // Render inline annotation via Pierre's renderAnnotation slot
+  const renderAnnotation = useCallback(
+    (diffAnnotation: DiffLineAnnotation<AnnotationMeta>) => {
+      const meta = diffAnnotation.metadata;
+      if (!meta) return null;
+
+      if (meta.type === 'form') {
+        return (
+          <InlineAnnotationForm
+            onSubmit={(body) => {
+              const side = diffAnnotation.side === "deletions" ? "left" : "right";
+              handleCreate(body, diffAnnotation.lineNumber, side as "left" | "right");
+              setPendingAnnotation(null);
+            }}
+            onCancel={() => setPendingAnnotation(null)}
+          />
+        );
+      }
+
+      const a = meta.annotation;
+      if (a.resolved && !showResolved) return null;
+      return (
+        <div className="px-3 py-1.5 border-t border-border bg-card/60 text-xs">
+          <span className="font-mono text-muted-foreground mr-2">
+            {a.side === "left" ? "L" : "R"}:{a.line_number}
+          </span>
+          <span className="text-foreground">{a.body}</span>
+          {a.resolved && (
+            <span className="ml-2 text-green-400 text-[10px]">(resolved)</span>
+          )}
+        </div>
+      );
+    },
+    [showResolved, handleCreate]
   );
 
   const handleResolve = useCallback(
@@ -444,7 +474,7 @@ export function DiffView() {
     <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
       <div className="flex-1 overflow-auto">
-        <PatchDiff<Annotation>
+        <PatchDiff<AnnotationMeta>
           patch={diffText!}
           lineAnnotations={lineAnnotations}
           renderAnnotation={renderAnnotation}
