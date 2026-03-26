@@ -6,7 +6,6 @@ import { PatchDiff, Virtualizer } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
-import { AnnotationForm } from "./AnnotationForm";
 import { AnnotationDisplay } from "./AnnotationDisplay";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
@@ -90,7 +89,6 @@ export function DiffView() {
 
 
   const [showResolved, setShowResolved] = useState(false);
-  const [showAnnotationForm, setShowAnnotationForm] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [pendingAnnotation, setPendingAnnotation] = useState<{
@@ -155,6 +153,7 @@ export function DiffView() {
 
   // Load annotations when file/commit context changes
   useEffect(() => {
+    setPendingAnnotation(null);
     if (!selectedProject || !selectedFile) {
       updateData({ annotations: [] });
       return;
@@ -252,7 +251,6 @@ export function DiffView() {
         body,
       });
       updateData({ annotations: [...annotations, created] });
-      setShowAnnotationForm(false);
     },
     [selectedProject, selectedFile, selectedCommit, viewMode, annotations, updateData]
   );
@@ -385,12 +383,6 @@ export function DiffView() {
             >
               Resolved
             </button>
-            <button
-              onClick={() => setShowAnnotationForm(!showAnnotationForm)}
-              className="px-2 py-0.5 rounded bg-accent text-accent-foreground hover:opacity-90"
-            >
-              + Comment
-            </button>
           </>
         )}
       </div>
@@ -485,14 +477,6 @@ export function DiffView() {
 
       {/* Annotation panel below the diff */}
       <div className="border-t bg-background">
-        {showAnnotationForm && (
-          <div className="p-3 border-b">
-            <AnnotationForm
-              onSubmit={handleCreate}
-              onCancel={() => setShowAnnotationForm(false)}
-            />
-          </div>
-        )}
         {visibleAnnotations.length > 0 && (
           <div className="flex flex-col gap-1.5 p-3 max-h-48 overflow-y-auto">
             {visibleAnnotations.map((a) => (
