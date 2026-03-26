@@ -6,8 +6,10 @@ mod watcher;
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::Manager;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use notify::{Config, Event, RecommendedWatcher, Watcher, RecursiveMode};
+use tauri::{Emitter, Manager};
 
 struct DbState(Mutex<rusqlite::Connection>);
 struct DiffCache(Mutex<lru::LruCache<String, String>>);
@@ -284,6 +286,54 @@ pub fn run() {
             app.manage(DiffCache(Mutex::new(lru::LruCache::new(
                 std::num::NonZeroUsize::new(50).unwrap(),
             ))));
+
+            // Watch annotations DB parent dir for external changes (e.g. MCP server)
+            {
+                let db_dir = app_dir.clone();
+                let app_handle = app.handle().clone();
+                let last_db_event = Arc::new(Mutex::new(Instant::now()));
+                let db_debounce_flag = Arc::new(Mutex::new(false));
+
+                let last_ref = last_db_event.clone();
+                let flag_ref = db_debounce_flag.clone();
+
+                let mut db_watcher = RecommendedWatcher::new(
+                    move |res: Result<Event, notify::Error>| {
+                        if res.is_ok() {
+                            if let Ok(mut last) = last_ref.lock() {
+                                *last = Instant::now();
+                            }
+                            let mut flag = flag_ref.lock().unwrap();
+                            if !*flag {
+                                *flag = true;
+                                let app_ref = app_handle.clone();
+                                let last_inner = last_db_event.clone();
+                                let flag_inner = db_debounce_flag.clone();
+                                std::thread::spawn(move || {
+                                    loop {
+                                        std::thread::sleep(Duration::from_millis(300));
+                                        let elapsed = {
+                                            let last = last_inner.lock().unwrap();
+                                            last.elapsed()
+                                        };
+                                        if elapsed >= Duration::from_millis(300) {
+                                            let _ = app_ref.emit("annotations-changed", ());
+                                            let mut f = flag_inner.lock().unwrap();
+                                            *f = false;
+                                            break;
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    },
+                    Config::default(),
+                ).map_err(|e| format!("Failed to create DB watcher: {}", e))?;
+
+                // Watch parent dir (catches WAL/SHM changes too)
+                let _ = db_watcher.watch(db_dir.as_ref(), RecursiveMode::NonRecursive);
+                app.manage(db_watcher);
+            }
 
             // Set window icon for dev mode (bundle icon is used in production)
             if let Some(window) = app.get_webview_window("main") {

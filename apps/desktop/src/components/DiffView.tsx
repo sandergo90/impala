@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
 import { PatchDiff, Virtualizer } from "@pierre/diffs/react";
@@ -189,6 +190,25 @@ export function DiffView() {
     viewMode,
     updateData,
   ]);
+
+  // Re-fetch annotations when the DB is modified externally (e.g. MCP server)
+  useEffect(() => {
+    const unlisten = listen("annotations-changed", () => {
+      if (!selectedProject || !selectedFile) return;
+      const repoPath = selectedProject.path;
+      const filePath = selectedFile.path;
+      const commitHash =
+        viewMode === "commit" && selectedCommit
+          ? selectedCommit.hash
+          : "all-changes";
+      sqliteProvider
+        .list(repoPath, filePath, commitHash)
+        .then((anns) => updateData({ annotations: anns }))
+        .catch(() => {});
+    });
+
+    return () => { unlisten.then((fn) => fn()); };
+  }, [selectedProject?.path, selectedFile?.path, selectedCommit?.hash, viewMode, updateData]);
 
   const lineAnnotations = useMemo((): DiffLineAnnotation<AnnotationMeta>[] => {
     const items: DiffLineAnnotation<AnnotationMeta>[] = annotations.map((a) => ({
