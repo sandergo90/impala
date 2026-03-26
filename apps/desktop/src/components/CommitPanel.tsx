@@ -48,10 +48,11 @@ export function CommitPanel() {
     updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
     try {
-      const filesPromise = invoke<ChangedFile[]>("get_all_changed_files", { worktreePath });
-      const diffPromise = invoke<string>("get_full_branch_diff", { worktreePath });
-      updateData({ changedFiles: await filesPromise });
-      updateData({ fileDiffs: splitPatch(await diffPromise) });
+      const [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
+        invoke<string>("get_full_branch_diff", { worktreePath }),
+      ]);
+      updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
@@ -61,10 +62,11 @@ export function CommitPanel() {
     updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
     try {
-      const filesPromise = invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath });
-      const diffPromise = invoke<string>("get_uncommitted_diff", { worktreePath });
-      updateData({ changedFiles: await filesPromise });
-      updateData({ fileDiffs: splitPatch(await diffPromise) });
+      const [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
+        invoke<string>("get_uncommitted_diff", { worktreePath }),
+      ]);
+      updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
     } catch (e) {
       toast.error("Failed to load uncommitted changes");
     }
@@ -74,45 +76,21 @@ export function CommitPanel() {
     updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {} });
     try {
-      const filesPromise = invoke<ChangedFile[]>("get_changed_files", { worktreePath, commitHash: commit.hash });
-      const diffPromise = invoke<string>("get_full_commit_diff", { worktreePath, commitHash: commit.hash });
-      updateData({ changedFiles: await filesPromise });
-      updateData({ fileDiffs: splitPatch(await diffPromise) });
+      const [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_changed_files", { worktreePath, commitHash: commit.hash }),
+        invoke<string>("get_full_commit_diff", { worktreePath, commitHash: commit.hash }),
+      ]);
+      updateData({ changedFiles: files, fileDiffs: splitPatch(fullDiff) });
     } catch (e) {
       toast.error("Failed to load commit");
     }
   };
 
-  const selectFile = async (file: ChangedFile) => {
+  const selectFile = (file: ChangedFile) => {
     updateNav({ selectedFile: file });
-    try {
-      let diff: string;
-      if (viewMode === 'uncommitted') {
-        // For uncommitted, get diff of working tree
-        diff = await invoke<string>("get_uncommitted_diff", {
-          worktreePath: worktreePath,
-        });
-        // Extract just this file's diff from the full output
-        const parts = diff.split(/^diff --git /m).filter(Boolean);
-        const filePart = parts.find(p => p.includes(`a/${file.path} b/${file.path}`));
-        diff = filePart ? "diff --git " + filePart : "";
-      } else if (viewMode === 'all-changes') {
-        diff = await invoke<string>("get_branch_diff", {
-          worktreePath: worktreePath,
-          filePath: file.path,
-        });
-      } else {
-        if (!selectedCommit) return;
-        diff = await invoke<string>("get_commit_diff", {
-          worktreePath: worktreePath,
-          commitHash: selectedCommit.hash,
-          filePath: file.path,
-        });
-      }
-      updateData({ diffText: diff });
-    } catch (e) {
-      toast.error("Failed to load diff");
-    }
+    const currentFileDiffs = useDataStore.getState().getWorktreeDataState(worktreePath).fileDiffs;
+    const diff = currentFileDiffs[file.path] ?? "";
+    updateData({ diffText: diff });
   };
 
   // Auto-refresh when files or git refs change on disk
