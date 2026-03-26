@@ -11,6 +11,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
+import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { useUIStore, useDataStore } from "./store";
 
 function App() {
@@ -191,6 +192,16 @@ function App() {
         <SettingsView />
       ) : (
         /* Main content area */
+        <WorkerPoolContextProvider
+          poolOptions={{
+            workerFactory: () => new Worker(
+              new URL("@pierre/diffs/worker/worker.js", import.meta.url),
+              { type: "module" }
+            ),
+            poolSize: 2,
+          }}
+          highlighterOptions={{}}
+        >
         <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
           {/* Sidebar */}
           {!sidebarCollapsed && (
@@ -263,6 +274,7 @@ function App() {
             </>
           )}
         </ResizablePanelGroup>
+        </WorkerPoolContextProvider>
       )}
 
       <Toaster />
