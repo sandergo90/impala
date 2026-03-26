@@ -29,14 +29,13 @@ function ProjectBadge({ name }: { name: string }) {
 }
 
 function BranchIcon({ active }: { active: boolean }) {
-  const color = active ? "#3b82f6" : "#555";
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0">
-      <circle cx="4" cy="4" r="2" stroke={color} strokeWidth="1.4" fill="none"/>
-      <circle cx="4" cy="12" r="2" stroke={color} strokeWidth="1.4" fill="none"/>
-      <line x1="4" y1="6" x2="4" y2="10" stroke={color} strokeWidth="1.4"/>
-      <path d="M4 8 L10 4" stroke={color} strokeWidth="1.4"/>
-      <circle cx="12" cy="4" r="2" stroke={color} strokeWidth="1.4" fill="none"/>
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className={`shrink-0 ${active ? "text-primary" : "text-muted-foreground/50"}`}>
+      <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+      <circle cx="4" cy="12" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+      <line x1="4" y1="6" x2="4" y2="10" stroke="currentColor" strokeWidth="1.4"/>
+      <path d="M4 8 L10 4" stroke="currentColor" strokeWidth="1.4"/>
+      <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
     </svg>
   );
 }
@@ -212,18 +211,17 @@ export function Sidebar() {
       {/* Project Switcher */}
       <div
         onClick={() => setShowDropdown(!showDropdown)}
-        className="mx-2.5 mt-2.5 mb-1.5 px-2.5 py-1.5 rounded-md flex items-center gap-2 cursor-pointer hover:bg-[#282828]"
-        style={{ background: "rgba(255,255,255,0.06)" }}
+        className="mx-2.5 mt-2.5 mb-1.5 px-2.5 py-1.5 rounded-md flex items-center gap-2 cursor-pointer bg-accent hover:bg-accent/80"
       >
         {selectedProject ? (
           <>
             <ProjectBadge name={selectedProject.name} />
-            <span className="text-[#e5e5e5] text-[12px] font-medium truncate">{selectedProject.name}</span>
+            <span className="text-foreground text-[12px] font-medium truncate">{selectedProject.name}</span>
           </>
         ) : (
-          <span className="text-[#888] text-[12px]">Select project</span>
+          <span className="text-muted-foreground text-[12px]">Select project</span>
         )}
-        <span className="ml-auto text-[#555] text-[9px]">&#9662;</span>
+        <span className="ml-auto text-muted-foreground/50 text-[9px]">&#9662;</span>
       </div>
 
       {/* Project Dropdown */}
@@ -231,30 +229,28 @@ export function Sidebar() {
         <>
           <div className="fixed inset-0 z-20" onClick={() => setShowDropdown(false)} />
           <div
-            className="absolute left-2.5 right-2.5 top-[52px] z-30 rounded-md border py-1 shadow-lg"
-            style={{ background: "#252525", borderColor: "rgba(255,255,255,0.1)" }}
+            className="absolute left-2.5 right-2.5 top-[52px] z-30 rounded-md border border-border bg-popover py-1 shadow-lg"
           >
             {projects.map((project) => (
               <div
                 key={project.path}
                 onClick={() => { selectProject(project); setShowDropdown(false); }}
-                className="group flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-white/5"
+                className="group flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent"
               >
                 <ProjectBadge name={project.name} />
-                <span className={`text-[12px] truncate ${selectedProject?.path === project.path ? "text-[#e5e5e5] font-medium" : "text-[#999]"}`}>
+                <span className={`text-[12px] truncate ${selectedProject?.path === project.path ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                   {project.name}
                 </span>
                 <span
                   onClick={(e) => handleRemoveProject(e, project.path)}
-                  className="ml-auto opacity-0 group-hover:opacity-100 text-[#666] hover:text-[#ccc] px-1 text-[11px]"
+                  className="ml-auto opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground px-1 text-[11px]"
                 >
                   &times;
                 </span>
               </div>
             ))}
             <div
-              className="border-t mt-1 pt-1 flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-white/5 text-[#666] text-[11px]"
-              style={{ borderColor: "rgba(255,255,255,0.06)" }}
+              className="border-t border-border mt-1 pt-1 flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent text-muted-foreground text-[11px]"
               onClick={() => { openProject(); setShowDropdown(false); }}
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
@@ -268,10 +264,10 @@ export function Sidebar() {
       {selectedProject && (
         <>
           <div className="flex items-center justify-between px-3.5 pt-2 pb-1">
-            <span className="text-[9px] uppercase tracking-[1.2px] text-[#555]">Worktrees</span>
+            <span className="text-[9px] uppercase tracking-[1.2px] text-muted-foreground/50">Worktrees</span>
             <button
               onClick={() => setShowNewWorktree(true)}
-              className="text-[#444] hover:text-[#888] text-[14px] leading-none"
+              className="text-muted-foreground/50 hover:text-muted-foreground text-[14px] leading-none"
             >
               +
             </button>
@@ -287,17 +283,16 @@ export function Sidebar() {
                 onClick={() => selectWorktree(wt)}
                 className={`flex items-center gap-2 mx-2 my-0.5 px-3 py-1.5 rounded-[5px] text-left transition-colors ${
                   isSelected
-                    ? "border-l-2 border-[#3b82f6] pl-2.5"
-                    : "hover:bg-white/[0.03]"
+                    ? "border-l-2 border-primary pl-2.5 bg-primary/10"
+                    : "hover:bg-accent"
                 }`}
-                style={isSelected ? { background: "rgba(59,130,246,0.08)" } : undefined}
               >
                 <BranchIcon active={isSelected} />
                 <div className="min-w-0">
-                  <div className={`text-[11px] truncate ${isSelected ? "text-[#e5e5e5] font-medium" : "text-[#999]"}`}>
+                  <div className={`text-[11px] truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                     {wt.branch}
                   </div>
-                  <div className={`text-[9px] mt-0.5 ${isSelected ? "text-[#6b7280]" : "text-[#555]"}`}>
+                  <div className={`text-[9px] mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
                     {aheadCount > 0 ? `${aheadCount} commit${aheadCount === 1 ? "" : "s"} ahead` : "up to date"}
                   </div>
                 </div>
@@ -313,8 +308,7 @@ export function Sidebar() {
       {!selectedProject && (
         <button
           onClick={openProject}
-          className="flex items-center gap-1.5 px-3.5 py-2 text-[10px] text-[#444] hover:text-[#888] transition-colors"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
+          className="flex items-center gap-1.5 px-3.5 py-2 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           Open Project
@@ -324,8 +318,7 @@ export function Sidebar() {
       {/* Settings gear — always at bottom */}
       <button
         onClick={() => useUIStore.getState().setCurrentView("settings")}
-        className="flex items-center gap-1.5 px-3.5 py-2.5 text-[#444] hover:text-[#888] transition-colors"
-        style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
+        className="flex items-center gap-1.5 px-3.5 py-2.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
