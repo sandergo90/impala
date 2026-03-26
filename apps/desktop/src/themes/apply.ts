@@ -5,38 +5,57 @@ import { getBuiltInTheme, defaultDark } from "./built-in";
 /** Current theme reference for Pierre's async theme loaders */
 let currentTheme: Theme = defaultDark;
 
-// Register custom Pierre themes that dynamically use our app theme colors.
-// The loaders clone Pierre's syntax tokens but override editor bg/fg/diff colors.
-registerCustomTheme("differ-dark", async () => {
-  const base = await import("@pierre/theme/themes/pierre-dark.json").then((m) => m.default ?? m);
+/** Map terminal ANSI colors to syntax token scopes */
+function buildTokenColors(t: Theme["terminal"]): Array<{ scope: string | string[]; settings: { foreground: string; fontStyle?: string } }> {
+  return [
+    { scope: "comment", settings: { foreground: t.brightBlack, fontStyle: "italic" } },
+    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: t.red } },
+    { scope: ["string", "string.quoted"], settings: { foreground: t.green } },
+    { scope: ["constant.numeric", "constant.language"], settings: { foreground: t.cyan } },
+    { scope: ["variable.other.constant", "constant.other"], settings: { foreground: t.brightYellow } },
+    { scope: ["entity.name.function", "support.function"], settings: { foreground: t.magenta } },
+    { scope: ["entity.name.type", "support.type", "support.class"], settings: { foreground: t.brightMagenta } },
+    { scope: ["variable", "variable.other"], settings: { foreground: t.yellow } },
+    { scope: "variable.parameter", settings: { foreground: t.brightCyan } },
+    { scope: ["entity.name.tag", "punctuation.definition.tag"], settings: { foreground: t.red } },
+    { scope: "entity.other.attribute-name", settings: { foreground: t.yellow } },
+    { scope: ["keyword.operator"], settings: { foreground: t.brightBlack } },
+    { scope: "string.regexp", settings: { foreground: t.brightCyan } },
+    { scope: "invalid.illegal", settings: { foreground: t.brightRed } },
+  ];
+}
+
+function patchTheme(
+  base: { colors: Record<string, string>; tokenColors: unknown[]; [k: string]: unknown },
+  name: string,
+  type: "dark" | "light",
+): Record<string, unknown> {
+  const t = currentTheme;
   return {
     ...base,
-    name: "differ-dark",
-    type: "dark" as const,
+    name,
+    type,
     colors: {
       ...base.colors,
-      "editor.background": currentTheme.ui.background,
-      "editor.foreground": currentTheme.ui.foreground,
-      "diffEditor.insertedTextBackground": currentTheme.terminal.green + "1a",
-      "diffEditor.removedTextBackground": currentTheme.terminal.red + "1a",
+      "editor.background": t.ui.background,
+      "editor.foreground": t.ui.foreground,
+      "diffEditor.insertedTextBackground": t.terminal.green + "1a",
+      "diffEditor.removedTextBackground": t.terminal.red + "1a",
     },
+    tokenColors: buildTokenColors(t.terminal),
   };
+}
+
+registerCustomTheme("differ-dark", async () => {
+  const base = await import("@pierre/theme/themes/pierre-dark.json").then((m) => m.default ?? m);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return patchTheme(base, "differ-dark", "dark") as any;
 });
 
 registerCustomTheme("differ-light", async () => {
   const base = await import("@pierre/theme/themes/pierre-light.json").then((m) => m.default ?? m);
-  return {
-    ...base,
-    name: "differ-light",
-    type: "light" as const,
-    colors: {
-      ...base.colors,
-      "editor.background": currentTheme.ui.background,
-      "editor.foreground": currentTheme.ui.foreground,
-      "diffEditor.insertedTextBackground": currentTheme.terminal.green + "1a",
-      "diffEditor.removedTextBackground": currentTheme.terminal.red + "1a",
-    },
-  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return patchTheme(base, "differ-light", "light") as any;
 });
 
 export function resolveTheme(theme: Theme): ResolvedCSS {
