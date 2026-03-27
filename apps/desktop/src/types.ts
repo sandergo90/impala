@@ -61,7 +61,7 @@ export type SplitNode =
     };
 
 export interface WorktreeNavState {
-  activeTab: "terminal" | "diff";
+  activeTab: "terminal" | "diff" | "split";
   splitTree: SplitNode;
   focusedPaneId: string;
   claudeLaunched: boolean;

@@ -118,10 +118,10 @@ function App() {
         return;
       }
 
-      // Split keybindings only apply when terminal tab is active
+      // Split keybindings apply when terminal or split tab is active
       if (!wtPath) return;
       const nav = useUIStore.getState().getWorktreeNavState(wtPath);
-      if (nav.activeTab !== "terminal") return;
+      if (nav.activeTab !== "terminal" && nav.activeTab !== "split") return;
 
       const focusedId = nav.focusedPaneId;
       const tree = nav.splitTree;
@@ -221,6 +221,13 @@ function App() {
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: "diff" });
   };
 
+  const handleSplitTab = () => {
+    if (!selectedWorktree) return;
+    useUIStore
+      .getState()
+      .updateWorktreeNavState(selectedWorktree.path, { activeTab: "split" });
+  };
+
   const handleFocusPane = useCallback((paneId: string) => {
     if (!wtPath) return;
     useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: paneId });
@@ -317,6 +324,7 @@ function App() {
                 <>
                   {tabPill("Diff", activeTab === "diff", handleDiffTab)}
                   {tabPill("Terminal", activeTab === "terminal", handleTerminalTab)}
+                  {tabPill("Split", activeTab === "split", handleSplitTab)}
                   <span className="mx-1 w-px h-3.5 bg-border" />
                 </>
               )}
@@ -364,6 +372,20 @@ function App() {
                   <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                     Select a worktree
                   </div>
+                ) : activeTab === "split" ? (
+                  <ResizablePanelGroup orientation="horizontal">
+                    <ResizablePanel defaultSize="50%" minSize={200}>
+                      <WorktreeTerminals
+                        activeWorktreePath={wtPath!}
+                        onFocusPane={handleFocusPane}
+                        onSessionSpawned={handleSessionSpawned}
+                      />
+                    </ResizablePanel>
+                    <ResizableHandle withHandle />
+                    <ResizablePanel defaultSize="50%" minSize={200}>
+                      <DiffView />
+                    </ResizablePanel>
+                  </ResizablePanelGroup>
                 ) : (
                   <>
                     <div className={activeTab === "diff" ? "h-full" : "hidden"}>
