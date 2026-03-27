@@ -135,7 +135,7 @@ pub fn pty_spawn(
             }
         }
         let exit_event = format!("pty-exit-{}", safe_id);
-        let _ = app_handle.emit(&exit_event, ());
+        let _ = app_handle.emit(&exit_event, 0i32);
     });
 
     Ok(())

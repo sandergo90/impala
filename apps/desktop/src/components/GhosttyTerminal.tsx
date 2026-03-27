@@ -15,6 +15,7 @@ interface GhosttyTerminalProps {
   sessionId: string;
   isFocused?: boolean;
   onFocus?: () => void;
+  onRestart?: () => void;
 }
 
 function sanitizeEventId(id: string): string {
@@ -39,11 +40,12 @@ function getGhostty(): Promise<Ghostty> {
   return ghosttyPromise;
 }
 
-export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: GhosttyTerminalProps) {
+export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestart }: GhosttyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const isFocusedRef = useRef(isFocused);
   isFocusedRef.current = isFocused;
+  const exitedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [exited, setExited] = useState<number | null>(null);
   const [termBg, setTermBg] = useState(() => getTerminalTheme().background);
@@ -60,11 +62,22 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: Ghostt
     let unlistenOutput: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
 
-    // Intercept split keybindings in capture phase before Ghostty consumes them
+    // Intercept keybindings in capture phase before Ghostty consumes them
     const interceptKeys = (e: KeyboardEvent) => {
       if (e.metaKey) {
         if (e.key === "d" || e.key === "D" || e.key === "[" || e.key === "]" || e.key === "w" || e.key === ",") {
           e.stopPropagation();
+        }
+        if (e.key === "k") {
+          e.preventDefault();
+          e.stopPropagation();
+          // Ctrl+L clears screen in shells; SIGWINCH redraws TUI apps
+          const ctrlL = btoa(String.fromCharCode(0x0c));
+          invoke("pty_write", { sessionId, data: ctrlL }).catch(() => {});
+          const dims = fitAddon?.proposeDimensions();
+          if (dims) {
+            invoke("pty_resize", { sessionId, rows: dims.rows, cols: dims.cols }).catch(() => {});
+          }
         }
       }
     };
@@ -134,16 +147,18 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: Ghostt
       fitAddon.observeResize();
 
       resizeDisposable = terminal.onResize(({ cols, rows }) => {
-        invoke("pty_resize", { sessionId, rows, cols });
+        if (exitedRef.current) return;
+        invoke("pty_resize", { sessionId, rows, cols }).catch(() => {});
       });
 
       dataDisposable = terminal.onData((data: string) => {
+        if (exitedRef.current) return;
         const encoded = btoa(
           Array.from(new TextEncoder().encode(data), (b) =>
             String.fromCharCode(b)
           ).join("")
         );
-        invoke("pty_write", { sessionId, data: encoded });
+        invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
       });
 
       const safeId = sanitizeEventId(sessionId);
@@ -155,6 +170,7 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: Ghostt
 
       unlistenExit = await listen<number>(`pty-exit-${safeId}`, (event) => {
         if (cancelled) return;
+        exitedRef.current = true;
         setExited(event.payload);
       });
 
@@ -244,6 +260,14 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus }: Ghostt
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-20">
           <div className="text-center text-muted-foreground">
             <p className="text-sm">Process exited with code {exited}</p>
+            {onRestart && (
+              <button
+                onClick={onRestart}
+                className="mt-2 text-sm px-3 py-1 rounded bg-accent text-accent-foreground hover:bg-accent/80"
+              >
+                Restart
+              </button>
+            )}
           </div>
         </div>
       )}

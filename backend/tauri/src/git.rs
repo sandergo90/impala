@@ -227,7 +227,7 @@ pub fn get_full_branch_diff(worktree_path: &str) -> Result<String, String> {
 }
 
 pub fn get_uncommitted_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {
-    let output = run_git(worktree_path, &["status", "--porcelain"])?;
+    let output = run_git(worktree_path, &["status", "--porcelain", "-uall"])?;
     let files = output
         .lines()
         .filter(|line| !line.is_empty())
@@ -246,19 +246,31 @@ pub fn get_uncommitted_diff(worktree_path: &str) -> Result<String, String> {
     let staged = run_git(worktree_path, &["diff", "--cached"]).unwrap_or_default();
 
     // Generate diffs for untracked files (git diff doesn't include them)
-    let status = run_git(worktree_path, &["status", "--porcelain"]).unwrap_or_default();
+    let status = run_git(worktree_path, &["status", "--porcelain", "-uall"]).unwrap_or_default();
     let mut untracked_diffs = String::new();
     for line in status.lines() {
         if line.starts_with("??") {
             let file_path = &line[3..];
             let full_path = std::path::Path::new(worktree_path).join(file_path);
-            if let Ok(content) = std::fs::read_to_string(&full_path) {
-                let line_count = content.lines().count();
-                untracked_diffs.push_str(&format!("diff --git a/{f} b/{f}\nnew file mode 100644\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1,{line_count} @@\n", f = file_path));
-                for line in content.lines() {
-                    untracked_diffs.push('+');
-                    untracked_diffs.push_str(line);
-                    untracked_diffs.push('\n');
+            match std::fs::read_to_string(&full_path) {
+                Ok(content) => {
+                    let line_count = content.lines().count().max(1);
+                    untracked_diffs.push_str(&format!("diff --git a/{f} b/{f}\nnew file mode 100644\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1,{line_count} @@\n", f = file_path));
+                    for line in content.lines() {
+                        untracked_diffs.push('+');
+                        untracked_diffs.push_str(line);
+                        untracked_diffs.push('\n');
+                    }
+                    if content.is_empty() {
+                        untracked_diffs.push_str("+\n");
+                    }
+                }
+                Err(_) => {
+                    // Binary or unreadable file — generate a minimal diff header
+                    untracked_diffs.push_str(&format!(
+                        "diff --git a/{f} b/{f}\nnew file mode 100644\nBinary files /dev/null and b/{f} differ\n",
+                        f = file_path
+                    ));
                 }
             }
         }
@@ -302,6 +314,15 @@ pub fn create_worktree(
         branch: branch_name.to_string(),
         head_commit: head,
     })
+}
+
+pub fn delete_worktree(repo_path: &str, worktree_path: &str, force: bool) -> Result<(), String> {
+    let mut args = vec!["worktree", "remove", worktree_path];
+    if force {
+        args.push("--force");
+    }
+    run_git(repo_path, &args)?;
+    Ok(())
 }
 
 pub fn list_branches(repo_path: &str) -> Result<Vec<BranchInfo>, String> {

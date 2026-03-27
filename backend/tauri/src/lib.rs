@@ -175,6 +175,11 @@ fn create_worktree(
 }
 
 #[tauri::command]
+fn delete_worktree(repo_path: String, worktree_path: String, force: bool) -> Result<(), String> {
+    git::delete_worktree(&repo_path, &worktree_path, force)
+}
+
+#[tauri::command]
 fn list_branches(repo_path: String) -> Result<Vec<git::BranchInfo>, String> {
     git::list_branches(&repo_path)
 }
@@ -445,6 +450,7 @@ pub fn run() {
             get_uncommitted_files,
             get_uncommitted_diff,
             create_worktree,
+            delete_worktree,
             list_branches,
             load_projects,
             save_projects,

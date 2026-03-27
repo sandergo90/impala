@@ -59,7 +59,8 @@ export function CommitPanel() {
   }, []);
 
   const selectAllChanges = async () => {
-    updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
+    const currentTab = navState?.activeTab ?? 'diff';
+    updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([
@@ -78,7 +79,8 @@ export function CommitPanel() {
   };
 
   const selectUncommitted = async () => {
-    updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
+    const currentTab = navState?.activeTab ?? 'diff';
+    updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([
@@ -97,7 +99,8 @@ export function CommitPanel() {
   };
 
   const selectCommit = async (commit: CommitInfo) => {
-    updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: 'diff' });
+    const currentTab = navState?.activeTab ?? 'diff';
+    updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, CollapsedSidebar } from "./components/Sidebar";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffView } from "./components/DiffView";
 import { SplitTreeRenderer } from "./components/SplitTreeRenderer";
@@ -20,10 +20,12 @@ function WorktreeTerminals({
   activeWorktreePath,
   onFocusPane,
   onSessionSpawned,
+  claudeOnly = false,
 }: {
   activeWorktreePath: string | null;
   onFocusPane: (paneId: string) => void;
   onSessionSpawned: (paneId: string, sessionId: string) => void;
+  claudeOnly?: boolean;
 }) {
   const [visitedPaths, setVisitedPaths] = useState<Set<string>>(new Set());
 
@@ -37,21 +39,30 @@ function WorktreeTerminals({
   }, [activeWorktreePath]);
 
   return (
-    <>
+    <div className="relative h-full">
       {[...visitedPaths].map((path) => {
         const isActive = path === activeWorktreePath;
         return (
-          <div key={path} className={isActive ? "h-full" : "hidden"}>
+          <div
+            key={path}
+            className="absolute inset-0"
+            style={{
+              visibility: isActive ? "visible" : "hidden",
+              zIndex: isActive ? 1 : 0,
+              pointerEvents: isActive ? "auto" : "none",
+            }}
+          >
             <WorktreeTerminalPane
               worktreePath={path}
               isActive={isActive}
               onFocusPane={onFocusPane}
               onSessionSpawned={onSessionSpawned}
+              claudeOnly={claudeOnly}
             />
           </div>
         );
       })}
-    </>
+    </div>
   );
 }
 
@@ -60,11 +71,13 @@ function WorktreeTerminalPane({
   isActive,
   onFocusPane,
   onSessionSpawned,
+  claudeOnly = false,
 }: {
   worktreePath: string;
   isActive: boolean;
   onFocusPane: (paneId: string) => void;
   onSessionSpawned: (paneId: string, sessionId: string) => void;
+  claudeOnly?: boolean;
 }) {
   // Subscribe to raw stored state to trigger re-renders when nav state changes
   useUIStore((s) => s.worktreeNavStates[worktreePath]);
@@ -72,9 +85,13 @@ function WorktreeTerminalPane({
   // Compute merged nav state synchronously (getWorktreeNavState creates new objects, can't use in selector)
   const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
 
+  const tree = claudeOnly
+    ? (getLeaves(nav.splitTree).find((l) => l.paneType === "claude") ?? nav.splitTree)
+    : nav.splitTree;
+
   return (
     <SplitTreeRenderer
-      tree={nav.splitTree}
+      tree={tree}
       worktreePath={worktreePath}
       focusedPaneId={isActive ? nav.focusedPaneId : ""}
       paneSessions={dataState?.paneSessions ?? {}}
@@ -129,6 +146,7 @@ function App() {
       // Cmd+D → split vertical
       if (e.metaKey && !e.shiftKey && e.key === "d") {
         e.preventDefault();
+        if (nav.activeTab === "split") return;
         const result = splitNode(tree, focusedId, "vertical");
         if (result) {
           useUIStore.getState().updateWorktreeNavState(wtPath, {
@@ -142,6 +160,7 @@ function App() {
       // Cmd+Shift+D → split horizontal
       if (e.metaKey && e.shiftKey && (e.key === "D" || e.key === "d")) {
         e.preventDefault();
+        if (nav.activeTab === "split") return;
         const result = splitNode(tree, focusedId, "horizontal");
         if (result) {
           useUIStore.getState().updateWorktreeNavState(wtPath, {
@@ -352,6 +371,10 @@ function App() {
           }}
           highlighterOptions={{}}
         >
+        <div className="flex flex-1 min-h-0">
+        {sidebarCollapsed && (
+          <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
+        )}
         <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
           {/* Sidebar */}
           {!sidebarCollapsed && (
@@ -379,6 +402,7 @@ function App() {
                         activeWorktreePath={wtPath!}
                         onFocusPane={handleFocusPane}
                         onSessionSpawned={handleSessionSpawned}
+                        claudeOnly
                       />
                     </ResizablePanel>
                     <ResizableHandle withHandle />
@@ -412,6 +436,7 @@ function App() {
             </>
           )}
         </ResizablePanelGroup>
+        </div>
         </WorkerPoolContextProvider>
       )}
 

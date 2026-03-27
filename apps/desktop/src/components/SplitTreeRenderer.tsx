@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ResizablePanelGroup,
@@ -8,7 +8,7 @@ import {
 import { GhosttyTerminal } from "./GhosttyTerminal";
 import type { SplitNode } from "../types";
 import { paneSessionId } from "../lib/split-tree";
-import { useUIStore } from "../store";
+import { useUIStore, useDataStore } from "../store";
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -122,28 +122,39 @@ function LeafPane({
   onFocus: () => void;
   onSessionSpawned: (sessionId: string) => void;
 }) {
+  const handleRestart = useCallback(() => {
+    if (!sessionId) return;
+    invoke("pty_kill", { sessionId }).catch(() => {});
+    const data = useDataStore.getState().getWorktreeDataState(worktreePath);
+    const { [paneId]: _, ...remaining } = data.paneSessions;
+    useDataStore.getState().updateWorktreeDataState(worktreePath, { paneSessions: remaining });
+  }, [sessionId, paneId, worktreePath]);
+
   // Auto-spawn PTY session when leaf has no session
   // Backend deduplicates via sessions.contains_key — safe to call multiple times
   useEffect(() => {
     if (sessionId) return;
 
     const ptyId = paneSessionId(paneId);
-    let command: string[] | null = null;
-    if (paneType === "claude") {
-      const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
-      command = claudeLaunched
-        ? ["claude", "--dangerously-skip-permissions", "--continue"]
-        : ["claude", "--dangerously-skip-permissions"];
-    }
 
     invoke("pty_spawn", {
       sessionId: ptyId,
       cwd: worktreePath,
-      command,
+      command: null,
     })
       .then(() => {
         onSessionSpawned(ptyId);
         if (paneType === "claude") {
+          const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
+          const claudeCmd = claudeLaunched
+            ? "claude --dangerously-skip-permissions --remote-control --continue\n"
+            : "claude --dangerously-skip-permissions --remote-control\n";
+          const encoded = btoa(
+            Array.from(new TextEncoder().encode(claudeCmd), (b) =>
+              String.fromCharCode(b)
+            ).join("")
+          );
+          invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
           useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
         }
       })
@@ -180,6 +191,7 @@ function LeafPane({
           sessionId={sessionId}
           isFocused={isFocused}
           onFocus={onFocus}
+          onRestart={handleRestart}
         />
       ) : (
         <div className="flex items-center justify-center h-full text-muted-foreground text-sm">

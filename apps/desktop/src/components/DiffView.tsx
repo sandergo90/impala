@@ -136,10 +136,7 @@ export function DiffView() {
 
   const toggleViewed = useCallback((path: string) => {
     if (!worktreePath || !commitHashForViewed) return;
-    const patch = fileDiffs[path];
-    if (!patch) return;
-    const patchHash = fileDiffHashes[path];
-    if (!patchHash) return;
+    const patchHash = fileDiffHashes[path] ?? "new-file";
 
     const isCurrentlyViewed = viewedFiles.has(path);
     if (isCurrentlyViewed) {
@@ -153,18 +150,18 @@ export function DiffView() {
       viewedFilesProvider.set(worktreePath, commitHashForViewed, path, patchHash);
       setViewedFiles((prev) => new Set(prev).add(path));
     }
-  }, [worktreePath, commitHashForViewed, fileDiffs, fileDiffHashes, viewedFiles]);
+  }, [worktreePath, commitHashForViewed, fileDiffHashes, viewedFiles]);
 
   // Load annotations when file/commit context changes
   useEffect(() => {
     setPendingAnnotation(null);
-    if (!selectedProject || !selectedFile) {
+    if (!selectedProject) {
       updateData({ annotations: [] });
       return;
     }
 
     const repoPath = selectedProject.path;
-    const filePath = selectedFile.path;
+    const filePath = selectedFile?.path;
     const commitHash =
       viewMode === "commit" && selectedCommit
         ? selectedCommit.hash
@@ -188,9 +185,9 @@ export function DiffView() {
   // Re-fetch annotations when the DB is modified externally (e.g. MCP server)
   useEffect(() => {
     const unlisten = listen("annotations-changed", () => {
-      if (!selectedProject || !selectedFile) return;
+      if (!selectedProject) return;
       const repoPath = selectedProject.path;
-      const filePath = selectedFile.path;
+      const filePath = selectedFile?.path;
       const commitHash =
         viewMode === "commit" && selectedCommit
           ? selectedCommit.hash
@@ -221,6 +218,20 @@ export function DiffView() {
 
     return items;
   }, [annotations, pendingAnnotation]);
+
+  const annotationsByFile = useMemo(() => {
+    const map = new Map<string, DiffLineAnnotation<AnnotationMeta>[]>();
+    for (const a of annotations) {
+      const items = map.get(a.file_path) ?? [];
+      items.push({
+        side: a.side === "left" ? ("deletions" as const) : ("additions" as const),
+        lineNumber: a.line_number,
+        metadata: { type: 'comment' as const, annotation: a },
+      });
+      map.set(a.file_path, items);
+    }
+    return map;
+  }, [annotations]);
 
   const pendingAnnotationRef = useRef(pendingAnnotation);
   pendingAnnotationRef.current = pendingAnnotation;
@@ -356,8 +367,17 @@ export function DiffView() {
 
   const handleSendAllToClaude = useCallback(
     async () => {
-      if (!selectedFile || !annotations.some((a) => !a.resolved)) return;
-      const prompt = `Review and address the annotations on ${selectedFile.path}\n`;
+      const unresolved = annotations.filter((a) => !a.resolved);
+      if (unresolved.length === 0) return;
+      let prompt: string;
+      if (selectedFile) {
+        prompt = `Review and address the annotations on ${selectedFile.path}\n`;
+      } else {
+        const lines = unresolved.map(
+          (a) => `- ${a.file_path} line ${a.line_number}: ${a.body}`
+        );
+        prompt = `Review and address the following annotations:\n${lines.join("\n")}\n`;
+      }
       await sendPromptToClaude(prompt);
     },
     [sendPromptToClaude, selectedFile, annotations]
@@ -446,18 +466,45 @@ export function DiffView() {
             )}
           </>
         )}
-        {showAllFiles && changedFiles.length > 0 && (
+        {showAllFiles && (
           <>
-            <span className="mx-1 text-border">|</span>
-            <span className="text-muted-foreground tabular-nums">
-              {viewedFiles.size} / {changedFiles.length} viewed
-            </span>
-            <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden">
-              <div
-                className="h-full rounded-full bg-green-500 transition-all duration-300"
-                style={{ width: `${changedFiles.length > 0 ? (viewedFiles.size / changedFiles.length) * 100 : 0}%` }}
-              />
-            </div>
+            {annotations.length > 0 && (
+              <>
+                <span className="mx-1 text-border">|</span>
+                <button
+                  onClick={() => setShowResolved(!showResolved)}
+                  className={`px-2 py-0.5 rounded ${
+                    showResolved
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Resolved
+                </button>
+                {annotations.some((a) => !a.resolved) && (
+                  <button
+                    onClick={handleSendAllToClaude}
+                    className="px-2 py-0.5 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/20"
+                  >
+                    Send to Claude
+                  </button>
+                )}
+              </>
+            )}
+            {changedFiles.length > 0 && (
+              <>
+                <span className="mx-1 text-border">|</span>
+                <span className="text-muted-foreground tabular-nums">
+                  {viewedFiles.size} / {changedFiles.length} viewed
+                </span>
+                <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-green-500 transition-all duration-300"
+                    style={{ width: `${changedFiles.length > 0 ? (viewedFiles.size / changedFiles.length) * 100 : 0}%` }}
+                  />
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -475,8 +522,18 @@ export function DiffView() {
         >
           {changedFiles.map((file) => {
             const patch = fileDiffs[file.path];
-            if (!patch) return null;
             const isViewed = viewedFiles.has(file.path);
+            if (!patch) {
+              return (
+                <div key={file.path} data-file-path={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
+                  <div className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground">
+                    <span className="flex-1 truncate">{file.path}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted">New file</span>
+                    <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+                  </div>
+                </div>
+              );
+            }
             const isLargeFile = patch.length > 100_000;
             const isGenerated = generatedFiles.includes(file.path);
             const isCollapsed = collapsedFiles.has(file.path) || isViewed || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
@@ -520,11 +577,17 @@ export function DiffView() {
                 <PatchDiff<AnnotationMeta>
                   patch={patch}
                   options={{ ...diffOptions, collapsed: isCollapsed, onGutterUtilityClick: makeGutterUtilityClickHandler(file.path) }}
-                  lineAnnotations={pendingAnnotation?.filePath === file.path ? [{
-                    side: pendingAnnotation.side,
-                    lineNumber: pendingAnnotation.lineNumber,
-                    metadata: { type: 'form' as const },
-                  }] : undefined}
+                  lineAnnotations={(() => {
+                    const saved = annotationsByFile.get(file.path) ?? [];
+                    if (pendingAnnotation?.filePath === file.path) {
+                      return [...saved, {
+                        side: pendingAnnotation.side,
+                        lineNumber: pendingAnnotation.lineNumber,
+                        metadata: { type: 'form' as const },
+                      }];
+                    }
+                    return saved.length > 0 ? saved : undefined;
+                  })()}
                   renderAnnotation={renderAnnotation}
                   renderHeaderPrefix={() => (
                     <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
