@@ -1,8 +1,10 @@
 mod annotations;
 mod git;
+mod linear;
 mod pty;
 mod viewed_files;
 mod watcher;
+mod worktree_issues;
 
 use std::fs;
 use std::path::PathBuf;
@@ -272,7 +274,7 @@ fn setup_claude_integration() -> Result<String, String> {
 
     let mcp_binary = which_mcp_binary(&home)?;
 
-    let settings_path = home.join(".claude").join("settings.local.json");
+    let settings_path = home.join(".claude.json");
     let mut settings: serde_json::Value = if settings_path.exists() {
         let contents = fs::read_to_string(&settings_path)
             .map_err(|e| format!("Failed to read settings: {}", e))?;
@@ -295,9 +297,6 @@ fn setup_claude_integration() -> Result<String, String> {
             "command": mcp_binary,
             "args": []
         }));
-
-    fs::create_dir_all(settings_path.parent().unwrap())
-        .map_err(|e| format!("Failed to create .claude directory: {}", e))?;
 
     let formatted = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
@@ -350,6 +349,58 @@ fn check_generated_files(worktree_path: String, files: Vec<String>) -> Result<Ve
     git::check_generated_files(&worktree_path, &files)
 }
 
+#[tauri::command]
+fn get_my_linear_issues(api_key: String) -> Result<Vec<linear::LinearIssue>, String> {
+    linear::get_my_issues(&api_key)
+}
+
+#[tauri::command]
+fn search_linear_issues(api_key: String, query: String) -> Result<Vec<linear::LinearIssue>, String> {
+    linear::search_issues(&api_key, &query)
+}
+
+#[tauri::command]
+fn start_linear_issue(api_key: String, issue_id: String) -> Result<(), String> {
+    linear::start_issue(&api_key, &issue_id)
+}
+
+#[tauri::command]
+fn link_worktree_issue(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+    issue_id: String,
+    identifier: String,
+) -> Result<worktree_issues::WorktreeIssue, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    worktree_issues::link_worktree(&conn, &worktree_path, &issue_id, &identifier)
+}
+
+#[tauri::command]
+fn get_worktree_issue(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+) -> Result<Option<worktree_issues::WorktreeIssue>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    worktree_issues::get_issue_for_worktree(&conn, &worktree_path)
+}
+
+#[tauri::command]
+fn get_all_worktree_issues(
+    state: tauri::State<'_, DbState>,
+) -> Result<Vec<worktree_issues::WorktreeIssue>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    worktree_issues::get_all_worktree_issues(&conn)
+}
+
+#[tauri::command]
+fn unlink_worktree_issue(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    worktree_issues::unlink_worktree(&conn, &worktree_path)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -370,6 +421,8 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize database: {}", e))?;
             viewed_files::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize viewed_files table: {}", e))?;
+            worktree_issues::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize worktree_issues table: {}", e))?;
             app.manage(DbState(Mutex::new(conn)));
             app.manage(pty::PtyState::new());
             app.manage(watcher::WatcherState::new());
@@ -463,6 +516,13 @@ pub fn run() {
             list_viewed_files,
             clear_viewed_files,
             setup_claude_integration,
+            get_my_linear_issues,
+            search_linear_issues,
+            start_linear_issue,
+            link_worktree_issue,
+            get_worktree_issue,
+            get_all_worktree_issues,
+            unlink_worktree_issue,
             pty::pty_spawn,
             pty::pty_get_buffer,
             pty::pty_write,
