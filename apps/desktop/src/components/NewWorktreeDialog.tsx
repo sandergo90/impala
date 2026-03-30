@@ -25,7 +25,7 @@ export function NewWorktreeDialog({
 }: NewWorktreeDialogProps) {
   const [tab, setTab] = useState<Tab>("new");
   const [branchName, setBranchName] = useState("");
-  const [baseBranch, setBaseBranch] = useState("");
+  const [baseBranch, setBaseBranch] = useState("develop");
   const [selectedBranch, setSelectedBranch] = useState("");
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,7 +38,7 @@ export function NewWorktreeDialog({
   const [linearLoading, setLinearLoading] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<LinearIssue | null>(null);
   const [linearBranchName, setLinearBranchName] = useState("");
-  const [linearBaseBranch, setLinearBaseBranch] = useState("");
+  const [linearBaseBranch, setLinearBaseBranch] = useState("develop");
   const [comboboxOpen, setComboboxOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const comboboxRef = useRef<HTMLDivElement>(null);
@@ -89,7 +89,7 @@ export function NewWorktreeDialog({
         });
         setSearchResults(results);
       } catch (e) {
-        // Silently fail search — user can retry
+        console.error("Linear search failed:", e);
       }
     }, 300);
   }, [linearApiKey]);
@@ -237,7 +237,7 @@ export function NewWorktreeDialog({
                 type="text"
                 value={baseBranch}
                 onChange={(e) => setBaseBranch(e.target.value)}
-                placeholder="main"
+                placeholder="develop"
                 className="w-full px-3 py-1.5 border rounded text-sm bg-background"
               />
             </div>
@@ -364,7 +364,7 @@ export function NewWorktreeDialog({
                     type="text"
                     value={linearBaseBranch}
                     onChange={(e) => setLinearBaseBranch(e.target.value)}
-                    placeholder="main"
+                    placeholder="develop"
                     className="w-full px-3 py-1.5 border rounded text-sm bg-background"
                   />
                 </div>

@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
@@ -8,22 +7,13 @@ import { PatchDiff, Virtualizer } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
-import { AnnotationDisplay } from "./AnnotationDisplay";
+import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
-import { paneSessionId } from "../lib/split-tree";
 
 type AnnotationMeta =
   | { type: 'comment'; annotation: Annotation }
   | { type: 'form' };
-
-function encodeForPty(text: string): string {
-  return btoa(
-    Array.from(new TextEncoder().encode(text), (b) =>
-      String.fromCharCode(b)
-    ).join("")
-  );
-}
 
 function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: React.MouseEvent) => void }) {
   return (
@@ -88,7 +78,7 @@ export function DiffView() {
   );
 
 
-  const [showResolved, setShowResolved] = useState(false);
+  const showResolved = useUIStore((s) => s.showResolved);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [pendingAnnotation, setPendingAnnotation] = useState<{
@@ -250,35 +240,7 @@ export function DiffView() {
     []
   );
 
-  // Filtered and sorted annotations for the panel
-  const visibleAnnotations = useMemo(() => {
-    const filtered = showResolved
-      ? annotations
-      : annotations.filter((a) => !a.resolved);
-    return [...filtered].sort((a, b) => a.line_number - b.line_number);
-  }, [annotations, showResolved]);
-
-  const handleCreate = useCallback(
-    async (body: string, lineNumber: number, side: "left" | "right", filePath?: string) => {
-      if (!selectedProject) return;
-      const resolvedFilePath = filePath ?? selectedFile?.path;
-      if (!resolvedFilePath) return;
-      const commitHash =
-        viewMode === "commit" && selectedCommit
-          ? selectedCommit.hash
-          : "all-changes";
-      const created = await sqliteProvider.create({
-        repo_path: selectedProject.path,
-        file_path: resolvedFilePath,
-        commit_hash: commitHash,
-        line_number: lineNumber,
-        side,
-        body,
-      });
-      updateData({ annotations: [...annotations, created] });
-    },
-    [selectedProject, selectedFile, selectedCommit, viewMode, annotations, updateData]
-  );
+  const { handleCreate } = useAnnotationActions();
 
   const renderAnnotation = useCallback(
     (diffAnnotation: DiffLineAnnotation<AnnotationMeta>) => {
@@ -313,74 +275,6 @@ export function DiffView() {
       );
     },
     [showResolved, handleCreate, pendingAnnotation?.filePath]
-  );
-
-  const handleResolve = useCallback(
-    async (id: string, resolved: boolean) => {
-      const updated = await sqliteProvider.update(id, { resolved });
-      updateData({
-        annotations: annotations.map((a) => (a.id === id ? updated : a)),
-      });
-    },
-    [annotations, updateData]
-  );
-
-  const handleDelete = useCallback(
-    async (id: string) => {
-      await sqliteProvider.delete(id);
-      updateData({
-        annotations: annotations.filter((a) => a.id !== id),
-      });
-    },
-    [annotations, updateData]
-  );
-
-  const sendPromptToClaude = useCallback(
-    async (prompt: string) => {
-      if (!worktreePath) return;
-
-      const paneSessions = useDataStore.getState().getWorktreeDataState(worktreePath).paneSessions;
-      const focusedPaneId = useUIStore.getState().getWorktreeNavState(worktreePath).focusedPaneId;
-      let sessionId = paneSessions[focusedPaneId] ?? Object.values(paneSessions)[0] ?? null;
-      if (!sessionId) {
-        // Spawn a session for the focused pane if none exist
-        sessionId = paneSessionId(focusedPaneId);
-        await invoke("pty_spawn", { sessionId, cwd: worktreePath });
-        useDataStore.getState().updateWorktreeDataState(worktreePath, {
-          paneSessions: { ...paneSessions, [focusedPaneId]: sessionId },
-        });
-      }
-
-      await invoke("pty_write", { sessionId, data: encodeForPty(prompt) });
-      useUIStore.getState().updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
-    },
-    [worktreePath]
-  );
-
-  const handleSendToClaude = useCallback(
-    async (annotation: Annotation) => {
-      const prompt = `Review and address the annotation on ${annotation.file_path} line ${annotation.line_number}: ${annotation.body}\n`;
-      await sendPromptToClaude(prompt);
-    },
-    [sendPromptToClaude]
-  );
-
-  const handleSendAllToClaude = useCallback(
-    async () => {
-      const unresolved = annotations.filter((a) => !a.resolved);
-      if (unresolved.length === 0) return;
-      let prompt: string;
-      if (selectedFile) {
-        prompt = `Review and address the annotations on ${selectedFile.path}\n`;
-      } else {
-        const lines = unresolved.map(
-          (a) => `- ${a.file_path} line ${a.line_number}: ${a.body}`
-        );
-        prompt = `Review and address the following annotations:\n${lines.join("\n")}\n`;
-      }
-      await sendPromptToClaude(prompt);
-    },
-    [sendPromptToClaude, selectedFile, annotations]
   );
 
   const hasFileDiffs = Object.keys(fileDiffs).length > 0;
@@ -443,68 +337,18 @@ export function DiffView() {
         >
           Wrap
         </button>
-        {showSingleFile && (
+        {showAllFiles && changedFiles.length > 0 && (
           <>
             <span className="mx-1 text-border">|</span>
-            <button
-              onClick={() => setShowResolved(!showResolved)}
-              className={`px-2 py-0.5 rounded ${
-                showResolved
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Resolved
-            </button>
-            {annotations.some((a) => !a.resolved) && (
-              <button
-                onClick={handleSendAllToClaude}
-                className="px-2 py-0.5 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/20"
-              >
-                Send to Claude
-              </button>
-            )}
-          </>
-        )}
-        {showAllFiles && (
-          <>
-            {annotations.length > 0 && (
-              <>
-                <span className="mx-1 text-border">|</span>
-                <button
-                  onClick={() => setShowResolved(!showResolved)}
-                  className={`px-2 py-0.5 rounded ${
-                    showResolved
-                      ? "bg-accent text-accent-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  Resolved
-                </button>
-                {annotations.some((a) => !a.resolved) && (
-                  <button
-                    onClick={handleSendAllToClaude}
-                    className="px-2 py-0.5 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/20"
-                  >
-                    Send to Claude
-                  </button>
-                )}
-              </>
-            )}
-            {changedFiles.length > 0 && (
-              <>
-                <span className="mx-1 text-border">|</span>
-                <span className="text-muted-foreground tabular-nums">
-                  {viewedFiles.size} / {changedFiles.length} viewed
-                </span>
-                <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-green-500 transition-all duration-300"
-                    style={{ width: `${changedFiles.length > 0 ? (viewedFiles.size / changedFiles.length) * 100 : 0}%` }}
-                  />
-                </div>
-              </>
-            )}
+            <span className="text-muted-foreground tabular-nums">
+              {viewedFiles.size} / {changedFiles.length} viewed
+            </span>
+            <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden">
+              <div
+                className="h-full rounded-full bg-green-500 transition-all duration-300"
+                style={{ width: `${changedFiles.length > 0 ? (viewedFiles.size / changedFiles.length) * 100 : 0}%` }}
+              />
+            </div>
           </>
         )}
       </div>
@@ -625,22 +469,6 @@ export function DiffView() {
           options={{ ...diffOptions, onGutterUtilityClick: makeGutterUtilityClickHandler() }}
         />
       </div>
-
-      {visibleAnnotations.length > 0 && (
-        <div className="border-t bg-background">
-          <div className="flex flex-col gap-1.5 p-3 max-h-48 overflow-y-auto">
-            {visibleAnnotations.map((a) => (
-              <AnnotationDisplay
-                key={a.id}
-                annotation={a}
-                onResolve={handleResolve}
-                onDelete={handleDelete}
-                onSendToClaude={handleSendToClaude}
-              />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

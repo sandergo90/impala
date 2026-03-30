@@ -196,11 +196,14 @@ export function CommitPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full text-sm overflow-hidden">
+    <div className="flex flex-col h-full text-sm overflow-hidden bg-card">
       {/* Commits section — top half */}
       <div className="flex flex-col min-h-0 flex-1">
-        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-[9px] uppercase tracking-[1.2px] text-muted-foreground/50 shrink-0 border-b border-border">
+        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-[9px] uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-b border-border">
           Commits on <span className="font-mono text-[10px] text-muted-foreground normal-case tracking-normal">{selectedWorktree.branch}</span>
+          {commits.length > 0 && (
+            <span className="ml-auto text-[9px] bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{commits.length}</span>
+          )}
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0">
@@ -209,7 +212,7 @@ export function CommitPanel() {
           onClick={selectUncommitted}
           className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
             viewMode === 'uncommitted'
-              ? "border-l-2 border-l-primary pl-3 bg-primary/[0.06]"
+              ? "bg-primary/12"
               : "hover:bg-accent"
           }`}
         >
@@ -224,7 +227,7 @@ export function CommitPanel() {
           onClick={selectAllChanges}
           className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
             viewMode === 'all-changes'
-              ? "border-l-2 border-l-primary pl-3 bg-primary/[0.06]"
+              ? "bg-primary/12"
               : "hover:bg-accent"
           }`}
         >
@@ -246,7 +249,7 @@ export function CommitPanel() {
                 onClick={() => selectCommit(commit)}
                 className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border/50 ${
                   isSelected
-                    ? "border-l-2 border-l-primary pl-3 bg-primary/[0.06]"
+                    ? "bg-primary/12"
                     : "hover:bg-accent"
                 }`}
               >
@@ -272,8 +275,11 @@ export function CommitPanel() {
 
       {/* Changed Files — bottom half */}
       <div className="flex flex-col min-h-0 flex-1">
-        <div className="px-3.5 py-2 text-[9px] uppercase tracking-[1.2px] text-muted-foreground/50 shrink-0 border-y border-border">
+        <div className="flex items-center px-3.5 py-2 text-[9px] uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-y border-border">
           Changed Files
+          {changedFiles.length > 0 && (
+            <span className="ml-auto text-[9px] bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{changedFiles.length}</span>
+          )}
         </div>
         <div className="overflow-y-auto flex-1 min-h-0">
           {changedFiles.map((file) => {

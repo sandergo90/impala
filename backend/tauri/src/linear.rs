@@ -119,16 +119,15 @@ pub fn get_my_issues(api_key: &str) -> Result<Vec<LinearIssue>, String> {
 
 #[derive(Deserialize)]
 struct SearchData {
-    #[serde(rename = "issueSearch")]
-    issue_search: IssueConnection,
+    #[serde(rename = "searchIssues")]
+    search_issues: IssueConnection,
 }
 
 pub fn search_issues(api_key: &str, query_text: &str) -> Result<Vec<LinearIssue>, String> {
-    let query = r#"query($q: String!) {
-        issueSearch(
-            query: $q
+    let query = r#"query($term: String!) {
+        searchIssues(
+            term: $term
             first: 20
-            includeArchived: false
         ) {
             nodes {
                 id
@@ -141,10 +140,10 @@ pub fn search_issues(api_key: &str, query_text: &str) -> Result<Vec<LinearIssue>
         }
     }"#;
 
-    let variables = serde_json::json!({ "q": query_text });
+    let variables = serde_json::json!({ "term": query_text });
     let response = make_request(api_key, query, &variables)?;
     let data: SearchData = parse_response(&response, "Linear search")?;
-    Ok(data.issue_search.nodes.into_iter().map(|n| n.into_linear_issue()).collect())
+    Ok(data.search_issues.nodes.into_iter().map(|n| n.into_linear_issue()).collect())
 }
 
 // --- Update issue state to "In Progress" ---
@@ -225,7 +224,11 @@ pub fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
     }
     let states_data: StatesOnlyData = parse_response(&states_response, "workflow states")?;
 
-    let in_progress_state = states_data.workflow_states.nodes.first()
+    // Prefer the state named "In Progress"; fall back to first "started" state
+    let states = &states_data.workflow_states.nodes;
+    let in_progress_state = states.iter()
+        .find(|s| s.name == "In Progress")
+        .or_else(|| states.first())
         .ok_or_else(|| "No 'In Progress' state found for this team".to_string())?;
 
     // Update the issue's state

@@ -38,7 +38,7 @@ export function LinearPane() {
         <p className="text-xs text-muted-foreground">
           Generate a key at{" "}
           <span className="font-mono text-foreground">
-            Linear &gt; Settings &gt; API &gt; Personal API keys
+            Linear &gt; Settings &gt; Security &amp; access &gt; Personal API keys
           </span>
         </p>
         <div className="flex gap-2">

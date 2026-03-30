@@ -67,3 +67,12 @@
     @apply font-sans;
     }
 }
+
+.annotation-highlight {
+  animation: annotation-flash 1.5s ease-out;
+}
+
+@keyframes annotation-flash {
+  0%, 20% { background-color: var(--primary) !important; opacity: 0.3; }
+  100% { background-color: transparent; opacity: 1; }
+}

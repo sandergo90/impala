@@ -163,9 +163,24 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
 
       const safeId = sanitizeEventId(sessionId);
 
+      // Find the scrollable viewport element for scroll-lock behavior
+      const viewport = container.querySelector('[class*="viewport"]') as HTMLElement
+        ?? container.querySelector('[style*="overflow"]') as HTMLElement
+        ?? null;
+
       unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
         if (cancelled || !terminal) return;
+        // Preserve scroll position if user has scrolled up
+        let wasAtBottom = true;
+        let savedScrollTop = 0;
+        if (viewport) {
+          savedScrollTop = viewport.scrollTop;
+          wasAtBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 5;
+        }
         terminal.write(decodeBase64(event.payload));
+        if (!wasAtBottom && viewport) {
+          viewport.scrollTop = savedScrollTop;
+        }
       });
 
       unlistenExit = await listen<number>(`pty-exit-${safeId}`, (event) => {

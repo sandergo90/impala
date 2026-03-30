@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Sidebar, CollapsedSidebar } from "./components/Sidebar";
-import { CommitPanel } from "./components/CommitPanel";
+import { RightSidebar } from "./components/RightSidebar";
 import { DiffView } from "./components/DiffView";
 import { SplitTreeRenderer } from "./components/SplitTreeRenderer";
 import { SettingsView } from "./components/SettingsView";
+import { CommandPalette } from "./components/CommandPalette";
 import { Toaster } from "./components/ui/sonner";
 import {
   ResizablePanelGroup,
@@ -104,8 +105,9 @@ function WorktreeTerminalPane({
 function App() {
   const [gitError, setGitError] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [showChanges, setShowChanges] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
   const currentView = useUIStore((s) => s.currentView);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -132,6 +134,13 @@ function App() {
         e.preventDefault();
         const view = useUIStore.getState().currentView;
         useUIStore.getState().setCurrentView(view === "settings" ? "main" : "settings");
+        return;
+      }
+
+      // Cmd+P → command palette
+      if (e.metaKey && e.key === "p") {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
         return;
       }
 
@@ -324,14 +333,18 @@ function App() {
             <div className="flex-1 flex items-center justify-center gap-1.5 text-[11px]" data-tauri-drag-region>
               {selectedWorktree && (
                 <>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-muted-foreground/50 shrink-0">
+                    <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+                    <circle cx="4" cy="12" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+                    <line x1="4" y1="6" x2="4" y2="10" stroke="currentColor" strokeWidth="1.4"/>
+                    <path d="M4 8 L10 4" stroke="currentColor" strokeWidth="1.4"/>
+                    <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+                  </svg>
                   <span className="text-muted-foreground/60">{selectedProject?.name}</span>
                   <span className="text-muted-foreground/40">/</span>
-                  <span className="text-foreground font-medium font-mono">{selectedWorktree.branch}</span>
+                  <span className="text-foreground font-medium font-mono text-[12px]">{selectedWorktree.branch}</span>
                   {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
-                    <>
-                      <span className="text-muted-foreground/40">&middot;</span>
-                      <span className="text-muted-foreground/60">{dataState.commits.length} ahead of {dataState.baseBranch}</span>
-                    </>
+                    <span className="bg-accent rounded-full px-1.5 py-0.5 text-[9px] text-muted-foreground">{dataState.commits.length} ahead of {dataState.baseBranch}</span>
                   )}
                 </>
               )}
@@ -347,7 +360,7 @@ function App() {
                   <span className="mx-1 w-px h-3.5 bg-border" />
                 </>
               )}
-              {tabPill("Changes", showChanges, () => setShowChanges(!showChanges))}
+              {tabPill("Sidebar", showSidebar, () => setShowSidebar(!showSidebar))}
             </div>
           </>
         ) : (
@@ -380,14 +393,14 @@ function App() {
           {!sidebarCollapsed && (
             <>
               <ResizablePanel defaultSize="15%" minSize={140} maxSize={300}>
-                <Sidebar />
+                <Sidebar onOpenCommandPalette={() => setCommandPaletteOpen(true)} />
               </ResizablePanel>
               <ResizableHandle />
             </>
           )}
 
           {/* Content */}
-          <ResizablePanel defaultSize={showChanges ? "65%" : "85%"}>
+          <ResizablePanel defaultSize={showSidebar ? "65%" : "85%"}>
             <div className="flex flex-col h-full">
               {/* Tab content */}
               <div className="flex-1 min-h-0">
@@ -427,11 +440,11 @@ function App() {
           </ResizablePanel>
 
           {/* Right panel — Changes/Commits */}
-          {showChanges && (
+          {showSidebar && (
             <>
               <ResizableHandle />
               <ResizablePanel defaultSize="20%" minSize={180} maxSize={400}>
-                <CommitPanel />
+                <RightSidebar />
               </ResizablePanel>
             </>
           )}
@@ -440,6 +453,7 @@ function App() {
         </WorkerPoolContextProvider>
       )}
 
+      <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
       <Toaster />
     </div>
   );

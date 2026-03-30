@@ -140,22 +140,21 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
   const deleteWorktree = async (wt: Worktree) => {
     if (!selectedProject) return;
     try {
-      // Kill all PTY sessions for this worktree
+      // Run all cleanup in parallel — these are independent
       const dataState = useDataStore.getState().worktreeDataStates[wt.path];
-      if (dataState?.paneSessions) {
-        await Promise.all(
-          Object.values(dataState.paneSessions).map((sessionId) =>
+      const ptyKills = dataState?.paneSessions
+        ? Object.values(dataState.paneSessions).map((sessionId) =>
             invoke("pty_kill", { sessionId }).catch(() => {})
           )
-        );
-      }
+        : [];
+      await Promise.all([
+        ...ptyKills,
+        invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
+        viewedFilesProvider.clearForWorktree(wt.path).catch(() => {}),
+        invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(() => {}),
+      ]);
 
-      // Unwatch and clear viewed files
-      await invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {});
-      await viewedFilesProvider.clearForWorktree(wt.path).catch(() => {});
-      await invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(() => {});
-
-      // Remove worktree via git
+      // Remove worktree via git (must happen after PTY sessions are killed)
       await invoke("delete_worktree", {
         repoPath: selectedProject.path,
         worktreePath: wt.path,

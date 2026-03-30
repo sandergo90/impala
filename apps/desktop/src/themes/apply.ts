@@ -73,9 +73,9 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
   return {
     background,
     foreground,
-    card: background,
+    card: isDark ? mix("#ffffff", 4) : mix("#000000", 3),
     cardForeground: foreground,
-    popover: background,
+    popover: isDark ? mix("#ffffff", 6) : mix("#000000", 4),
     popoverForeground: foreground,
     primary,
     primaryForeground: isDark ? "#191c22" : "#ffffff",

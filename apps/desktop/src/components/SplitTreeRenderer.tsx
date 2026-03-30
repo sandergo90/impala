@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ResizablePanelGroup,
@@ -131,9 +131,10 @@ function LeafPane({
   }, [sessionId, paneId, worktreePath]);
 
   // Auto-spawn PTY session when leaf has no session
-  // Backend deduplicates via sessions.contains_key — safe to call multiple times
+  const spawningRef = useRef(false);
   useEffect(() => {
-    if (sessionId) return;
+    if (sessionId || spawningRef.current) return;
+    spawningRef.current = true;
 
     const ptyId = paneSessionId(paneId);
 
@@ -158,7 +159,10 @@ function LeafPane({
           useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
         }
       })
-      .catch((err) => console.error("Failed to spawn PTY:", err));
+      .catch((err) => {
+        console.error("Failed to spawn PTY:", err);
+        spawningRef.current = false;
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: backend deduplicates spawns
   }, [paneId, paneType, worktreePath, sessionId]);
 
