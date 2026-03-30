@@ -1,17 +1,45 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { Ghostty, Terminal, FitAddon } from "ghostty-web";
-import wasmUrl from "ghostty-web/ghostty-vt.wasm?url";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
+import "@xterm/xterm/css/xterm.css";
 import { useUIStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
+import type { ThemeTerminal } from "../themes/types";
 
 function getTerminalTheme() {
   const state = useUIStore.getState();
   return resolveThemeById(state.activeThemeId, state.customThemes).terminal;
 }
 
-interface GhosttyTerminalProps {
+function toXtermTheme(t: ThemeTerminal) {
+  return {
+    background: t.background,
+    foreground: t.foreground,
+    cursor: t.cursor,
+    selectionBackground: t.selectionBackground,
+    black: t.black,
+    red: t.red,
+    green: t.green,
+    yellow: t.yellow,
+    blue: t.blue,
+    magenta: t.magenta,
+    cyan: t.cyan,
+    white: t.white,
+    brightBlack: t.brightBlack,
+    brightRed: t.brightRed,
+    brightGreen: t.brightGreen,
+    brightYellow: t.brightYellow,
+    brightBlue: t.brightBlue,
+    brightMagenta: t.brightMagenta,
+    brightCyan: t.brightCyan,
+    brightWhite: t.brightWhite,
+  };
+}
+
+interface XtermTerminalProps {
   sessionId: string;
   isFocused?: boolean;
   onFocus?: () => void;
@@ -31,16 +59,7 @@ function decodeBase64(encoded: string): Uint8Array {
   return bytes;
 }
 
-// Cache the Ghostty WASM instance so it's only loaded once
-let ghosttyPromise: Promise<Ghostty> | null = null;
-function getGhostty(): Promise<Ghostty> {
-  if (!ghosttyPromise) {
-    ghosttyPromise = Ghostty.load(wasmUrl);
-  }
-  return ghosttyPromise;
-}
-
-export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestart }: GhosttyTerminalProps) {
+export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart }: XtermTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const isFocusedRef = useRef(isFocused);
@@ -57,12 +76,14 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
     let cancelled = false;
     let terminal: Terminal | null = null;
     let fitAddon: FitAddon | null = null;
+    let webglAddon: WebglAddon | null = null;
+    let resizeObserver: ResizeObserver | null = null;
     let resizeDisposable: { dispose(): void } | null = null;
     let dataDisposable: { dispose(): void } | null = null;
     let unlistenOutput: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
 
-    // Intercept keybindings in capture phase before Ghostty consumes them
+    // Intercept keybindings in capture phase before xterm consumes them
     const interceptKeys = (e: KeyboardEvent) => {
       if (e.metaKey) {
         if (e.key === "d" || e.key === "D" || e.key === "[" || e.key === "]" || e.key === "w" || e.key === ",") {
@@ -84,17 +105,16 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
     container.addEventListener("keydown", interceptKeys, true);
 
     const setup = async () => {
-      const ghostty = await getGhostty();
       if (cancelled) return;
 
       terminal = new Terminal({
-        ghostty,
         cursorBlink: true,
         cursorStyle: "bar",
         fontSize: 14,
         fontFamily:
           "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
-        theme: getTerminalTheme(),
+        theme: toXtermTheme(getTerminalTheme()),
+        allowProposedApi: true,
       });
 
       terminalRef.current = terminal;
@@ -102,6 +122,19 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
       fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
+
+      // Load WebGL renderer after open() for GPU-accelerated rendering
+      try {
+        webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => {
+          webglAddon?.dispose();
+          webglAddon = null;
+        });
+        terminal.loadAddon(webglAddon);
+      } catch {
+        // WebGL not available — falls back to canvas renderer automatically
+        webglAddon = null;
+      }
 
       if (cancelled) {
         terminal.dispose();
@@ -144,7 +177,11 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
         });
       }
 
-      fitAddon.observeResize();
+      // xterm.js FitAddon lacks observeResize(), so use ResizeObserver instead
+      resizeObserver = new ResizeObserver(() => {
+        fitAddon?.fit();
+      });
+      resizeObserver.observe(container);
 
       resizeDisposable = terminal.onResize(({ cols, rows }) => {
         if (exitedRef.current) return;
@@ -163,10 +200,8 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
 
       const safeId = sanitizeEventId(sessionId);
 
-      // Find the scrollable viewport element for scroll-lock behavior
-      const viewport = container.querySelector('[class*="viewport"]') as HTMLElement
-        ?? container.querySelector('[style*="overflow"]') as HTMLElement
-        ?? null;
+      // xterm.js uses .xterm-viewport for the scrollable element
+      const viewport = container.querySelector(".xterm-viewport") as HTMLElement | null;
 
       unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
         if (cancelled || !terminal) return;
@@ -207,7 +242,6 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
       if (onFocus) {
         container.addEventListener("mousedown", onFocus);
       }
-
     };
 
     setup().catch((err) => {
@@ -221,8 +255,10 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
       if (onFocus && container) {
         container.removeEventListener("mousedown", onFocus);
       }
+      resizeObserver?.disconnect();
       resizeDisposable?.dispose();
       dataDisposable?.dispose();
+      webglAddon?.dispose();
       unlistenOutput?.();
       unlistenExit?.();
       if (terminal) {
@@ -251,8 +287,8 @@ export function GhosttyTerminal({ sessionId, isFocused = true, onFocus, onRestar
         prevThemeId = state.activeThemeId;
         const termTheme = getTerminalTheme();
         setTermBg(termTheme.background);
-        if (terminalRef.current?.renderer) {
-          terminalRef.current.renderer.setTheme(termTheme);
+        if (terminalRef.current) {
+          terminalRef.current.options.theme = toXtermTheme(termTheme);
         }
       }
     });

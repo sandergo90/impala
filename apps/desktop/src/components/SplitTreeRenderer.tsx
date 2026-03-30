@@ -5,7 +5,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { GhosttyTerminal } from "./GhosttyTerminal";
+import { XtermTerminal } from "./XtermTerminal";
 import type { SplitNode } from "../types";
 import { paneSessionId } from "../lib/split-tree";
 import { useUIStore, useDataStore } from "../store";
@@ -190,7 +190,7 @@ function LeafPane({
         </div>
       )}
       {sessionId ? (
-        <GhosttyTerminal
+        <XtermTerminal
           key={sessionId}
           sessionId={sessionId}
           isFocused={isFocused}
