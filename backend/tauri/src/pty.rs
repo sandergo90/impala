@@ -42,12 +42,12 @@ pub fn pty_spawn(
     session_id: String,
     cwd: String,
     command: Option<Vec<String>>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     // Don't spawn if session already exists
     {
         let sessions = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
         if sessions.contains_key(&session_id) {
-            return Ok(());
+            return Ok(false);
         }
     }
 
@@ -138,7 +138,7 @@ pub fn pty_spawn(
         let _ = app_handle.emit(&exit_event, 0i32);
     });
 
-    Ok(())
+    Ok(true)
 }
 
 #[tauri::command]

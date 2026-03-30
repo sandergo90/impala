@@ -95,13 +95,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
         if (e.key === "k") {
           e.preventDefault();
           e.stopPropagation();
-          // Ctrl+L clears screen in shells; SIGWINCH redraws TUI apps
-          const ctrlL = btoa(String.fromCharCode(0x0c));
-          invoke("pty_write", { sessionId, data: ctrlL }).catch(() => {});
-          const dims = fitAddon?.proposeDimensions();
-          if (dims) {
-            invoke("pty_resize", { sessionId, rows: dims.rows, cols: dims.cols }).catch(() => {});
-          }
+          terminal?.clear();
         }
       }
     };

@@ -138,14 +138,14 @@ function LeafPane({
 
     const ptyId = paneSessionId(paneId);
 
-    invoke("pty_spawn", {
+    invoke<boolean>("pty_spawn", {
       sessionId: ptyId,
       cwd: worktreePath,
       command: null,
     })
-      .then(() => {
+      .then((isNew) => {
         onSessionSpawned(ptyId);
-        if (paneType === "claude") {
+        if (paneType === "claude" && isNew) {
           const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
           const claudeCmd = claudeLaunched
             ? "claude --dangerously-skip-permissions --remote-control --continue\n"
