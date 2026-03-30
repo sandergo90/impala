@@ -123,6 +123,13 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
 
+  // Tick every 2s to refresh activity indicators
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 2000);
+    return () => clearInterval(id);
+  }, []);
+
   const commitCounts = useDataStore(
     useShallow((s) => {
       const counts: Record<string, number> = {};
@@ -373,6 +380,8 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
             const isSelected = selectedWorktree?.path === wt.path;
             const aheadCount = commitCounts[wt.path] ?? 0;
             const isMain = wt.branch === "main" || wt.branch === "master" || wt.branch === "develop";
+            const lastActivity = useDataStore.getState().getWorktreeDataState(wt.path).lastPtyActivity;
+            const isActive = now - lastActivity < 3000;
 
             return (
               <div key={wt.path} className="group relative mx-2 my-0.5">
@@ -384,7 +393,13 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
                       : "hover:bg-accent"
                   }`}
                 >
-                  <BranchIcon active={isSelected} />
+                  {isActive ? (
+                    <span className="w-3 h-3 flex items-center justify-center shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    </span>
+                  ) : (
+                    <BranchIcon active={isSelected} />
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className={`text-[11px] truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                       {wt.branch}

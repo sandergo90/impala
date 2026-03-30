@@ -29,6 +29,7 @@ const defaultDataState: WorktreeDataState = {
   fileDiffHashes: {},
   generatedFiles: [],
   annotations: [],
+  lastPtyActivity: 0,
 };
 
 interface UIState {

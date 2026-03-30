@@ -6,7 +6,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { useUIStore } from "../store";
+import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
 
 const SHOW_CURSOR = "\x1b[?25h";
@@ -19,6 +19,7 @@ function getTerminalTheme() {
 
 interface XtermTerminalProps {
   sessionId: string;
+  worktreePath: string;
   isFocused?: boolean;
   onFocus?: () => void;
   onRestart?: () => void;
@@ -37,7 +38,7 @@ function decodeBase64(encoded: string): Uint8Array {
   return bytes;
 }
 
-export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart }: XtermTerminalProps) {
+export function XtermTerminal({ sessionId, worktreePath, isFocused = true, onFocus, onRestart }: XtermTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const isFocusedRef = useRef(isFocused);
@@ -199,6 +200,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
       // .xterm-viewport is xterm's internal scrollable element — fragile across versions
       const viewport = container.querySelector(".xterm-viewport") as HTMLElement | null;
 
+      let lastActivityUpdate = 0;
       unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
         if (cancelled || !terminal) return;
         let wasAtBottom = true;
@@ -210,6 +212,12 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
         terminal.write(decodeBase64(event.payload));
         if (!wasAtBottom && viewport) {
           viewport.scrollTop = savedScrollTop;
+        }
+        // Throttle activity updates to once per second
+        const now = Date.now();
+        if (now - lastActivityUpdate > 1000) {
+          lastActivityUpdate = now;
+          useDataStore.getState().updateWorktreeDataState(worktreePath, { lastPtyActivity: now });
         }
       });
 
