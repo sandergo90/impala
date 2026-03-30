@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
-import type { Worktree, CommitInfo, ChangedFile, Project } from "../types";
+import { selectWorktree as sharedSelectWorktree, selectProject as sharedSelectProject } from "../hooks/useWorktreeActions";
+import type { Worktree, Project, WorktreeIssue } from "../types";
 import { NewWorktreeDialog } from "./NewWorktreeDialog";
 import {
   AlertDialog,
@@ -55,40 +57,6 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const worktrees = useDataStore((s) => s.worktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
 
-  const selectWorktree = async (wt: Worktree) => {
-    useUIStore.getState().setSelectedWorktree(wt);
-    try {
-      await invoke("watch_worktree", { worktreePath: wt.path });
-      const base = await invoke<string>("detect_base_branch", { worktreePath: wt.path });
-      useDataStore.getState().updateWorktreeDataState(wt.path, { baseBranch: base });
-      const commits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath: wt.path, baseBranch: base });
-      useDataStore.getState().updateWorktreeDataState(wt.path, { commits });
-
-      const navState = useUIStore.getState().getWorktreeNavState(wt.path);
-      if (!navState.selectedCommit && navState.viewMode === 'commit') {
-        useUIStore.getState().updateWorktreeNavState(wt.path, { viewMode: 'uncommitted', selectedCommit: null, selectedFile: null });
-        try {
-          const [files, fullDiff] = await Promise.all([
-            invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: wt.path }),
-            invoke<string>("get_uncommitted_diff", { worktreePath: wt.path }),
-          ]);
-          const fileDiffs: Record<string, string> = {};
-          const parts = fullDiff.split(/^diff --git /m).filter(Boolean);
-          for (const part of parts) {
-            const patch = "diff --git " + part;
-            const match = patch.match(/^diff --git a\/(.*?) b\//);
-            if (match) fileDiffs[match[1]] = patch;
-          }
-          useDataStore.getState().updateWorktreeDataState(wt.path, { changedFiles: files, fileDiffs });
-        } catch {
-          // Non-critical
-        }
-      }
-    } catch (e) {
-      toast.error("Failed to load commits");
-    }
-  };
-
   return (
     <div className="flex flex-col items-center h-full w-10 bg-sidebar border-r border-border py-2.5 gap-1">
       {/* Project badge */}
@@ -117,10 +85,10 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
         return (
           <button
             key={wt.path}
-            onClick={() => selectWorktree(wt)}
+            onClick={() => sharedSelectWorktree(wt)}
             className={`w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
               isSelected
-                ? "bg-primary/15 border-l-2 border-primary"
+                ? "bg-primary/15"
                 : "hover:bg-accent"
             }`}
             title={wt.branch}
@@ -147,7 +115,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () => void }) {
   const projects = useDataStore((s) => s.projects);
   const addProject = useDataStore((s) => s.addProject);
   const selectedProject = useUIStore((s) => s.selectedProject);
@@ -167,6 +135,7 @@ export function Sidebar() {
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [worktreeToDelete, setWorktreeToDelete] = useState<Worktree | null>(null);
+  const [worktreeIssues, setWorktreeIssues] = useState<Record<string, WorktreeIssue>>({});
 
   const deleteWorktree = async (wt: Worktree) => {
     if (!selectedProject) return;
@@ -184,6 +153,7 @@ export function Sidebar() {
       // Unwatch and clear viewed files
       await invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {});
       await viewedFilesProvider.clearForWorktree(wt.path).catch(() => {});
+      await invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(() => {});
 
       // Remove worktree via git
       await invoke("delete_worktree", {
@@ -217,40 +187,7 @@ export function Sidebar() {
     }
   };
 
-  const selectWorktree = async (wt: Worktree) => {
-    useUIStore.getState().setSelectedWorktree(wt);
-    try {
-      await invoke("watch_worktree", { worktreePath: wt.path });
-      const base = await invoke<string>("detect_base_branch", { worktreePath: wt.path });
-      useDataStore.getState().updateWorktreeDataState(wt.path, { baseBranch: base });
-      const commits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath: wt.path, baseBranch: base });
-      useDataStore.getState().updateWorktreeDataState(wt.path, { commits });
-
-      // Auto-load uncommitted changes in split view if no persisted nav state
-      const navState = useUIStore.getState().getWorktreeNavState(wt.path);
-      if (!navState.selectedCommit && navState.viewMode === 'commit') {
-        useUIStore.getState().updateWorktreeNavState(wt.path, { viewMode: 'uncommitted', selectedCommit: null, selectedFile: null });
-        try {
-          const [files, fullDiff] = await Promise.all([
-            invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath: wt.path }),
-            invoke<string>("get_uncommitted_diff", { worktreePath: wt.path }),
-          ]);
-          const fileDiffs: Record<string, string> = {};
-          const parts = fullDiff.split(/^diff --git /m).filter(Boolean);
-          for (const part of parts) {
-            const patch = "diff --git " + part;
-            const match = patch.match(/^diff --git a\/(.*?) b\//);
-            if (match) fileDiffs[match[1]] = patch;
-          }
-          useDataStore.getState().updateWorktreeDataState(wt.path, { changedFiles: files, fileDiffs });
-        } catch {
-          // Non-critical — user can manually select
-        }
-      }
-    } catch (e) {
-      toast.error("Failed to load commits");
-    }
-  };
+  const selectWorktree = sharedSelectWorktree;
 
   // Load persisted projects on mount and restore selections
   useEffect(() => {
@@ -289,6 +226,22 @@ export function Sidebar() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!selectedProject) return;
+    (async () => {
+      try {
+        const issues = await invoke<WorktreeIssue[]>("get_all_worktree_issues");
+        const map: Record<string, WorktreeIssue> = {};
+        for (const issue of issues) {
+          map[issue.worktree_path] = issue;
+        }
+        setWorktreeIssues(map);
+      } catch {
+        // Best-effort — sidebar still works without issue labels
+      }
+    })();
+  }, [selectedProject, worktrees]);
+
   const openProject = async () => {
     const selected = await open({ directory: true });
     if (!selected) return;
@@ -312,19 +265,7 @@ export function Sidebar() {
     }
   };
 
-  const selectProject = async (project: Project) => {
-    useUIStore.getState().setSelectedProject(project);
-    useUIStore.getState().setSelectedWorktree(null);
-    useDataStore.getState().setWorktrees([]);
-    try {
-      const wts = await invoke<Worktree[]>("list_worktrees", {
-        repoPath: project.path,
-      });
-      useDataStore.getState().setWorktrees(wts);
-    } catch (e) {
-      toast.error("Failed to load worktrees");
-    }
-  };
+  const selectProject = sharedSelectProject;
 
   const handleRemoveProject = async (
     e: React.MouseEvent,
@@ -402,11 +343,25 @@ export function Sidebar() {
         </>
       )}
 
+      {/* Search / Command Palette Trigger */}
+      <button
+        onClick={onOpenCommandPalette}
+        className="mx-2.5 mb-1 px-2.5 py-1.5 rounded-md flex items-center gap-2 bg-accent/60 hover:bg-accent text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+          <circle cx="11" cy="11" r="8"/>
+          <path d="m21 21-4.3-4.3"/>
+        </svg>
+        <span className="text-[11px]">Search...</span>
+        <span className="ml-auto text-[9px] bg-background/50 rounded px-1 py-0.5 font-mono">&#8984;P</span>
+      </button>
+
       {/* Worktrees Section */}
       {selectedProject && (
         <>
-          <div className="flex items-center justify-between px-3.5 pt-2 pb-1">
-            <span className="text-[9px] uppercase tracking-[1.2px] text-muted-foreground/50">Worktrees</span>
+          <div className="mx-3 mb-1.5 border-b border-border/30" />
+          <div className="flex items-center justify-between px-3.5 pt-1 pb-1">
+            <span className="text-[9px] uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">Worktrees</span>
             <button
               onClick={() => setShowNewWorktree(true)}
               className="text-muted-foreground/50 hover:text-muted-foreground text-[14px] leading-none"
@@ -426,7 +381,7 @@ export function Sidebar() {
                   onClick={() => selectWorktree(wt)}
                   className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-[5px] text-left transition-colors ${
                     isSelected
-                      ? "border-l-2 border-primary pl-2.5 bg-primary/10"
+                      ? "bg-primary/15"
                       : "hover:bg-accent"
                   }`}
                 >
@@ -435,8 +390,19 @@ export function Sidebar() {
                     <div className={`text-[11px] truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                       {wt.branch}
                     </div>
-                    <div className={`text-[9px] mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
-                      {aheadCount > 0 ? `${aheadCount} commit${aheadCount === 1 ? "" : "s"} ahead` : "up to date"}
+                    <div className={`flex items-center gap-1.5 text-[9px] mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
+                      <span>{aheadCount > 0 ? `${aheadCount} commit${aheadCount === 1 ? "" : "s"} ahead` : "up to date"}</span>
+                      {worktreeIssues[wt.path] && (
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openUrl(`https://linear.app/issue/${worktreeIssues[wt.path].identifier}`);
+                          }}
+                          className="font-mono text-[9px] text-blue-400 hover:text-blue-300 cursor-pointer"
+                        >
+                          {worktreeIssues[wt.path].identifier}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {!isMain && (
