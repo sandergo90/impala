@@ -15,28 +15,7 @@ function getTerminalTheme() {
 }
 
 function toXtermTheme(t: ThemeTerminal) {
-  return {
-    background: t.background,
-    foreground: t.foreground,
-    cursor: t.cursor,
-    selectionBackground: t.selectionBackground,
-    black: t.black,
-    red: t.red,
-    green: t.green,
-    yellow: t.yellow,
-    blue: t.blue,
-    magenta: t.magenta,
-    cyan: t.cyan,
-    white: t.white,
-    brightBlack: t.brightBlack,
-    brightRed: t.brightRed,
-    brightGreen: t.brightGreen,
-    brightYellow: t.brightYellow,
-    brightBlue: t.brightBlue,
-    brightMagenta: t.brightMagenta,
-    brightCyan: t.brightCyan,
-    brightWhite: t.brightWhite,
-  };
+  return { ...t };
 }
 
 interface XtermTerminalProps {
