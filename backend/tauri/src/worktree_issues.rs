@@ -46,6 +46,15 @@ pub fn link_worktree(
     })
 }
 
+fn row_to_issue(row: &rusqlite::Row) -> rusqlite::Result<WorktreeIssue> {
+    Ok(WorktreeIssue {
+        worktree_path: row.get(0)?,
+        issue_id: row.get(1)?,
+        identifier: row.get(2)?,
+        created_at: row.get(3)?,
+    })
+}
+
 pub fn get_issue_for_worktree(
     conn: &Connection,
     worktree_path: &str,
@@ -58,14 +67,7 @@ pub fn get_issue_for_worktree(
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
     let mut rows = stmt
-        .query_map(params![worktree_path], |row| {
-            Ok(WorktreeIssue {
-                worktree_path: row.get(0)?,
-                issue_id: row.get(1)?,
-                identifier: row.get(2)?,
-                created_at: row.get(3)?,
-            })
-        })
+        .query_map(params![worktree_path], row_to_issue)
         .map_err(|e| format!("Failed to query worktree issue: {}", e))?;
 
     match rows.next() {
@@ -82,14 +84,7 @@ pub fn get_all_worktree_issues(
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
     let rows = stmt
-        .query_map([], |row| {
-            Ok(WorktreeIssue {
-                worktree_path: row.get(0)?,
-                issue_id: row.get(1)?,
-                identifier: row.get(2)?,
-                created_at: row.get(3)?,
-            })
-        })
+        .query_map([], row_to_issue)
         .map_err(|e| format!("Failed to query worktree issues: {}", e))?;
 
     let mut issues = Vec::new();

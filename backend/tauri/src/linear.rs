@@ -1,6 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::sync::LazyLock;
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
+
+static CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(reqwest::blocking::Client::new);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LinearIssue {
@@ -21,6 +24,19 @@ struct GraphQLResponse<T> {
 #[derive(Deserialize)]
 struct GraphQLError {
     message: String,
+}
+
+fn parse_response<T: DeserializeOwned>(raw: &str, context: &str) -> Result<T, String> {
+    let parsed: GraphQLResponse<T> = serde_json::from_str(raw)
+        .map_err(|e| format!("Failed to parse {}: {}", context, e))?;
+
+    if let Some(errors) = parsed.errors {
+        if !errors.is_empty() {
+            return Err(format!("Linear API error: {}", errors[0].message));
+        }
+    }
+
+    parsed.data.ok_or_else(|| format!("No data in {} response", context))
 }
 
 // --- Viewer's assigned issues (Todo + In Progress) ---
@@ -94,17 +110,8 @@ pub fn get_my_issues(api_key: &str) -> Result<Vec<LinearIssue>, String> {
         }
     }"#;
 
-    let response = make_request(api_key, query)?;
-    let parsed: GraphQLResponse<MyIssuesData> = serde_json::from_str(&response)
-        .map_err(|e| format!("Failed to parse Linear response: {}", e))?;
-
-    if let Some(errors) = parsed.errors {
-        if !errors.is_empty() {
-            return Err(format!("Linear API error: {}", errors[0].message));
-        }
-    }
-
-    let data = parsed.data.ok_or_else(|| "No data in Linear response".to_string())?;
+    let response = make_request(api_key, query, &serde_json::json!({}))?;
+    let data: MyIssuesData = parse_response(&response, "Linear issues")?;
     Ok(data.viewer.assigned_issues.nodes.into_iter().map(|n| n.into_linear_issue()).collect())
 }
 
@@ -117,47 +124,30 @@ struct SearchData {
 }
 
 pub fn search_issues(api_key: &str, query_text: &str) -> Result<Vec<LinearIssue>, String> {
-    let query = format!(
-        r#"{{
-            issueSearch(
-                query: "{}"
-                first: 20
-                includeArchived: false
-            ) {{
-                nodes {{
-                    id
-                    identifier
-                    title
-                    branchName
-                    url
-                    state {{ name type }}
-                }}
-            }}
-        }}"#,
-        query_text.replace('"', "\\\"")
-    );
-
-    let response = make_request(api_key, &query)?;
-    let parsed: GraphQLResponse<SearchData> = serde_json::from_str(&response)
-        .map_err(|e| format!("Failed to parse Linear response: {}", e))?;
-
-    if let Some(errors) = parsed.errors {
-        if !errors.is_empty() {
-            return Err(format!("Linear API error: {}", errors[0].message));
+    let query = r#"query($q: String!) {
+        issueSearch(
+            query: $q
+            first: 20
+            includeArchived: false
+        ) {
+            nodes {
+                id
+                identifier
+                title
+                branchName
+                url
+                state { name type }
+            }
         }
-    }
+    }"#;
 
-    let data = parsed.data.ok_or_else(|| "No data in Linear response".to_string())?;
+    let variables = serde_json::json!({ "q": query_text });
+    let response = make_request(api_key, query, &variables)?;
+    let data: SearchData = parse_response(&response, "Linear search")?;
     Ok(data.issue_search.nodes.into_iter().map(|n| n.into_linear_issue()).collect())
 }
 
 // --- Update issue state to "In Progress" ---
-
-#[derive(Deserialize)]
-struct TeamStatesData {
-    #[serde(rename = "workflowStates")]
-    workflow_states: WorkflowStateConnection,
-}
 
 #[derive(Deserialize)]
 struct WorkflowStateConnection {
@@ -171,11 +161,6 @@ struct WorkflowStateNode {
     name: String,
     #[serde(rename = "type")]
     state_type: String,
-}
-
-#[derive(Deserialize)]
-struct IssueDetailData {
-    issue: IssueDetail,
 }
 
 #[derive(Deserialize)]
@@ -201,69 +186,61 @@ struct IssueUpdatePayload {
 }
 
 pub fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
-    // First, get the issue's team and current state
-    let detail_query = format!(
-        r#"{{
-            issue(id: "{}") {{
-                team {{ id }}
-                state {{ name type }}
-            }}
-        }}"#,
-        issue_id
-    );
-    let detail_response = make_request(api_key, &detail_query)?;
-    let detail: GraphQLResponse<IssueDetailData> = serde_json::from_str(&detail_response)
-        .map_err(|e| format!("Failed to parse issue detail: {}", e))?;
-    let detail_data = detail.data.ok_or_else(|| "No data for issue detail".to_string())?;
+    // Step 1: get issue's team and current state
+    let issue_query = r#"query($issueId: String!) {
+        issue(id: $issueId) {
+            team { id }
+            state { name type }
+        }
+    }"#;
+    let issue_vars = serde_json::json!({ "issueId": issue_id });
+    let issue_response = make_request(api_key, issue_query, &issue_vars)?;
 
-    // If already in "started" state, nothing to do
-    if detail_data.issue.state.state_type == "started" {
+    #[derive(Deserialize)]
+    struct IssueOnlyData { issue: IssueDetail }
+    let issue_data: IssueOnlyData = parse_response(&issue_response, "issue detail")?;
+
+    // Already in progress — nothing to do
+    if issue_data.issue.state.state_type == "started" {
         return Ok(());
     }
 
-    // Find the "started" (In Progress) workflow state for this team
-    let states_query = format!(
-        r#"{{
-            workflowStates(
-                filter: {{
-                    team: {{ id: {{ eq: "{}" }} }}
-                    type: {{ eq: "started" }}
-                }}
-                first: 10
-            ) {{
-                nodes {{ id name type }}
-            }}
-        }}"#,
-        detail_data.issue.team.id
-    );
-    let states_response = make_request(api_key, &states_query)?;
-    let states: GraphQLResponse<TeamStatesData> = serde_json::from_str(&states_response)
-        .map_err(|e| format!("Failed to parse workflow states: {}", e))?;
-    let states_data = states.data.ok_or_else(|| "No workflow states data".to_string())?;
+    // Step 2: get workflow states for this team and update in one call
+    // (We can't combine steps 1 and 2 because the team filter depends on step 1)
+    let states_query = r#"query($teamId: ID!) {
+        workflowStates(
+            filter: { team: { id: { eq: $teamId } }, type: { eq: "started" } }
+            first: 10
+        ) {
+            nodes { id name type }
+        }
+    }"#;
+    let states_vars = serde_json::json!({ "teamId": issue_data.issue.team.id });
+    let states_response = make_request(api_key, states_query, &states_vars)?;
+
+    #[derive(Deserialize)]
+    struct StatesOnlyData {
+        #[serde(rename = "workflowStates")]
+        workflow_states: WorkflowStateConnection,
+    }
+    let states_data: StatesOnlyData = parse_response(&states_response, "workflow states")?;
 
     let in_progress_state = states_data.workflow_states.nodes.first()
         .ok_or_else(|| "No 'In Progress' state found for this team".to_string())?;
 
     // Update the issue's state
-    let update_query = format!(
-        r#"mutation {{
-            issueUpdate(id: "{}", input: {{ stateId: "{}" }}) {{
-                success
-            }}
-        }}"#,
-        issue_id, in_progress_state.id
-    );
-    let update_response = make_request(api_key, &update_query)?;
-    let update: GraphQLResponse<UpdateIssueData> = serde_json::from_str(&update_response)
-        .map_err(|e| format!("Failed to parse update response: {}", e))?;
-
-    if let Some(errors) = update.errors {
-        if !errors.is_empty() {
-            return Err(format!("Failed to update issue: {}", errors[0].message));
+    let update_query = r#"mutation($issueId: String!, $stateId: String!) {
+        issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+            success
         }
-    }
+    }"#;
+    let update_vars = serde_json::json!({
+        "issueId": issue_id,
+        "stateId": in_progress_state.id,
+    });
+    let update_response = make_request(api_key, update_query, &update_vars)?;
+    let update_data: UpdateIssueData = parse_response(&update_response, "issue update")?;
 
-    let update_data = update.data.ok_or_else(|| "No data in update response".to_string())?;
     if !update_data.issue_update.success {
         return Err("Failed to update issue state".to_string());
     }
@@ -273,11 +250,10 @@ pub fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
 
 // --- HTTP helper ---
 
-fn make_request(api_key: &str, query: &str) -> Result<String, String> {
-    let body = serde_json::json!({ "query": query });
+fn make_request(api_key: &str, query: &str, variables: &serde_json::Value) -> Result<String, String> {
+    let body = serde_json::json!({ "query": query, "variables": variables });
 
-    let client = reqwest::blocking::Client::new();
-    let response = client
+    let response = CLIENT
         .post(LINEAR_API_URL)
         .header("Authorization", api_key)
         .header("Content-Type", "application/json")

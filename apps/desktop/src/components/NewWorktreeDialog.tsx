@@ -12,6 +12,12 @@ interface NewWorktreeDialogProps {
 
 type Tab = "new" | "existing" | "linear";
 
+const tabs: { id: Tab; label: string }[] = [
+  { id: "new", label: "New branch" },
+  { id: "existing", label: "Existing branch" },
+  { id: "linear", label: "Linear" },
+];
+
 export function NewWorktreeDialog({
   repoPath,
   onCreated,
@@ -24,9 +30,9 @@ export function NewWorktreeDialog({
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Linear state
   const linearApiKey = useUIStore((s) => s.linearApiKey);
   const [myIssues, setMyIssues] = useState<LinearIssue[]>([]);
+  const [myIssuesLoaded, setMyIssuesLoaded] = useState(false);
   const [searchResults, setSearchResults] = useState<LinearIssue[]>([]);
   const [linearQuery, setLinearQuery] = useState("");
   const [linearLoading, setLinearLoading] = useState(false);
@@ -51,23 +57,23 @@ export function NewWorktreeDialog({
     })();
   }, [repoPath]);
 
-  // Fetch my issues when Linear tab is selected
+  // Fetch my issues once when Linear tab is first selected
   useEffect(() => {
-    if (tab !== "linear" || !linearApiKey) return;
+    if (tab !== "linear" || !linearApiKey || myIssuesLoaded) return;
     (async () => {
       setLinearLoading(true);
       try {
         const issues = await invoke<LinearIssue[]>("get_my_linear_issues", { apiKey: linearApiKey });
         setMyIssues(issues);
+        setMyIssuesLoaded(true);
       } catch (e) {
         toast.error(`Failed to load Linear issues: ${e}`);
       } finally {
         setLinearLoading(false);
       }
     })();
-  }, [tab, linearApiKey]);
+  }, [tab, linearApiKey, myIssuesLoaded]);
 
-  // Debounced search
   const handleLinearSearch = useCallback((query: string) => {
     setLinearQuery(query);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -87,6 +93,13 @@ export function NewWorktreeDialog({
       }
     }, 300);
   }, [linearApiKey]);
+
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   // Close combobox on outside click
   useEffect(() => {
@@ -109,6 +122,10 @@ export function NewWorktreeDialog({
   const displayedIssues = linearQuery.trim() ? searchResults : myIssues;
 
   const handleCreate = async () => {
+    let name: string;
+    let base: string | null;
+    let existing = false;
+
     if (tab === "linear") {
       if (!selectedIssue) {
         toast.error("Please select a Linear issue");
@@ -118,15 +135,35 @@ export function NewWorktreeDialog({
         toast.error("Please specify a branch name");
         return;
       }
-      setLoading(true);
-      try {
-        const worktree = await invoke<Worktree>("create_worktree", {
-          repoPath,
-          branchName: linearBranchName.trim(),
-          baseBranch: linearBaseBranch.trim() || null,
-          existing: false,
-        });
-        // Link worktree to issue and move to In Progress (best-effort, don't block)
+      name = linearBranchName.trim();
+      base = linearBaseBranch.trim() || null;
+    } else if (tab === "existing") {
+      if (!selectedBranch) {
+        toast.error("Please specify a branch name");
+        return;
+      }
+      name = selectedBranch;
+      base = null;
+      existing = true;
+    } else {
+      if (!branchName.trim()) {
+        toast.error("Please specify a branch name");
+        return;
+      }
+      name = branchName.trim();
+      base = baseBranch.trim() || null;
+    }
+
+    setLoading(true);
+    try {
+      const worktree = await invoke<Worktree>("create_worktree", {
+        repoPath,
+        branchName: name,
+        baseBranch: base,
+        existing,
+      });
+      // Best-effort: link to Linear issue and move to In Progress
+      if (tab === "linear" && selectedIssue) {
         await Promise.all([
           invoke("link_worktree_issue", {
             worktreePath: worktree.path,
@@ -138,29 +175,7 @@ export function NewWorktreeDialog({
             issueId: selectedIssue.id,
           }).catch(() => {}),
         ]);
-        onCreated(worktree);
-      } catch (e) {
-        toast.error(`Failed to create worktree: ${e}`);
-      } finally {
-        setLoading(false);
       }
-      return;
-    }
-
-    // Existing "new" and "existing" tab logic
-    const name = tab === "new" ? branchName.trim() : selectedBranch;
-    if (!name) {
-      toast.error("Please specify a branch name");
-      return;
-    }
-    setLoading(true);
-    try {
-      const worktree = await invoke<Worktree>("create_worktree", {
-        repoPath,
-        branchName: name,
-        baseBranch: tab === "new" && baseBranch.trim() ? baseBranch.trim() : null,
-        existing: tab === "existing",
-      });
       onCreated(worktree);
     } catch (e) {
       toast.error(`Failed to create worktree: ${e}`);
@@ -168,12 +183,6 @@ export function NewWorktreeDialog({
       setLoading(false);
     }
   };
-
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "new", label: "New branch" },
-    { id: "existing", label: "Existing branch" },
-    { id: "linear", label: "Linear" },
-  ];
 
   return (
     <div
@@ -186,7 +195,6 @@ export function NewWorktreeDialog({
       >
         <h2 className="text-lg font-semibold">New Worktree</h2>
 
-        {/* Tabs */}
         <div className="flex border-b border-border">
           {tabs.map((t) => (
             <button
@@ -206,7 +214,6 @@ export function NewWorktreeDialog({
           ))}
         </div>
 
-        {/* New branch tab */}
         {tab === "new" && (
           <div className="space-y-3">
             <div>
@@ -237,7 +244,6 @@ export function NewWorktreeDialog({
           </div>
         )}
 
-        {/* Existing branch tab */}
         {tab === "existing" && (
           <div>
             <label className="block text-xs text-muted-foreground mb-1">
@@ -258,7 +264,6 @@ export function NewWorktreeDialog({
           </div>
         )}
 
-        {/* Linear tab */}
         {tab === "linear" && (
           <div className="space-y-3">
             {!linearApiKey ? (
@@ -278,7 +283,6 @@ export function NewWorktreeDialog({
               </div>
             ) : (
               <>
-                {/* Issue combobox */}
                 <div>
                   <label className="block text-xs text-muted-foreground mb-1">
                     Issue
@@ -339,7 +343,6 @@ export function NewWorktreeDialog({
                   </div>
                 </div>
 
-                {/* Branch name (auto-filled from issue) */}
                 <div>
                   <label className="block text-xs text-muted-foreground mb-1">
                     Branch name
@@ -353,7 +356,6 @@ export function NewWorktreeDialog({
                   />
                 </div>
 
-                {/* Base branch */}
                 <div>
                   <label className="block text-xs text-muted-foreground mb-1">
                     Base branch (optional, defaults to HEAD)

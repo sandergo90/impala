@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useUIStore } from "../../store";
 
 export function LinearPane() {
@@ -6,11 +6,19 @@ export function LinearPane() {
   const setLinearApiKey = useUIStore((s) => s.setLinearApiKey);
   const [inputValue, setInputValue] = useState(linearApiKey);
   const [saved, setSaved] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   const handleSave = () => {
     setLinearApiKey(inputValue.trim());
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
   };
 
   const handleClear = () => {
