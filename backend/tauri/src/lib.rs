@@ -8,9 +8,8 @@ mod worktree_issues;
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use notify::{Config, Event, RecommendedWatcher, Watcher, RecursiveMode};
+use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{Emitter, Manager};
 
 struct DbState(Mutex<rusqlite::Connection>);
@@ -430,52 +429,29 @@ pub fn run() {
                 std::num::NonZeroUsize::new(50).unwrap(),
             ))));
 
-            // Watch annotations DB parent dir for external changes (e.g. MCP server)
+            // Poll annotations DB for external changes (e.g. MCP server) using data_version.
+            // File watchers are unreliable with SQLite WAL mode on macOS.
             {
-                let db_dir = app_dir.clone();
+                let db_path = app_dir.join("annotations.db");
                 let app_handle = app.handle().clone();
-                let last_db_event = Arc::new(Mutex::new(Instant::now()));
-                let db_debounce_flag = Arc::new(Mutex::new(false));
-
-                let last_ref = last_db_event.clone();
-                let flag_ref = db_debounce_flag.clone();
-
-                let mut db_watcher = RecommendedWatcher::new(
-                    move |res: Result<Event, notify::Error>| {
-                        if res.is_ok() {
-                            if let Ok(mut last) = last_ref.lock() {
-                                *last = Instant::now();
-                            }
-                            let mut flag = flag_ref.lock().unwrap();
-                            if !*flag {
-                                *flag = true;
-                                let app_ref = app_handle.clone();
-                                let last_inner = last_db_event.clone();
-                                let flag_inner = db_debounce_flag.clone();
-                                std::thread::spawn(move || {
-                                    loop {
-                                        std::thread::sleep(Duration::from_millis(300));
-                                        let elapsed = {
-                                            let last = last_inner.lock().unwrap();
-                                            last.elapsed()
-                                        };
-                                        if elapsed >= Duration::from_millis(300) {
-                                            let _ = app_ref.emit("annotations-changed", ());
-                                            let mut f = flag_inner.lock().unwrap();
-                                            *f = false;
-                                            break;
-                                        }
-                                    }
-                                });
+                std::thread::spawn(move || {
+                    let Ok(poll_conn) = rusqlite::Connection::open_with_flags(
+                        &db_path,
+                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                    ) else { return };
+                    let mut last_version: i64 = poll_conn
+                        .pragma_query_value(None, "data_version", |row| row.get(0))
+                        .unwrap_or(0);
+                    loop {
+                        std::thread::sleep(Duration::from_secs(1));
+                        if let Ok(version) = poll_conn.pragma_query_value(None, "data_version", |row| row.get::<_, i64>(0)) {
+                            if version != last_version {
+                                last_version = version;
+                                let _ = app_handle.emit("annotations-changed", ());
                             }
                         }
-                    },
-                    Config::default(),
-                ).map_err(|e| format!("Failed to create DB watcher: {}", e))?;
-
-                // Watch parent dir (catches WAL/SHM changes too)
-                let _ = db_watcher.watch(db_dir.as_ref(), RecursiveMode::NonRecursive);
-                app.manage(db_watcher);
+                    }
+                });
             }
 
             // Set window icon for dev mode (bundle icon is used in production)
