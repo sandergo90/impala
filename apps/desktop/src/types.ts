@@ -88,3 +88,19 @@ export interface CommentProvider {
   update(id: string, changes: { body?: string; resolved?: boolean }): Promise<Annotation>;
   delete(id: string): Promise<void>;
 }
+
+export interface LinearIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  branch_name: string;
+  status: string;
+  url: string;
+}
+
+export interface WorktreeIssue {
+  worktree_path: string;
+  issue_id: string;
+  identifier: string;
+  created_at: string;
+}
