@@ -64,11 +64,6 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     let unlistenExit: UnlistenFn | null = null;
     let unlistenDragDrop: UnlistenFn | null = null;
 
-    const handleDragOver = (e: DragEvent) => {
-      e.preventDefault();
-    };
-    container.addEventListener("dragover", handleDragOver);
-
     function writeToPty(text: string) {
       if (exitedRef.current) return;
       const encoded = btoa(
@@ -80,18 +75,17 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     }
 
     getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type !== "drop") return;
-      const rect = container.getBoundingClientRect();
-      const scale = window.devicePixelRatio;
-      const x = event.payload.position.x / scale;
-      const y = event.payload.position.y / scale;
-      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
-
+      if (cancelled) return;
+      if (event.payload.type !== "drop" || !isFocusedRef.current) return;
+      if (!container.checkVisibility()) return;
       const text = event.payload.paths
         .map((p) => (p.includes(" ") ? `'${p}'` : p))
         .join(" ");
       writeToPty(text);
-    }).then((fn) => { unlistenDragDrop = fn; });
+    }).then((fn) => {
+      if (cancelled) fn();  // immediately unlisten if effect already cleaned up
+      else unlistenDragDrop = fn;
+    });
 
     const interceptKeys = (e: KeyboardEvent) => {
       if (e.metaKey) {
@@ -254,7 +248,6 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     return () => {
       cancelled = true;
       container.removeEventListener("keydown", interceptKeys, true);
-      container.removeEventListener("dragover", handleDragOver);
       if (onFocus && container) {
         container.removeEventListener("mousedown", onFocus);
       }
