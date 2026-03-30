@@ -7,15 +7,13 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { useUIStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
-import type { ThemeTerminal } from "../themes/types";
+
+const SHOW_CURSOR = "\x1b[?25h";
+const HIDE_CURSOR = "\x1b[?25l";
 
 function getTerminalTheme() {
   const state = useUIStore.getState();
   return resolveThemeById(state.activeThemeId, state.customThemes).terminal;
-}
-
-function toXtermTheme(t: ThemeTerminal) {
-  return { ...t };
 }
 
 interface XtermTerminalProps {
@@ -46,7 +44,9 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
   const exitedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [exited, setExited] = useState<number | null>(null);
-  const [termBg, setTermBg] = useState(() => getTerminalTheme().background);
+  const termBg = useUIStore(
+    (s) => resolveThemeById(s.activeThemeId, s.customThemes).terminal.background
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -62,7 +62,6 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     let unlistenOutput: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
 
-    // Intercept keybindings in capture phase before xterm consumes them
     const interceptKeys = (e: KeyboardEvent) => {
       if (e.metaKey) {
         if (e.key === "d" || e.key === "D" || e.key === "[" || e.key === "]" || e.key === "w" || e.key === ",") {
@@ -83,6 +82,10 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     };
     container.addEventListener("keydown", interceptKeys, true);
 
+    if (onFocus) {
+      container.addEventListener("mousedown", onFocus);
+    }
+
     const setup = async () => {
       if (cancelled) return;
 
@@ -92,7 +95,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
         fontSize: 14,
         fontFamily:
           "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
-        theme: toXtermTheme(getTerminalTheme()),
+        theme: getTerminalTheme(),
         allowProposedApi: true,
       });
 
@@ -102,7 +105,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
       terminal.loadAddon(fitAddon);
       terminal.open(container);
 
-      // Load WebGL renderer after open() for GPU-accelerated rendering
+      // WebGL must be loaded after open()
       try {
         webglAddon = new WebglAddon();
         webglAddon.onContextLoss(() => {
@@ -111,7 +114,6 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
         });
         terminal.loadAddon(webglAddon);
       } catch {
-        // WebGL not available — falls back to canvas renderer automatically
         webglAddon = null;
       }
 
@@ -122,16 +124,13 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
 
       setLoading(false);
 
-      // Fit terminal to container FIRST (before buffer replay)
       fitAddon.fit();
 
-      // Replay buffered output (scrollback restoration for existing sessions)
       try {
         const buffered = await invoke<string>("pty_get_buffer", { sessionId });
         if (buffered && !cancelled) {
           const bytes = decodeBase64(buffered);
           if (bytes.length > 0) {
-            // Clear terminal first to avoid mixing stale events
             terminal.clear();
             terminal.write(bytes);
           }
@@ -145,8 +144,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
         return;
       }
 
-      // Resize PTY to match terminal — this sends SIGWINCH which makes
-      // TUI apps (like Claude Code) redraw cleanly
+      // Resize PTY to match terminal — sends SIGWINCH for TUI app redraw
       const dims = fitAddon.proposeDimensions();
       if (dims) {
         await invoke("pty_resize", {
@@ -156,9 +154,15 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
         });
       }
 
-      // xterm.js FitAddon lacks observeResize(), so use ResizeObserver instead
+      let rafPending = false;
       resizeObserver = new ResizeObserver(() => {
-        fitAddon?.fit();
+        if (!rafPending) {
+          rafPending = true;
+          requestAnimationFrame(() => {
+            rafPending = false;
+            fitAddon?.fit();
+          });
+        }
       });
       resizeObserver.observe(container);
 
@@ -179,12 +183,11 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
 
       const safeId = sanitizeEventId(sessionId);
 
-      // xterm.js uses .xterm-viewport for the scrollable element
+      // .xterm-viewport is xterm's internal scrollable element — fragile across versions
       const viewport = container.querySelector(".xterm-viewport") as HTMLElement | null;
 
       unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
         if (cancelled || !terminal) return;
-        // Preserve scroll position if user has scrolled up
         let wasAtBottom = true;
         let savedScrollTop = 0;
         if (viewport) {
@@ -213,13 +216,8 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
       if (isFocusedRef.current) {
         terminal.focus();
       } else {
-        terminal.write("\x1b[?25l"); // hide cursor for unfocused pane
+        terminal.write(HIDE_CURSOR);
         terminal.blur();
-      }
-
-      // Notify parent when terminal receives focus
-      if (onFocus) {
-        container.addEventListener("mousedown", onFocus);
       }
     };
 
@@ -251,10 +249,10 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
   useEffect(() => {
     if (!terminalRef.current) return;
     if (isFocused) {
-      terminalRef.current.write("\x1b[?25h"); // DECTCEM: show cursor
+      terminalRef.current.write(SHOW_CURSOR);
       terminalRef.current.focus();
     } else {
-      terminalRef.current.write("\x1b[?25l"); // DECTCEM: hide cursor
+      terminalRef.current.write(HIDE_CURSOR);
       terminalRef.current.blur();
     }
   }, [isFocused]);
@@ -264,10 +262,8 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     const unsubscribe = useUIStore.subscribe((state) => {
       if (state.activeThemeId !== prevThemeId) {
         prevThemeId = state.activeThemeId;
-        const termTheme = getTerminalTheme();
-        setTermBg(termTheme.background);
         if (terminalRef.current) {
-          terminalRef.current.options.theme = toXtermTheme(termTheme);
+          terminalRef.current.options.theme = getTerminalTheme();
         }
       }
     });
