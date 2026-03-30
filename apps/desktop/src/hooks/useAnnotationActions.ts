@@ -110,7 +110,7 @@ export function useAnnotationActions() {
         });
       }
 
-      await invoke("pty_write", { sessionId, data: encodeForPty(prompt) });
+      await invoke("pty_write", { sessionId, data: encodeForPty(prompt + "\r") });
     },
     [worktreePath]
   );
