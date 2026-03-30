@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useUIStore } from "../store";
 import { AppearancePane } from "./settings/AppearancePane";
 import { ClaudeIntegrationPane } from "./settings/ClaudeIntegrationPane";
+import { LinearPane } from "./settings/LinearPane";
 
 const navItems = [
   { id: "appearance", label: "Appearance", enabled: true },
   { id: "claude", label: "Claude Integration", enabled: true },
+  { id: "linear", label: "Linear", enabled: true },
   { id: "general", label: "General", enabled: false },
   { id: "editor", label: "Editor", enabled: false },
   { id: "keyboard", label: "Keyboard", enabled: false },
@@ -34,9 +36,9 @@ export function SettingsView() {
             key={item.id}
             onClick={() => item.enabled && setSelectedPane(item.id)}
             disabled={!item.enabled}
-            className={`px-4 py-1.5 text-xs text-left w-full ${
+            className={`px-4 py-1.5 text-xs text-left w-full rounded-md mx-0 ${
               item.enabled && item.id === selectedPane
-                ? "text-foreground font-medium border-l-2 border-primary"
+                ? "text-foreground font-medium bg-primary/15"
                 : item.enabled
                   ? "text-muted-foreground hover:text-foreground"
                   : "text-muted-foreground/50 cursor-not-allowed"
@@ -50,6 +52,7 @@ export function SettingsView() {
       <div className="flex-1 overflow-y-auto p-8">
         {selectedPane === "appearance" && <AppearancePane />}
         {selectedPane === "claude" && <ClaudeIntegrationPane />}
+        {selectedPane === "linear" && <LinearPane />}
       </div>
     </div>
   );

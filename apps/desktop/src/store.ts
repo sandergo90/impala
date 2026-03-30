@@ -50,6 +50,10 @@ interface UIState {
   removeCustomTheme: (id: string) => void;
   currentView: 'main' | 'settings';
   setCurrentView: (view: 'main' | 'settings') => void;
+  showResolved: boolean;
+  setShowResolved: (show: boolean) => void;
+  linearApiKey: string;
+  setLinearApiKey: (key: string) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -104,11 +108,15 @@ export const useUIStore = create<UIState>()(
       },
       currentView: 'main',
       setCurrentView: (view) => set({ currentView: view }),
+      showResolved: false,
+      setShowResolved: (show) => set({ showResolved: show }),
+      linearApiKey: "",
+      setLinearApiKey: (key) => set({ linearApiKey: key }),
     }),
     {
       name: "differ-ui-state",
       partialize: (state) => {
-        const { currentView, ...rest } = state;
+        const { currentView, showResolved, ...rest } = state;
         return rest;
       },
       onRehydrateStorage: () => (state) => {
