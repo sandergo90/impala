@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -61,6 +62,36 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     let dataDisposable: { dispose(): void } | null = null;
     let unlistenOutput: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
+    let unlistenDragDrop: UnlistenFn | null = null;
+
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    container.addEventListener("dragover", handleDragOver);
+
+    function writeToPty(text: string) {
+      if (exitedRef.current) return;
+      const encoded = btoa(
+        Array.from(new TextEncoder().encode(text), (b) =>
+          String.fromCharCode(b)
+        ).join("")
+      );
+      invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
+    }
+
+    getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type !== "drop") return;
+      const rect = container.getBoundingClientRect();
+      const scale = window.devicePixelRatio;
+      const x = event.payload.position.x / scale;
+      const y = event.payload.position.y / scale;
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+
+      const text = event.payload.paths
+        .map((p) => (p.includes(" ") ? `'${p}'` : p))
+        .join(" ");
+      writeToPty(text);
+    }).then((fn) => { unlistenDragDrop = fn; });
 
     const interceptKeys = (e: KeyboardEvent) => {
       if (e.metaKey) {
@@ -172,13 +203,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
       });
 
       dataDisposable = terminal.onData((data: string) => {
-        if (exitedRef.current) return;
-        const encoded = btoa(
-          Array.from(new TextEncoder().encode(data), (b) =>
-            String.fromCharCode(b)
-          ).join("")
-        );
-        invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
+        writeToPty(data);
       });
 
       const safeId = sanitizeEventId(sessionId);
@@ -229,9 +254,11 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     return () => {
       cancelled = true;
       container.removeEventListener("keydown", interceptKeys, true);
+      container.removeEventListener("dragover", handleDragOver);
       if (onFocus && container) {
         container.removeEventListener("mousedown", onFocus);
       }
+      unlistenDragDrop?.();
       resizeObserver?.disconnect();
       resizeDisposable?.dispose();
       dataDisposable?.dispose();
