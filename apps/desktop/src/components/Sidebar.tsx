@@ -129,9 +129,12 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
     const unlisten = listen<{ worktree_path: string; status: string }>("agent-status", (event) => {
       const { worktree_path, status } = event.payload;
       if (status === "working" || status === "idle") {
-        useDataStore.getState().updateWorktreeDataState(worktree_path, {
-          agentStatus: status,
-        });
+        const current = useDataStore.getState().worktreeDataStates[worktree_path];
+        if (current?.agentStatus !== status) {
+          useDataStore.getState().updateWorktreeDataState(worktree_path, {
+            agentStatus: status,
+          });
+        }
       }
     });
     return () => { unlisten.then((fn) => fn()); };
