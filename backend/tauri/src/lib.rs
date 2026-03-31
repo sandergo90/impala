@@ -2,6 +2,7 @@ mod annotations;
 mod git;
 mod hook_server;
 mod linear;
+mod linear_context;
 mod pty;
 mod viewed_files;
 mod watcher;
@@ -407,6 +408,21 @@ fn unlink_worktree_issue(
     worktree_issues::unlink_worktree(&conn, &worktree_path)
 }
 
+#[tauri::command]
+fn write_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
+    linear_context::write_context(&api_key, &issue_id, &worktree_path, true)
+}
+
+#[tauri::command]
+fn refresh_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
+    linear_context::write_context(&api_key, &issue_id, &worktree_path, false)
+}
+
+#[tauri::command]
+fn clean_linear_context(worktree_path: String) -> Result<(), String> {
+    linear_context::clean_context(&worktree_path)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -511,6 +527,9 @@ pub fn run() {
             get_worktree_issue,
             get_all_worktree_issues,
             unlink_worktree_issue,
+            write_linear_context,
+            refresh_linear_context,
+            clean_linear_context,
             pty::pty_spawn,
             pty::pty_get_buffer,
             pty::pty_write,

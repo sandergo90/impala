@@ -146,6 +146,96 @@ pub fn search_issues(api_key: &str, query_text: &str) -> Result<Vec<LinearIssue>
     Ok(data.search_issues.nodes.into_iter().map(|n| n.into_linear_issue()).collect())
 }
 
+// --- Issue detail (description + comments) ---
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LinearIssueDetail {
+    pub identifier: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub url: String,
+    pub status: String,
+    pub comments: Vec<LinearComment>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LinearComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Deserialize)]
+struct IssueDetailData {
+    issue: IssueDetailNode,
+}
+
+#[derive(Deserialize)]
+struct IssueDetailNode {
+    identifier: String,
+    title: String,
+    description: Option<String>,
+    url: String,
+    state: IssueState,
+    comments: CommentConnection,
+}
+
+#[derive(Deserialize)]
+struct CommentConnection {
+    nodes: Vec<CommentNode>,
+}
+
+#[derive(Deserialize)]
+struct CommentNode {
+    body: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    user: Option<CommentUser>,
+}
+
+#[derive(Deserialize)]
+struct CommentUser {
+    #[serde(rename = "displayName")]
+    display_name: String,
+}
+
+pub fn get_issue_detail(api_key: &str, issue_id: &str) -> Result<LinearIssueDetail, String> {
+    let query = r#"query($issueId: String!) {
+        issue(id: $issueId) {
+            identifier
+            title
+            description
+            url
+            state { name type }
+            comments(first: 50) {
+                nodes {
+                    body
+                    createdAt
+                    user { displayName }
+                }
+            }
+        }
+    }"#;
+
+    let variables = serde_json::json!({ "issueId": issue_id });
+    let response = make_request(api_key, query, &variables)?;
+    let data: IssueDetailData = parse_response(&response, "issue detail")?;
+
+    let node = data.issue;
+    Ok(LinearIssueDetail {
+        identifier: node.identifier,
+        title: node.title,
+        description: node.description,
+        url: node.url,
+        status: node.state.name,
+        comments: node.comments.nodes.into_iter().map(|c| LinearComment {
+            author: c.user.map(|u| u.display_name).unwrap_or_else(|| "Unknown".to_string()),
+            body: c.body,
+            created_at: c.created_at,
+        }).collect(),
+    })
+}
+
 // --- Update issue state to "In Progress" ---
 
 #[derive(Deserialize)]
