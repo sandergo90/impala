@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
@@ -123,11 +124,17 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
 
-  // Tick every 2s to refresh activity indicators
-  const [now, setNow] = useState(Date.now());
+  // Listen for agent-status events from the backend
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 2000);
-    return () => clearInterval(id);
+    const unlisten = listen<{ worktree_path: string; status: string }>("agent-status", (event) => {
+      const { worktree_path, status } = event.payload;
+      if (status === "working" || status === "idle") {
+        useDataStore.getState().updateWorktreeDataState(worktree_path, {
+          agentStatus: status,
+        });
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
 
   const commitCounts = useDataStore(
@@ -137,6 +144,16 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
         counts[path] = state.commits?.length ?? 0;
       }
       return counts;
+    })
+  );
+
+  const agentStatuses = useDataStore(
+    useShallow((s) => {
+      const statuses: Record<string, string> = {};
+      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
+        statuses[path] = state.agentStatus ?? "idle";
+      }
+      return statuses;
     })
   );
   const [showNewWorktree, setShowNewWorktree] = useState(false);
@@ -380,8 +397,7 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
             const isSelected = selectedWorktree?.path === wt.path;
             const aheadCount = commitCounts[wt.path] ?? 0;
             const isMain = wt.branch === "main" || wt.branch === "master" || wt.branch === "develop";
-            const lastActivity = useDataStore.getState().getWorktreeDataState(wt.path).lastPtyActivity;
-            const isActive = now - lastActivity < 3000;
+            const isActive = agentStatuses[wt.path] === "working";
 
             return (
               <div key={wt.path} className="group relative mx-2 my-0.5">

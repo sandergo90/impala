@@ -80,7 +80,7 @@ export interface WorktreeDataState {
   fileDiffHashes: Record<string, string>;
   generatedFiles: string[];
   annotations: Annotation[];
-  lastPtyActivity: number;
+  agentStatus: "idle" | "working";
 }
 
 export interface CommentProvider {

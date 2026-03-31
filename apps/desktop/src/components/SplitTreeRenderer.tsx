@@ -193,7 +193,6 @@ function LeafPane({
         <XtermTerminal
           key={sessionId}
           sessionId={sessionId}
-          worktreePath={worktreePath}
           isFocused={isFocused}
           onFocus={onFocus}
           onRestart={handleRestart}
