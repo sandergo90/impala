@@ -1,9 +1,28 @@
 import { registerCustomTheme } from "@pierre/diffs";
+import type { DiffsThemeNames } from "@pierre/diffs/react";
+import type { CSSProperties } from "react";
 import type { Theme, ResolvedCSS } from "./types";
 import { getBuiltInTheme, defaultDark } from "./built-in";
 
-/** Current theme reference for Pierre's async theme loaders */
-let currentTheme: Theme = defaultDark;
+// ---------------------------------------------------------------------------
+// Pierre diff theme registration (follows Superset's pattern)
+// ---------------------------------------------------------------------------
+
+const REGISTERED_DIFF_THEMES = new Set<string>();
+
+function hashString(value: string): string {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function createDiffThemeName(theme: Theme): DiffsThemeNames {
+  const sig = hashString(JSON.stringify(theme.terminal) + theme.ui.background + theme.ui.foreground);
+  return `differ-${theme.id}-${sig}` as DiffsThemeNames;
+}
 
 /**
  * Map terminal ANSI colors to syntax token scopes.
@@ -11,58 +30,74 @@ let currentTheme: Theme = defaultDark;
  *   keyword→magenta, function→blue, string→green, number→yellow,
  *   type→cyan, constant→cyan, tag→red, comment→brightBlack
  */
-function buildTokenColors(t: Theme["terminal"], isDark: boolean): Array<{ scope: string | string[]; settings: { foreground: string; fontStyle?: string } }> {
-  return [
-    { scope: "comment", settings: { foreground: t.brightBlack, fontStyle: "italic" } },
-    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: t.magenta } },
-    { scope: ["string", "string.quoted"], settings: { foreground: t.green } },
-    { scope: ["constant.numeric", "constant.language"], settings: { foreground: t.yellow } },
-    { scope: ["variable.other.constant", "constant.other"], settings: { foreground: t.cyan } },
-    { scope: ["entity.name.function", "support.function"], settings: { foreground: t.blue } },
-    { scope: ["entity.name.type", "support.type", "support.class"], settings: { foreground: t.cyan } },
-    { scope: "entity.name.class", settings: { foreground: t.yellow } },
-    { scope: ["entity.name.tag", "punctuation.definition.tag"], settings: { foreground: t.red } },
-    { scope: "entity.other.attribute-name", settings: { foreground: t.yellow } },
-    { scope: "string.regexp", settings: { foreground: t.red } },
-    { scope: "invalid.illegal", settings: { foreground: isDark ? t.brightRed : t.red } },
-  ];
-}
-
-function patchTheme(
-  base: { colors: Record<string, string>; tokenColors: unknown[]; [k: string]: unknown },
-  name: string,
-  type: "dark" | "light",
-): Record<string, unknown> {
-  const t = currentTheme;
-  const isDark = type === "dark";
-  const additionColor = isDark ? t.terminal.brightGreen : t.terminal.green;
-  const deletionColor = isDark ? t.terminal.brightRed : t.terminal.red;
+function createShikiTheme(theme: Theme) {
+  const t = theme.terminal;
+  const isDark = theme.type === "dark";
   return {
-    ...base,
-    name,
-    type,
+    name: createDiffThemeName(theme),
+    type: theme.type,
     colors: {
-      ...base.colors,
-      "editor.background": t.ui.background,
-      "editor.foreground": t.ui.foreground,
-      "diffEditor.insertedTextBackground": additionColor + "1a",
-      "diffEditor.removedTextBackground": deletionColor + "1a",
+      "editor.background": theme.terminal.background,
+      "editor.foreground": theme.terminal.foreground,
     },
-    tokenColors: buildTokenColors(t.terminal, isDark),
+    tokenColors: [
+      { settings: { foreground: theme.ui.foreground, background: theme.ui.background } },
+      { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: t.brightBlack, fontStyle: "italic" } },
+      { scope: ["keyword", "storage", "storage.type", "storage.modifier"], settings: { foreground: t.magenta } },
+      { scope: ["string", "string.template", "string.quoted"], settings: { foreground: t.green } },
+      { scope: ["constant.numeric", "constant.language"], settings: { foreground: t.yellow } },
+      { scope: ["entity.name.function", "support.function", "meta.function-call"], settings: { foreground: t.blue } },
+      { scope: ["variable", "meta.definition.variable"], settings: { foreground: theme.ui.foreground } },
+      { scope: ["entity.name.type", "support.type", "support.class"], settings: { foreground: t.cyan } },
+      { scope: ["entity.name.class", "entity.other.inherited-class"], settings: { foreground: t.yellow } },
+      { scope: ["variable.other.constant", "constant", "support.constant"], settings: { foreground: t.cyan } },
+      { scope: ["string.regexp", "constant.other.character-class.regexp"], settings: { foreground: t.red } },
+      { scope: ["entity.name.tag", "punctuation.definition.tag"], settings: { foreground: t.red } },
+      { scope: ["entity.other.attribute-name"], settings: { foreground: t.yellow } },
+      { scope: ["invalid", "invalid.illegal"], settings: { foreground: isDark ? t.brightRed : t.red } },
+    ],
   };
 }
 
-registerCustomTheme("differ-dark", async () => {
-  const base = await import("@pierre/theme/themes/pierre-dark.json").then((m) => m.default ?? m);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return patchTheme(base, "differ-dark", "dark") as any;
-});
+/** Get (or register) a Pierre diff theme for the given Differ theme. */
+export function getDiffsTheme(theme: Theme): DiffsThemeNames {
+  const name = createDiffThemeName(theme);
+  if (!REGISTERED_DIFF_THEMES.has(name)) {
+    registerCustomTheme(name, async () => createShikiTheme(theme));
+    REGISTERED_DIFF_THEMES.add(name);
+  }
+  return name;
+}
 
-registerCustomTheme("differ-light", async () => {
-  const base = await import("@pierre/theme/themes/pierre-light.json").then((m) => m.default ?? m);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return patchTheme(base, "differ-light", "light") as any;
-});
+/** CSS variable overrides for Pierre diff styling, applied as inline styles on the container. */
+export function getDiffViewerStyle(theme: Theme): CSSProperties {
+  const isDark = theme.type === "dark";
+  const additionColor = isDark ? theme.terminal.brightGreen : theme.terminal.green;
+  const deletionColor = isDark ? theme.terminal.brightRed : theme.terminal.red;
+  // Pierre's --diffs-bg uses light-dark(var(--diffs-light-bg), var(--diffs-dark-bg))
+  // so we must set the inner variables for the active mode.
+  return {
+    // Set both light and dark variants so light-dark() works regardless of system color-scheme
+    "--diffs-dark": theme.terminal.foreground,
+    "--diffs-dark-bg": theme.terminal.background,
+    "--diffs-light": theme.terminal.foreground,
+    "--diffs-light-bg": theme.terminal.background,
+    "--diffs-bg-buffer-override": theme.terminal.background,
+    "--diffs-bg-hover-override": theme.terminal.background,
+    "--diffs-bg-context-override": theme.terminal.background,
+    "--diffs-bg-separator-override": theme.ui.border,
+    "--diffs-fg-number-override": isDark ? theme.terminal.brightBlack : theme.terminal.white,
+    "--diffs-addition-color-override": additionColor,
+    "--diffs-deletion-color-override": deletionColor,
+    "--diffs-selection-color-override": theme.terminal.selectionBackground,
+    backgroundColor: theme.terminal.background,
+    color: theme.terminal.foreground,
+  } as CSSProperties;
+}
+
+// ---------------------------------------------------------------------------
+// App-wide theme application (CSS variables for Tailwind / app chrome)
+// ---------------------------------------------------------------------------
 
 export function resolveTheme(theme: Theme): ResolvedCSS {
   const { background, foreground, primary, border, accent } = theme.ui;
@@ -140,27 +175,7 @@ const CSS_VAR_MAP: Record<keyof ResolvedCSS, string> = {
   sidebarRing: "--sidebar-ring",
 };
 
-/** Derive Pierre diff CSS variable overrides from theme colors */
-function getDiffOverrides(theme: Theme): Record<string, string> {
-  const { background, foreground } = theme.ui;
-  const isDark = theme.type === "dark";
-  const additionColor = isDark ? theme.terminal.brightGreen : theme.terminal.green;
-  const deletionColor = isDark ? theme.terminal.brightRed : theme.terminal.red;
-
-  // Pierre uses --diffs-dark-* / --diffs-light-* as base theme variables.
-  const prefix = isDark ? "--diffs-dark" : "--diffs-light";
-
-  return {
-    [`${prefix}`]: foreground,
-    [`${prefix}-bg`]: background,
-    [`${prefix}-addition-color`]: additionColor,
-    [`${prefix}-deletion-color`]: deletionColor,
-  };
-}
-
 export function applyTheme(theme: Theme): void {
-  currentTheme = theme;
-
   const resolved = resolveTheme(theme);
   const root = document.documentElement;
 
@@ -168,11 +183,8 @@ export function applyTheme(theme: Theme): void {
     root.style.setProperty(cssVar, resolved[key as keyof ResolvedCSS]);
   }
 
-  for (const [cssVar, value] of Object.entries(getDiffOverrides(theme))) {
-    root.style.setProperty(cssVar, value);
-  }
-
   root.setAttribute("data-theme-type", theme.type);
+  root.style.colorScheme = theme.type;
   root.classList.remove("dark");
 }
 

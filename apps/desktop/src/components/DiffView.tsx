@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
-import { resolveThemeById } from "../themes/apply";
-import { PatchDiff, Virtualizer } from "@pierre/diffs/react";
+import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";
+import { PatchDiff } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
@@ -36,6 +37,143 @@ function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: R
       </span>
       Viewed
     </button>
+  );
+}
+
+function VirtualizedCommitView({
+  toolbar, changedFiles, fileDiffs, viewedFiles, collapsedFiles, setCollapsedFiles,
+  generatedFiles, diffOptions, diffViewerStyle, annotationsByFile,
+  pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler, toggleViewed,
+}: {
+  toolbar: React.ReactNode;
+  changedFiles: WorktreeDataState["changedFiles"];
+  fileDiffs: Record<string, string>;
+  viewedFiles: Set<string>;
+  collapsedFiles: Set<string>;
+  setCollapsedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
+  generatedFiles: string[];
+  diffOptions: Record<string, unknown>;
+  diffViewerStyle: React.CSSProperties;
+  annotationsByFile: Map<string, DiffLineAnnotation<AnnotationMeta>[]>;
+  pendingAnnotation: { filePath?: string; lineNumber: number; side: "deletions" | "additions" } | null;
+  renderAnnotation: (annotation: DiffLineAnnotation<AnnotationMeta>) => React.ReactNode;
+  makeGutterUtilityClickHandler: (filePath?: string) => (range: { start: number; side?: "deletions" | "additions"; end: number }) => void;
+  toggleViewed: (path: string) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: changedFiles.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) => {
+      const file = changedFiles[index];
+      const patch = fileDiffs[file.path];
+      const isViewed = viewedFiles.has(file.path);
+      const isCollapsed = collapsedFiles.has(file.path) || isViewed;
+      if (!patch || isCollapsed) return 44;
+      const lineCount = patch.split("\n").length;
+      return Math.max(44, lineCount * 20 + 44);
+    },
+    overscan: 2,
+    scrollMargin: listRef.current?.offsetTop ?? 0,
+  });
+
+  const items = virtualizer.getVirtualItems();
+
+  return (
+    <div ref={scrollRef} className="flex flex-col h-full overflow-auto">
+      {toolbar}
+      <div ref={listRef}>
+        <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+          {items.map((virtualRow) => {
+            const file = changedFiles[virtualRow.index];
+            const patch = fileDiffs[file.path];
+            const isViewed = viewedFiles.has(file.path);
+
+            if (!patch) {
+              return (
+                <div
+                  key={file.path}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  data-file-path={file.path}
+                  className={`absolute left-0 w-full border-b border-border ${isViewed ? "opacity-75" : ""}`}
+                  style={{ top: virtualRow.start - (virtualizer.options.scrollMargin ?? 0) }}
+                >
+                  <div className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground">
+                    <span className="flex-1 truncate">{file.path}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted">New file</span>
+                    <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+                  </div>
+                </div>
+              );
+            }
+
+            const isLargeFile = patch.length > 100_000;
+            const isGenerated = generatedFiles.includes(file.path);
+            const isCollapsed = collapsedFiles.has(file.path) || isViewed || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
+
+            const toggleCollapse = () => {
+              setCollapsedFiles((prev) => {
+                const next = new Set(prev);
+                if (isLargeFile || isGenerated) {
+                  const expandKey = `expanded:${file.path}`;
+                  if (next.has(expandKey)) next.delete(expandKey);
+                  else next.add(expandKey);
+                } else if (next.has(file.path)) next.delete(file.path);
+                else next.add(file.path);
+                return next;
+              });
+            };
+
+            return (
+              <div
+                key={file.path}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
+                data-file-path={file.path}
+                className={`absolute left-0 w-full border-b border-border ${isViewed ? "opacity-75" : ""}`}
+                style={{ top: virtualRow.start - (virtualizer.options.scrollMargin ?? 0) }}
+              >
+                <PatchDiff<AnnotationMeta>
+                  style={diffViewerStyle}
+                  patch={patch}
+                  options={{ ...diffOptions, collapsed: isCollapsed, onGutterUtilityClick: makeGutterUtilityClickHandler(file.path) }}
+                  lineAnnotations={(() => {
+                    const saved = annotationsByFile.get(file.path) ?? [];
+                    if (pendingAnnotation?.filePath === file.path) {
+                      return [...saved, {
+                        side: pendingAnnotation.side,
+                        lineNumber: pendingAnnotation.lineNumber,
+                        metadata: { type: 'form' as const },
+                      }];
+                    }
+                    return saved.length > 0 ? saved : undefined;
+                  })()}
+                  renderAnnotation={renderAnnotation}
+                  renderHeaderPrefix={() => (
+                    <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
+                      {isCollapsed ? "▶" : "▼"}
+                    </button>
+                  )}
+                  renderHeaderMetadata={() => (
+                    <div className="flex items-center gap-2">
+                      {isGenerated && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                          Generated
+                        </span>
+                      )}
+                      <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); }} />
+                    </div>
+                  )}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -290,14 +428,16 @@ export function DiffView() {
   }
 
   const activeTheme = resolveThemeById(activeThemeId, customThemes);
-  const differTheme = activeTheme.type === "dark" ? "differ-dark" : "differ-light";
+  const differTheme = getDiffsTheme(activeTheme);
+  const diffViewerStyle = getDiffViewerStyle(activeTheme);
 
   const diffOptions = {
     theme: differTheme,
+    themeType: activeTheme.type as "dark" | "light",
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
     enableGutterUtility: true,
-    unsafeCSS: `[data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
+    unsafeCSS: `:host { --diffs-dark-bg: ${activeTheme.terminal.background}; --diffs-light-bg: ${activeTheme.terminal.background}; --diffs-dark: ${activeTheme.terminal.foreground}; --diffs-light: ${activeTheme.terminal.foreground}; } [data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
   };
 
   const toolbar = (
@@ -357,112 +497,31 @@ export function DiffView() {
 
   // Full commit view: all files stacked with virtualization
   if (showAllFiles) {
-    return (
-      <div className="flex flex-col h-full overflow-hidden">
-        {toolbar}
-        <Virtualizer
-          className="flex-1 overflow-auto"
-          config={{ overscrollSize: 500 }}
-        >
-          {changedFiles.map((file) => {
-            const patch = fileDiffs[file.path];
-            const isViewed = viewedFiles.has(file.path);
-            if (!patch) {
-              return (
-                <div key={file.path} data-file-path={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
-                  <div className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground">
-                    <span className="flex-1 truncate">{file.path}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted">New file</span>
-                    <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
-                  </div>
-                </div>
-              );
-            }
-            const isLargeFile = patch.length > 100_000;
-            const isGenerated = generatedFiles.includes(file.path);
-            const isCollapsed = collapsedFiles.has(file.path) || isViewed || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
-
-            const toggleCollapse = () => {
-              setCollapsedFiles((prev) => {
-                const next = new Set(prev);
-                if (isLargeFile || isGenerated) {
-                  const expandKey = `expanded:${file.path}`;
-                  if (next.has(expandKey)) {
-                    next.delete(expandKey);
-                  } else {
-                    next.add(expandKey);
-                  }
-                } else if (next.has(file.path)) {
-                  next.delete(file.path);
-                } else {
-                  next.add(file.path);
-                }
-                return next;
-              });
-            };
-
-            const scrollToNextFile = () => {
-              // Scroll so the current file's collapsed header stays at top, next file visible below
-              requestAnimationFrame(() => requestAnimationFrame(() => {
-                const currentEl = document.querySelector(`[data-file-path="${CSS.escape(file.path)}"]`);
-                if (!currentEl) return;
-                const container = currentEl.closest(".overflow-auto");
-                if (container) {
-                  const containerRect = container.getBoundingClientRect();
-                  const elRect = currentEl.getBoundingClientRect();
-                  const offset = elRect.top - containerRect.top + container.scrollTop;
-                  container.scrollTo({ top: offset, behavior: "smooth" });
-                }
-              }));
-            };
-
-            return (
-              <div key={file.path} data-file-path={file.path} className={`border-b border-border ${isViewed ? "opacity-75" : ""}`}>
-                <PatchDiff<AnnotationMeta>
-                  patch={patch}
-                  options={{ ...diffOptions, collapsed: isCollapsed, onGutterUtilityClick: makeGutterUtilityClickHandler(file.path) }}
-                  lineAnnotations={(() => {
-                    const saved = annotationsByFile.get(file.path) ?? [];
-                    if (pendingAnnotation?.filePath === file.path) {
-                      return [...saved, {
-                        side: pendingAnnotation.side,
-                        lineNumber: pendingAnnotation.lineNumber,
-                        metadata: { type: 'form' as const },
-                      }];
-                    }
-                    return saved.length > 0 ? saved : undefined;
-                  })()}
-                  renderAnnotation={renderAnnotation}
-                  renderHeaderPrefix={() => (
-                    <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
-                      {isCollapsed ? "▶" : "▼"}
-                    </button>
-                  )}
-                  renderHeaderMetadata={() => (
-                    <div className="flex items-center gap-2">
-                      {isGenerated && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                          Generated
-                        </span>
-                      )}
-                      <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToNextFile(); }} />
-                    </div>
-                  )}
-                />
-              </div>
-            );
-          })}
-        </Virtualizer>
-      </div>
-    );
+    return <VirtualizedCommitView
+      toolbar={toolbar}
+      changedFiles={changedFiles}
+      fileDiffs={fileDiffs}
+      viewedFiles={viewedFiles}
+      collapsedFiles={collapsedFiles}
+      setCollapsedFiles={setCollapsedFiles}
+      generatedFiles={generatedFiles}
+      diffOptions={diffOptions}
+      diffViewerStyle={diffViewerStyle}
+      annotationsByFile={annotationsByFile}
+      pendingAnnotation={pendingAnnotation}
+      renderAnnotation={renderAnnotation}
+      makeGutterUtilityClickHandler={makeGutterUtilityClickHandler}
+      toggleViewed={toggleViewed}
+    />;
   }
 
   // Single file view with annotations
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" style={diffViewerStyle}>
         <PatchDiff<AnnotationMeta>
+          style={diffViewerStyle}
           patch={diffText!}
           lineAnnotations={lineAnnotations}
           renderAnnotation={renderAnnotation}

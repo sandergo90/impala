@@ -14,7 +14,12 @@ import {
 } from "@/components/ui/resizable";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { useUIStore, useDataStore } from "./store";
-import { splitNode, removeNode, getAdjacentLeafId, getLeaves } from "./lib/split-tree";
+import {
+  splitNode,
+  removeNode,
+  getAdjacentLeafId,
+  getLeaves,
+} from "./lib/split-tree";
 
 /** Keeps all visited worktree terminals mounted (hidden when inactive) to avoid remounting */
 function WorktreeTerminals({
@@ -87,7 +92,8 @@ function WorktreeTerminalPane({
   const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
 
   const tree = claudeOnly
-    ? (getLeaves(nav.splitTree).find((l) => l.paneType === "claude") ?? nav.splitTree)
+    ? getLeaves(nav.splitTree).find((l) => l.paneType === "claude") ??
+      nav.splitTree
     : nav.splitTree;
 
   return (
@@ -114,10 +120,10 @@ function App() {
   const selectedProject = useUIStore((s) => s.selectedProject);
   const wtPath = selectedWorktree?.path;
   const navState = useUIStore((s) =>
-    wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null
+    wtPath ? s.worktreeNavStates[wtPath] ?? null : null
   );
   const dataState = useDataStore((s) =>
-    wtPath ? (s.worktreeDataStates[wtPath] ?? null) : null
+    wtPath ? s.worktreeDataStates[wtPath] ?? null : null
   );
 
   const activeTab = navState?.activeTab ?? "diff";
@@ -133,7 +139,9 @@ function App() {
       if (e.metaKey && e.key === ",") {
         e.preventDefault();
         const view = useUIStore.getState().currentView;
-        useUIStore.getState().setCurrentView(view === "settings" ? "main" : "settings");
+        useUIStore
+          .getState()
+          .setCurrentView(view === "settings" ? "main" : "settings");
         return;
       }
 
@@ -184,7 +192,9 @@ function App() {
       if (e.metaKey && e.key === "]") {
         e.preventDefault();
         const nextId = getAdjacentLeafId(tree, focusedId, 1);
-        useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: nextId });
+        useUIStore
+          .getState()
+          .updateWorktreeNavState(wtPath, { focusedPaneId: nextId });
         return;
       }
 
@@ -192,7 +202,9 @@ function App() {
       if (e.metaKey && e.key === "[") {
         e.preventDefault();
         const prevId = getAdjacentLeafId(tree, focusedId, -1);
-        useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: prevId });
+        useUIStore
+          .getState()
+          .updateWorktreeNavState(wtPath, { focusedPaneId: prevId });
         return;
       }
 
@@ -218,13 +230,17 @@ function App() {
         if (sessionId) {
           invoke("pty_kill", { sessionId }).catch(() => {});
           const { [focusedId]: _, ...remaining } = data.paneSessions;
-          useDataStore.getState().updateWorktreeDataState(wtPath, { paneSessions: remaining });
+          useDataStore
+            .getState()
+            .updateWorktreeDataState(wtPath, { paneSessions: remaining });
         }
 
         // Focus adjacent pane (fall back to first leaf if adjacent was the one removed)
         const newLeaves = getLeaves(newTree);
         const newLeafIds = new Set(newLeaves.map((l) => l.id));
-        const newFocusId = newLeafIds.has(adjacentId) ? adjacentId : (newLeaves[0]?.id ?? "default");
+        const newFocusId = newLeafIds.has(adjacentId)
+          ? adjacentId
+          : newLeaves[0]?.id ?? "default";
         useUIStore.getState().updateWorktreeNavState(wtPath, {
           splitTree: newTree,
           focusedPaneId: newFocusId,
@@ -239,7 +255,9 @@ function App() {
 
   const handleTerminalTab = () => {
     if (!selectedWorktree) return;
-    useUIStore.getState().updateWorktreeNavState(selectedWorktree.path, { activeTab: "terminal" });
+    useUIStore
+      .getState()
+      .updateWorktreeNavState(selectedWorktree.path, { activeTab: "terminal" });
   };
 
   const handleDiffTab = () => {
@@ -256,18 +274,26 @@ function App() {
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: "split" });
   };
 
-  const handleFocusPane = useCallback((paneId: string) => {
-    if (!wtPath) return;
-    useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: paneId });
-  }, [wtPath]);
+  const handleFocusPane = useCallback(
+    (paneId: string) => {
+      if (!wtPath) return;
+      useUIStore
+        .getState()
+        .updateWorktreeNavState(wtPath, { focusedPaneId: paneId });
+    },
+    [wtPath]
+  );
 
-  const handleSessionSpawned = useCallback((paneId: string, sessionId: string) => {
-    if (!wtPath) return;
-    const current = useDataStore.getState().getWorktreeDataState(wtPath);
-    useDataStore.getState().updateWorktreeDataState(wtPath, {
-      paneSessions: { ...current.paneSessions, [paneId]: sessionId },
-    });
-  }, [wtPath]);
+  const handleSessionSpawned = useCallback(
+    (paneId: string, sessionId: string) => {
+      if (!wtPath) return;
+      const current = useDataStore.getState().getWorktreeDataState(wtPath);
+      useDataStore.getState().updateWorktreeDataState(wtPath, {
+        paneSessions: { ...current.paneSessions, [paneId]: sessionId },
+      });
+    },
+    [wtPath]
+  );
 
   if (checking) return null;
 
@@ -324,28 +350,93 @@ function App() {
               title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
             >
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                <rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.4" fill="none" />
-                <line x1="5.5" y1="2" x2="5.5" y2="14" stroke="currentColor" strokeWidth="1.4" />
+                <rect
+                  x="1"
+                  y="2"
+                  width="14"
+                  height="12"
+                  rx="2"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  fill="none"
+                />
+                <line
+                  x1="5.5"
+                  y1="2"
+                  x2="5.5"
+                  y2="14"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
               </svg>
             </button>
 
             {/* Center context: project / branch · N ahead of base */}
-            <div className="flex-1 flex items-center justify-center gap-1.5 text-[11px]" data-tauri-drag-region>
+            <div
+              className="flex-1 flex items-center justify-center gap-1.5 text-[11px]"
+              data-tauri-drag-region
+            >
               {selectedWorktree && (
                 <>
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-muted-foreground/50 shrink-0">
-                    <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-                    <circle cx="4" cy="12" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-                    <line x1="4" y1="6" x2="4" y2="10" stroke="currentColor" strokeWidth="1.4"/>
-                    <path d="M4 8 L10 4" stroke="currentColor" strokeWidth="1.4"/>
-                    <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    className="text-muted-foreground/50 shrink-0"
+                  >
+                    <circle
+                      cx="4"
+                      cy="4"
+                      r="2"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      fill="none"
+                    />
+                    <circle
+                      cx="4"
+                      cy="12"
+                      r="2"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      fill="none"
+                    />
+                    <line
+                      x1="4"
+                      y1="6"
+                      x2="4"
+                      y2="10"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                    />
+                    <path
+                      d="M4 8 L10 4"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                    />
+                    <circle
+                      cx="12"
+                      cy="4"
+                      r="2"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      fill="none"
+                    />
                   </svg>
-                  <span className="text-muted-foreground/60">{selectedProject?.name}</span>
+                  <span className="text-muted-foreground/60">
+                    {selectedProject?.name}
+                  </span>
                   <span className="text-muted-foreground/40">/</span>
-                  <span className="text-foreground font-medium font-mono text-[12px]">{selectedWorktree.branch}</span>
-                  {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
-                    <span className="bg-accent rounded-full px-1.5 py-0.5 text-[9px] text-muted-foreground">{dataState.commits.length} ahead of {dataState.baseBranch}</span>
-                  )}
+                  <span className="text-foreground font-medium font-mono text-[12px]">
+                    {selectedWorktree.branch}
+                  </span>
+                  {dataState?.baseBranch &&
+                    (dataState?.commits?.length ?? 0) > 0 && (
+                      <span className="bg-accent rounded-full px-1.5 py-0.5 text-[9px] text-muted-foreground">
+                        {dataState.commits.length} ahead of{" "}
+                        {dataState.baseBranch}
+                      </span>
+                    )}
                 </>
               )}
             </div>
@@ -355,16 +446,25 @@ function App() {
               {selectedWorktree && (
                 <>
                   {tabPill("Diff", activeTab === "diff", handleDiffTab)}
-                  {tabPill("Terminal", activeTab === "terminal", handleTerminalTab)}
+                  {tabPill(
+                    "Terminal",
+                    activeTab === "terminal",
+                    handleTerminalTab
+                  )}
                   {tabPill("Split", activeTab === "split", handleSplitTab)}
                   <span className="mx-1 w-px h-3.5 bg-border" />
                 </>
               )}
-              {tabPill("Sidebar", showSidebar, () => setShowSidebar(!showSidebar))}
+              {tabPill("Sidebar", showSidebar, () =>
+                setShowSidebar(!showSidebar)
+              )}
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-[11px] text-muted-foreground font-medium" data-tauri-drag-region>
+          <div
+            className="flex-1 flex items-center justify-center text-[11px] text-muted-foreground font-medium"
+            data-tauri-drag-region
+          >
             Settings
           </div>
         )}
@@ -376,84 +476,99 @@ function App() {
         /* Main content area */
         <WorkerPoolContextProvider
           poolOptions={{
-            workerFactory: () => new Worker(
-              new URL("@pierre/diffs/worker/worker.js", import.meta.url),
-              { type: "module" }
-            ),
+            workerFactory: () =>
+              new Worker(
+                new URL("@pierre/diffs/worker/worker.js", import.meta.url),
+                { type: "module" }
+              ),
             poolSize: 2,
           }}
           highlighterOptions={{}}
         >
-        <div className="flex flex-1 min-h-0">
-        {sidebarCollapsed && (
-          <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
-        )}
-        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
-          {/* Sidebar */}
-          {!sidebarCollapsed && (
-            <>
-              <ResizablePanel defaultSize="15%" minSize={140} maxSize={300}>
-                <Sidebar onOpenCommandPalette={() => setCommandPaletteOpen(true)} />
-              </ResizablePanel>
-              <ResizableHandle />
-            </>
-          )}
-
-          {/* Content */}
-          <ResizablePanel defaultSize={showSidebar ? "65%" : "85%"}>
-            <div className="flex flex-col h-full">
-              {/* Tab content */}
-              <div className="flex-1 min-h-0">
-                {!selectedWorktree ? (
-                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                    Select a worktree
-                  </div>
-                ) : activeTab === "split" ? (
-                  <ResizablePanelGroup orientation="horizontal">
-                    <ResizablePanel defaultSize="50%" minSize={200}>
-                      <WorktreeTerminals
-                        activeWorktreePath={wtPath!}
-                        onFocusPane={handleFocusPane}
-                        onSessionSpawned={handleSessionSpawned}
-                        claudeOnly
-                      />
-                    </ResizablePanel>
-                    <ResizableHandle withHandle />
-                    <ResizablePanel defaultSize="50%" minSize={200}>
-                      <DiffView />
-                    </ResizablePanel>
-                  </ResizablePanelGroup>
-                ) : (
-                  <>
-                    <div className={activeTab === "diff" ? "h-full" : "hidden"}>
-                      <DiffView />
-                    </div>
-                    <WorktreeTerminals
-                      activeWorktreePath={activeTab === "terminal" ? wtPath! : null}
-                      onFocusPane={handleFocusPane}
-                      onSessionSpawned={handleSessionSpawned}
+          <div className="flex flex-1 min-h-0">
+            {sidebarCollapsed && (
+              <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
+            )}
+            <ResizablePanelGroup
+              orientation="horizontal"
+              className="flex-1 min-h-0"
+            >
+              {/* Sidebar */}
+              {!sidebarCollapsed && (
+                <>
+                  <ResizablePanel defaultSize="15%" minSize={140} maxSize={300}>
+                    <Sidebar
+                      onOpenCommandPalette={() => setCommandPaletteOpen(true)}
                     />
-                  </>
-                )}
-              </div>
-            </div>
-          </ResizablePanel>
+                  </ResizablePanel>
+                  <ResizableHandle />
+                </>
+              )}
 
-          {/* Right panel — Changes/Commits */}
-          {showSidebar && (
-            <>
-              <ResizableHandle />
-              <ResizablePanel defaultSize="20%" minSize={180} maxSize={400}>
-                <RightSidebar />
+              {/* Content */}
+              <ResizablePanel defaultSize={showSidebar ? "65%" : "85%"}>
+                <div className="flex flex-col h-full">
+                  {/* Tab content */}
+                  <div className="flex-1 min-h-0">
+                    {!selectedWorktree ? (
+                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                        Select a worktree
+                      </div>
+                    ) : activeTab === "split" ? (
+                      <ResizablePanelGroup orientation="horizontal">
+                        <ResizablePanel defaultSize="50%" minSize={200}>
+                          <WorktreeTerminals
+                            activeWorktreePath={wtPath!}
+                            onFocusPane={handleFocusPane}
+                            onSessionSpawned={handleSessionSpawned}
+                            claudeOnly
+                          />
+                        </ResizablePanel>
+                        <ResizableHandle withHandle />
+                        <ResizablePanel defaultSize="50%" minSize={200}>
+                          <DiffView />
+                        </ResizablePanel>
+                      </ResizablePanelGroup>
+                    ) : (
+                      <div className="relative h-full">
+                        <div
+                          className={`absolute inset-0 ${activeTab === "diff" ? "z-10" : "z-0 invisible"}`}
+                        >
+                          <DiffView />
+                        </div>
+                        <div className={`absolute inset-0 ${activeTab !== "diff" ? "z-10" : "z-0 invisible"}`}>
+                          <WorktreeTerminals
+                            activeWorktreePath={
+                              activeTab === "terminal" ? wtPath! : null
+                            }
+                            onFocusPane={handleFocusPane}
+                            onSessionSpawned={handleSessionSpawned}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </ResizablePanel>
-            </>
-          )}
-        </ResizablePanelGroup>
-        </div>
+
+              {/* Right panel — Changes/Commits */}
+              {showSidebar && (
+                <>
+                  <ResizableHandle />
+                  <ResizablePanel defaultSize="20%" minSize={180} maxSize={400}>
+                    <RightSidebar />
+                  </ResizablePanel>
+                </>
+              )}
+            </ResizablePanelGroup>
+          </div>
         </WorkerPoolContextProvider>
       )}
 
-      <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
       <Toaster />
     </div>
   );
