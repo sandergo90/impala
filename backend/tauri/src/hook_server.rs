@@ -9,6 +9,128 @@ pub struct AgentStatusEvent {
     pub status: String,
 }
 
+const DIFFER_HOOK_MARKER: &str = "DIFFER_HOOK_PORT";
+
+/// The hook command for a specific event type. Uses env vars set on the PTY process.
+fn hook_command(event_type: &str) -> String {
+    format!(
+        "[ -n \"$DIFFER_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${{DIFFER_HOOK_PORT}}/hook\" --data-urlencode \"event_type={}\" --data-urlencode \"worktree_path=${{DIFFER_WORKTREE_PATH}}\" --connect-timeout 1 --max-time 2 2>/dev/null || true",
+        event_type
+    )
+}
+
+/// Merge Differ hooks into ~/.claude/settings.json, preserving all other settings and hooks.
+pub fn install_claude_hooks() {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let settings_path = home.join(".claude").join("settings.json");
+
+    // Read existing settings (or start with empty object)
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        match std::fs::read_to_string(&settings_path) {
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(v) => v,
+                Err(_) => return, // Don't touch malformed settings
+            },
+            Err(_) => return,
+        }
+    } else {
+        serde_json::json!({})
+    };
+
+    let hooks = settings
+        .as_object_mut()
+        .unwrap()
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+
+    // Events we want hooks for, and whether they need a matcher
+    let events = [
+        ("UserPromptSubmit", false),
+        ("Stop", false),
+        ("PostToolUse", true),
+    ];
+
+    let mut changed = false;
+
+    for (event_name, needs_matcher) in &events {
+        let command = hook_command(event_name);
+
+        let event_defs = hooks
+            .as_object_mut()
+            .unwrap()
+            .entry(*event_name)
+            .or_insert_with(|| serde_json::json!([]));
+
+        let defs = match event_defs.as_array_mut() {
+            Some(a) => a,
+            None => continue,
+        };
+
+        // Remove any existing Differ-managed hooks (identified by marker)
+        for def in defs.iter_mut() {
+            if let Some(hook_list) = def.get_mut("hooks").and_then(|h| h.as_array_mut()) {
+                let before_len = hook_list.len();
+                hook_list.retain(|h| {
+                    h.get("command")
+                        .and_then(|c| c.as_str())
+                        .map(|c| !c.contains(DIFFER_HOOK_MARKER))
+                        .unwrap_or(true)
+                });
+                if hook_list.len() != before_len {
+                    changed = true;
+                }
+            }
+        }
+
+        // Remove empty definitions left after cleanup
+        let before_len = defs.len();
+        defs.retain(|def| {
+            def.get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(true)
+        });
+        if defs.len() != before_len {
+            changed = true;
+        }
+
+        // Check if our hook already exists in any definition
+        let already_present = defs.iter().any(|def| {
+            def.get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hooks| {
+                    hooks.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains(DIFFER_HOOK_MARKER))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        });
+
+        if !already_present {
+            let mut new_def = serde_json::json!({
+                "hooks": [{ "type": "command", "command": command }]
+            });
+            if *needs_matcher {
+                new_def["matcher"] = serde_json::json!("*");
+            }
+            defs.push(new_def);
+            changed = true;
+        }
+    }
+
+    if changed {
+        if let Ok(content) = serde_json::to_string_pretty(&settings) {
+            let _ = std::fs::write(&settings_path, content);
+        }
+    }
+}
+
 /// Start the hook HTTP server on a random port. Returns the port number.
 pub fn start(app_handle: AppHandle) -> u16 {
     let server = Arc::new(
