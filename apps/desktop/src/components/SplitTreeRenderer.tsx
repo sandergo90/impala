@@ -10,6 +10,14 @@ import type { SplitNode } from "../types";
 import { paneSessionId } from "../lib/split-tree";
 import { useUIStore, useDataStore } from "../store";
 
+let cachedHookPort: number | null = null;
+async function getHookPort(): Promise<number> {
+  if (cachedHookPort === null) {
+    cachedHookPort = await invoke<number>("get_hook_port");
+  }
+  return cachedHookPort;
+}
+
 interface SplitTreeRendererProps {
   tree: SplitNode;
   worktreePath: string;
@@ -138,31 +146,37 @@ function LeafPane({
 
     const ptyId = paneSessionId(paneId);
 
-    invoke<boolean>("pty_spawn", {
-      sessionId: ptyId,
-      cwd: worktreePath,
-      command: null,
-    })
-      .then((isNew) => {
-        onSessionSpawned(ptyId);
-        if (paneType === "claude" && isNew) {
-          const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
-          const claudeCmd = claudeLaunched
-            ? "claude --dangerously-skip-permissions --remote-control --continue\n"
-            : "claude --dangerously-skip-permissions --remote-control\n";
-          const encoded = btoa(
-            Array.from(new TextEncoder().encode(claudeCmd), (b) =>
-              String.fromCharCode(b)
-            ).join("")
-          );
-          invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
-          useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
-        }
+    getHookPort().then((hookPort) => {
+      invoke<boolean>("pty_spawn", {
+        sessionId: ptyId,
+        cwd: worktreePath,
+        command: null,
+        envVars: {
+          DIFFER_HOOK_PORT: String(hookPort),
+          DIFFER_WORKTREE_PATH: worktreePath,
+        },
       })
-      .catch((err) => {
-        console.error("Failed to spawn PTY:", err);
-        spawningRef.current = false;
-      });
+        .then((isNew) => {
+          onSessionSpawned(ptyId);
+          if (paneType === "claude" && isNew) {
+            const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
+            const claudeCmd = claudeLaunched
+              ? "claude --dangerously-skip-permissions --remote-control --continue\n"
+              : "claude --dangerously-skip-permissions --remote-control\n";
+            const encoded = btoa(
+              Array.from(new TextEncoder().encode(claudeCmd), (b) =>
+                String.fromCharCode(b)
+              ).join("")
+            );
+            invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
+            useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to spawn PTY:", err);
+          spawningRef.current = false;
+        });
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: backend deduplicates spawns
   }, [paneId, paneType, worktreePath, sessionId]);
 

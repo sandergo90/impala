@@ -1,1 +1,22 @@
-{}
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "curl -sG \"http://127.0.0.1:${DIFFER_HOOK_PORT}/hook\" --data-urlencode \"event_type=UserPromptSubmit\" --data-urlencode \"worktree_path=${DIFFER_WORKTREE_PATH}\" --connect-timeout 1 --max-time 2 2>/dev/null || true"
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "curl -sG \"http://127.0.0.1:${DIFFER_HOOK_PORT}/hook\" --data-urlencode \"event_type=Stop\" --data-urlencode \"worktree_path=${DIFFER_WORKTREE_PATH}\" --connect-timeout 1 --max-time 2 2>/dev/null || true"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "curl -sG \"http://127.0.0.1:${DIFFER_HOOK_PORT}/hook\" --data-urlencode \"event_type=PostToolUse\" --data-urlencode \"worktree_path=${DIFFER_WORKTREE_PATH}\" --connect-timeout 1 --max-time 2 2>/dev/null || true"
+      }
+    ]
+  }
+}
