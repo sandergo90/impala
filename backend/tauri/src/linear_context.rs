@@ -126,7 +126,6 @@ pub fn write_context(
     let detail = linear::get_issue_detail(api_key, issue_id)?;
     let section = format_section(&detail);
 
-    // Read existing content or start fresh
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let content = if existing.is_empty() {
         format!("{}\n", section)
@@ -134,7 +133,10 @@ pub fn write_context(
         splice_section(&existing, &section)
     };
 
-    // Ensure parent directories exist
+    if content == existing {
+        return Ok(());
+    }
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create directory: {}", e))?;

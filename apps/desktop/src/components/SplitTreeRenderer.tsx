@@ -138,8 +138,6 @@ function LeafPane({
     useDataStore.getState().updateWorktreeDataState(worktreePath, { paneSessions: remaining });
   }, [sessionId, paneId, worktreePath]);
 
-  const linearApiKey = useUIStore((s) => s.linearApiKey);
-
   // Auto-spawn PTY session when leaf has no session
   const spawningRef = useRef(false);
   useEffect(() => {
@@ -147,6 +145,7 @@ function LeafPane({
     spawningRef.current = true;
 
     // Best-effort refresh of Linear context for Claude
+    const linearApiKey = useUIStore.getState().linearApiKey;
     if (linearApiKey) {
       invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
         .then((issue) => {
