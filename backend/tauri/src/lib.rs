@@ -1,5 +1,6 @@
 mod annotations;
 mod git;
+mod hook_server;
 mod linear;
 mod pty;
 mod viewed_files;
@@ -14,6 +15,7 @@ use tauri::{Emitter, Manager};
 
 struct DbState(Mutex<rusqlite::Connection>);
 struct DiffCache(Mutex<lru::LruCache<String, String>>);
+struct HookPort(u16);
 
 fn get_projects_file(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let app_dir = app_handle
@@ -344,6 +346,11 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_hook_port(state: tauri::State<'_, HookPort>) -> u16 {
+    state.0
+}
+
+#[tauri::command]
 fn check_generated_files(worktree_path: String, files: Vec<String>) -> Result<Vec<String>, String> {
     git::check_generated_files(&worktree_path, &files)
 }
@@ -429,6 +436,9 @@ pub fn run() {
                 std::num::NonZeroUsize::new(50).unwrap(),
             ))));
 
+            let hook_port = hook_server::start(app.handle().clone());
+            app.manage(HookPort(hook_port));
+
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.
             {
@@ -505,6 +515,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             check_generated_files,
+            get_hook_port,
             watcher::watch_worktree,
             watcher::unwatch_worktree,
         ])

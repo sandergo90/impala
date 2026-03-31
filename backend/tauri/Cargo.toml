@@ -30,3 +30,5 @@ tauri-plugin-fs = "2"
 dirs = "6"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
+tiny_http = "0.12"
+urlencoding = "2"

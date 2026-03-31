@@ -42,6 +42,7 @@ pub fn pty_spawn(
     session_id: String,
     cwd: String,
     command: Option<Vec<String>>,
+    env_vars: Option<HashMap<String, String>>,
 ) -> Result<bool, String> {
     // Don't spawn if session already exists
     {
@@ -77,6 +78,11 @@ pub fn pty_spawn(
     cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    if let Some(vars) = &env_vars {
+        for (key, value) in vars {
+            cmd.env(key, value);
+        }
+    }
 
     let child = pair
         .slave
