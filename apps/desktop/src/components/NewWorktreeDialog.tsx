@@ -174,6 +174,11 @@ export function NewWorktreeDialog({
             apiKey: linearApiKey,
             issueId: selectedIssue.id,
           }).catch(() => {}),
+          invoke("write_linear_context", {
+            apiKey: linearApiKey,
+            issueId: selectedIssue.id,
+            worktreePath: worktree.path,
+          }).catch(() => {}),
         ]);
       }
       onCreated(worktree);

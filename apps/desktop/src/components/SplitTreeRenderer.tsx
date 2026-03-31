@@ -6,7 +6,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { XtermTerminal } from "./XtermTerminal";
-import type { SplitNode } from "../types";
+import type { SplitNode, WorktreeIssue } from "../types";
 import { paneSessionId } from "../lib/split-tree";
 import { useUIStore, useDataStore } from "../store";
 
@@ -138,11 +138,28 @@ function LeafPane({
     useDataStore.getState().updateWorktreeDataState(worktreePath, { paneSessions: remaining });
   }, [sessionId, paneId, worktreePath]);
 
+  const linearApiKey = useUIStore((s) => s.linearApiKey);
+
   // Auto-spawn PTY session when leaf has no session
   const spawningRef = useRef(false);
   useEffect(() => {
     if (sessionId || spawningRef.current) return;
     spawningRef.current = true;
+
+    // Best-effort refresh of Linear context for Claude
+    if (linearApiKey) {
+      invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
+        .then((issue) => {
+          if (issue) {
+            invoke("refresh_linear_context", {
+              apiKey: linearApiKey,
+              issueId: issue.issue_id,
+              worktreePath,
+            }).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
 
     const ptyId = paneSessionId(paneId);
 
