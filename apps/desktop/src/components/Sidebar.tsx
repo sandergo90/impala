@@ -179,6 +179,7 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
         invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
         viewedFilesProvider.clearForWorktree(wt.path).catch(() => {}),
         invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(() => {}),
+        invoke("clean_linear_context", { worktreePath: wt.path }).catch(() => {}),
       ]);
 
       // Remove worktree via git (must happen after PTY sessions are killed)
