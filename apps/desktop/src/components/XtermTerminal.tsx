@@ -186,8 +186,10 @@ export function XtermTerminal({ sessionId, worktreePath, isFocused = true, onFoc
       });
       resizeObserver.observe(container);
 
+      let lastResizeTime = 0;
       resizeDisposable = terminal.onResize(({ cols, rows }) => {
         if (exitedRef.current) return;
+        lastResizeTime = Date.now();
         invoke("pty_resize", { sessionId, rows, cols }).catch(() => {});
       });
 
@@ -213,9 +215,9 @@ export function XtermTerminal({ sessionId, worktreePath, isFocused = true, onFoc
         if (!wasAtBottom && viewport) {
           viewport.scrollTop = savedScrollTop;
         }
-        // Throttle activity updates to once per second
+        // Throttle activity updates; ignore output shortly after a resize (e.g. window focus)
         const now = Date.now();
-        if (now - lastActivityUpdate > 1000) {
+        if (now - lastActivityUpdate > 1000 && now - lastResizeTime > 500) {
           lastActivityUpdate = now;
           useDataStore.getState().updateWorktreeDataState(worktreePath, { lastPtyActivity: now });
         }
