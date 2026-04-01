@@ -142,11 +142,12 @@ Review and address code review annotations from Differ using the MCP server tool
 
 ARGUMENTS: If an annotation ID is provided as an argument, address only that annotation. Otherwise, address all unresolved annotations.
 
-## Phase 1: Fetch Annotations
+## Phase 1: Fetch and Plan
 
-1. Call `mcp__differ__list_annotations` to fetch all annotations.
-2. Filter to unresolved ones (`resolved: false`). If an ID argument was given, find that specific annotation.
-3. If zero unresolved annotations, report "No unresolved review comments. Nothing to address." and stop.
+1. Call `mcp__differ__list_files_with_annotations` to get an overview of which files have annotations and how many.
+2. Call `mcp__differ__list_annotations` to fetch unresolved annotations. If an ID argument was given, find that specific annotation.
+3. If zero annotations, report "No unresolved review comments. Nothing to address." and stop.
+4. Group annotations by file — you will work through them file by file so you only need to read each file once.
 
 ## Phase 2: Triage Each Annotation
 
@@ -174,7 +175,9 @@ The concern has already been fixed in the current code, or is no longer relevant
 
 ## Phase 3: Address Each Annotation
 
-Process annotations one at a time. After addressing each one, immediately call `mcp__differ__resolve_annotation` to mark it done.
+Work file by file. For each file, read it once, then process all annotations on that file before moving to the next.
+
+After addressing each annotation, immediately call `mcp__differ__resolve_annotation` to mark it done.
 
 **ACTIONABLE:** Fix the code, then resolve the annotation.
 
@@ -184,7 +187,11 @@ Process annotations one at a time. After addressing each one, immediately call `
 
 Keep fixes minimal and focused — don't refactor unrelated code. If a reviewer suggests a specific code change, prefer their version unless it introduces issues.
 
-## Phase 4: Summary
+## Phase 4: Verify
+
+After all annotations are addressed, run the project's typecheck and lint to make sure nothing is broken. Fix any issues introduced by the changes.
+
+## Phase 5: Summary
 
 Report a structured summary:
 
@@ -201,13 +208,22 @@ Report a structured summary:
 - <file>: <what was changed and why>
 ```
 
+## Annotation Fields
+
+- `id` — unique identifier, used for resolving
+- `file_path` — the file the annotation is on
+- `line_number` — the line number in the file
+- `side` — `left` means the annotation is on the old/deleted code, `right` means new/added code
+- `body` — the reviewer's comment text
+- `resolved` — boolean, only unresolved annotations are returned
+
 ## Important Notes
 
 - **Every annotation gets addressed** — no silent skips
 - **Ask the user when uncertain** — don't guess on architectural or business logic questions
 - **Verify before fixing** — read the code context, understand the intent, then act
 - **Keep fixes minimal** — only change what the annotation asks for
-- Annotations have: `id`, `file_path`, `line_number`, `side` (left/right), `body` (the review comment), `resolved` (boolean)
+- **Work file by file** — group annotations by file to avoid redundant file reads
 "#;
 
 /// Install the /differ-review skill to ~/.claude/skills/differ-review/SKILL.md

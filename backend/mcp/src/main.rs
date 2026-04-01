@@ -64,7 +64,7 @@ fn row_to_annotation(row: &rusqlite::Row) -> rusqlite::Result<Annotation> {
 
 fn tool_list_annotations(conn: &Connection, params: &Value) -> Result<Value, String> {
     let mut sql = String::from(
-        "SELECT id, repo_path, file_path, commit_hash, line_number, side, body, resolved, created_at, updated_at FROM annotations WHERE 1=1",
+        "SELECT id, repo_path, file_path, commit_hash, line_number, side, body, resolved, created_at, updated_at FROM annotations WHERE resolved = 0",
     );
     let mut bind_values: Vec<String> = Vec::new();
 
