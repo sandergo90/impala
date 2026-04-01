@@ -134,7 +134,7 @@ pub fn install_claude_hooks() {
 const DIFFER_REVIEW_SKILL: &str = r#"---
 name: differ-review
 description: Review and address code review annotations from Differ. Use when asked to review annotations, or when invoked as /differ-review.
-allowed-tools: mcp__differ__list_annotations, mcp__differ__resolve_annotation, mcp__differ__list_files_with_annotations, Read, Edit, Write, Grep, Glob, Bash(git add *), Bash(git commit *)
+allowed-tools: mcp__differ__list_annotations, mcp__differ__resolve_annotation, mcp__differ__list_files_with_annotations, Read, Edit, Write, Grep, Glob
 argument-hint: "[annotation-id]"
 ---
 
@@ -172,39 +172,19 @@ Examples:
 ### ALREADY ADDRESSED
 The concern has already been fixed in the current code, or is no longer relevant.
 
-## Phase 3: Act on Each Annotation
+## Phase 3: Address Each Annotation
 
-**ACTIONABLE:** Fix the code. Track the annotation ID and a brief description of the fix.
+Process annotations one at a time. After addressing each one, immediately call `mcp__differ__resolve_annotation` to mark it done.
 
-**DISCUSSION:** Ask the user. Present the reviewer's comment, show the relevant code, and ask what they'd like to do. Wait for their answer. Apply their decision and track it.
+**ACTIONABLE:** Fix the code, then resolve the annotation.
 
-**ALREADY ADDRESSED:** Track the annotation ID and note why.
+**DISCUSSION:** Ask the user. Present the reviewer's comment, show the relevant code, and ask what they'd like to do. Wait for their answer. Apply their decision, then resolve the annotation.
+
+**ALREADY ADDRESSED:** Resolve the annotation immediately.
 
 Keep fixes minimal and focused — don't refactor unrelated code. If a reviewer suggests a specific code change, prefer their version unless it introduces issues.
 
-## Phase 4: Commit
-
-After processing ALL annotations:
-
-1. Stage and commit all changes:
-   ```
-   git add <changed files>
-   git commit -m "fix: address review annotations
-
-   <list of changes made>"
-   ```
-
-## Phase 5: Resolve All Annotations
-
-After the commit, resolve every processed annotation:
-
-- **ACTIONABLE:** Call `mcp__differ__resolve_annotation` with the annotation's `id`
-- **DISCUSSION (after user decision):** Call `mcp__differ__resolve_annotation`
-- **ALREADY ADDRESSED:** Call `mcp__differ__resolve_annotation`
-
-Do NOT resolve annotations before the commit exists.
-
-## Phase 6: Summary
+## Phase 4: Summary
 
 Report a structured summary:
 
