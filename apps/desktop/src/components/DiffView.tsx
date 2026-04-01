@@ -6,7 +6,7 @@ import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";
 import { PatchDiff } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
-import { viewedFilesProvider } from "../providers/viewed-files-provider";
+import { viewedFilesProvider, type ViewedFile } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import type { DiffLineAnnotation } from "@pierre/diffs";
@@ -218,6 +218,7 @@ export function DiffView() {
   const showResolved = useUIStore((s) => s.showResolved);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
+  const [_viewedFileRecords, setViewedFileRecords] = useState<Record<string, ViewedFile>>({});
   const [pendingAnnotation, setPendingAnnotation] = useState<{
     filePath?: string;
     lineNumber: number;
@@ -242,17 +243,20 @@ export function DiffView() {
       .then((rows) => {
         // Filter out stale entries where the patch has changed
         const valid = new Set<string>();
+        const records: Record<string, ViewedFile> = {};
         const staleIds: string[] = [];
         for (const row of rows) {
           const currentPatch = fileDiffs[row.file_path];
           const currentHash = fileDiffHashes[row.file_path];
           if (currentPatch && currentHash === row.patch_hash) {
             valid.add(row.file_path);
+            records[row.file_path] = row;
           } else if (currentPatch) {
             staleIds.push(row.file_path);
           }
         }
         setViewedFiles(valid);
+        setViewedFileRecords(records);
         // Lazily clean up stale entries
         for (const fp of staleIds) {
           viewedFilesProvider.unset(worktreePath, commitHashForViewed, fp);
@@ -274,10 +278,10 @@ export function DiffView() {
         return next;
       });
     } else {
-      viewedFilesProvider.set(worktreePath, commitHashForViewed, path, patchHash);
+      viewedFilesProvider.set(worktreePath, commitHashForViewed, path, patchHash, selectedWorktree?.head_commit);
       setViewedFiles((prev) => new Set(prev).add(path));
     }
-  }, [worktreePath, commitHashForViewed, fileDiffHashes, viewedFiles]);
+  }, [worktreePath, commitHashForViewed, fileDiffHashes, viewedFiles, selectedWorktree?.head_commit]);
 
   // Load all annotations for this worktree
   useEffect(() => {

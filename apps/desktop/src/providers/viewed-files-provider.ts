@@ -5,6 +5,7 @@ export interface ViewedFile {
   commit_hash: string;
   file_path: string;
   patch_hash: string;
+  viewed_at_commit: string | null;
   created_at: string;
 }
 
@@ -20,12 +21,14 @@ export const viewedFilesProvider = {
     commitHash: string,
     filePath: string,
     patchHash: string,
+    viewedAtCommit?: string | null,
   ): Promise<ViewedFile> {
     return invoke<ViewedFile>("set_file_viewed", {
       worktreePath,
       commitHash,
       filePath,
       patchHash,
+      viewedAtCommit: viewedAtCommit ?? null,
     });
   },
   async unset(
