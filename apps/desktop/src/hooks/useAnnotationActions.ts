@@ -117,8 +117,7 @@ export function useAnnotationActions() {
 
   const handleSendToClaude = useCallback(
     async (annotation: Annotation) => {
-      const prompt = `Review and address the annotation on ${annotation.file_path} line ${annotation.line_number}: ${annotation.body}\n`;
-      await sendPromptToClaude(prompt);
+      await sendPromptToClaude(`/differ-review ${annotation.id}`);
     },
     [sendPromptToClaude]
   );
@@ -127,18 +126,9 @@ export function useAnnotationActions() {
     async () => {
       const unresolved = annotations.filter((a) => !a.resolved);
       if (unresolved.length === 0) return;
-      let prompt: string;
-      if (selectedFile) {
-        prompt = `Review and address the annotations on ${selectedFile.path}\n`;
-      } else {
-        const lines = unresolved.map(
-          (a) => `- ${a.file_path} line ${a.line_number}: ${a.body}`
-        );
-        prompt = `Review and address the following annotations:\n${lines.join("\n")}\n`;
-      }
-      await sendPromptToClaude(prompt);
+      await sendPromptToClaude("/differ-review");
     },
-    [sendPromptToClaude, selectedFile, annotations]
+    [sendPromptToClaude, annotations]
   );
 
   return {
