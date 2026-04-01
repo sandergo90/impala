@@ -257,7 +257,7 @@ export function CommitPanel() {
                   {commit.message}
                 </div>
                 <div className="flex items-center gap-1 text-[9px] text-muted-foreground/50 mt-0.5 font-mono">
-                  <span>{commit.hash.slice(0, 7)} &middot; {commit.date.split("T")[0]}</span>
+                  <span>{commit.hash.slice(0, 7)} &middot; {commit.date.split("T")[0]} {commit.date.split("T")[1]?.slice(0, 5)}</span>
                   {(commit.additions > 0 || commit.deletions > 0) && (
                     <span className="ml-auto">
                       <span className="text-green-500">+{commit.additions}</span>
