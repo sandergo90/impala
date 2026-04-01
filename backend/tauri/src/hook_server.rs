@@ -131,6 +131,50 @@ pub fn install_claude_hooks() {
     }
 }
 
+const DIFFER_REVIEW_SKILL: &str = r#"---
+name: differ-review
+description: Review and address code review annotations from Differ. Use when asked to review annotations, or when invoked as /differ-review.
+allowed-tools: mcp__differ__list_annotations, mcp__differ__resolve_annotation, mcp__differ__list_files_with_annotations, Read, Edit, Write, Grep, Glob
+argument-hint: "[annotation-id]"
+---
+
+Review and address code review annotations using the Differ MCP server tools.
+
+ARGUMENTS: If an annotation ID is provided as an argument, address only that annotation. Otherwise, address all unresolved annotations.
+
+## Steps
+
+1. Call `mcp__differ__list_annotations` to fetch annotations (unresolved ones). If an ID argument was given, find that specific annotation.
+2. For each annotation:
+   a. Read the file at the annotated line to understand the context
+   b. Address the feedback (make the requested change, fix the issue, etc.)
+   c. Call `mcp__differ__resolve_annotation` with the annotation's `id` to mark it done
+3. After addressing all annotations, briefly summarize what was changed.
+
+## Notes
+
+- Annotations have: `id`, `file_path`, `line_number`, `side` (left/right), `body` (the review comment), `resolved` (boolean)
+- Focus on unresolved annotations (`resolved: false`)
+- The `body` field contains the reviewer's feedback — read it carefully and address the specific concern
+- Always resolve annotations after addressing them so the reviewer can see progress in Differ
+"#;
+
+/// Install the /differ-review skill to ~/.claude/skills/differ-review/SKILL.md
+pub fn install_differ_review_skill() {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+
+    let skill_dir = home.join(".claude").join("skills").join("differ-review");
+    if let Err(_) = std::fs::create_dir_all(&skill_dir) {
+        return;
+    }
+
+    let skill_path = skill_dir.join("SKILL.md");
+    let _ = std::fs::write(&skill_path, DIFFER_REVIEW_SKILL);
+}
+
 /// Start the hook HTTP server on a random port. Returns the port number.
 pub fn start(app_handle: AppHandle) -> u16 {
     let server = Arc::new(

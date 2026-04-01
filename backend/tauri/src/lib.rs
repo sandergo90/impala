@@ -456,6 +456,7 @@ pub fn run() {
             app.manage(HookPort(hook_port));
 
             hook_server::install_claude_hooks();
+            hook_server::install_differ_review_skill();
 
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.
