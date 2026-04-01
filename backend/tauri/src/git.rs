@@ -73,6 +73,9 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
     }
     flush(&mut path, &mut branch, &mut head, &mut worktrees);
 
+    // Filter out temporary Claude Code agent worktrees
+    worktrees.retain(|wt| !wt.branch.starts_with("worktree-agent-"));
+
     Ok(worktrees)
 }
 
