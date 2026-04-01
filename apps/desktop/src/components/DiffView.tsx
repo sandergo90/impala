@@ -309,8 +309,18 @@ export function DiffView() {
     return () => { unlisten.then((fn) => fn()); };
   }, [worktreePath, updateData]);
 
+  // Filter annotations to those matching the current commit context
+  const contextCommitHash =
+    viewMode === "commit" && selectedCommit
+      ? selectedCommit.hash
+      : "all-changes";
+  const contextAnnotations = useMemo(
+    () => annotations.filter((a) => a.commit_hash === contextCommitHash),
+    [annotations, contextCommitHash]
+  );
+
   const lineAnnotations = useMemo((): DiffLineAnnotation<AnnotationMeta>[] => {
-    const items: DiffLineAnnotation<AnnotationMeta>[] = annotations.map((a) => ({
+    const items: DiffLineAnnotation<AnnotationMeta>[] = contextAnnotations.map((a) => ({
       side: a.side === "left" ? ("deletions" as const) : ("additions" as const),
       lineNumber: a.line_number,
       metadata: { type: 'comment' as const, annotation: a },
@@ -325,11 +335,11 @@ export function DiffView() {
     }
 
     return items;
-  }, [annotations, pendingAnnotation]);
+  }, [contextAnnotations, pendingAnnotation]);
 
   const annotationsByFile = useMemo(() => {
     const map = new Map<string, DiffLineAnnotation<AnnotationMeta>[]>();
-    for (const a of annotations) {
+    for (const a of contextAnnotations) {
       const items = map.get(a.file_path) ?? [];
       items.push({
         side: a.side === "left" ? ("deletions" as const) : ("additions" as const),
@@ -339,7 +349,7 @@ export function DiffView() {
       map.set(a.file_path, items);
     }
     return map;
-  }, [annotations]);
+  }, [contextAnnotations]);
 
   const pendingAnnotationRef = useRef(pendingAnnotation);
   pendingAnnotationRef.current = pendingAnnotation;
