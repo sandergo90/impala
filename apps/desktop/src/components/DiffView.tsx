@@ -279,7 +279,7 @@ export function DiffView() {
     }
   }, [worktreePath, commitHashForViewed, fileDiffHashes, viewedFiles]);
 
-  // Load annotations when file/commit context changes
+  // Load all annotations for this worktree
   useEffect(() => {
     setPendingAnnotation(null);
     if (!worktreePath) {
@@ -287,44 +287,27 @@ export function DiffView() {
       return;
     }
 
-    const filePath = selectedFile?.path;
-    const commitHash =
-      viewMode === "commit" && selectedCommit
-        ? selectedCommit.hash
-        : "all-changes";
-
     sqliteProvider
-      .list(worktreePath, filePath, commitHash)
+      .list(worktreePath)
       .then((anns) => updateData({ annotations: anns }))
       .catch(() => {
         toast.error("Failed to load annotations");
         updateData({ annotations: [] });
       });
-  }, [
-    worktreePath,
-    selectedFile?.path,
-    selectedCommit?.hash,
-    viewMode,
-    updateData,
-  ]);
+  }, [worktreePath, updateData]);
 
   // Re-fetch annotations when the DB is modified externally (e.g. MCP server)
   useEffect(() => {
     const unlisten = listen("annotations-changed", () => {
       if (!worktreePath) return;
-      const filePath = selectedFile?.path;
-      const commitHash =
-        viewMode === "commit" && selectedCommit
-          ? selectedCommit.hash
-          : "all-changes";
       sqliteProvider
-        .list(worktreePath, filePath, commitHash)
+        .list(worktreePath)
         .then((anns) => updateData({ annotations: anns }))
         .catch(() => {});
     });
 
     return () => { unlisten.then((fn) => fn()); };
-  }, [worktreePath, selectedFile?.path, selectedCommit?.hash, viewMode, updateData]);
+  }, [worktreePath, updateData]);
 
   const lineAnnotations = useMemo((): DiffLineAnnotation<AnnotationMeta>[] => {
     const items: DiffLineAnnotation<AnnotationMeta>[] = annotations.map((a) => ({

@@ -40,17 +40,13 @@ export function useAnnotationActions() {
   useEffect(() => {
     if (!worktreePath) return;
     const unlisten = listen("annotations-changed", () => {
-      const commitHash =
-        viewMode === "commit" && selectedCommit
-          ? selectedCommit.hash
-          : "all-changes";
       sqliteProvider
-        .list(worktreePath, undefined, commitHash)
+        .list(worktreePath)
         .then((anns) => updateData({ annotations: anns }))
         .catch(() => {});
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [worktreePath, selectedCommit?.hash, viewMode, updateData]);
+  }, [worktreePath, updateData]);
 
   const handleCreate = useCallback(
     async (body: string, lineNumber: number, side: "left" | "right", filePath?: string) => {
