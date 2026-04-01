@@ -134,29 +134,100 @@ pub fn install_claude_hooks() {
 const DIFFER_REVIEW_SKILL: &str = r#"---
 name: differ-review
 description: Review and address code review annotations from Differ. Use when asked to review annotations, or when invoked as /differ-review.
-allowed-tools: mcp__differ__list_annotations, mcp__differ__resolve_annotation, mcp__differ__list_files_with_annotations, Read, Edit, Write, Grep, Glob
+allowed-tools: mcp__differ__list_annotations, mcp__differ__resolve_annotation, mcp__differ__list_files_with_annotations, Read, Edit, Write, Grep, Glob, Bash(git add *), Bash(git commit *)
 argument-hint: "[annotation-id]"
 ---
 
-Review and address code review annotations using the Differ MCP server tools.
+Review and address code review annotations from Differ using the MCP server tools. These are human-written review comments anchored to specific lines in the code.
 
 ARGUMENTS: If an annotation ID is provided as an argument, address only that annotation. Otherwise, address all unresolved annotations.
 
-## Steps
+## Phase 1: Fetch Annotations
 
-1. Call `mcp__differ__list_annotations` to fetch annotations (unresolved ones). If an ID argument was given, find that specific annotation.
-2. For each annotation:
-   a. Read the file at the annotated line to understand the context
-   b. Address the feedback (make the requested change, fix the issue, etc.)
-   c. Call `mcp__differ__resolve_annotation` with the annotation's `id` to mark it done
-3. After addressing all annotations, briefly summarize what was changed.
+1. Call `mcp__differ__list_annotations` to fetch all annotations.
+2. Filter to unresolved ones (`resolved: false`). If an ID argument was given, find that specific annotation.
+3. If zero unresolved annotations, report "No unresolved review comments. Nothing to address." and stop.
 
-## Notes
+## Phase 2: Triage Each Annotation
 
+For each unresolved annotation, read the file at the annotated line and evaluate the comment. Classify it as one of:
+
+### ACTIONABLE
+The reviewer requests a concrete change — a bug fix, a refactor, a naming improvement, using a different API, etc. The right action is clear from the comment.
+
+Examples:
+- "Use plain tailwind classes instead of this wrapper"
+- "This should return an object, not void"
+- "Never use plain buttons, always use from components"
+- "Split this into multiple files"
+
+### DISCUSSION
+The reviewer raises a valid point, but the right approach is unclear or involves a tradeoff. The comment is a question, a suggestion to consider, or thinking out loud.
+
+Examples:
+- "Should these types be part of the store? It looks more component related"
+- "Can't we use selectors or a better way for this?"
+- "Do we need isMobile detection via a separate hook? Couldn't we just use tailwind for this?"
+
+### ALREADY ADDRESSED
+The concern has already been fixed in the current code, or is no longer relevant.
+
+## Phase 3: Act on Each Annotation
+
+**ACTIONABLE:** Fix the code. Track the annotation ID and a brief description of the fix.
+
+**DISCUSSION:** Ask the user. Present the reviewer's comment, show the relevant code, and ask what they'd like to do. Wait for their answer. Apply their decision and track it.
+
+**ALREADY ADDRESSED:** Track the annotation ID and note why.
+
+Keep fixes minimal and focused — don't refactor unrelated code. If a reviewer suggests a specific code change, prefer their version unless it introduces issues.
+
+## Phase 4: Commit
+
+After processing ALL annotations:
+
+1. Stage and commit all changes:
+   ```
+   git add <changed files>
+   git commit -m "fix: address review annotations
+
+   <list of changes made>"
+   ```
+
+## Phase 5: Resolve All Annotations
+
+After the commit, resolve every processed annotation:
+
+- **ACTIONABLE:** Call `mcp__differ__resolve_annotation` with the annotation's `id`
+- **DISCUSSION (after user decision):** Call `mcp__differ__resolve_annotation`
+- **ALREADY ADDRESSED:** Call `mcp__differ__resolve_annotation`
+
+Do NOT resolve annotations before the commit exists.
+
+## Phase 6: Summary
+
+Report a structured summary:
+
+```
+## Review Annotations Summary
+
+### Results
+- Fixed: X annotations
+- Already addressed: X
+- Discussion resolved: X
+
+### Changes
+- <file>: <what was changed and why>
+- <file>: <what was changed and why>
+```
+
+## Important Notes
+
+- **Every annotation gets addressed** — no silent skips
+- **Ask the user when uncertain** — don't guess on architectural or business logic questions
+- **Verify before fixing** — read the code context, understand the intent, then act
+- **Keep fixes minimal** — only change what the annotation asks for
 - Annotations have: `id`, `file_path`, `line_number`, `side` (left/right), `body` (the review comment), `resolved` (boolean)
-- Focus on unresolved annotations (`resolved: false`)
-- The `body` field contains the reviewer's feedback — read it carefully and address the specific concern
-- Always resolve annotations after addressing them so the reviewer can see progress in Differ
 "#;
 
 /// Install the /differ-review skill to ~/.claude/skills/differ-review/SKILL.md
