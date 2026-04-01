@@ -329,6 +329,42 @@ export function DiffView() {
     setDeltaDiffs({});
   }, [fileDiffHashes]);
 
+  // Auto-enable delta mode for viewed files with stale viewed_at_commit
+  useEffect(() => {
+    if (!worktreePath || commitHashForViewed !== "all-changes") return;
+    const headCommit = selectedWorktree?.head_commit;
+    if (!headCommit) return;
+
+    const toFetch: { path: string; sinceCommit: string }[] = [];
+    for (const [path, record] of Object.entries(viewedFileRecords)) {
+      if (record.viewed_at_commit && record.viewed_at_commit !== headCommit) {
+        toFetch.push({ path, sinceCommit: record.viewed_at_commit });
+      }
+    }
+    if (toFetch.length === 0) return;
+
+    Promise.all(
+      toFetch.map(({ path, sinceCommit }) =>
+        invoke<string>("get_file_diff_since_commit", { worktreePath, sinceCommit, filePath: path })
+          .then((diff) => ({ path, diff }))
+          .catch(() => null)
+      )
+    ).then((results) => {
+      const newDiffs: Record<string, string> = {};
+      const newPaths = new Set<string>();
+      for (const r of results) {
+        if (r) {
+          newDiffs[r.path] = r.diff;
+          newPaths.add(r.path);
+        }
+      }
+      if (newPaths.size > 0) {
+        setDeltaDiffs((prev) => ({ ...prev, ...newDiffs }));
+        setDeltaMode((prev) => new Set([...prev, ...newPaths]));
+      }
+    });
+  }, [worktreePath, commitHashForViewed, viewedFileRecords, selectedWorktree?.head_commit]);
+
   const toggleViewed = useCallback((path: string) => {
     if (!worktreePath || !commitHashForViewed) return;
     const patchHash = fileDiffHashes[path] ?? "new-file";
