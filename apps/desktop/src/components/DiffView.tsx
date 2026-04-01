@@ -93,7 +93,7 @@ function VirtualizedCommitView({
       const file = changedFiles[index];
       const patch = deltaMode.has(file.path) ? deltaDiffs[file.path] : fileDiffs[file.path];
       const isViewed = viewedFiles.has(file.path);
-      const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !deltaMode.has(file.path));
+      const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !deltaMode.has(file.path) && !collapsedFiles.has(`expanded:${file.path}`));
       if (!patch || isCollapsed) return 44;
       const lineCount = patch.split("\n").length;
       return Math.max(44, lineCount * 20 + 44);
@@ -141,12 +141,12 @@ function VirtualizedCommitView({
 
             const isLargeFile = (patch ?? "").length > 100_000;
             const isGenerated = generatedFiles.includes(file.path);
-            const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !isInDeltaMode) || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
+            const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !isInDeltaMode && !collapsedFiles.has(`expanded:${file.path}`)) || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
 
             const toggleCollapse = () => {
               setCollapsedFiles((prev) => {
                 const next = new Set(prev);
-                if (isLargeFile || isGenerated) {
+                if (isViewed || isLargeFile || isGenerated) {
                   const expandKey = `expanded:${file.path}`;
                   if (next.has(expandKey)) next.delete(expandKey);
                   else next.add(expandKey);
