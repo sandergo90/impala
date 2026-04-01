@@ -178,7 +178,6 @@ function VirtualizedCommitView({
 }
 
 export function DiffView() {
-  const selectedProject = useUIStore((s) => s.selectedProject);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const diffStyle = useUIStore((s) => s.diffStyle);
   const setDiffStyle = useUIStore((s) => s.setDiffStyle);
@@ -283,12 +282,11 @@ export function DiffView() {
   // Load annotations when file/commit context changes
   useEffect(() => {
     setPendingAnnotation(null);
-    if (!selectedProject) {
+    if (!worktreePath) {
       updateData({ annotations: [] });
       return;
     }
 
-    const repoPath = selectedProject.path;
     const filePath = selectedFile?.path;
     const commitHash =
       viewMode === "commit" && selectedCommit
@@ -296,14 +294,14 @@ export function DiffView() {
         : "all-changes";
 
     sqliteProvider
-      .list(repoPath, filePath, commitHash)
+      .list(worktreePath, filePath, commitHash)
       .then((anns) => updateData({ annotations: anns }))
       .catch(() => {
         toast.error("Failed to load annotations");
         updateData({ annotations: [] });
       });
   }, [
-    selectedProject?.path,
+    worktreePath,
     selectedFile?.path,
     selectedCommit?.hash,
     viewMode,
@@ -313,21 +311,20 @@ export function DiffView() {
   // Re-fetch annotations when the DB is modified externally (e.g. MCP server)
   useEffect(() => {
     const unlisten = listen("annotations-changed", () => {
-      if (!selectedProject) return;
-      const repoPath = selectedProject.path;
+      if (!worktreePath) return;
       const filePath = selectedFile?.path;
       const commitHash =
         viewMode === "commit" && selectedCommit
           ? selectedCommit.hash
           : "all-changes";
       sqliteProvider
-        .list(repoPath, filePath, commitHash)
+        .list(worktreePath, filePath, commitHash)
         .then((anns) => updateData({ annotations: anns }))
         .catch(() => {});
     });
 
     return () => { unlisten.then((fn) => fn()); };
-  }, [selectedProject?.path, selectedFile?.path, selectedCommit?.hash, viewMode, updateData]);
+  }, [worktreePath, selectedFile?.path, selectedCommit?.hash, viewMode, updateData]);
 
   const lineAnnotations = useMemo((): DiffLineAnnotation<AnnotationMeta>[] => {
     const items: DiffLineAnnotation<AnnotationMeta>[] = annotations.map((a) => ({

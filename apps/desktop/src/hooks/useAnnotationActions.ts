@@ -15,7 +15,6 @@ function encodeForPty(text: string): string {
 }
 
 export function useAnnotationActions() {
-  const selectedProject = useUIStore((s) => s.selectedProject);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const worktreePath = selectedWorktree?.path;
 
@@ -39,23 +38,23 @@ export function useAnnotationActions() {
 
   // Refresh annotations when DB is modified externally (e.g. MCP server)
   useEffect(() => {
-    if (!selectedProject || !worktreePath) return;
+    if (!worktreePath) return;
     const unlisten = listen("annotations-changed", () => {
       const commitHash =
         viewMode === "commit" && selectedCommit
           ? selectedCommit.hash
           : "all-changes";
       sqliteProvider
-        .list(selectedProject.path, undefined, commitHash)
+        .list(worktreePath, undefined, commitHash)
         .then((anns) => updateData({ annotations: anns }))
         .catch(() => {});
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [selectedProject?.path, worktreePath, selectedCommit?.hash, viewMode, updateData]);
+  }, [worktreePath, selectedCommit?.hash, viewMode, updateData]);
 
   const handleCreate = useCallback(
     async (body: string, lineNumber: number, side: "left" | "right", filePath?: string) => {
-      if (!selectedProject) return;
+      if (!worktreePath) return;
       const resolvedFilePath = filePath ?? selectedFile?.path;
       if (!resolvedFilePath) return;
       const commitHash =
@@ -63,7 +62,7 @@ export function useAnnotationActions() {
           ? selectedCommit.hash
           : "all-changes";
       const created = await sqliteProvider.create({
-        repo_path: selectedProject.path,
+        repo_path: worktreePath,
         file_path: resolvedFilePath,
         commit_hash: commitHash,
         line_number: lineNumber,
@@ -72,7 +71,7 @@ export function useAnnotationActions() {
       });
       updateData({ annotations: [...annotations, created] });
     },
-    [selectedProject, selectedFile, selectedCommit, viewMode, annotations, updateData]
+    [worktreePath, selectedFile, selectedCommit, viewMode, annotations, updateData]
   );
 
   const handleResolve = useCallback(
