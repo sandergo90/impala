@@ -229,6 +229,15 @@ pub fn get_full_branch_diff(worktree_path: &str) -> Result<String, String> {
     run_git(worktree_path, &["diff", &range])
 }
 
+pub fn get_file_diff_since_commit(
+    worktree_path: &str,
+    since_commit: &str,
+    file_path: &str,
+) -> Result<String, String> {
+    let range = format!("{}..HEAD", since_commit);
+    run_git(worktree_path, &["diff", &range, "--", file_path])
+}
+
 pub fn get_uncommitted_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {
     let output = run_git(worktree_path, &["status", "--porcelain", "-uall"])?;
     let files = output

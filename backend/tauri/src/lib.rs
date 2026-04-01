@@ -234,9 +234,19 @@ fn set_file_viewed(
     commit_hash: String,
     file_path: String,
     patch_hash: String,
+    viewed_at_commit: Option<String>,
 ) -> Result<viewed_files::ViewedFile, String> {
     let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    viewed_files::set_viewed(&conn, &worktree_path, &commit_hash, &file_path, &patch_hash)
+    viewed_files::set_viewed(&conn, &worktree_path, &commit_hash, &file_path, &patch_hash, viewed_at_commit.as_deref())
+}
+
+#[tauri::command]
+fn get_file_diff_since_commit(
+    worktree_path: String,
+    since_commit: String,
+    file_path: String,
+) -> Result<String, String> {
+    git::get_file_diff_since_commit(&worktree_path, &since_commit, &file_path)
 }
 
 #[tauri::command]
@@ -517,6 +527,7 @@ pub fn run() {
             update_annotation,
             delete_annotation,
             set_file_viewed,
+            get_file_diff_since_commit,
             unset_file_viewed,
             list_viewed_files,
             clear_viewed_files,

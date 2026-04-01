@@ -8,20 +8,27 @@ pub struct ViewedFile {
     pub file_path: String,
     pub patch_hash: String,
     pub created_at: String,
+    pub viewed_at_commit: Option<String>,
 }
 
 pub fn init_db(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS viewed_files (
-            worktree_path TEXT NOT NULL,
-            commit_hash   TEXT NOT NULL,
-            file_path     TEXT NOT NULL,
-            patch_hash    TEXT NOT NULL,
-            created_at    TEXT NOT NULL,
+            worktree_path    TEXT NOT NULL,
+            commit_hash      TEXT NOT NULL,
+            file_path        TEXT NOT NULL,
+            patch_hash       TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            viewed_at_commit TEXT,
             PRIMARY KEY (worktree_path, commit_hash, file_path)
         );",
     )
-    .map_err(|e| format!("Failed to initialize viewed_files table: {}", e))
+    .map_err(|e| format!("Failed to initialize viewed_files table: {}", e))?;
+
+    // Safe migration for existing databases
+    let _ = conn.execute_batch("ALTER TABLE viewed_files ADD COLUMN viewed_at_commit TEXT;");
+
+    Ok(())
 }
 
 pub fn set_viewed(
@@ -30,15 +37,16 @@ pub fn set_viewed(
     commit_hash: &str,
     file_path: &str,
     patch_hash: &str,
+    viewed_at_commit: Option<&str>,
 ) -> Result<ViewedFile, String> {
     let now = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO viewed_files (worktree_path, commit_hash, file_path, patch_hash, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO viewed_files (worktree_path, commit_hash, file_path, patch_hash, created_at, viewed_at_commit)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(worktree_path, commit_hash, file_path)
-         DO UPDATE SET patch_hash = excluded.patch_hash, created_at = excluded.created_at",
-        params![worktree_path, commit_hash, file_path, patch_hash, now],
+         DO UPDATE SET patch_hash = excluded.patch_hash, created_at = excluded.created_at, viewed_at_commit = excluded.viewed_at_commit",
+        params![worktree_path, commit_hash, file_path, patch_hash, now, viewed_at_commit],
     )
     .map_err(|e| format!("Failed to set file as viewed: {}", e))?;
 
@@ -48,6 +56,7 @@ pub fn set_viewed(
         file_path: file_path.to_string(),
         patch_hash: patch_hash.to_string(),
         created_at: now,
+        viewed_at_commit: viewed_at_commit.map(|s| s.to_string()),
     })
 }
 
@@ -73,7 +82,7 @@ pub fn list_viewed(
 ) -> Result<Vec<ViewedFile>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT worktree_path, commit_hash, file_path, patch_hash, created_at
+            "SELECT worktree_path, commit_hash, file_path, patch_hash, created_at, viewed_at_commit
              FROM viewed_files
              WHERE worktree_path = ?1 AND commit_hash = ?2",
         )
@@ -87,6 +96,7 @@ pub fn list_viewed(
                 file_path: row.get(2)?,
                 patch_hash: row.get(3)?,
                 created_at: row.get(4)?,
+                viewed_at_commit: row.get(5)?,
             })
         })
         .map_err(|e| format!("Failed to query viewed files: {}", e))?;
