@@ -385,9 +385,9 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
 
       {/* Worktrees Section */}
       {selectedProject && (
-        <>
+        <div className="flex flex-col min-h-0 flex-1">
           <div className="mx-3 mb-1.5 border-b border-border/30" />
-          <div className="flex items-center justify-between px-3.5 pt-1 pb-1">
+          <div className="flex items-center justify-between px-3.5 pt-1 pb-1 shrink-0">
             <span className="text-[9px] uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">Worktrees</span>
             <button
               onClick={() => setShowNewWorktree(true)}
@@ -397,6 +397,7 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
             </button>
           </div>
 
+          <div className="flex-1 overflow-y-auto">
           {worktrees.map((wt) => {
             const isSelected = selectedWorktree?.path === wt.path;
             const aheadCount = commitCounts[wt.path] ?? 0;
@@ -451,10 +452,9 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
               </div>
             );
           })}
-        </>
+          </div>
+        </div>
       )}
-
-      <div className="flex-1" />
 
       {/* Bottom: Open Project (shown when no project selected) */}
       {!selectedProject && (
