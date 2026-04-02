@@ -104,10 +104,26 @@ function VirtualizedCommitView({
 
   const items = virtualizer.getVirtualItems();
 
+  const scrollToFile = useCallback((index: number) => {
+    requestAnimationFrame(() => {
+      const container = scrollRef.current;
+      if (!container) return;
+      const item = container.querySelector(`[data-index="${index}"]`);
+      if (!item) return;
+      const containerRect = container.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      container.scrollTo({
+        top: itemRect.top - containerRect.top + container.scrollTop,
+        behavior: "smooth",
+      });
+    });
+  }, []);
+
   return (
-    <div ref={scrollRef} className="flex flex-col h-full overflow-auto">
+    <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
-      <div ref={listRef}>
+      <div ref={scrollRef} className="flex-1 overflow-auto">
+        <div ref={listRef}>
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
           {items.map((virtualRow) => {
             const file = changedFiles[virtualRow.index];
@@ -121,6 +137,8 @@ function VirtualizedCommitView({
               && viewedFileRecords[file.path]?.viewed_at_commit !== selectedWorktree?.head_commit;
 
             if (!fileDiffs[file.path]) {
+              const isRenamed = file.status.startsWith("R") || file.status.startsWith("C");
+              const [oldPath, newPath] = isRenamed ? file.path.split("\t") : [null, file.path];
               return (
                 <div
                   key={file.path}
@@ -131,9 +149,15 @@ function VirtualizedCommitView({
                   style={{ top: virtualRow.start - (virtualizer.options.scrollMargin ?? 0) }}
                 >
                   <div className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground">
-                    <span className="flex-1 truncate">{file.path}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted">New file</span>
-                    <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+                    {isRenamed ? (
+                      <span className="flex-1 truncate">{oldPath} <span className="text-muted-foreground/50">→</span> {newPath}</span>
+                    ) : (
+                      <span className="flex-1 truncate">{file.path}</span>
+                    )}
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted">
+                      {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
+                    </span>
+                    <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
                   </div>
                 </div>
               );
@@ -180,7 +204,7 @@ function VirtualizedCommitView({
                         {showDeltaButton && (
                           <DeltaButton isActive={isInDeltaMode} onClick={(e) => { e.stopPropagation(); toggleDelta(file.path); }} />
                         )}
-                        <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); }} />
+                        <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
                       </div>
                     )}
                   />
@@ -216,7 +240,7 @@ function VirtualizedCommitView({
                         {showDeltaButton && (
                           <DeltaButton isActive={isInDeltaMode} onClick={(e) => { e.stopPropagation(); toggleDelta(file.path); }} />
                         )}
-                        <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); }} />
+                        <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
                       </div>
                     )}
                   />
@@ -227,6 +251,7 @@ function VirtualizedCommitView({
               </div>
             );
           })}
+          </div>
         </div>
       </div>
     </div>
@@ -306,7 +331,16 @@ export function DiffView() {
         for (const row of rows) {
           const currentPatch = fileDiffs[row.file_path];
           const currentHash = fileDiffHashes[row.file_path];
-          if (currentPatch && currentHash === row.patch_hash) {
+          if (!currentPatch && row.patch_hash === "new-file") {
+            // No diff content (e.g. moved/renamed file) — keep as viewed
+            valid.add(row.file_path);
+            records[row.file_path] = row;
+          } else if (currentPatch && currentHash === row.patch_hash) {
+            // Patch unchanged — file is still viewed as-is
+            valid.add(row.file_path);
+            records[row.file_path] = row;
+          } else if (currentPatch && row.viewed_at_commit) {
+            // Patch changed but has viewed_at_commit — keep as viewed so delta mode can show new changes
             valid.add(row.file_path);
             records[row.file_path] = row;
           } else if (currentPatch) {

@@ -181,7 +181,15 @@ After addressing each annotation, immediately call `mcp__differ__resolve_annotat
 
 **ACTIONABLE:** Fix the code, then resolve the annotation.
 
-**DISCUSSION:** Ask the user. Present the reviewer's comment, show the relevant code, and ask what they'd like to do. Wait for their answer. Apply their decision, then resolve the annotation.
+**DISCUSSION:** Before asking the user, explore the codebase to see if the answer is clear from context (existing patterns, conventions, usage elsewhere). If you can determine the right approach, treat it as ACTIONABLE instead.
+
+If the question genuinely requires user input, present it well — ONE annotation per message:
+1. Briefly explain why the reviewer's concern matters
+2. List the realistic options with trade-offs
+3. Give your recommended approach and why
+4. Ask, then STOP and wait for their answer
+
+Apply their decision, then resolve the annotation.
 
 **ALREADY ADDRESSED:** Resolve the annotation immediately.
 

@@ -109,6 +109,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
       if (cancelled) return;
 
       terminal = new Terminal({
+        scrollback: 10000,
         cursorBlink: true,
         cursorStyle: "bar",
         fontSize: 14,
