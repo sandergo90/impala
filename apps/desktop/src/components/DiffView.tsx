@@ -1,5 +1,4 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { listen } from "@tauri-apps/api/event";
@@ -7,7 +6,7 @@ import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";
 import { PatchDiff } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
-import { viewedFilesProvider, type ViewedFile } from "../providers/viewed-files-provider";
+import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import type { DiffLineAnnotation } from "@pierre/diffs";
@@ -41,26 +40,10 @@ function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: R
   );
 }
 
-function DeltaButton({ isActive, onClick }: { isActive: boolean; onClick: (e: React.MouseEvent) => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-        isActive
-          ? "border-amber-500/60 text-amber-400 bg-amber-500/10"
-          : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
-      }`}
-    >
-      {isActive ? "Full diff" : "Since viewed"}
-    </button>
-  );
-}
-
 function VirtualizedCommitView({
   toolbar, changedFiles, fileDiffs, viewedFiles, collapsedFiles, setCollapsedFiles,
   generatedFiles, diffOptions, diffViewerStyle, annotationsByFile,
   pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler, toggleViewed,
-  toggleDelta, deltaMode, deltaDiffs, viewedFileRecords, commitHashForViewed, selectedWorktree,
 }: {
   toolbar: React.ReactNode;
   changedFiles: WorktreeDataState["changedFiles"];
@@ -76,12 +59,6 @@ function VirtualizedCommitView({
   renderAnnotation: (annotation: DiffLineAnnotation<AnnotationMeta>) => React.ReactNode;
   makeGutterUtilityClickHandler: (filePath?: string) => (range: { start: number; side?: "deletions" | "additions"; end: number }) => void;
   toggleViewed: (path: string) => void;
-  toggleDelta: (path: string) => void;
-  deltaMode: Set<string>;
-  deltaDiffs: Record<string, string>;
-  viewedFileRecords: Record<string, ViewedFile>;
-  commitHashForViewed: string | null;
-  selectedWorktree: { head_commit?: string } | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -91,9 +68,9 @@ function VirtualizedCommitView({
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => {
       const file = changedFiles[index];
-      const patch = deltaMode.has(file.path) ? deltaDiffs[file.path] : fileDiffs[file.path];
+      const patch = fileDiffs[file.path];
       const isViewed = viewedFiles.has(file.path);
-      const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !deltaMode.has(file.path) && !collapsedFiles.has(`expanded:${file.path}`));
+      const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !collapsedFiles.has(`expanded:${file.path}`));
       if (!patch || isCollapsed) return 44;
       const lineCount = patch.split("\n").length;
       return Math.max(44, lineCount * 20 + 44);
@@ -127,14 +104,8 @@ function VirtualizedCommitView({
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
           {items.map((virtualRow) => {
             const file = changedFiles[virtualRow.index];
-            const isInDeltaMode = deltaMode.has(file.path);
-            const patch = isInDeltaMode ? deltaDiffs[file.path] : fileDiffs[file.path];
+            const patch = fileDiffs[file.path];
             const isViewed = viewedFiles.has(file.path);
-
-            const showDeltaButton = isViewed
-              && commitHashForViewed === "all-changes"
-              && viewedFileRecords[file.path]?.viewed_at_commit
-              && viewedFileRecords[file.path]?.viewed_at_commit !== selectedWorktree?.head_commit;
 
             if (!fileDiffs[file.path]) {
               const isRenamed = file.status.startsWith("R") || file.status.startsWith("C");
@@ -165,7 +136,7 @@ function VirtualizedCommitView({
 
             const isLargeFile = (patch ?? "").length > 100_000;
             const isGenerated = generatedFiles.includes(file.path);
-            const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !isInDeltaMode && !collapsedFiles.has(`expanded:${file.path}`)) || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
+            const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !collapsedFiles.has(`expanded:${file.path}`)) || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
 
             const toggleCollapse = () => {
               setCollapsedFiles((prev) => {
@@ -186,32 +157,12 @@ function VirtualizedCommitView({
                 ref={virtualizer.measureElement}
                 data-index={virtualRow.index}
                 data-file-path={file.path}
-                className={`absolute left-0 w-full border-b border-border ${isViewed && !isInDeltaMode ? "opacity-75" : ""}`}
+                className={`absolute left-0 w-full border-b border-border ${isViewed ? "opacity-75" : ""}`}
                 style={{ top: virtualRow.start - (virtualizer.options.scrollMargin ?? 0) }}
               >
-                {isInDeltaMode && !patch?.trim() ? (
-                  <PatchDiff<AnnotationMeta>
+                <PatchDiff<AnnotationMeta>
                     style={diffViewerStyle}
-                    patch={fileDiffs[file.path]}
-                    options={{ ...diffOptions, collapsed: true, onGutterUtilityClick: makeGutterUtilityClickHandler(file.path) }}
-                    renderHeaderPrefix={() => (
-                      <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
-                        {isCollapsed ? "▶" : "▼"}
-                      </button>
-                    )}
-                    renderHeaderMetadata={() => (
-                      <div className="flex items-center gap-2">
-                        {showDeltaButton && (
-                          <DeltaButton isActive={isInDeltaMode} onClick={(e) => { e.stopPropagation(); toggleDelta(file.path); }} />
-                        )}
-                        <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
-                      </div>
-                    )}
-                  />
-                ) : (
-                  <PatchDiff<AnnotationMeta>
-                    style={diffViewerStyle}
-                    patch={patch ?? fileDiffs[file.path]}
+                    patch={patch}
                     options={{ ...diffOptions, collapsed: isCollapsed, onGutterUtilityClick: makeGutterUtilityClickHandler(file.path) }}
                     lineAnnotations={(() => {
                       const saved = annotationsByFile.get(file.path) ?? [];
@@ -237,17 +188,10 @@ function VirtualizedCommitView({
                             Generated
                           </span>
                         )}
-                        {showDeltaButton && (
-                          <DeltaButton isActive={isInDeltaMode} onClick={(e) => { e.stopPropagation(); toggleDelta(file.path); }} />
-                        )}
                         <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
                       </div>
                     )}
                   />
-                )}
-                {isInDeltaMode && !patch?.trim() && (
-                  <div className="px-4 py-3 text-sm text-muted-foreground">No changes since last viewed</div>
-                )}
               </div>
             );
           })}
@@ -299,15 +243,11 @@ export function DiffView() {
   const showResolved = useUIStore((s) => s.showResolved);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
-  const [viewedFileRecords, setViewedFileRecords] = useState<Record<string, ViewedFile>>({});
   const [pendingAnnotation, setPendingAnnotation] = useState<{
     filePath?: string;
     lineNumber: number;
     side: 'deletions' | 'additions';
   } | null>(null);
-  const [deltaMode, setDeltaMode] = useState<Set<string>>(new Set());
-  const [deltaDiffs, setDeltaDiffs] = useState<Record<string, string>>({});
-
   // Determine the commit hash for viewed-files scoping
   const commitHashForViewed =
     viewMode === "commit" && selectedCommit ? selectedCommit.hash
@@ -326,29 +266,19 @@ export function DiffView() {
       .then((rows) => {
         // Filter out stale entries where the patch has changed
         const valid = new Set<string>();
-        const records: Record<string, ViewedFile> = {};
         const staleIds: string[] = [];
         for (const row of rows) {
           const currentPatch = fileDiffs[row.file_path];
           const currentHash = fileDiffHashes[row.file_path];
           if (!currentPatch && row.patch_hash === "new-file") {
-            // No diff content (e.g. moved/renamed file) — keep as viewed
             valid.add(row.file_path);
-            records[row.file_path] = row;
           } else if (currentPatch && currentHash === row.patch_hash) {
-            // Patch unchanged — file is still viewed as-is
             valid.add(row.file_path);
-            records[row.file_path] = row;
-          } else if (currentPatch && row.viewed_at_commit) {
-            // Patch changed but has viewed_at_commit — keep as viewed so delta mode can show new changes
-            valid.add(row.file_path);
-            records[row.file_path] = row;
           } else if (currentPatch) {
             staleIds.push(row.file_path);
           }
         }
         setViewedFiles(valid);
-        setViewedFileRecords(records);
         // Lazily clean up stale entries
         for (const fp of staleIds) {
           viewedFilesProvider.unset(worktreePath, commitHashForViewed, fp);
@@ -356,48 +286,6 @@ export function DiffView() {
       })
       .catch(() => setViewedFiles(new Set()));
   }, [worktreePath, commitHashForViewed, fileDiffHashes]);
-
-  // Clear delta state when file diffs change
-  useEffect(() => {
-    setDeltaMode(new Set());
-    setDeltaDiffs({});
-  }, [fileDiffHashes]);
-
-  // Auto-enable delta mode for viewed files with stale viewed_at_commit
-  useEffect(() => {
-    if (!worktreePath || commitHashForViewed !== "all-changes") return;
-    const headCommit = selectedWorktree?.head_commit;
-    if (!headCommit) return;
-
-    const toFetch: { path: string; sinceCommit: string }[] = [];
-    for (const [path, record] of Object.entries(viewedFileRecords)) {
-      if (record.viewed_at_commit && record.viewed_at_commit !== headCommit) {
-        toFetch.push({ path, sinceCommit: record.viewed_at_commit });
-      }
-    }
-    if (toFetch.length === 0) return;
-
-    Promise.all(
-      toFetch.map(({ path, sinceCommit }) =>
-        invoke<string>("get_file_diff_since_commit", { worktreePath, sinceCommit, filePath: path })
-          .then((diff) => ({ path, diff }))
-          .catch(() => null)
-      )
-    ).then((results) => {
-      const newDiffs: Record<string, string> = {};
-      const newPaths = new Set<string>();
-      for (const r of results) {
-        if (r) {
-          newDiffs[r.path] = r.diff;
-          newPaths.add(r.path);
-        }
-      }
-      if (newPaths.size > 0) {
-        setDeltaDiffs((prev) => ({ ...prev, ...newDiffs }));
-        setDeltaMode((prev) => new Set([...prev, ...newPaths]));
-      }
-    });
-  }, [worktreePath, commitHashForViewed, viewedFileRecords, selectedWorktree?.head_commit]);
 
   const toggleViewed = useCallback((path: string) => {
     if (!worktreePath || !commitHashForViewed) return;
@@ -411,33 +299,11 @@ export function DiffView() {
         next.delete(path);
         return next;
       });
-      setDeltaMode((prev) => { const next = new Set(prev); next.delete(path); return next; });
-      setDeltaDiffs((prev) => { const { [path]: _, ...rest } = prev; return rest; });
     } else {
       viewedFilesProvider.set(worktreePath, commitHashForViewed, path, patchHash, selectedWorktree?.head_commit);
       setViewedFiles((prev) => new Set(prev).add(path));
     }
   }, [worktreePath, commitHashForViewed, fileDiffHashes, viewedFiles, selectedWorktree?.head_commit]);
-
-  const toggleDelta = useCallback(async (path: string) => {
-    if (deltaMode.has(path)) {
-      setDeltaMode((prev) => { const next = new Set(prev); next.delete(path); return next; });
-      return;
-    }
-    const record = viewedFileRecords[path];
-    if (!record?.viewed_at_commit || !worktreePath) return;
-    try {
-      const diff = await invoke<string>("get_file_diff_since_commit", {
-        worktreePath,
-        sinceCommit: record.viewed_at_commit,
-        filePath: path,
-      });
-      setDeltaDiffs((prev) => ({ ...prev, [path]: diff }));
-      setDeltaMode((prev) => new Set(prev).add(path));
-    } catch {
-      toast.error("Could not load changes since last viewed — the commit may no longer exist");
-    }
-  }, [deltaMode, viewedFileRecords, worktreePath]);
 
   // Load all annotations for this worktree
   useEffect(() => {
@@ -662,12 +528,6 @@ export function DiffView() {
       renderAnnotation={renderAnnotation}
       makeGutterUtilityClickHandler={makeGutterUtilityClickHandler}
       toggleViewed={toggleViewed}
-      toggleDelta={toggleDelta}
-      deltaMode={deltaMode}
-      deltaDiffs={deltaDiffs}
-      viewedFileRecords={viewedFileRecords}
-      commitHashForViewed={commitHashForViewed}
-      selectedWorktree={selectedWorktree}
     />;
   }
 

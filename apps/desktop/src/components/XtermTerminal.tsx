@@ -191,6 +191,14 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
         invoke("pty_resize", { sessionId, rows, cols }).catch(() => {});
       });
 
+      terminal.attachCustomKeyEventHandler((e) => {
+        if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
+          writeToPty("\n");
+          return false;
+        }
+        return true;
+      });
+
       dataDisposable = terminal.onData((data: string) => {
         writeToPty(data);
       });

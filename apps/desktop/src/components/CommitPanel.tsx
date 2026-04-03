@@ -127,6 +127,17 @@ export function CommitPanel() {
 
   // Auto-refresh when files or git refs change on disk
   const refreshCurrentView = useCallback(async () => {
+    // Keep selectedWorktree.head_commit in sync with actual HEAD
+    try {
+      const headCommit = await invoke<string>("get_head_commit", { worktreePath });
+      const current = useUIStore.getState().selectedWorktree;
+      if (current && current.path === worktreePath && current.head_commit !== headCommit) {
+        useUIStore.getState().setSelectedWorktree({ ...current, head_commit: headCommit });
+      }
+    } catch {
+      // Silently fail
+    }
+
     // Always refresh commit list so sidebar counts stay accurate
     if (baseBranch) {
       try {

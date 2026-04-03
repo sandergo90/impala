@@ -329,11 +329,23 @@ pub fn create_worktree(
 }
 
 pub fn delete_worktree(repo_path: &str, worktree_path: &str, force: bool) -> Result<(), String> {
+    // Resolve the branch before removing the worktree
+    let branch = run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .ok()
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty() && b != "HEAD");
+
     let mut args = vec!["worktree", "remove", worktree_path];
     if force {
         args.push("--force");
     }
     run_git(repo_path, &args)?;
+
+    // Delete the local branch after the worktree is gone
+    if let Some(branch) = branch {
+        let _ = run_git(repo_path, &["branch", "-D", &branch]);
+    }
+
     Ok(())
 }
 
@@ -372,6 +384,10 @@ pub fn check_generated_files(worktree_path: &str, files: &[String]) -> Result<Ve
     }
 
     Ok(generated)
+}
+
+pub fn get_head_commit(worktree_path: &str) -> Result<String, String> {
+    run_git(worktree_path, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string())
 }
 
 pub fn get_all_changed_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {

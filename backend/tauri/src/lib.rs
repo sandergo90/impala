@@ -164,6 +164,11 @@ fn invalidate_branch_cache(
 }
 
 #[tauri::command]
+fn get_head_commit(worktree_path: String) -> Result<String, String> {
+    git::get_head_commit(&worktree_path)
+}
+
+#[tauri::command]
 fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
     git::get_all_changed_files(&worktree_path)
 }
@@ -513,6 +518,7 @@ pub fn run() {
             get_full_commit_diff,
             get_branch_diff,
             get_full_branch_diff,
+            get_head_commit,
             get_all_changed_files,
             invalidate_branch_cache,
             get_uncommitted_files,

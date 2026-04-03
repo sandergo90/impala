@@ -7,18 +7,12 @@ const START_MARKER: &str = "<!-- DIFFER:LINEAR_CONTEXT:START -->";
 const END_MARKER: &str = "<!-- DIFFER:LINEAR_CONTEXT:END -->";
 const REFRESH_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
 
-/// Resolve the CLAUDE.md path for a worktree.
-/// Claude Code uses `~/.claude/projects/<encoded-path>/CLAUDE.md`
-/// where the path is encoded by replacing `/` with `-`.
+/// Resolve the CLAUDE.local.md path for a worktree.
+/// Claude Code walks up the directory tree from CWD and reads CLAUDE.local.md files.
+/// Writing directly into the worktree directory is the simplest approach —
+/// it's gitignored, per-worktree, and automatically discovered by Claude Code.
 fn claude_md_path(worktree_path: &str) -> Result<PathBuf, String> {
-    let home =
-        dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
-    let encoded = worktree_path.replace('/', "-");
-    Ok(home
-        .join(".claude")
-        .join("projects")
-        .join(&encoded)
-        .join("CLAUDE.md"))
+    Ok(PathBuf::from(worktree_path).join("CLAUDE.local.md"))
 }
 
 /// Format issue detail as a markdown section between markers.
@@ -137,17 +131,12 @@ pub fn write_context(
         return Ok(());
     }
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
-
-    fs::write(&path, content).map_err(|e| format!("Failed to write CLAUDE.md: {}", e))?;
+    fs::write(&path, content).map_err(|e| format!("Failed to write CLAUDE.local.md: {}", e))?;
 
     Ok(())
 }
 
-/// Remove Linear context section from CLAUDE.md. Cleans up empty files/dirs.
+/// Remove Linear context section from CLAUDE.local.md. Deletes the file if empty.
 pub fn clean_context(worktree_path: &str) -> Result<(), String> {
     let path = claude_md_path(worktree_path)?;
 
@@ -156,19 +145,14 @@ pub fn clean_context(worktree_path: &str) -> Result<(), String> {
     }
 
     let existing =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read CLAUDE.md: {}", e))?;
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read CLAUDE.local.md: {}", e))?;
 
     let remaining = remove_section(&existing);
 
     if remaining.trim().is_empty() {
-        // File is empty — delete it
-        fs::remove_file(&path).map_err(|e| format!("Failed to delete CLAUDE.md: {}", e))?;
-        // Try to remove parent dir if empty (best-effort)
-        if let Some(parent) = path.parent() {
-            let _ = fs::remove_dir(parent); // fails silently if not empty
-        }
+        fs::remove_file(&path).map_err(|e| format!("Failed to delete CLAUDE.local.md: {}", e))?;
     } else {
-        fs::write(&path, remaining).map_err(|e| format!("Failed to write CLAUDE.md: {}", e))?;
+        fs::write(&path, remaining).map_err(|e| format!("Failed to write CLAUDE.local.md: {}", e))?;
     }
 
     Ok(())
