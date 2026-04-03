@@ -5,6 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { useUIStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
@@ -40,11 +41,15 @@ function decodeBase64(encoded: string): Uint8Array {
 export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart }: XtermTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const isFocusedRef = useRef(isFocused);
   isFocusedRef.current = isFocused;
   const exitedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [exited, setExited] = useState<number | null>(null);
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const termBg = useUIStore(
     (s) => resolveThemeById(s.activeThemeId, s.customThemes).terminal.background
   );
@@ -97,6 +102,12 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
           e.stopPropagation();
           terminal?.clear();
         }
+        if (e.key === "f") {
+          e.preventDefault();
+          e.stopPropagation();
+          setSearchVisible(true);
+          requestAnimationFrame(() => searchInputRef.current?.focus());
+        }
       }
     };
     container.addEventListener("keydown", interceptKeys, true);
@@ -122,7 +133,10 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
       terminalRef.current = terminal;
 
       fitAddon = new FitAddon();
+      const searchAddon = new SearchAddon();
       terminal.loadAddon(fitAddon);
+      terminal.loadAddon(searchAddon);
+      searchAddonRef.current = searchAddon;
       terminal.open(container);
 
       // WebGL must be loaded after open()
@@ -193,7 +207,8 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
 
       terminal.attachCustomKeyEventHandler((e) => {
         if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
-          writeToPty("\n");
+          // Send Kitty keyboard protocol sequence for Shift+Enter
+          writeToPty("\x1b[13;2u");
           return false;
         }
         return true;
@@ -265,6 +280,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
         terminal.dispose();
         terminal = null;
       }
+      searchAddonRef.current = null;
       terminalRef.current = null;
     };
   }, [sessionId]);
@@ -293,8 +309,46 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
     return unsubscribe;
   }, []);
 
+  const closeSearch = () => {
+    setSearchVisible(false);
+    setSearchQuery("");
+    searchAddonRef.current?.clearDecorations();
+    terminalRef.current?.focus();
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      closeSearch();
+    } else if (e.key === "Enter") {
+      if (e.shiftKey) {
+        searchAddonRef.current?.findPrevious(searchQuery);
+      } else {
+        searchAddonRef.current?.findNext(searchQuery);
+      }
+    }
+  };
+
   return (
     <div className="relative h-full w-full" style={{ background: termBg }}>
+      {searchVisible && (
+        <div className="absolute top-1 right-2 z-30 flex items-center gap-1 bg-background border border-border rounded px-2 py-1 shadow-lg">
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              if (e.target.value) searchAddonRef.current?.findNext(e.target.value);
+            }}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search..."
+            className="bg-transparent text-foreground text-xs outline-none w-40 placeholder:text-muted-foreground"
+          />
+          <button onClick={() => searchAddonRef.current?.findPrevious(searchQuery)} className="text-muted-foreground hover:text-foreground text-xs px-1">&#9650;</button>
+          <button onClick={() => searchAddonRef.current?.findNext(searchQuery)} className="text-muted-foreground hover:text-foreground text-xs px-1">&#9660;</button>
+          <button onClick={closeSearch} className="text-muted-foreground hover:text-foreground text-xs px-1">&times;</button>
+        </div>
+      )}
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground z-10">
           Loading terminal...

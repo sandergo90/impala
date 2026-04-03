@@ -116,28 +116,58 @@ pub fn pty_spawn(
 
     let safe_id = sanitize_event_id(&session_id);
 
-    // Background thread to read PTY output, buffer it, and emit events
+    // Background thread to read PTY output, buffer it, and emit batched events.
+    // Batching prevents rapid output (e.g. bun dev rebuilds) from flooding the UI thread.
+    let pending: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let pending_for_flush = Arc::clone(&pending);
+    let app_for_flush = app_handle.clone();
+    let event_name = format!("pty-output-{}", safe_id);
+    let event_name_flush = event_name.clone();
+
+    // Flush thread: emits pending data every 8ms (~120fps)
+    let flush_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let flush_running_clone = Arc::clone(&flush_running);
     std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
+        while flush_running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(16));
+            let data = {
+                let mut p = pending_for_flush.lock().unwrap();
+                if p.is_empty() { continue; }
+                std::mem::take(&mut *p)
+            };
+            let encoded = STANDARD.encode(&data);
+            let _ = app_for_flush.emit(&event_name_flush, encoded);
+        }
+    });
+
+    // Read thread: reads PTY output and appends to pending buffer
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    // Append to scrollback buffer
                     if let Ok(mut scrollback) = buffer_for_thread.lock() {
                         scrollback.extend_from_slice(&buf[..n]);
-                        // Trim to max size (keep the tail)
                         if scrollback.len() > MAX_BUFFER_SIZE {
                             let start = scrollback.len() - MAX_BUFFER_SIZE;
                             *scrollback = scrollback[start..].to_vec();
                         }
                     }
-
-                    let encoded = STANDARD.encode(&buf[..n]);
-                    let event_name = format!("pty-output-{}", safe_id);
-                    let _ = app_handle.emit(&event_name, encoded);
+                    if let Ok(mut p) = pending.lock() {
+                        p.extend_from_slice(&buf[..n]);
+                    }
                 }
                 Err(_) => break,
+            }
+        }
+        // Stop flush thread and emit any remaining data
+        flush_running.store(false, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(mut p) = pending.lock() {
+            if !p.is_empty() {
+                let encoded = STANDARD.encode(&*p);
+                let _ = app_handle.emit(&event_name, encoded);
+                p.clear();
             }
         }
         let exit_event = format!("pty-exit-{}", safe_id);
