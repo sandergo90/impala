@@ -11,6 +11,7 @@ import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { OpenInEditorButton } from "../components/OpenInEditorButton";
 import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
+import { triggerRunScript } from "../lib/run-script";
 
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -181,6 +182,15 @@ export function MainView() {
                 )}
               <span className="mx-1 w-px h-3.5 bg-border/50" />
               <OpenInEditorButton worktreePath={selectedWorktree.path} />
+              <button
+                onClick={() => triggerRunScript()}
+                className="relative text-muted-foreground hover:text-foreground px-1.5 py-1 rounded hover:bg-accent"
+                title="Run script (Cmd+Shift+R)"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M4 2l10 6-10 6V2z" />
+                </svg>
+              </button>
             </>
           )}
         </div>

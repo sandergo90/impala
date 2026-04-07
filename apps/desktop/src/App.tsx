@@ -11,6 +11,7 @@ import {
   getAdjacentLeafId,
   getLeaves,
 } from "./lib/split-tree";
+import { triggerRunScript } from "./lib/run-script";
 
 export function RootLayout() {
   const [gitError, setGitError] = useState(false);
@@ -48,6 +49,13 @@ export function RootLayout() {
       if (e.metaKey && e.key === "p") {
         e.preventDefault();
         setCommandPaletteOpen((prev) => !prev);
+        return;
+      }
+
+      // Cmd+Shift+R → run script
+      if (e.metaKey && e.shiftKey && (e.key === "R" || e.key === "r")) {
+        e.preventDefault();
+        triggerRunScript();
         return;
       }
 
