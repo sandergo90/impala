@@ -1,5 +1,15 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { projectSettingsRoute } from "../../router";
 import { useDataStore } from "../../store";
+
+interface ProjectConfig {
+  setup?: string | null;
+  run?: string | null;
+}
+
+type SaveStatus = "idle" | "saving" | "saved";
 
 export function ProjectSettingsRoute() {
   const { projectId } = projectSettingsRoute.useParams();
@@ -12,6 +22,72 @@ export function ProjectSettingsRoute() {
     projectPath.split("/").filter(Boolean).pop() ??
     projectPath;
 
+  const [setup, setSetup] = useState("");
+  const [run, setRun] = useState("");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const loadedRef = useRef(false);
+
+  // Load config on mount / when projectPath changes
+  useEffect(() => {
+    loadedRef.current = false;
+    invoke<ProjectConfig>("read_project_config", { projectPath })
+      .then((config) => {
+        setSetup(config.setup ?? "");
+        setRun(config.run ?? "");
+        loadedRef.current = true;
+      })
+      .catch((e) => {
+        toast.error(`Failed to load project config: ${e}`);
+        loadedRef.current = true;
+      });
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, [projectPath]);
+
+  const saveConfig = useCallback(
+    (nextSetup: string, nextRun: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+
+      debounceRef.current = setTimeout(async () => {
+        setSaveStatus("saving");
+        try {
+          await invoke("write_project_config", {
+            projectPath,
+            config: {
+              setup: nextSetup.trim() || null,
+              run: nextRun.trim() || null,
+            },
+          });
+          setSaveStatus("saved");
+          if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+          savedTimerRef.current = setTimeout(
+            () => setSaveStatus("idle"),
+            2000
+          );
+        } catch (e) {
+          setSaveStatus("idle");
+          toast.error(`Failed to save project config: ${e}`);
+        }
+      }, 500);
+    },
+    [projectPath]
+  );
+
+  const handleSetupChange = (value: string) => {
+    setSetup(value);
+    if (loadedRef.current) saveConfig(value, run);
+  };
+
+  const handleRunChange = (value: string) => {
+    setRun(value);
+    if (loadedRef.current) saveConfig(setup, value);
+  };
+
   return (
     <div className="max-w-2xl space-y-6">
       <div>
@@ -19,11 +95,45 @@ export function ProjectSettingsRoute() {
         <p className="text-sm text-muted-foreground mt-1">{projectPath}</p>
       </div>
 
-      <div className="rounded-lg border border-border/50 p-4">
-        <h3 className="text-sm font-medium mb-2">Scripts</h3>
-        <p className="text-xs text-muted-foreground">
-          Project scripts will be configurable here in a future update.
-        </p>
+      <div className="p-4 rounded-lg border border-border bg-card space-y-5">
+        <h3 className="text-sm font-medium">Scripts</h3>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Setup</label>
+          <p className="text-xs text-muted-foreground">
+            Runs automatically after creating a new worktree.
+          </p>
+          <textarea
+            value={setup}
+            onChange={(e) => handleSetupChange(e.target.value)}
+            rows={4}
+            className="w-full px-3 py-2 rounded border border-border bg-background font-mono text-sm resize-y"
+            placeholder="npm install"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Run</label>
+          <p className="text-xs text-muted-foreground">
+            Start the dev server. Triggered via Cmd+Shift+R.
+          </p>
+          <textarea
+            value={run}
+            onChange={(e) => handleRunChange(e.target.value)}
+            rows={4}
+            className="w-full px-3 py-2 rounded border border-border bg-background font-mono text-sm resize-y"
+            placeholder="npm run dev"
+          />
+        </div>
+
+        <div className="flex justify-end">
+          {saveStatus === "saving" && (
+            <span className="text-xs text-muted-foreground">Saving...</span>
+          )}
+          {saveStatus === "saved" && (
+            <span className="text-xs text-muted-foreground">Saved ✓</span>
+          )}
+        </div>
       </div>
     </div>
   );
