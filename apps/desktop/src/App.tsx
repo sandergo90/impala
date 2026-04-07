@@ -33,8 +33,13 @@ export function RootLayout() {
       // Cmd+, → toggle settings
       if (e.metaKey && e.key === ",") {
         e.preventDefault();
-        const isSettings = matchRoute({ to: "/settings" });
-        router.navigate({ to: isSettings ? "/" : "/settings" });
+        const isSettings = matchRoute({
+          to: "/settings",
+          fuzzy: true,
+        });
+        router.navigate({
+          to: isSettings ? "/" : "/settings/appearance",
+        });
         return;
       }
 
