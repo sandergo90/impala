@@ -51,6 +51,14 @@ interface UIState {
   removeCustomTheme: (id: string) => void;
   showResolved: boolean;
   setShowResolved: (show: boolean) => void;
+  floatingTerminal: {
+    mode: 'hidden' | 'expanded' | 'pill';
+    sessionId: string | null;
+    label: string;
+    type: 'setup' | 'run' | null;
+    worktreePath: string | null;
+  };
+  setFloatingTerminal: (updates: Partial<UIState['floatingTerminal']>) => void;
   linearApiKey: string;
   setLinearApiKey: (key: string) => void;
   preferredEditor: string;
@@ -109,6 +117,16 @@ export const useUIStore = create<UIState>()(
       },
       showResolved: false,
       setShowResolved: (show) => set({ showResolved: show }),
+      floatingTerminal: {
+        mode: 'hidden',
+        sessionId: null,
+        label: '',
+        type: null,
+        worktreePath: null,
+      },
+      setFloatingTerminal: (updates) => set((state) => ({
+        floatingTerminal: { ...state.floatingTerminal, ...updates },
+      })),
       linearApiKey: "",
       setLinearApiKey: (key) => set({ linearApiKey: key }),
       preferredEditor: "cursor",
@@ -117,7 +135,7 @@ export const useUIStore = create<UIState>()(
     {
       name: "canopy-ui-state",
       partialize: (state) => {
-        const { showResolved, ...rest } = state;
+        const { showResolved, floatingTerminal, ...rest } = state;
         return rest;
       },
       onRehydrateStorage: () => (state) => {

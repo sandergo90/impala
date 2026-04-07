@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Outlet, useRouter, useMatchRoute } from "@tanstack/react-router";
 import { CommandPalette } from "./components/CommandPalette";
+import { FloatingTerminal } from "./components/FloatingTerminal";
 import { Toaster } from "./components/ui/sonner";
 import { useUIStore, useDataStore } from "./store";
 import {
@@ -172,6 +173,7 @@ export function RootLayout() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground flex flex-col">
       <Outlet />
+      <FloatingTerminal />
 
       <CommandPalette
         open={commandPaletteOpen}
