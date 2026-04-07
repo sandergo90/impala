@@ -1,4 +1,5 @@
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { useDataStore } from "../store";
 
 const navItems = [
   { to: "/settings/appearance" as const, label: "Appearance" },
@@ -7,6 +8,7 @@ const navItems = [
 
 export function SettingsLayout() {
   const navigate = useNavigate();
+  const projects = useDataStore((s) => s.projects);
 
   return (
     <>
@@ -63,6 +65,27 @@ export function SettingsLayout() {
           <div className="px-4 pb-1.5 pt-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Projects
           </div>
+
+          {projects.length === 0 ? (
+            <div className="px-4 py-1.5 text-xs text-muted-foreground/60">
+              No projects added
+            </div>
+          ) : (
+            projects.map((project) => (
+              <Link
+                key={project.path}
+                to="/settings/project/$projectId"
+                params={{ projectId: encodeURIComponent(project.path) }}
+                className="px-4 py-1.5 text-xs text-left w-full rounded-md mx-0 text-muted-foreground hover:text-foreground"
+                activeProps={{
+                  className:
+                    "px-4 py-1.5 text-xs text-left w-full rounded-md mx-0 text-foreground font-medium bg-primary/15",
+                }}
+              >
+                {project.name}
+              </Link>
+            ))
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-8">

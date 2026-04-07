@@ -10,6 +10,7 @@ import { MainView } from "./views/MainView";
 import { SettingsLayout } from "./routes/settings-layout";
 import { AppearanceRoute } from "./routes/settings/appearance";
 import { IntegrationsRoute } from "./routes/settings/integrations";
+import { ProjectSettingsRoute } from "./routes/settings/project";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -44,11 +45,18 @@ const settingsIntegrationsRoute = createRoute({
   component: IntegrationsRoute,
 });
 
+export const projectSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/project/$projectId",
+  component: ProjectSettingsRoute,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   settingsRoute.addChildren([
     settingsAppearanceRoute,
     settingsIntegrationsRoute,
+    projectSettingsRoute,
   ]),
 ]);
 
