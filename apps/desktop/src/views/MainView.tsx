@@ -28,25 +28,11 @@ export function MainView() {
 
   const activeTab = navState?.activeTab ?? "diff";
 
-  const handleTerminalTab = () => {
+  const setTab = (tab: "diff" | "terminal" | "split") => {
     if (!selectedWorktree) return;
     useUIStore
       .getState()
-      .updateWorktreeNavState(selectedWorktree.path, { activeTab: "terminal" });
-  };
-
-  const handleDiffTab = () => {
-    if (!selectedWorktree) return;
-    useUIStore
-      .getState()
-      .updateWorktreeNavState(selectedWorktree.path, { activeTab: "diff" });
-  };
-
-  const handleSplitTab = () => {
-    if (!selectedWorktree) return;
-    useUIStore
-      .getState()
-      .updateWorktreeNavState(selectedWorktree.path, { activeTab: "split" });
+      .updateWorktreeNavState(selectedWorktree.path, { activeTab: tab });
   };
 
   const handleFocusPane = useCallback(
@@ -203,13 +189,9 @@ export function MainView() {
         <div className="relative flex items-center gap-1 pr-3">
           {selectedWorktree && (
             <>
-              {tabPill("Diff", activeTab === "diff", handleDiffTab)}
-              {tabPill(
-                "Terminal",
-                activeTab === "terminal",
-                handleTerminalTab
-              )}
-              {tabPill("Split", activeTab === "split", handleSplitTab)}
+              {tabPill("Diff", activeTab === "diff", () => setTab("diff"))}
+              {tabPill("Terminal", activeTab === "terminal", () => setTab("terminal"))}
+              {tabPill("Split", activeTab === "split", () => setTab("split"))}
               <span className="mx-1 w-px h-3.5 bg-border" />
             </>
           )}

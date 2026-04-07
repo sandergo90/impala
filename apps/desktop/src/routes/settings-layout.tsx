@@ -6,6 +6,11 @@ const navItems = [
   { to: "/settings/integrations" as const, label: "Integrations" },
 ];
 
+const navLinkClass =
+  "px-4 py-1.5 text-xs text-left w-full rounded-md mx-0 text-muted-foreground hover:text-foreground";
+const navLinkActiveClass =
+  "px-4 py-1.5 text-xs text-left w-full rounded-md mx-0 text-foreground font-medium bg-primary/15";
+
 export function SettingsLayout() {
   const navigate = useNavigate();
   const projects = useDataStore((s) => s.projects);
@@ -52,11 +57,8 @@ export function SettingsLayout() {
             <Link
               key={item.to}
               to={item.to}
-              className="px-4 py-1.5 text-xs text-left w-full rounded-md mx-0 text-muted-foreground hover:text-foreground"
-              activeProps={{
-                className:
-                  "px-4 py-1.5 text-xs text-left w-full rounded-md mx-0 text-foreground font-medium bg-primary/15",
-              }}
+              className={navLinkClass}
+              activeProps={{ className: navLinkActiveClass }}
             >
               {item.label}
             </Link>
