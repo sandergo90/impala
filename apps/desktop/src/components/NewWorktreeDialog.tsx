@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
+import { useNavigate } from "@tanstack/react-router";
 import { useUIStore } from "../store";
 import type { BranchInfo, Worktree, LinearIssue } from "../types";
 
@@ -23,6 +24,7 @@ export function NewWorktreeDialog({
   onCreated,
   onCancel,
 }: NewWorktreeDialogProps) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("new");
   const [branchName, setBranchName] = useState("");
   const [baseBranch, setBaseBranch] = useState("develop");
@@ -162,24 +164,22 @@ export function NewWorktreeDialog({
         baseBranch: base,
         existing,
       });
-      // Best-effort: link to Linear issue and move to In Progress
+      // Best-effort: link to Linear issue and move to In Progress (fire-and-forget)
       if (tab === "linear" && selectedIssue) {
-        await Promise.all([
-          invoke("link_worktree_issue", {
-            worktreePath: worktree.path,
-            issueId: selectedIssue.id,
-            identifier: selectedIssue.identifier,
-          }).catch(() => {}),
-          invoke("start_linear_issue", {
-            apiKey: linearApiKey,
-            issueId: selectedIssue.id,
-          }).catch(() => {}),
-          invoke("write_linear_context", {
-            apiKey: linearApiKey,
-            issueId: selectedIssue.id,
-            worktreePath: worktree.path,
-          }).catch(() => {}),
-        ]);
+        invoke("link_worktree_issue", {
+          worktreePath: worktree.path,
+          issueId: selectedIssue.id,
+          identifier: selectedIssue.identifier,
+        }).catch(() => {});
+        invoke("start_linear_issue", {
+          apiKey: linearApiKey,
+          issueId: selectedIssue.id,
+        }).catch(() => {});
+        invoke("write_linear_context", {
+          apiKey: linearApiKey,
+          issueId: selectedIssue.id,
+          worktreePath: worktree.path,
+        }).catch(() => {});
       }
       onCreated(worktree);
     } catch (e) {
@@ -279,7 +279,7 @@ export function NewWorktreeDialog({
                 <button
                   onClick={() => {
                     onCancel();
-                    useUIStore.getState().setCurrentView("settings");
+                    navigate({ to: "/settings" });
                   }}
                   className="text-xs text-blue-400 hover:text-blue-300"
                 >

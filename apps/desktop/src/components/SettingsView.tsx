@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useUIStore } from "../store";
+import { useNavigate } from "@tanstack/react-router";
 import { AppearancePane } from "./settings/AppearancePane";
 import { ClaudeIntegrationPane } from "./settings/ClaudeIntegrationPane";
 import { LinearPane } from "./settings/LinearPane";
@@ -15,14 +15,14 @@ const navItems = [
 ];
 
 export function SettingsView() {
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
+  const navigate = useNavigate();
   const [selectedPane, setSelectedPane] = useState("appearance");
 
   return (
     <div className="flex h-full">
       <div className="w-[200px] border-r border-border/50 py-4 flex flex-col shrink-0">
         <button
-          onClick={() => setCurrentView("main")}
+          onClick={() => navigate({ to: "/" })}
           className="flex items-center gap-2 px-4 pb-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">

@@ -49,12 +49,12 @@ interface UIState {
   customThemes: Theme[];
   addCustomTheme: (theme: Theme) => void;
   removeCustomTheme: (id: string) => void;
-  currentView: 'main' | 'settings';
-  setCurrentView: (view: 'main' | 'settings') => void;
   showResolved: boolean;
   setShowResolved: (show: boolean) => void;
   linearApiKey: string;
   setLinearApiKey: (key: string) => void;
+  preferredEditor: string;
+  setPreferredEditor: (editor: string) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -107,17 +107,17 @@ export const useUIStore = create<UIState>()(
         }));
         if (wasActive) applyTheme(defaultDark);
       },
-      currentView: 'main',
-      setCurrentView: (view) => set({ currentView: view }),
       showResolved: false,
       setShowResolved: (show) => set({ showResolved: show }),
       linearApiKey: "",
       setLinearApiKey: (key) => set({ linearApiKey: key }),
+      preferredEditor: "cursor",
+      setPreferredEditor: (editor) => set({ preferredEditor: editor }),
     }),
     {
-      name: "differ-ui-state",
+      name: "canopy-ui-state",
       partialize: (state) => {
-        const { currentView, showResolved, ...rest } = state;
+        const { showResolved, ...rest } = state;
         return rest;
       },
       onRehydrateStorage: () => (state) => {

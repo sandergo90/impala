@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
+import { useNavigate } from "@tanstack/react-router";
 import { useUIStore, useDataStore } from "../store";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { selectWorktree as sharedSelectWorktree, selectProject as sharedSelectProject } from "../hooks/useWorktreeActions";
@@ -54,6 +55,7 @@ function BranchIcon({ active }: { active: boolean }) {
 }
 
 export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
+  const navigate = useNavigate();
   const selectedProject = useUIStore((s) => s.selectedProject);
   const worktrees = useDataStore((s) => s.worktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -103,7 +105,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
 
       {/* Settings */}
       <button
-        onClick={() => useUIStore.getState().setCurrentView("settings")}
+        onClick={() => navigate({ to: "/settings" })}
         className="w-7 h-7 flex items-center justify-center text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border pt-2"
         title="Settings"
       >
@@ -116,7 +118,8 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   );
 }
 
-export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () => void }) {
+export function Sidebar() {
+  const navigate = useNavigate();
   const projects = useDataStore((s) => s.projects);
   const addProject = useDataStore((s) => s.addProject);
   const selectedProject = useUIStore((s) => s.selectedProject);
@@ -372,7 +375,7 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
 
       {/* Search / Command Palette Trigger */}
       <button
-        onClick={onOpenCommandPalette}
+        onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true, bubbles: true }))}
         className="mx-2.5 mb-1 px-2.5 py-1.5 rounded-md flex items-center gap-2 bg-accent/60 hover:bg-accent text-muted-foreground/50 hover:text-muted-foreground transition-colors"
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
@@ -469,7 +472,7 @@ export function Sidebar({ onOpenCommandPalette }: { onOpenCommandPalette?: () =>
 
       {/* Settings gear — always at bottom */}
       <button
-        onClick={() => useUIStore.getState().setCurrentView("settings")}
+        onClick={() => navigate({ to: "/settings" })}
         className="flex items-center gap-1.5 px-3.5 py-2.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

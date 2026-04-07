@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Command } from "cmdk";
+import { useNavigate } from "@tanstack/react-router";
 import { useUIStore, useDataStore } from "../store";
 import { selectWorktree, selectProject } from "../hooks/useWorktreeActions";
 
@@ -14,6 +15,7 @@ export function CommandPalette({
   const worktrees = useDataStore((s) => s.worktrees);
   const selectedProject = useUIStore((s) => s.selectedProject);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+  const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export function CommandPalette({
   const handleAction = (action: string) => {
     switch (action) {
       case "settings":
-        useUIStore.getState().setCurrentView("settings");
+        navigate({ to: "/settings" });
         break;
       case "diff-tab":
         if (selectedWorktree) {
