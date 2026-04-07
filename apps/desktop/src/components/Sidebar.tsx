@@ -494,6 +494,32 @@ export function Sidebar() {
               });
               setWorktrees(wts);
               selectWorktree(worktree);
+
+              // Run setup script if configured (fire-and-forget)
+              invoke<{ setup?: string; run?: string }>("read_project_config", {
+                projectPath: selectedProject.path,
+              }).then((config) => {
+                if (config.setup?.trim()) {
+                  const sessionId = `floating-setup-${Date.now()}`;
+                  invoke("pty_spawn", {
+                    sessionId,
+                    cwd: worktree.path,
+                    command: [config.setup],
+                  }).then(() => {
+                    useUIStore.getState().setFloatingTerminal({
+                      mode: "expanded",
+                      sessionId,
+                      label: "Setup",
+                      type: "setup",
+                      worktreePath: worktree.path,
+                    });
+                  }).catch((e) => {
+                    toast.error(`Failed to run setup script: ${e}`);
+                  });
+                }
+              }).catch(() => {
+                // Silently ignore config read failures
+              });
             } catch (e) {
               toast.error("Failed to refresh worktrees");
             }
