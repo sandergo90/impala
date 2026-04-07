@@ -1,4 +1,5 @@
 mod annotations;
+mod config;
 mod git;
 mod hook_server;
 mod linear;
@@ -32,11 +33,11 @@ fn check_git() -> Result<String, String> {
     let output = std::process::Command::new("git")
         .arg("--version")
         .output()
-        .map_err(|_| "Git is not installed. Please install Git to use Differ.".to_string())?;
+        .map_err(|_| "Git is not installed. Please install Git to use Canopy.".to_string())?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        Err("Git is not installed. Please install Git to use Differ.".to_string())
+        Err("Git is not installed. Please install Git to use Canopy.".to_string())
     }
 }
 
@@ -310,7 +311,7 @@ fn setup_claude_integration() -> Result<String, String> {
     mcp_servers
         .as_object_mut()
         .ok_or_else(|| "mcpServers is not a JSON object".to_string())?
-        .insert("differ".to_string(), serde_json::json!({
+        .insert("canopy".to_string(), serde_json::json!({
             "command": mcp_binary,
             "args": []
         }));
@@ -325,7 +326,7 @@ fn setup_claude_integration() -> Result<String, String> {
 
 fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
     // Check PATH first
-    if let Ok(output) = std::process::Command::new("which").arg("differ-mcp").output() {
+    if let Ok(output) = std::process::Command::new("which").arg("canopy-mcp").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -335,7 +336,7 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
     }
 
     // Check cargo install location
-    let cargo_bin = home.join(".cargo").join("bin").join("differ-mcp");
+    let cargo_bin = home.join(".cargo").join("bin").join("canopy-mcp");
     if cargo_bin.exists() {
         return Ok(cargo_bin.to_string_lossy().to_string());
     }
@@ -346,19 +347,42 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
         // Tauri binary is in backend/tauri/target/... — MCP binary is in backend/mcp/target/...
         if let Some(tauri_target) = exe_path.ancestors().find(|p| p.ends_with("target")) {
             let mcp_debug = tauri_target.parent().unwrap().parent().unwrap()
-                .join("mcp").join("target").join("debug").join("differ-mcp");
+                .join("mcp").join("target").join("debug").join("canopy-mcp");
             if mcp_debug.exists() {
                 return Ok(mcp_debug.to_string_lossy().to_string());
             }
             let mcp_release = tauri_target.parent().unwrap().parent().unwrap()
-                .join("mcp").join("target").join("release").join("differ-mcp");
+                .join("mcp").join("target").join("release").join("canopy-mcp");
             if mcp_release.exists() {
                 return Ok(mcp_release.to_string_lossy().to_string());
             }
         }
     }
 
-    Err("differ-mcp binary not found. Build it with: cd backend/mcp && cargo install --path .".to_string())
+    Err("canopy-mcp binary not found. Build it with: cd backend/mcp && cargo install --path .".to_string())
+}
+
+#[tauri::command]
+fn open_in_editor(editor: String, path: String) -> Result<(), String> {
+    let app_name = match editor.as_str() {
+        "cursor" => "Cursor",
+        "vscode" => "Visual Studio Code",
+        "zed" => "Zed",
+        "webstorm" => "WebStorm",
+        "sublime" => "Sublime Text",
+        _ => return Err(format!("Unknown editor: {}", editor)),
+    };
+    let output = std::process::Command::new("open")
+        .arg("-a")
+        .arg(app_name)
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("Failed to launch {}: {}", app_name, e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to open {}: {}", app_name, stderr.trim()));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -471,7 +495,7 @@ pub fn run() {
             app.manage(HookPort(hook_port));
 
             hook_server::install_claude_hooks();
-            hook_server::install_differ_review_skill();
+            hook_server::install_canopy_review_skill();
 
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.
@@ -554,9 +578,12 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             check_generated_files,
+            open_in_editor,
             get_hook_port,
             watcher::watch_worktree,
             watcher::unwatch_worktree,
+            config::read_project_config,
+            config::write_project_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
