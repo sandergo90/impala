@@ -28,6 +28,10 @@ export function ProjectSettingsRoute() {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const loadedRef = useRef(false);
+  const setupRef = useRef(setup);
+  const runRef = useRef(run);
+  setupRef.current = setup;
+  runRef.current = run;
 
   // Load config on mount / when projectPath changes
   useEffect(() => {
@@ -80,12 +84,12 @@ export function ProjectSettingsRoute() {
 
   const handleSetupChange = (value: string) => {
     setSetup(value);
-    if (loadedRef.current) saveConfig(value, run);
+    if (loadedRef.current) saveConfig(value, runRef.current);
   };
 
   const handleRunChange = (value: string) => {
     setRun(value);
-    if (loadedRef.current) saveConfig(setup, value);
+    if (loadedRef.current) saveConfig(setupRef.current, value);
   };
 
   return (
