@@ -39,6 +39,11 @@ export async function triggerRunScript() {
       sessionId,
       cwd: selectedWorktree.path,
       command: [config.run],
+      envVars: {
+        CANOPY_PROJECT_PATH: selectedProject.path,
+        CANOPY_WORKTREE_PATH: selectedWorktree.path,
+        CANOPY_BRANCH: selectedWorktree.branch,
+      },
     });
 
     const label = config.run.length > 30 ? config.run.slice(0, 30) + "..." : config.run;

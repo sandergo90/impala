@@ -139,6 +139,27 @@ export function ProjectSettingsRoute() {
           )}
         </div>
       </div>
+
+      <div className="space-y-2">
+        <h3 className="text-sm font-medium">Environment variables</h3>
+        <p className="text-xs text-muted-foreground">
+          These variables are available in your scripts:
+        </p>
+        <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
+          <div className="flex items-baseline gap-2">
+            <code className="text-xs font-mono text-foreground">$CANOPY_PROJECT_PATH</code>
+            <span className="text-xs text-muted-foreground">— Main repository root</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <code className="text-xs font-mono text-foreground">$CANOPY_WORKTREE_PATH</code>
+            <span className="text-xs text-muted-foreground">— Worktree directory (also the working directory)</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <code className="text-xs font-mono text-foreground">$CANOPY_BRANCH</code>
+            <span className="text-xs text-muted-foreground">— Branch name</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

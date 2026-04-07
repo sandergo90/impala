@@ -505,6 +505,11 @@ export function Sidebar() {
                     sessionId,
                     cwd: worktree.path,
                     command: [config.setup],
+                    envVars: {
+                      CANOPY_PROJECT_PATH: selectedProject.path,
+                      CANOPY_WORKTREE_PATH: worktree.path,
+                      CANOPY_BRANCH: worktree.branch,
+                    },
                   }).then(() => {
                     useUIStore.getState().setFloatingTerminal({
                       mode: "expanded",
