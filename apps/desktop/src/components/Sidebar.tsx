@@ -78,6 +78,15 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const projectIcons = useDataStore((s) => s.projectIcons);
   const worktrees = useDataStore((s) => s.worktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+  const agentStatuses = useDataStore(
+    useShallow((s) => {
+      const statuses: Record<string, string> = {};
+      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
+        statuses[path] = state.agentStatus ?? "idle";
+      }
+      return statuses;
+    })
+  );
 
   const iconUrl = selectedProject ? projectIcons[selectedProject.path] : undefined;
 
@@ -116,11 +125,12 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
       {/* Worktree icons */}
       {selectedProject && worktrees.map((wt) => {
         const isSelected = selectedWorktree?.path === wt.path;
+        const isActive = agentStatuses[wt.path] === "working";
         return (
           <button
             key={wt.path}
             onClick={() => sharedSelectWorktree(wt)}
-            className={`w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
+            className={`relative w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
               isSelected
                 ? "bg-primary/15"
                 : "hover:bg-accent"
@@ -128,6 +138,9 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
             title={wt.branch}
           >
             <BranchIcon active={isSelected} />
+            {isActive && (
+              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            )}
           </button>
         );
       })}
