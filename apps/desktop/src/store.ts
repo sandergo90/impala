@@ -6,6 +6,22 @@ import { defaultDark } from "./themes/built-in";
 import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
 import { createLeaf } from "./lib/split-tree";
 
+export interface FloatingTerminalState {
+  mode: 'hidden' | 'expanded' | 'pill';
+  sessionId: string | null;
+  label: string;
+  type: 'setup' | 'run' | null;
+  status: 'running' | 'succeeded' | 'failed';
+}
+
+const defaultFloatingTerminal: FloatingTerminalState = {
+  mode: 'hidden',
+  sessionId: null,
+  label: '',
+  type: null,
+  status: 'running',
+};
+
 function createDefaultNavState(): WorktreeNavState {
   const leaf = createLeaf("claude");
   return {
@@ -51,15 +67,9 @@ interface UIState {
   removeCustomTheme: (id: string) => void;
   showResolved: boolean;
   setShowResolved: (show: boolean) => void;
-  floatingTerminal: {
-    mode: 'hidden' | 'expanded' | 'pill';
-    sessionId: string | null;
-    label: string;
-    type: 'setup' | 'run' | null;
-    worktreePath: string | null;
-    status: 'running' | 'succeeded' | 'failed';
-  };
-  setFloatingTerminal: (updates: Partial<UIState['floatingTerminal']>) => void;
+  floatingTerminals: Record<string, FloatingTerminalState>;
+  getFloatingTerminal: (worktreePath: string) => FloatingTerminalState;
+  setFloatingTerminal: (worktreePath: string, updates: Partial<FloatingTerminalState>) => void;
   floatingTerminalSize: { width: number; height: number };
   setFloatingTerminalSize: (size: { width: number; height: number }) => void;
   linearApiKey: string;
@@ -120,17 +130,20 @@ export const useUIStore = create<UIState>()(
       },
       showResolved: false,
       setShowResolved: (show) => set({ showResolved: show }),
-      floatingTerminal: {
-        mode: 'hidden',
-        sessionId: null,
-        label: '',
-        type: null,
-        worktreePath: null,
-        status: 'running',
+      floatingTerminals: {},
+      getFloatingTerminal: (worktreePath: string): FloatingTerminalState => {
+        return get().floatingTerminals[worktreePath] ?? defaultFloatingTerminal;
       },
-      setFloatingTerminal: (updates) => set((state) => ({
-        floatingTerminal: { ...state.floatingTerminal, ...updates },
-      })),
+      setFloatingTerminal: (worktreePath: string, updates: Partial<FloatingTerminalState>) =>
+        set((state) => {
+          const current = state.floatingTerminals[worktreePath] ?? { ...defaultFloatingTerminal };
+          return {
+            floatingTerminals: {
+              ...state.floatingTerminals,
+              [worktreePath]: { ...current, ...updates },
+            },
+          };
+        }),
       floatingTerminalSize: { width: 500, height: 300 },
       setFloatingTerminalSize: (size) => set({ floatingTerminalSize: size }),
       linearApiKey: "",
@@ -141,7 +154,7 @@ export const useUIStore = create<UIState>()(
     {
       name: "canopy-ui-state",
       partialize: (state) => {
-        const { showResolved, floatingTerminal, ...rest } = state;
+        const { showResolved, floatingTerminals, ...rest } = state;
         return rest;
       },
       onRehydrateStorage: () => (state) => {

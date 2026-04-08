@@ -3,12 +3,14 @@ import { toast } from "sonner";
 import { useUIStore } from "../store";
 
 export async function triggerRunScript() {
-  const { selectedProject, selectedWorktree, floatingTerminal, setFloatingTerminal } = useUIStore.getState();
+  const { selectedProject, selectedWorktree, getFloatingTerminal, setFloatingTerminal } = useUIStore.getState();
 
   if (!selectedProject || !selectedWorktree) return;
 
+  const ft = getFloatingTerminal(selectedWorktree.path);
+
   // Block if setup is running
-  if (floatingTerminal.type === 'setup' && floatingTerminal.mode !== 'hidden') {
+  if (ft.type === 'setup' && ft.mode !== 'hidden') {
     toast("Setup in progress...");
     return;
   }
@@ -28,8 +30,8 @@ export async function triggerRunScript() {
   }
 
   // Kill existing floating terminal session if any
-  if (floatingTerminal.sessionId) {
-    await invoke("pty_kill", { sessionId: floatingTerminal.sessionId }).catch(() => {});
+  if (ft.sessionId) {
+    await invoke("pty_kill", { sessionId: ft.sessionId }).catch(() => {});
   }
 
   // Spawn new session
@@ -51,12 +53,11 @@ export async function triggerRunScript() {
 
     const label = config.run.length > 30 ? config.run.slice(0, 30) + "..." : config.run;
 
-    setFloatingTerminal({
+    setFloatingTerminal(selectedWorktree.path, {
       mode: "expanded",
       sessionId,
       label,
       type: "run",
-      worktreePath: selectedWorktree.path,
       status: "running",
     });
   } catch (e) {

@@ -24,12 +24,18 @@ function StatusDot({ status }: { status: "running" | "succeeded" | "failed" }) {
 }
 
 export function FloatingTerminal() {
-  const { mode, sessionId, label, status } = useUIStore(
-    (s) => s.floatingTerminal
+  const wtPath = useUIStore((s) => s.selectedWorktree?.path);
+  const ft = useUIStore((s) =>
+    wtPath ? s.floatingTerminals[wtPath] : undefined
   );
   const setFloatingTerminal = useUIStore((s) => s.setFloatingTerminal);
   const size = useUIStore((s) => s.floatingTerminalSize);
   const setSize = useUIStore((s) => s.setFloatingTerminalSize);
+
+  const mode = ft?.mode ?? "hidden";
+  const sessionId = ft?.sessionId ?? null;
+  const label = ft?.label ?? "";
+  const status = ft?.status ?? "running";
 
   const dragRef = useRef<{
     startX: number;
@@ -41,7 +47,7 @@ export function FloatingTerminal() {
 
   // Listen for process exit
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !wtPath) return;
 
     const safeId = sanitizeEventId(sessionId);
     let cancelled = false;
@@ -49,27 +55,27 @@ export function FloatingTerminal() {
     const unlistenPromise = listen<number>(`pty-exit-${safeId}`, (event) => {
       if (cancelled) return;
       const exitCode = event.payload;
-      const current = useUIStore.getState().floatingTerminal;
+      const current = useUIStore.getState().getFloatingTerminal(wtPath);
       const failed = exitCode !== 0;
 
       if (failed) {
         const failLabel =
           current.type === "setup" ? "Setup failed" : "Run failed";
-        setFloatingTerminal({ label: failLabel, status: "failed" });
+        setFloatingTerminal(wtPath, { label: failLabel, status: "failed" });
       } else if (current.type === "setup") {
-        setFloatingTerminal({
+        setFloatingTerminal(wtPath, {
           label: "Setup complete",
           status: "succeeded",
           mode: "pill",
         });
       } else if (current.type === "run") {
-        setFloatingTerminal({
+        setFloatingTerminal(wtPath, {
           label: "Run stopped",
           status: "succeeded",
           mode: "pill",
         });
       } else {
-        setFloatingTerminal({ status: "succeeded", mode: "pill" });
+        setFloatingTerminal(wtPath, { status: "succeeded", mode: "pill" });
       }
     });
 
@@ -77,7 +83,7 @@ export function FloatingTerminal() {
       cancelled = true;
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [sessionId, setFloatingTerminal]);
+  }, [sessionId, wtPath, setFloatingTerminal]);
 
   const onResizeStart = useCallback(
     (e: React.MouseEvent, edge: string) => {
@@ -125,15 +131,15 @@ export function FloatingTerminal() {
   );
 
   const dismiss = () => {
+    if (!wtPath) return;
     if (sessionId) {
       invoke("pty_kill", { sessionId }).catch(() => {});
     }
-    setFloatingTerminal({
+    setFloatingTerminal(wtPath, {
       mode: "hidden",
       sessionId: null,
       label: "",
       type: null,
-      worktreePath: null,
       status: "running",
     });
   };
@@ -150,7 +156,7 @@ export function FloatingTerminal() {
         }}
       >
         <button
-          onClick={() => setFloatingTerminal({ mode: "expanded" })}
+          onClick={() => wtPath && setFloatingTerminal(wtPath, { mode: "expanded" })}
           className="flex items-center gap-2"
         >
           <StatusDot status={status} />
@@ -203,7 +209,7 @@ export function FloatingTerminal() {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={() => setFloatingTerminal({ mode: "pill" })}
+            onClick={() => wtPath && setFloatingTerminal(wtPath, { mode: "pill" })}
             className="text-muted-foreground hover:text-foreground text-xs px-1"
             title="Minimize"
           >

@@ -165,46 +165,46 @@ export function Sidebar() {
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [worktreeToDelete, setWorktreeToDelete] = useState<Worktree | null>(null);
-  const [worktreeIssues, setWorktreeIssues] = useState<Record<string, WorktreeIssue>>({});
 
-  const deleteWorktree = async (wt: Worktree) => {
+  const deleteWorktree = (wt: Worktree) => {
     if (!selectedProject) return;
-    try {
-      // Run all cleanup in parallel — these are independent
-      const dataState = useDataStore.getState().worktreeDataStates[wt.path];
-      const ptyKills = dataState?.paneSessions
-        ? Object.values(dataState.paneSessions).map((sessionId) =>
-            invoke("pty_kill", { sessionId }).catch(() => {})
-          )
-        : [];
-      await Promise.all([
-        ...ptyKills,
-        invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
-        viewedFilesProvider.clearForWorktree(wt.path).catch(() => {}),
-        invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(() => {}),
-        invoke("clean_linear_context", { worktreePath: wt.path }).catch(() => {}),
-      ]);
 
-      // Remove worktree via git (must happen after PTY sessions are killed)
-      await invoke("delete_worktree", {
-        repoPath: selectedProject.path,
-        worktreePath: wt.path,
-        force: true,
-      });
-
-      // Clear selection if this was the active worktree
-      if (selectedWorktree?.path === wt.path) {
-        useUIStore.getState().setSelectedWorktree(null);
-      }
-
-      // Refresh worktree list
-      const updated = await invoke<Worktree[]>("list_worktrees", { repoPath: selectedProject.path });
-      setWorktrees(updated);
-      setWorktreeToDelete(null);
-      toast.success(`Removed worktree ${wt.branch}`);
-    } catch (e) {
-      toast.error(`Failed to remove worktree: ${e}`);
+    // Optimistic update: close dialog, remove from list, clear selection immediately
+    setWorktreeToDelete(null);
+    setWorktrees(useDataStore.getState().worktrees.filter((w) => w.path !== wt.path));
+    if (selectedWorktree?.path === wt.path) {
+      useUIStore.getState().setSelectedWorktree(null);
     }
+
+    // Run actual deletion in background
+    (async () => {
+      try {
+        const dataState = useDataStore.getState().worktreeDataStates[wt.path];
+        const ptyKills = dataState?.paneSessions
+          ? Object.values(dataState.paneSessions).map((sessionId) =>
+              invoke("pty_kill", { sessionId }).catch(() => {})
+            )
+          : [];
+        await Promise.all([
+          ...ptyKills,
+          invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
+          viewedFilesProvider.clearForWorktree(wt.path).catch(() => {}),
+          invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(() => {}),
+          invoke("clean_linear_context", { worktreePath: wt.path }).catch(() => {}),
+        ]);
+
+        await invoke("delete_worktree", {
+          repoPath: selectedProject.path,
+          worktreePath: wt.path,
+          force: true,
+        });
+      } catch (e) {
+        // Rollback: re-fetch the real worktree list
+        toast.error(`Failed to remove worktree: ${e}`);
+        const updated = await invoke<Worktree[]>("list_worktrees", { repoPath: selectedProject.path });
+        setWorktrees(updated);
+      }
+    })();
   };
 
   const persistProjects = async (projectList: Project[]) => {
@@ -255,6 +255,8 @@ export function Sidebar() {
       }
     })();
   }, []);
+
+  const [worktreeIssues, setWorktreeIssues] = useState<Record<string, WorktreeIssue>>({});
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -513,12 +515,11 @@ export function Sidebar() {
                     // Write the setup command into the interactive shell
                     const encoded = btoa(config.setup + "\n");
                     invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
-                    useUIStore.getState().setFloatingTerminal({
+                    useUIStore.getState().setFloatingTerminal(worktree.path, {
                       mode: "expanded",
                       sessionId,
                       label: "Setup",
                       type: "setup",
-                      worktreePath: worktree.path,
                       status: "running",
                     });
                   }).catch((e) => {
