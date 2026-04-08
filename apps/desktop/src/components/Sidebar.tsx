@@ -531,8 +531,16 @@ export function Sidebar() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                      {wt.branch}
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                        {wt.branch}
+                      </span>
+                      {stats && (stats.additions > 0 || stats.deletions > 0) && (
+                        <span className="flex items-center gap-0.5 text-[10px] font-mono shrink-0 ml-auto bg-accent/60 rounded px-1.5 py-0.5">
+                          <span className="text-green-500">+{stats.additions}</span>
+                          <span className="text-red-500">-{stats.deletions}</span>
+                        </span>
+                      )}
                     </div>
                     <div className={`text-xs mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
                       {aheadCount > 0 ? `${aheadCount} ahead` : "up to date"}
@@ -552,12 +560,6 @@ export function Sidebar() {
                       )}
                     </div>
                   </div>
-                  {stats && (stats.additions > 0 || stats.deletions > 0) && (
-                    <span className="flex items-center gap-1 text-xs font-mono shrink-0 bg-accent/60 rounded px-1.5 py-0.5">
-                      <span className="text-green-500">+{stats.additions}</span>
-                      <span className="text-red-500">-{stats.deletions}</span>
-                    </span>
-                  )}
                   {!isMain && (
                     <span
                       onClick={(e) => { e.stopPropagation(); setWorktreeToDelete(wt); }}
