@@ -15,6 +15,7 @@ import {
 } from "./lib/split-tree";
 import { triggerRunScript } from "./lib/run-script";
 import { useHotkeysStore } from "./stores/hotkeys";
+import { selectWorktree } from "./hooks/useWorktreeActions";
 
 export function RootLayout() {
   const { loading: checking, error: gitError } = useInvoke("check_git");
@@ -125,6 +126,22 @@ export function RootLayout() {
     { enabled: isTerminalTab },
     [wtPath],
   );
+
+  // -- Worktree jump shortcuts (always active) --
+  const worktrees = useDataStore((s) => s.worktrees);
+  const jumpTo = (index: number) => {
+    if (worktrees[index]) selectWorktree(worktrees[index]);
+  };
+
+  useAppHotkey("JUMP_TO_WORKTREE_1", () => jumpTo(0));
+  useAppHotkey("JUMP_TO_WORKTREE_2", () => jumpTo(1));
+  useAppHotkey("JUMP_TO_WORKTREE_3", () => jumpTo(2));
+  useAppHotkey("JUMP_TO_WORKTREE_4", () => jumpTo(3));
+  useAppHotkey("JUMP_TO_WORKTREE_5", () => jumpTo(4));
+  useAppHotkey("JUMP_TO_WORKTREE_6", () => jumpTo(5));
+  useAppHotkey("JUMP_TO_WORKTREE_7", () => jumpTo(6));
+  useAppHotkey("JUMP_TO_WORKTREE_8", () => jumpTo(7));
+  useAppHotkey("JUMP_TO_WORKTREE_9", () => jumpTo(8));
 
   if (checking) return null;
 

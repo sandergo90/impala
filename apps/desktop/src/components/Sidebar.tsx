@@ -255,16 +255,6 @@ export function Sidebar() {
     setWorktreeToDelete(selectedWorktree);
   });
 
-  useAppHotkey("JUMP_TO_WORKTREE_1", () => { if (worktrees[0]) selectWorktree(worktrees[0]); });
-  useAppHotkey("JUMP_TO_WORKTREE_2", () => { if (worktrees[1]) selectWorktree(worktrees[1]); });
-  useAppHotkey("JUMP_TO_WORKTREE_3", () => { if (worktrees[2]) selectWorktree(worktrees[2]); });
-  useAppHotkey("JUMP_TO_WORKTREE_4", () => { if (worktrees[3]) selectWorktree(worktrees[3]); });
-  useAppHotkey("JUMP_TO_WORKTREE_5", () => { if (worktrees[4]) selectWorktree(worktrees[4]); });
-  useAppHotkey("JUMP_TO_WORKTREE_6", () => { if (worktrees[5]) selectWorktree(worktrees[5]); });
-  useAppHotkey("JUMP_TO_WORKTREE_7", () => { if (worktrees[6]) selectWorktree(worktrees[6]); });
-  useAppHotkey("JUMP_TO_WORKTREE_8", () => { if (worktrees[7]) selectWorktree(worktrees[7]); });
-  useAppHotkey("JUMP_TO_WORKTREE_9", () => { if (worktrees[8]) selectWorktree(worktrees[8]); });
-
   const persistProjects = async (projectList: Project[]) => {
     try {
       await invoke("save_projects", {
