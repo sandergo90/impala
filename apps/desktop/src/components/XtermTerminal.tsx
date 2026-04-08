@@ -187,7 +187,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart,
       }
 
       if (cancelled) {
-        terminal.dispose();
+        terminal?.dispose();
         return;
       }
 

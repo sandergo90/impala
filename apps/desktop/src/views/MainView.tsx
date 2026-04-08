@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
 import { RightSidebar } from "../components/RightSidebar";
 import { DiffView } from "../components/DiffView";
@@ -18,6 +18,10 @@ import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const sidebarSize = useUIStore((s) => s.sidebarSize);
+  const rightSidebarSize = useUIStore((s) => s.rightSidebarSize);
+  const sidebarResizeTimer = useRef<ReturnType<typeof setTimeout>>();
+  const rightSidebarResizeTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const selectedProject = useUIStore((s) => s.selectedProject);
@@ -173,21 +177,30 @@ export function MainView() {
             <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
           )}
           <ResizablePanelGroup
+            key={`${sidebarCollapsed}-${showSidebar}`}
             orientation="horizontal"
             className="flex-1 min-h-0"
           >
             {/* Sidebar */}
             {!sidebarCollapsed && (
               <>
-                <ResizablePanel defaultSize="15%" minSize={140} maxSize={300}>
+                <ResizablePanel
+                  defaultSize={sidebarSize != null ? `${sidebarSize}%` : "15%"}
+                  minSize={140}
+                  maxSize={300}
+                  onResize={(size) => {
+                    clearTimeout(sidebarResizeTimer.current);
+                    sidebarResizeTimer.current = setTimeout(() => useUIStore.getState().setSidebarSize(size.asPercentage), 300);
+                  }}
+                >
                   <Sidebar />
                 </ResizablePanel>
                 <ResizableHandle />
               </>
             )}
 
-            {/* Content */}
-            <ResizablePanel defaultSize={showSidebar ? "65%" : "85%"}>
+            {/* Content — no defaultSize so it absorbs whatever remains */}
+            <ResizablePanel>
               <div className="flex flex-col h-full">
                 {/* Tab content */}
                 <div className="flex-1 min-h-0">
@@ -236,7 +249,15 @@ export function MainView() {
             {showSidebar && (
               <>
                 <ResizableHandle />
-                <ResizablePanel defaultSize="20%" minSize={180} maxSize={400}>
+                <ResizablePanel
+                  defaultSize={rightSidebarSize != null ? `${rightSidebarSize}%` : "20%"}
+                  minSize={180}
+                  maxSize={400}
+                  onResize={(size) => {
+                    clearTimeout(rightSidebarResizeTimer.current);
+                    rightSidebarResizeTimer.current = setTimeout(() => useUIStore.getState().setRightSidebarSize(size.asPercentage), 300);
+                  }}
+                >
                   <RightSidebar />
                 </ResizablePanel>
               </>

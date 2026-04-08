@@ -5,9 +5,11 @@ import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
+  onAction,
 } from "@tauri-apps/plugin-notification";
 import { invoke } from "@tauri-apps/api/core";
-import { useUIStore } from "../store";
+import { useUIStore, useDataStore } from "../store";
+import { selectWorktree } from "./useWorktreeActions";
 
 export const NOTIFICATION_SOUNDS = [
   { id: "chime", name: "Chime" },
@@ -46,7 +48,37 @@ export function useAgentNotifications() {
   useEffect(() => {
     isPermissionGranted().then((granted) => {
       if (!granted) requestPermission();
+    }).catch(() => {
+      // Plugin may not be available in dev mode
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unregister: (() => void) | null = null;
+
+    onAction((notification) => {
+      const worktreePath = notification.extra?.worktree_path as string | undefined;
+      if (!worktreePath) return;
+
+      getCurrentWindow().setFocus();
+
+      const worktree = useDataStore.getState().worktrees.find((wt) => wt.path === worktreePath);
+      if (worktree) selectWorktree(worktree);
+    }).then((listener) => {
+      if (cancelled) {
+        listener.unregister();
+      } else {
+        unregister = () => listener.unregister();
+      }
+    }).catch(() => {
+      // Plugin may not be available in dev mode
+    });
+
+    return () => {
+      cancelled = true;
+      unregister?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -54,7 +86,7 @@ export function useAgentNotifications() {
       "agent-status",
       async (event) => {
         const { worktree_path, status } = event.payload;
-        if (status !== "idle") return;
+        if (status !== "idle" && status !== "permission") return;
 
         const selectedWorktree = useUIStore.getState().selectedWorktree;
         if (windowFocusedRef.current && selectedWorktree?.path === worktree_path) {
@@ -62,13 +94,19 @@ export function useAgentNotifications() {
         }
 
         const worktreeName = worktree_path.split("/").pop() ?? worktree_path;
+        const projectName = useUIStore.getState().selectedProject?.name ?? "Canopy";
+
+        const isPermission = status === "permission";
+        const title = isPermission
+          ? `Input Needed — ${projectName}`
+          : `Agent Complete — ${projectName}`;
+        const body = isPermission
+          ? `"${worktreeName}" needs your attention`
+          : `"${worktreeName}" has finished its task`;
 
         const granted = await isPermissionGranted();
         if (granted) {
-          sendNotification({
-            title: "Agent Complete",
-            body: `${worktreeName} has finished`,
-          });
+          sendNotification({ title, body, extra: { worktree_path } });
         }
 
         const { notificationSoundMuted, selectedSoundId } = useUIStore.getState();

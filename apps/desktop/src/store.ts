@@ -80,6 +80,10 @@ interface UIState {
   setNotificationSoundMuted: (muted: boolean) => void;
   selectedSoundId: string;
   setSelectedSoundId: (id: string) => void;
+  sidebarSize: number | null;
+  setSidebarSize: (size: number | null) => void;
+  rightSidebarSize: number | null;
+  setRightSidebarSize: (size: number | null) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -158,6 +162,10 @@ export const useUIStore = create<UIState>()(
       setNotificationSoundMuted: (muted) => set({ notificationSoundMuted: muted }),
       selectedSoundId: "chime",
       setSelectedSoundId: (id) => set({ selectedSoundId: id }),
+      sidebarSize: null,
+      setSidebarSize: (size) => set({ sidebarSize: size }),
+      rightSidebarSize: null,
+      setRightSidebarSize: (size) => set({ rightSidebarSize: size }),
     }),
     {
       name: "canopy-ui-state",
@@ -181,6 +189,8 @@ interface DataState {
   removeProject: (path: string) => void;
   worktrees: Worktree[];
   setWorktrees: (worktrees: Worktree[]) => void;
+  projectIcons: Record<string, string>;
+  setProjectIcon: (path: string, dataUrl: string) => void;
   worktreeDataStates: Record<string, WorktreeDataState>;
   getWorktreeDataState: (path: string) => WorktreeDataState;
   updateWorktreeDataState: (path: string, updates: Partial<WorktreeDataState>) => void;
@@ -201,6 +211,11 @@ export const useDataStore = create<DataState>()(
       })),
     worktrees: [],
     setWorktrees: (worktrees) => set({ worktrees }),
+    projectIcons: {},
+    setProjectIcon: (path, dataUrl) =>
+      set((state) => ({
+        projectIcons: { ...state.projectIcons, [path]: dataUrl },
+      })),
     worktreeDataStates: {},
     getWorktreeDataState: (path: string): WorktreeDataState => {
       return get().worktreeDataStates[path] ?? defaultDataState;
