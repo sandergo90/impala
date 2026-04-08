@@ -198,10 +198,35 @@ export function toCanonical(parsed: ParsedHotkey): string {
 // Matching — does a KeyboardEvent match a hotkey string?
 // ---------------------------------------------------------------------------
 
+/**
+ * Map from KeyboardEvent.code to canonical key name.
+ * Used as fallback when event.key returns a layout-shifted character
+ * (e.g., Cmd+1 producing "&" on AZERTY).
+ */
+const CODE_TO_KEY: Record<string, string> = {
+  Digit1: "1", Digit2: "2", Digit3: "3", Digit4: "4", Digit5: "5",
+  Digit6: "6", Digit7: "7", Digit8: "8", Digit9: "9", Digit0: "0",
+  Minus: "-", Equal: "=",
+  BracketLeft: "[", BracketRight: "]",
+  Backslash: "\\", Semicolon: ";", Quote: "'",
+  Comma: "comma", Period: ".", Slash: "slash",
+  Backquote: "`", Space: "space",
+};
+
 /** Map KeyboardEvent.key values to canonical key names */
 function eventKeyToCanonical(e: KeyboardEvent): string {
   const k = e.key.toLowerCase();
-  return KEY_ALIASES[k] ?? k;
+  const fromKey = KEY_ALIASES[k] ?? k;
+  // When Cmd/Ctrl is held, macOS may report a shifted character for the key
+  // (e.g., "&" instead of "1"). Fall back to event.code for reliable matching.
+  if ((e.metaKey || e.ctrlKey) && e.code && CODE_TO_KEY[e.code]) {
+    const fromCode = CODE_TO_KEY[e.code];
+    // Prefer event.key if it's a simple alphanumeric, else use code mapping
+    if (fromKey.length > 1 || !/^[a-z0-9]$/.test(fromKey)) {
+      return fromCode;
+    }
+  }
+  return fromKey;
 }
 
 const parseCache = new Map<string, ParsedHotkey | null>();
