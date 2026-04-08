@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
 struct DbState(Mutex<rusqlite::Connection>);
 struct DiffCache(Mutex<lru::LruCache<String, String>>);
@@ -666,6 +667,32 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .menu(|handle| {
+            let app_menu = SubmenuBuilder::new(handle, "Canopy")
+                .about(None)
+                .separator()
+                .services()
+                .separator()
+                .hide()
+                .hide_others()
+                .show_all()
+                .separator()
+                .quit()
+                .build()?;
+            let edit_menu = SubmenuBuilder::new(handle, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+            MenuBuilder::new(handle)
+                .item(&app_menu)
+                .item(&edit_menu)
+                .build()
+        })
         .setup(|app| {
             let app_dir = app
                 .path()
