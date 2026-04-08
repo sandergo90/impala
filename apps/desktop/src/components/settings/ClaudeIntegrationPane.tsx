@@ -21,14 +21,14 @@ export function ClaudeIntegrationPane() {
     <div className="max-w-lg">
       <h2 className="text-lg font-semibold mb-1">Claude Integration</h2>
       <p className="text-sm text-muted-foreground mb-6">
-        Connect Differ to Claude Code so Claude can read and resolve your code review annotations.
+        Connect Canopy to Claude Code so Claude can read and resolve your code review annotations.
       </p>
 
       <div className="space-y-4">
         <div className="p-4 rounded-lg border border-border bg-card">
           <h3 className="text-sm font-medium mb-2">MCP Server</h3>
           <p className="text-xs text-muted-foreground mb-3">
-            The Differ MCP server gives Claude access to your annotations.
+            The Canopy MCP server gives Claude access to your annotations.
             Click below to add it to your Claude Code settings.
           </p>
           <button

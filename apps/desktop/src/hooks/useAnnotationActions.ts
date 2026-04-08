@@ -112,7 +112,7 @@ export function useAnnotationActions() {
 
   const handleSendToClaude = useCallback(
     async (annotation: Annotation) => {
-      await sendPromptToClaude(`/differ-review ${annotation.id}`);
+      await sendPromptToClaude(`/canopy-review ${annotation.id}`);
     },
     [sendPromptToClaude]
   );
@@ -121,7 +121,7 @@ export function useAnnotationActions() {
     async () => {
       const unresolved = annotations.filter((a) => !a.resolved);
       if (unresolved.length === 0) return;
-      await sendPromptToClaude("/differ-review");
+      await sendPromptToClaude("/canopy-review");
     },
     [sendPromptToClaude, annotations]
   );

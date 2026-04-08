@@ -125,7 +125,7 @@ function VirtualizedCommitView({
                     ) : (
                       <span className="flex-1 truncate">{file.path}</span>
                     )}
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted">
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-muted">
                       {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
                     </span>
                     <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
@@ -177,14 +177,14 @@ function VirtualizedCommitView({
                     })()}
                     renderAnnotation={renderAnnotation}
                     renderHeaderPrefix={() => (
-                      <button onClick={toggleCollapse} className="text-[10px] text-muted-foreground px-1">
+                      <button onClick={toggleCollapse} className="text-xs text-muted-foreground px-1">
                         {isCollapsed ? "▶" : "▼"}
                       </button>
                     )}
                     renderHeaderMetadata={() => (
                       <div className="flex items-center gap-2">
                         {isGenerated && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                             Generated
                           </span>
                         )}
@@ -423,7 +423,7 @@ export function DiffView() {
           </span>
           <span className="text-foreground">{a.body}</span>
           {a.resolved && (
-            <span className="ml-2 text-green-400 text-[10px]">(resolved)</span>
+            <span className="ml-2 text-green-400 text-xs">(resolved)</span>
           )}
         </div>
       );
@@ -444,11 +444,11 @@ export function DiffView() {
   }
 
   const activeTheme = resolveThemeById(activeThemeId, customThemes);
-  const differTheme = getDiffsTheme(activeTheme);
+  const canopyTheme = getDiffsTheme(activeTheme);
   const diffViewerStyle = getDiffViewerStyle(activeTheme);
 
   const diffOptions = {
-    theme: differTheme,
+    theme: canopyTheme,
     themeType: activeTheme.type as "dark" | "light",
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,

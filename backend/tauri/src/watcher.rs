@@ -74,12 +74,12 @@ pub fn watch_worktree(
 
                 std::thread::spawn(move || {
                     loop {
-                        std::thread::sleep(Duration::from_millis(500));
+                        std::thread::sleep(Duration::from_millis(2000));
                         let elapsed = {
                             let last = last_ref.lock().unwrap();
                             last.elapsed()
                         };
-                        if elapsed >= Duration::from_millis(500) {
+                        if elapsed >= Duration::from_millis(2000) {
                             let event_name = format!("fs-changed-{}", sid);
                             let _ = app_ref.emit(&event_name, ());
                             let mut f = flag_ref.lock().unwrap();
@@ -111,6 +111,9 @@ pub fn watch_worktree(
                 let dominated_by_ignore = event.paths.iter().all(|p| {
                     let s = p.to_string_lossy();
                     s.contains("/node_modules/") || s.contains("/target/")
+                        || s.contains("/dist/") || s.contains("/.next/")
+                        || s.contains("/.turbo/") || s.contains("/.nuxt/")
+                        || s.contains("/.output/") || s.contains("/.vite/")
                 });
                 if dominated_by_ignore { return; }
 

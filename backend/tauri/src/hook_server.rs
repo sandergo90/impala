@@ -9,17 +9,17 @@ pub struct AgentStatusEvent {
     pub status: String,
 }
 
-const DIFFER_HOOK_MARKER: &str = "DIFFER_HOOK_PORT";
+const CANOPY_HOOK_MARKER: &str = "CANOPY_HOOK_PORT";
 
 /// The hook command for a specific event type. Uses env vars set on the PTY process.
 fn hook_command(event_type: &str) -> String {
     format!(
-        "[ -n \"$DIFFER_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${{DIFFER_HOOK_PORT}}/hook\" --data-urlencode \"event_type={}\" --data-urlencode \"worktree_path=${{DIFFER_WORKTREE_PATH}}\" --connect-timeout 1 --max-time 2 2>/dev/null || true",
+        "[ -n \"$CANOPY_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${{CANOPY_HOOK_PORT}}/hook\" --data-urlencode \"event_type={}\" --data-urlencode \"worktree_path=${{CANOPY_WORKTREE_PATH}}\" --connect-timeout 1 --max-time 2 2>/dev/null || true",
         event_type
     )
 }
 
-/// Merge Differ hooks into ~/.claude/settings.json, preserving all other settings and hooks.
+/// Merge Canopy hooks into ~/.claude/settings.json, preserving all other settings and hooks.
 pub fn install_claude_hooks() {
     let home = match dirs::home_dir() {
         Some(h) => h,
@@ -51,6 +51,8 @@ pub fn install_claude_hooks() {
         ("UserPromptSubmit", false),
         ("Stop", false),
         ("PostToolUse", true),
+        ("PostToolUseFailure", true),
+        ("PermissionRequest", false),
     ];
 
     let mut changed = false;
@@ -69,14 +71,14 @@ pub fn install_claude_hooks() {
             None => continue,
         };
 
-        // Remove any existing Differ-managed hooks (identified by marker)
+        // Remove any existing Canopy-managed hooks (identified by marker)
         for def in defs.iter_mut() {
             if let Some(hook_list) = def.get_mut("hooks").and_then(|h| h.as_array_mut()) {
                 let before_len = hook_list.len();
                 hook_list.retain(|h| {
                     h.get("command")
                         .and_then(|c| c.as_str())
-                        .map(|c| !c.contains(DIFFER_HOOK_MARKER))
+                        .map(|c| !c.contains(CANOPY_HOOK_MARKER))
                         .unwrap_or(true)
                 });
                 if hook_list.len() != before_len {
@@ -105,7 +107,7 @@ pub fn install_claude_hooks() {
                     hooks.iter().any(|h| {
                         h.get("command")
                             .and_then(|c| c.as_str())
-                            .map(|c| c.contains(DIFFER_HOOK_MARKER))
+                            .map(|c| c.contains(CANOPY_HOOK_MARKER))
                             .unwrap_or(false)
                     })
                 })
@@ -131,21 +133,21 @@ pub fn install_claude_hooks() {
     }
 }
 
-const DIFFER_REVIEW_SKILL: &str = r#"---
-name: differ-review
-description: Review and address code review annotations from Differ. Use when asked to review annotations, or when invoked as /differ-review.
-allowed-tools: mcp__differ__list_annotations, mcp__differ__resolve_annotation, mcp__differ__list_files_with_annotations, Read, Edit, Write, Grep, Glob
+const CANOPY_REVIEW_SKILL: &str = r#"---
+name: canopy-review
+description: Review and address code review annotations from Canopy. Use when asked to review annotations, or when invoked as /canopy-review.
+allowed-tools: mcp__canopy__list_annotations, mcp__canopy__resolve_annotation, mcp__canopy__list_files_with_annotations, Read, Edit, Write, Grep, Glob
 argument-hint: "[annotation-id]"
 ---
 
-Review and address code review annotations from Differ using the MCP server tools. These are human-written review comments anchored to specific lines in the code.
+Review and address code review annotations from Canopy using the MCP server tools. These are human-written review comments anchored to specific lines in the code.
 
 ARGUMENTS: If an annotation ID is provided as an argument, address only that annotation. Otherwise, address all unresolved annotations.
 
 ## Phase 1: Fetch and Plan
 
-1. Call `mcp__differ__list_files_with_annotations` to get an overview of which files have annotations and how many.
-2. Call `mcp__differ__list_annotations` to fetch unresolved annotations. If an ID argument was given, find that specific annotation.
+1. Call `mcp__canopy__list_files_with_annotations` to get an overview of which files have annotations and how many.
+2. Call `mcp__canopy__list_annotations` to fetch unresolved annotations. If an ID argument was given, find that specific annotation.
 3. If zero annotations, report "No unresolved review comments. Nothing to address." and stop.
 4. Group annotations by file — you will work through them file by file so you only need to read each file once.
 
@@ -177,7 +179,7 @@ The concern has already been fixed in the current code, or is no longer relevant
 
 Work file by file. For each file, read it once, then process all annotations on that file before moving to the next.
 
-After addressing each annotation, immediately call `mcp__differ__resolve_annotation` to mark it done.
+After addressing each annotation, immediately call `mcp__canopy__resolve_annotation` to mark it done.
 
 **ACTIONABLE:** Fix the code, then resolve the annotation.
 
@@ -234,20 +236,20 @@ Report a structured summary:
 - **Work file by file** — group annotations by file to avoid redundant file reads
 "#;
 
-/// Install the /differ-review skill to ~/.claude/skills/differ-review/SKILL.md
-pub fn install_differ_review_skill() {
+/// Install the /canopy-review skill to ~/.claude/skills/canopy-review/SKILL.md
+pub fn install_canopy_review_skill() {
     let home = match dirs::home_dir() {
         Some(h) => h,
         None => return,
     };
 
-    let skill_dir = home.join(".claude").join("skills").join("differ-review");
+    let skill_dir = home.join(".claude").join("skills").join("canopy-review");
     if let Err(_) = std::fs::create_dir_all(&skill_dir) {
         return;
     }
 
     let skill_path = skill_dir.join("SKILL.md");
-    let _ = std::fs::write(&skill_path, DIFFER_REVIEW_SKILL);
+    let _ = std::fs::write(&skill_path, CANOPY_REVIEW_SKILL);
 }
 
 /// Start the hook HTTP server on a random port. Returns the port number.
@@ -283,6 +285,7 @@ pub fn start(app_handle: AppHandle) -> u16 {
             let status = match event_type {
                 "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" => "working",
                 "Stop" => "idle",
+                "PermissionRequest" => "permission",
                 _ => "",
             };
 

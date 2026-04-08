@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
 import { useUIStore } from "../store";
+import { useInvoke } from "../hooks/useInvoke";
 import type { BranchInfo, Worktree, LinearIssue } from "../types";
 
 interface NewWorktreeDialogProps {
@@ -29,15 +30,11 @@ export function NewWorktreeDialog({
   const [branchName, setBranchName] = useState("");
   const [baseBranch, setBaseBranch] = useState("develop");
   const [selectedBranch, setSelectedBranch] = useState("");
-  const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
 
   const linearApiKey = useUIStore((s) => s.linearApiKey);
-  const [myIssues, setMyIssues] = useState<LinearIssue[]>([]);
-  const [myIssuesLoaded, setMyIssuesLoaded] = useState(false);
   const [searchResults, setSearchResults] = useState<LinearIssue[]>([]);
   const [linearQuery, setLinearQuery] = useState("");
-  const [linearLoading, setLinearLoading] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<LinearIssue | null>(null);
   const [linearBranchName, setLinearBranchName] = useState("");
   const [linearBaseBranch, setLinearBaseBranch] = useState("develop");
@@ -45,36 +42,21 @@ export function NewWorktreeDialog({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const comboboxRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const result = await invoke<BranchInfo[]>("list_branches", { repoPath });
-        setBranches(result);
-        if (result.length > 0) {
-          setSelectedBranch(result[0].name);
-        }
-      } catch (e) {
-        toast.error("Failed to load branches");
-      }
-    })();
-  }, [repoPath]);
+  const { data: branches } = useInvoke<BranchInfo[]>("list_branches", { repoPath }, {
+    onSuccess: (result) => {
+      if (result.length > 0) setSelectedBranch(result[0].name);
+    },
+    onError: () => toast.error("Failed to load branches"),
+  });
 
-  // Fetch my issues once when Linear tab is first selected
-  useEffect(() => {
-    if (tab !== "linear" || !linearApiKey || myIssuesLoaded) return;
-    (async () => {
-      setLinearLoading(true);
-      try {
-        const issues = await invoke<LinearIssue[]>("get_my_linear_issues", { apiKey: linearApiKey });
-        setMyIssues(issues);
-        setMyIssuesLoaded(true);
-      } catch (e) {
-        toast.error(`Failed to load Linear issues: ${e}`);
-      } finally {
-        setLinearLoading(false);
-      }
-    })();
-  }, [tab, linearApiKey, myIssuesLoaded]);
+  const { data: myIssues, loading: linearLoading } = useInvoke<LinearIssue[]>(
+    "get_my_linear_issues",
+    { apiKey: linearApiKey },
+    {
+      enabled: tab === "linear" && !!linearApiKey,
+      onError: (e) => toast.error(`Failed to load Linear issues: ${e}`),
+    },
+  );
 
   const handleLinearSearch = useCallback((query: string) => {
     setLinearQuery(query);
@@ -121,7 +103,7 @@ export function NewWorktreeDialog({
     setLinearQuery("");
   };
 
-  const displayedIssues = linearQuery.trim() ? searchResults : myIssues;
+  const displayedIssues = linearQuery.trim() ? searchResults : (myIssues ?? []);
 
   const handleCreate = async () => {
     let name: string;
@@ -259,7 +241,7 @@ export function NewWorktreeDialog({
               onChange={(e) => setSelectedBranch(e.target.value)}
               className="w-full px-3 py-1.5 border rounded text-sm bg-background"
             >
-              {branches.map((b) => (
+              {(branches ?? []).map((b) => (
                 <option key={b.name} value={b.name}>
                   {b.name}
                   {b.is_remote ? " (remote)" : ""}
@@ -333,11 +315,11 @@ export function NewWorktreeDialog({
                               onClick={() => selectIssue(issue)}
                               className="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2"
                             >
-                              <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+                              <span className="font-mono text-xs text-muted-foreground shrink-0">
                                 {issue.identifier}
                               </span>
                               <span className="text-xs truncate flex-1">{issue.title}</span>
-                              <span className="text-[10px] text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
+                              <span className="text-xs text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
                                 {issue.status}
                               </span>
                             </button>

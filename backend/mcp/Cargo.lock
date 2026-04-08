@@ -30,6 +30,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
+name = "canopy-mcp"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -63,17 +74,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "differ-mcp"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dirs",
- "rusqlite",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "dirs"

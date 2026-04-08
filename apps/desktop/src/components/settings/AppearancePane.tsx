@@ -46,7 +46,7 @@ export function AppearancePane() {
 
   const handleDownloadTemplate = async () => {
     const path = await save({
-      defaultPath: "differ-theme-template.json",
+      defaultPath: "canopy-theme-template.json",
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (!path) return;
@@ -62,10 +62,10 @@ export function AppearancePane() {
   return (
     <div>
       <h2 className="text-base font-semibold text-foreground">Appearance</h2>
-      <p className="text-xs text-muted-foreground mt-1 mb-6">Customize the look and feel of Differ</p>
+      <p className="text-xs text-muted-foreground mt-1 mb-6">Customize the look and feel of Canopy</p>
 
       {/* Dark themes */}
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Dark</div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Dark</div>
       <div className="flex flex-wrap gap-3 mb-6">
         {darkThemes.map((theme) => (
           <ThemeCard
@@ -78,7 +78,7 @@ export function AppearancePane() {
       </div>
 
       {/* Light themes */}
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Light</div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Light</div>
       <div className="flex flex-wrap gap-3 mb-6">
         {lightThemes.map((theme) => (
           <ThemeCard
@@ -91,7 +91,7 @@ export function AppearancePane() {
       </div>
 
       {/* Custom themes */}
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Custom Themes</div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Custom Themes</div>
       <div className="flex flex-wrap gap-3 mb-4">
         {customThemes.map((theme) => (
           <ThemeCard
@@ -116,18 +116,18 @@ export function AppearancePane() {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted-foreground">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <span className="text-[11px] text-muted-foreground">Import Theme</span>
+          <span className="text-xs text-muted-foreground">Import Theme</span>
         </button>
       </div>
 
       {/* Download template link */}
       <button
         onClick={handleDownloadTemplate}
-        className="text-[11px] text-muted-foreground underline hover:text-foreground transition-colors"
+        className="text-xs text-muted-foreground underline hover:text-foreground transition-colors"
       >
         Download template
       </button>
-      <span className="text-[10px] text-muted-foreground/50 ml-2">JSON file with all tokens</span>
+      <span className="text-xs text-muted-foreground/50 ml-2">JSON file with all tokens</span>
     </div>
   );
 }

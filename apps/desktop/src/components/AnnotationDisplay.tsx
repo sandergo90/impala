@@ -40,7 +40,7 @@ export function AnnotationDisplay({
       }`}
     >
       {/* Avatar placeholder */}
-      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-[10px] font-semibold">
+      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-xs font-semibold">
         You
       </div>
       <div className="flex-1 min-w-0">
@@ -58,7 +58,7 @@ export function AnnotationDisplay({
         <button
           onClick={() => onResolve(annotation.id, !resolved)}
           title={resolved ? "Unresolve" : "Resolve"}
-          className={`px-1.5 py-0.5 rounded text-[10px] ${
+          className={`px-1.5 py-0.5 rounded text-xs ${
             resolved
               ? "bg-green-800/30 text-green-400"
               : "hover:bg-accent text-muted-foreground hover:text-foreground"
@@ -70,7 +70,7 @@ export function AnnotationDisplay({
           <button
             onClick={() => onSendToClaude(annotation)}
             title="Send to Claude"
-            className="px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:text-blue-400 hover:bg-blue-900/20"
+            className="px-1.5 py-0.5 rounded text-xs text-muted-foreground hover:text-blue-400 hover:bg-blue-900/20"
           >
             Claude
           </button>
@@ -78,7 +78,7 @@ export function AnnotationDisplay({
         <button
           onClick={() => onDelete(annotation.id)}
           title="Delete"
-          className="px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:text-red-400 hover:bg-red-900/20"
+          className="px-1.5 py-0.5 rounded text-xs text-muted-foreground hover:text-red-400 hover:bg-red-900/20"
         >
           &times;
         </button>

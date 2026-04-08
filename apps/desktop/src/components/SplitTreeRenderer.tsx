@@ -168,8 +168,8 @@ function LeafPane({
         cwd: worktreePath,
         command: null,
         envVars: {
-          DIFFER_HOOK_PORT: String(hookPort),
-          DIFFER_WORKTREE_PATH: worktreePath,
+          CANOPY_HOOK_PORT: String(hookPort),
+          CANOPY_WORKTREE_PATH: worktreePath,
         },
       })
         .then((isNew) => {
@@ -215,7 +215,7 @@ function LeafPane({
         />
       )}
       {paneType === "claude" && (
-        <div className="absolute top-1 right-2 text-[9px] font-medium text-muted-foreground/40 z-10 pointer-events-none">
+        <div className="absolute top-1 right-2 text-xs font-medium text-muted-foreground/40 z-10 pointer-events-none">
           Claude
         </div>
       )}

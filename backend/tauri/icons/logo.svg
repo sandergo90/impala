@@ -7,19 +7,18 @@
   </defs>
 
   <!-- Background -->
-  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="200" fill="url(#bg)"/>
 
-  <!-- Large bold delta triangle — thick stroke, centered -->
-  <path
-    d="M 512 180 L 820 760 L 204 760 Z"
-    fill="none"
-    stroke="white"
-    stroke-width="64"
-    stroke-linejoin="round"
-    stroke-linecap="round"
-  />
+  <!-- Variation C: No trunk, just pure overlapping canopy filling the space -->
+  <!-- Back layer -->
+  <path d="M 512 140 Q 860 420 760 740 Q 512 840 264 740 Q 164 420 512 140 Z"
+        fill="white" opacity="0.2"/>
 
-  <!-- Split line through the middle — red to green gradient -->
-  <line x1="200" y1="560" x2="824" y2="560" stroke="#ef4444" stroke-width="48" stroke-linecap="round"/>
-  <line x1="512" y1="560" x2="824" y2="560" stroke="#22c55e" stroke-width="48" stroke-linecap="round"/>
+  <!-- Middle layer -->
+  <path d="M 512 250 Q 790 460 710 710 Q 512 790 314 710 Q 234 460 512 250 Z"
+        fill="white" opacity="0.4"/>
+
+  <!-- Front layer -->
+  <path d="M 512 360 Q 720 510 660 680 Q 512 740 364 680 Q 304 510 512 360 Z"
+        fill="white" opacity="0.75"/>
 </svg>

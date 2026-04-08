@@ -1,12 +1,12 @@
 [package]
-name = "differ"
+name = "canopy"
 version = "0.1.0"
 description = "A Tauri App for reviewing git worktree changes"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "differ_lib"
+name = "canopy_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

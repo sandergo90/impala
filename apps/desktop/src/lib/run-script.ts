@@ -48,7 +48,11 @@ export async function triggerRunScript() {
     });
 
     // Write the run command into the interactive shell
-    const encoded = btoa(config.run + "\n");
+    const encoded = btoa(
+      Array.from(new TextEncoder().encode(config.run + "\n"), (b) =>
+        String.fromCharCode(b)
+      ).join("")
+    );
     await invoke("pty_write", { sessionId, data: encoded });
 
     const label = config.run.length > 30 ? config.run.slice(0, 30) + "..." : config.run;

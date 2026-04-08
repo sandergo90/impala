@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { projectSettingsRoute } from "../../router";
 import { useDataStore } from "../../store";
+import { useInvoke } from "../../hooks/useInvoke";
 
 interface ProjectConfig {
   setup?: string | null;
@@ -33,25 +34,27 @@ export function ProjectSettingsRoute() {
   setupRef.current = setup;
   runRef.current = run;
 
-  // Load config on mount / when projectPath changes
+  // Reset loaded flag and clean up timers when projectPath changes
   useEffect(() => {
     loadedRef.current = false;
-    invoke<ProjectConfig>("read_project_config", { projectPath })
-      .then((config) => {
-        setSetup(config.setup ?? "");
-        setRun(config.run ?? "");
-        loadedRef.current = true;
-      })
-      .catch((e) => {
-        toast.error(`Failed to load project config: ${e}`);
-        loadedRef.current = true;
-      });
-
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     };
   }, [projectPath]);
+
+  // Load config on mount / when projectPath changes
+  useInvoke<ProjectConfig>("read_project_config", { projectPath }, {
+    onSuccess: (config) => {
+      setSetup(config.setup ?? "");
+      setRun(config.run ?? "");
+      loadedRef.current = true;
+    },
+    onError: (e) => {
+      toast.error(`Failed to load project config: ${e}`);
+      loadedRef.current = true;
+    },
+  });
 
   const saveConfig = useCallback(
     (nextSetup: string, nextRun: string) => {

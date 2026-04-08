@@ -21,7 +21,7 @@ function hashString(value: string): string {
 
 function createDiffThemeName(theme: Theme): DiffsThemeNames {
   const sig = hashString(JSON.stringify(theme.terminal) + theme.ui.background + theme.ui.foreground);
-  return `differ-${theme.id}-${sig}` as DiffsThemeNames;
+  return `canopy-${theme.id}-${sig}` as DiffsThemeNames;
 }
 
 /**
@@ -59,7 +59,7 @@ function createShikiTheme(theme: Theme) {
   };
 }
 
-/** Get (or register) a Pierre diff theme for the given Differ theme. */
+/** Get (or register) a Pierre diff theme for the given Canopy theme. */
 export function getDiffsTheme(theme: Theme): DiffsThemeNames {
   const name = createDiffThemeName(theme);
   if (!REGISTERED_DIFF_THEMES.has(name)) {
@@ -69,14 +69,21 @@ export function getDiffsTheme(theme: Theme): DiffsThemeNames {
   return name;
 }
 
+const DIFF_FONT_FAMILY = "ui-monospace, Menlo, Consolas, Liberation Mono, monospace";
+const DIFF_FONT_SIZE = 13;
+
 /** CSS variable overrides for Pierre diff styling, applied as inline styles on the container. */
 export function getDiffViewerStyle(theme: Theme): CSSProperties {
   const isDark = theme.type === "dark";
   const additionColor = isDark ? theme.terminal.brightGreen : theme.terminal.green;
   const deletionColor = isDark ? theme.terminal.brightRed : theme.terminal.red;
+  const lineHeight = Math.round(DIFF_FONT_SIZE * 1.5);
   // Pierre's --diffs-bg uses light-dark(var(--diffs-light-bg), var(--diffs-dark-bg))
   // so we must set the inner variables for the active mode.
   return {
+    "--diffs-font-family": DIFF_FONT_FAMILY,
+    "--diffs-font-size": `${DIFF_FONT_SIZE}px`,
+    "--diffs-line-height": `${lineHeight}px`,
     // Set both light and dark variants so light-dark() works regardless of system color-scheme
     "--diffs-dark": theme.terminal.foreground,
     "--diffs-dark-bg": theme.terminal.background,

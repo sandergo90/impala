@@ -80,7 +80,7 @@ export interface WorktreeDataState {
   fileDiffHashes: Record<string, string>;
   generatedFiles: string[];
   annotations: Annotation[];
-  agentStatus: "idle" | "working";
+  agentStatus: "idle" | "working" | "permission";
 }
 
 export interface CommentProvider {

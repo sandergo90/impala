@@ -28,7 +28,7 @@ struct Annotation {
 
 fn db_path() -> Result<PathBuf, String> {
     let data_dir = dirs::data_dir().ok_or("could not determine data directory")?;
-    let path = data_dir.join("com.differ.app").join("annotations.db");
+    let path = data_dir.join("com.canopy.app").join("annotations.db");
     if !path.exists() {
         return Err(format!("database not found at {}", path.display()));
     }
@@ -242,7 +242,7 @@ fn initialize_result() -> Value {
             "tools": {}
         },
         "serverInfo": {
-            "name": "differ-mcp",
+            "name": "canopy-mcp",
             "version": "0.1.0"
         }
     })
@@ -359,7 +359,7 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
 
 fn main() {
     let conn = open_db().unwrap_or_else(|e| {
-        eprintln!("differ-mcp: {}", e);
+        eprintln!("canopy-mcp: {}", e);
         std::process::exit(1);
     });
 
