@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHotkeysStore } from "../../stores/hotkeys";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   HOTKEYS,
   HOTKEY_CATEGORIES,
   type HotkeyId,
@@ -28,15 +38,10 @@ interface ConflictDialog {
 
 const hotkeyEntries = Object.entries(HOTKEYS) as [HotkeyId, (typeof HOTKEYS)[HotkeyId]][];
 
-function getDescription(entry: (typeof HOTKEYS)[HotkeyId]): string | undefined {
-  return "description" in entry ? (entry as { description: string }).description : undefined;
-}
-
 function matchesSearch(entry: (typeof HOTKEYS)[HotkeyId], query: string): boolean {
   const q = query.toLowerCase();
   if (entry.label.toLowerCase().includes(q)) return true;
-  const desc = getDescription(entry);
-  if (desc?.toLowerCase().includes(q)) return true;
+  if (("description" in entry) && (entry as { description: string }).description.toLowerCase().includes(q)) return true;
   return false;
 }
 
@@ -262,7 +267,7 @@ export function KeyboardShortcutsPane() {
                   const isRecording = recordingId === id;
                   const overridden = isOverridden(id);
 
-                  const description = getDescription(def);
+                  const description = "description" in def ? (def as { description: string }).description : undefined;
 
                   return (
                     <div
@@ -355,40 +360,34 @@ export function KeyboardShortcutsPane() {
       )}
 
       {/* Conflict dialog */}
-      {conflictDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-background border border-border rounded-lg p-6 max-w-sm w-full mx-4 shadow-lg">
-            <h3 className="text-sm font-semibold text-foreground mb-2">
-              Shortcut Conflict
-            </h3>
-            <p className="text-xs text-muted-foreground mb-4">
-              <KeyCombo hotkey={conflictDialog.keys} /> is already assigned to{" "}
-              <span className="font-medium text-foreground">
-                {HOTKEYS[conflictDialog.conflictId].label}
-              </span>
-              . Reassign it to{" "}
-              <span className="font-medium text-foreground">
-                {HOTKEYS[conflictDialog.targetId].label}
-              </span>
-              ?
-            </p>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={handleConflictCancel}
-                className="text-xs px-3 py-1.5 rounded-md border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConflictReassign}
-                className="text-xs px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Reassign
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AlertDialog open={!!conflictDialog} onOpenChange={(open) => { if (!open) handleConflictCancel(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Shortcut Conflict</AlertDialogTitle>
+            <AlertDialogDescription>
+              {conflictDialog && (
+                <>
+                  <KeyCombo hotkey={conflictDialog.keys} /> is already assigned to{" "}
+                  <span className="font-medium text-foreground">
+                    {HOTKEYS[conflictDialog.conflictId].label}
+                  </span>
+                  . Reassign it to{" "}
+                  <span className="font-medium text-foreground">
+                    {HOTKEYS[conflictDialog.targetId].label}
+                  </span>
+                  ?
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConflictReassign}>
+              Reassign
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

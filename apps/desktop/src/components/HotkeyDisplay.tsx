@@ -1,6 +1,14 @@
 import { formatHotkeyParts } from "../lib/hotkeys";
-import type { HotkeyId } from "../lib/hotkeys";
+import { HOTKEYS, type HotkeyId } from "../lib/hotkeys";
 import { useHotkeysStore } from "../stores/hotkeys";
+
+/** Selector that returns the effective binding for a hotkey (override ?? default) */
+function useEffectiveHotkey(id: HotkeyId): string | null {
+  return useHotkeysStore((s) => {
+    const o = s.overrides[id];
+    return o !== undefined ? o : HOTKEYS[id].default;
+  });
+}
 
 export function HotkeyDisplay({
   id,
@@ -9,8 +17,7 @@ export function HotkeyDisplay({
   id: HotkeyId;
   className?: string;
 }) {
-  const effective = useHotkeysStore((s) => s.getEffective(id));
-  useHotkeysStore((s) => s.overrides);
+  const effective = useEffectiveHotkey(id);
 
   if (!effective) return null;
 
@@ -28,8 +35,7 @@ export function HotkeyDisplay({
 }
 
 export function useHotkeyTooltip(id: HotkeyId, label: string): string {
-  const effective = useHotkeysStore((s) => s.getEffective(id));
-  useHotkeysStore((s) => s.overrides);
+  const effective = useEffectiveHotkey(id);
   if (!effective) return label;
   const parts = formatHotkeyParts(effective);
   return `${label} (${parts.join("")})`;

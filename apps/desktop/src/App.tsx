@@ -56,65 +56,30 @@ export function RootLayout() {
 
   // -- Terminal / split pane shortcuts (only when terminal or split tab is active) --
 
-  useAppHotkey(
-    "SPLIT_VERTICAL",
-    () => {
-      if (!wtPath) return;
-      const nav = useUIStore.getState().getWorktreeNavState(wtPath);
-      if (nav.activeTab === "split") return;
-      const result = splitNode(nav.splitTree, nav.focusedPaneId, "vertical");
-      if (result) {
-        useUIStore.getState().updateWorktreeNavState(wtPath, {
-          splitTree: result.tree,
-          focusedPaneId: result.newLeafId,
-        });
-      }
-    },
-    { enabled: isTerminalTab },
-    [wtPath],
-  );
+  const handleSplit = (direction: "vertical" | "horizontal") => {
+    if (!wtPath) return;
+    const nav = useUIStore.getState().getWorktreeNavState(wtPath);
+    if (nav.activeTab === "split") return;
+    const result = splitNode(nav.splitTree, nav.focusedPaneId, direction);
+    if (result) {
+      useUIStore.getState().updateWorktreeNavState(wtPath, {
+        splitTree: result.tree,
+        focusedPaneId: result.newLeafId,
+      });
+    }
+  };
 
-  useAppHotkey(
-    "SPLIT_HORIZONTAL",
-    () => {
-      if (!wtPath) return;
-      const nav = useUIStore.getState().getWorktreeNavState(wtPath);
-      if (nav.activeTab === "split") return;
-      const result = splitNode(nav.splitTree, nav.focusedPaneId, "horizontal");
-      if (result) {
-        useUIStore.getState().updateWorktreeNavState(wtPath, {
-          splitTree: result.tree,
-          focusedPaneId: result.newLeafId,
-        });
-      }
-    },
-    { enabled: isTerminalTab },
-    [wtPath],
-  );
+  const handleFocusAdjacentPane = (direction: 1 | -1) => {
+    if (!wtPath) return;
+    const nav = useUIStore.getState().getWorktreeNavState(wtPath);
+    const targetId = getAdjacentLeafId(nav.splitTree, nav.focusedPaneId, direction);
+    useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: targetId });
+  };
 
-  useAppHotkey(
-    "NEXT_PANE",
-    () => {
-      if (!wtPath) return;
-      const nav = useUIStore.getState().getWorktreeNavState(wtPath);
-      const nextId = getAdjacentLeafId(nav.splitTree, nav.focusedPaneId, 1);
-      useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: nextId });
-    },
-    { enabled: isTerminalTab },
-    [wtPath],
-  );
-
-  useAppHotkey(
-    "PREV_PANE",
-    () => {
-      if (!wtPath) return;
-      const nav = useUIStore.getState().getWorktreeNavState(wtPath);
-      const prevId = getAdjacentLeafId(nav.splitTree, nav.focusedPaneId, -1);
-      useUIStore.getState().updateWorktreeNavState(wtPath, { focusedPaneId: prevId });
-    },
-    { enabled: isTerminalTab },
-    [wtPath],
-  );
+  useAppHotkey("SPLIT_VERTICAL", () => handleSplit("vertical"), { enabled: isTerminalTab }, [wtPath]);
+  useAppHotkey("SPLIT_HORIZONTAL", () => handleSplit("horizontal"), { enabled: isTerminalTab }, [wtPath]);
+  useAppHotkey("NEXT_PANE", () => handleFocusAdjacentPane(1), { enabled: isTerminalTab }, [wtPath]);
+  useAppHotkey("PREV_PANE", () => handleFocusAdjacentPane(-1), { enabled: isTerminalTab }, [wtPath]);
 
   useAppHotkey(
     "CLOSE_PANE",

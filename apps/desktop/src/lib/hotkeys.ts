@@ -213,15 +213,6 @@ export function toCanonical(parsed: ParsedHotkey): string {
   return [...mods, parsed.key].join("+");
 }
 
-/**
- * Normalize a hotkey string to canonical form. Returns null if invalid.
- */
-export function normalizeHotkey(raw: string): string | null {
-  const parsed = parseHotkey(raw);
-  if (!parsed) return null;
-  return toCanonical(parsed);
-}
-
 // ---------------------------------------------------------------------------
 // Matching — does a KeyboardEvent match a hotkey string?
 // ---------------------------------------------------------------------------
@@ -232,11 +223,22 @@ function eventKeyToCanonical(e: KeyboardEvent): string {
   return KEY_ALIASES[k] ?? k;
 }
 
+const parseCache = new Map<string, ParsedHotkey | null>();
+
+function parseCached(hotkey: string): ParsedHotkey | null {
+  let result = parseCache.get(hotkey);
+  if (result === undefined) {
+    result = parseHotkey(hotkey) ?? null;
+    parseCache.set(hotkey, result);
+  }
+  return result;
+}
+
 /**
  * Check whether a KeyboardEvent matches the given canonical hotkey string.
  */
 export function matchesHotkeyEvent(event: KeyboardEvent, hotkey: string): boolean {
-  const parsed = parseHotkey(hotkey);
+  const parsed = parseCached(hotkey);
   if (!parsed) return false;
 
   const key = eventKeyToCanonical(event);
@@ -313,10 +315,6 @@ export function formatHotkeyParts(hotkey: string): string[] {
  * Format a canonical hotkey string as a single display string.
  * e.g. "meta+shift+d" → "⌘⇧D"
  */
-export function formatHotkey(hotkey: string): string {
-  return formatHotkeyParts(hotkey).join("");
-}
-
 // ---------------------------------------------------------------------------
 // Capture — convert a KeyboardEvent (from recording) to canonical string
 // ---------------------------------------------------------------------------
