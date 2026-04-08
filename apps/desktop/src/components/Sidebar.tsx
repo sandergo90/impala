@@ -515,7 +515,7 @@ export function Sidebar() {
               <div key={wt.path} className="group relative mx-2 my-0.5">
                 <button
                   onClick={() => selectWorktree(wt)}
-                  className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-[5px] text-left transition-colors ${
+                  className={`flex items-center gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${
                     isSelected
                       ? "bg-primary/15"
                       : "hover:bg-accent"
