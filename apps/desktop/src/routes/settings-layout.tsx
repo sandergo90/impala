@@ -5,6 +5,7 @@ const navItems = [
   { to: "/settings/appearance" as const, label: "Appearance" },
   { to: "/settings/integrations" as const, label: "Integrations" },
   { to: "/settings/notifications" as const, label: "Notifications" },
+  { to: "/settings/keyboard" as const, label: "Keyboard Shortcuts" },
 ];
 
 const navLinkClass =
@@ -25,7 +26,7 @@ export function SettingsLayout() {
       >
         <div className="absolute inset-0" data-tauri-drag-region />
         <div
-          className="flex-1 flex items-center justify-center text-[11px] text-muted-foreground font-medium"
+          className="flex-1 flex items-center justify-center text-xs text-muted-foreground font-medium"
           data-tauri-drag-region
         >
           Settings
@@ -50,7 +51,7 @@ export function SettingsLayout() {
             Back
           </button>
 
-          <div className="px-4 pb-1.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="px-4 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             General
           </div>
 
@@ -65,7 +66,7 @@ export function SettingsLayout() {
             </Link>
           ))}
 
-          <div className="px-4 pb-1.5 pt-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="px-4 pb-1.5 pt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Projects
           </div>
 

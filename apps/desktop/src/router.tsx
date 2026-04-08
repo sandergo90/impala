@@ -12,6 +12,7 @@ import { AppearanceRoute } from "./routes/settings/appearance";
 import { IntegrationsRoute } from "./routes/settings/integrations";
 import { ProjectSettingsRoute } from "./routes/settings/project";
 import { NotificationsRoute } from "./routes/settings/notifications";
+import { KeyboardRoute } from "./routes/settings/keyboard";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -52,6 +53,12 @@ const settingsNotificationsRoute = createRoute({
   component: NotificationsRoute,
 });
 
+const settingsKeyboardRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/keyboard",
+  component: KeyboardRoute,
+});
+
 export const projectSettingsRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/project/$projectId",
@@ -64,6 +71,7 @@ const routeTree = rootRoute.addChildren([
     settingsAppearanceRoute,
     settingsIntegrationsRoute,
     settingsNotificationsRoute,
+    settingsKeyboardRoute,
     projectSettingsRoute,
   ]),
 ]);
