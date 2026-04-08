@@ -529,26 +529,24 @@ export function Sidebar() {
                     <BranchIcon active={isSelected} />
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                        {wt.branch}
-                      </span>
-                      {stats && (stats.additions > 0 || stats.deletions > 0) && (
-                        <span className="flex items-center gap-1 text-xs font-mono ml-auto shrink-0">
-                          {stats.additions > 0 && <span className="text-green-500">+{stats.additions}</span>}
-                          {stats.deletions > 0 && <span className="text-red-500">-{stats.deletions}</span>}
-                        </span>
-                      )}
+                    <div className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                      {wt.branch}
                     </div>
                     <div className={`flex items-center gap-1.5 text-xs mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
-                      <span>{aheadCount > 0 ? `${aheadCount} commit${aheadCount === 1 ? "" : "s"} ahead` : "up to date"}</span>
+                      <span className="truncate">{aheadCount > 0 ? `${aheadCount} ahead` : "up to date"}</span>
+                      {stats && (stats.additions > 0 || stats.deletions > 0) && (
+                        <span className="flex items-center gap-0.5 font-mono shrink-0">
+                          <span className="text-green-500">+{stats.additions}</span>
+                          <span className="text-red-500">-{stats.deletions}</span>
+                        </span>
+                      )}
                       {worktreeIssues[wt.path] && (
                         <span
                           onClick={(e) => {
                             e.stopPropagation();
                             openUrl(`https://linear.app/issue/${worktreeIssues[wt.path].identifier}`);
                           }}
-                          className="font-mono text-xs text-blue-400 hover:text-blue-300 cursor-pointer"
+                          className="font-mono text-xs text-blue-400 hover:text-blue-300 cursor-pointer shrink-0"
                         >
                           {worktreeIssues[wt.path].identifier}
                         </span>
