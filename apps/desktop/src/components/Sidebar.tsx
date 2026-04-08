@@ -531,8 +531,8 @@ export function Sidebar() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                    <div className="flex items-start gap-1.5">
+                      <span className={`text-xs break-all ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                         {wt.branch}
                       </span>
                       <span className="ml-auto shrink-0">
