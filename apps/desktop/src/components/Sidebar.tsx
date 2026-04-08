@@ -11,6 +11,7 @@ import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { selectWorktree as sharedSelectWorktree, selectProject as sharedSelectProject } from "../hooks/useWorktreeActions";
 import type { Worktree, Project, WorktreeIssue } from "../types";
 import { useAgentNotifications } from "../hooks/useAgentNotifications";
+import { useAppHotkey } from "../hooks/useAppHotkey";
 import { NewWorktreeDialog } from "./NewWorktreeDialog";
 import {
   AlertDialog,
@@ -32,10 +33,25 @@ function projectColor(name: string): string {
   return `hsl(${hue}, 60%, 50%)`;
 }
 
-function ProjectBadge({ name }: { name: string }) {
+function ProjectBadge({ name, iconUrl }: { name: string; iconUrl?: string }) {
+  const [iconError, setIconError] = useState(false);
+
+  if (iconUrl && !iconError) {
+    return (
+      <div className="w-5 h-5 rounded-[5px] overflow-hidden shrink-0">
+        <img
+          src={iconUrl}
+          alt={`${name} icon`}
+          className="w-full h-full object-cover"
+          onError={() => setIconError(true)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
-      className="w-5 h-5 rounded-[5px] flex items-center justify-center text-white text-[10px] font-bold shrink-0"
+      className="w-5 h-5 rounded-[5px] flex items-center justify-center text-white text-xs font-bold shrink-0"
       style={{ background: projectColor(name) }}
     >
       {name[0]?.toUpperCase()}
@@ -58,21 +74,34 @@ function BranchIcon({ active }: { active: boolean }) {
 export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const navigate = useNavigate();
   const selectedProject = useUIStore((s) => s.selectedProject);
+  const projectIcons = useDataStore((s) => s.projectIcons);
   const worktrees = useDataStore((s) => s.worktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+
+  const iconUrl = selectedProject ? projectIcons[selectedProject.path] : undefined;
 
   return (
     <div className="flex flex-col items-center h-full w-10 bg-sidebar border-r border-border py-2.5 gap-1">
       {/* Project badge */}
       {selectedProject ? (
+        iconUrl ? (
+          <button
+            onClick={onExpand}
+            className="w-7 h-7 rounded-[6px] overflow-hidden shrink-0 mb-2 hover:opacity-80 transition-opacity"
+            title={selectedProject.name}
+          >
+            <img src={iconUrl} alt={`${selectedProject.name} icon`} className="w-full h-full object-cover" />
+          </button>
+        ) : (
         <button
           onClick={onExpand}
-          className="w-7 h-7 rounded-[6px] flex items-center justify-center text-white text-[11px] font-bold shrink-0 mb-2 hover:opacity-80 transition-opacity"
+          className="w-7 h-7 rounded-[6px] flex items-center justify-center text-white text-xs font-bold shrink-0 mb-2 hover:opacity-80 transition-opacity"
           style={{ background: projectColor(selectedProject.name) }}
           title={selectedProject.name}
         >
           {selectedProject.name[0]?.toUpperCase()}
         </button>
+        )
       ) : (
         <button
           onClick={onExpand}
@@ -123,6 +152,8 @@ export function Sidebar() {
   const navigate = useNavigate();
   const projects = useDataStore((s) => s.projects);
   const addProject = useDataStore((s) => s.addProject);
+  const projectIcons = useDataStore((s) => s.projectIcons);
+  const setProjectIcon = useDataStore((s) => s.setProjectIcon);
   const selectedProject = useUIStore((s) => s.selectedProject);
   const worktrees = useDataStore((s) => s.worktrees);
   const setWorktrees = useDataStore((s) => s.setWorktrees);
@@ -134,7 +165,7 @@ export function Sidebar() {
   useEffect(() => {
     const unlisten = listen<{ worktree_path: string; status: string }>("agent-status", (event) => {
       const { worktree_path, status } = event.payload;
-      if (status === "working" || status === "idle") {
+      if (status === "working" || status === "idle" || status === "permission") {
         const current = useDataStore.getState().worktreeDataStates[worktree_path];
         if (current?.agentStatus !== status) {
           useDataStore.getState().updateWorktreeDataState(worktree_path, {
@@ -210,6 +241,29 @@ export function Sidebar() {
     })();
   };
 
+  // -- Worktree hotkeys --
+
+  useAppHotkey("NEW_WORKTREE", () => {
+    if (selectedProject) setShowNewWorktree(true);
+  });
+
+  useAppHotkey("DELETE_WORKTREE", () => {
+    if (!selectedWorktree) return;
+    const branch = selectedWorktree.branch;
+    if (branch === "main" || branch === "master" || branch === "develop") return;
+    setWorktreeToDelete(selectedWorktree);
+  });
+
+  useAppHotkey("JUMP_TO_WORKTREE_1", () => { if (worktrees[0]) selectWorktree(worktrees[0]); });
+  useAppHotkey("JUMP_TO_WORKTREE_2", () => { if (worktrees[1]) selectWorktree(worktrees[1]); });
+  useAppHotkey("JUMP_TO_WORKTREE_3", () => { if (worktrees[2]) selectWorktree(worktrees[2]); });
+  useAppHotkey("JUMP_TO_WORKTREE_4", () => { if (worktrees[3]) selectWorktree(worktrees[3]); });
+  useAppHotkey("JUMP_TO_WORKTREE_5", () => { if (worktrees[4]) selectWorktree(worktrees[4]); });
+  useAppHotkey("JUMP_TO_WORKTREE_6", () => { if (worktrees[5]) selectWorktree(worktrees[5]); });
+  useAppHotkey("JUMP_TO_WORKTREE_7", () => { if (worktrees[6]) selectWorktree(worktrees[6]); });
+  useAppHotkey("JUMP_TO_WORKTREE_8", () => { if (worktrees[7]) selectWorktree(worktrees[7]); });
+  useAppHotkey("JUMP_TO_WORKTREE_9", () => { if (worktrees[8]) selectWorktree(worktrees[8]); });
+
   const persistProjects = async (projectList: Project[]) => {
     try {
       await invoke("save_projects", {
@@ -232,6 +286,15 @@ export function Sidebar() {
           name: p.split("/").pop() || p,
         }));
         useDataStore.getState().setProjects(loaded);
+
+        // Discover icons for all projects in parallel
+        for (const project of loaded) {
+          invoke<string | null>("discover_project_icon", { projectPath: project.path })
+            .then((icon) => {
+              if (icon) useDataStore.getState().setProjectIcon(project.path, icon);
+            })
+            .catch(() => {});
+        }
 
         const persistedProject = useUIStore.getState().selectedProject;
         if (persistedProject && loaded.some((p) => p.path === persistedProject.path)) {
@@ -294,6 +357,14 @@ export function Sidebar() {
         project,
       ];
       await persistProjects(updatedProjects);
+
+      // Discover favicon for the new project
+      invoke<string | null>("discover_project_icon", { projectPath: project.path })
+        .then((icon) => {
+          if (icon) setProjectIcon(project.path, icon);
+        })
+        .catch(() => {});
+
       await selectProject(project);
     } catch (e) {
       toast.error("Not a git repository or no worktrees found");
@@ -325,7 +396,7 @@ export function Sidebar() {
   };
 
   return (
-    <div className="flex flex-col h-full text-[12px] overflow-hidden relative bg-sidebar">
+    <div className="flex flex-col h-full text-sm overflow-hidden relative bg-sidebar">
       {/* Project Switcher */}
       <div
         onClick={() => setShowDropdown(!showDropdown)}
@@ -333,13 +404,13 @@ export function Sidebar() {
       >
         {selectedProject ? (
           <>
-            <ProjectBadge name={selectedProject.name} />
-            <span className="text-foreground text-[12px] font-medium truncate">{selectedProject.name}</span>
+            <ProjectBadge name={selectedProject.name} iconUrl={projectIcons[selectedProject.path]} />
+            <span className="text-foreground text-sm font-medium truncate">{selectedProject.name}</span>
           </>
         ) : (
-          <span className="text-muted-foreground text-[12px]">Select project</span>
+          <span className="text-muted-foreground text-sm">Select project</span>
         )}
-        <span className="ml-auto text-muted-foreground/50 text-[9px]">&#9662;</span>
+        <span className="ml-auto text-muted-foreground/50 text-xs">&#9662;</span>
       </div>
 
       {/* Project Dropdown */}
@@ -355,20 +426,20 @@ export function Sidebar() {
                 onClick={() => { selectProject(project); setShowDropdown(false); }}
                 className="group flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent"
               >
-                <ProjectBadge name={project.name} />
-                <span className={`text-[12px] truncate ${selectedProject?.path === project.path ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                <ProjectBadge name={project.name} iconUrl={projectIcons[project.path]} />
+                <span className={`text-sm truncate ${selectedProject?.path === project.path ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                   {project.name}
                 </span>
                 <span
                   onClick={(e) => handleRemoveProject(e, project.path)}
-                  className="ml-auto opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground px-1 text-[11px]"
+                  className="ml-auto opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground px-1 text-xs"
                 >
                   &times;
                 </span>
               </div>
             ))}
             <div
-              className="border-t border-border mt-1 pt-1 flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent text-muted-foreground text-[11px]"
+              className="border-t border-border mt-1 pt-1 flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent text-muted-foreground text-xs"
               onClick={() => { openProject(); setShowDropdown(false); }}
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
@@ -387,8 +458,8 @@ export function Sidebar() {
           <circle cx="11" cy="11" r="8"/>
           <path d="m21 21-4.3-4.3"/>
         </svg>
-        <span className="text-[11px]">Search...</span>
-        <span className="ml-auto text-[9px] bg-background/50 rounded px-1 py-0.5 font-mono">&#8984;P</span>
+        <span className="text-xs">Search...</span>
+        <span className="ml-auto text-xs bg-background/50 rounded px-1 py-0.5 font-mono">&#8984;P</span>
       </button>
 
       {/* Worktrees Section */}
@@ -396,10 +467,10 @@ export function Sidebar() {
         <div className="flex flex-col min-h-0 flex-1">
           <div className="mx-3 mb-1.5 border-b border-border/30" />
           <div className="flex items-center justify-between px-3.5 pt-1 pb-1 shrink-0">
-            <span className="text-[9px] uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">Worktrees</span>
+            <span className="text-xs uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">Worktrees</span>
             <button
               onClick={() => setShowNewWorktree(true)}
-              className="text-muted-foreground/50 hover:text-muted-foreground text-[14px] leading-none"
+              className="text-muted-foreground/50 hover:text-muted-foreground text-sm leading-none"
             >
               +
             </button>
@@ -430,10 +501,10 @@ export function Sidebar() {
                     <BranchIcon active={isSelected} />
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className={`text-[11px] truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                    <div className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                       {wt.branch}
                     </div>
-                    <div className={`flex items-center gap-1.5 text-[9px] mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
+                    <div className={`flex items-center gap-1.5 text-xs mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
                       <span>{aheadCount > 0 ? `${aheadCount} commit${aheadCount === 1 ? "" : "s"} ahead` : "up to date"}</span>
                       {worktreeIssues[wt.path] && (
                         <span
@@ -441,7 +512,7 @@ export function Sidebar() {
                             e.stopPropagation();
                             openUrl(`https://linear.app/issue/${worktreeIssues[wt.path].identifier}`);
                           }}
-                          className="font-mono text-[9px] text-blue-400 hover:text-blue-300 cursor-pointer"
+                          className="font-mono text-xs text-blue-400 hover:text-blue-300 cursor-pointer"
                         >
                           {worktreeIssues[wt.path].identifier}
                         </span>
@@ -451,7 +522,7 @@ export function Sidebar() {
                   {!isMain && (
                     <span
                       onClick={(e) => { e.stopPropagation(); setWorktreeToDelete(wt); }}
-                      className="text-muted-foreground/0 group-hover:text-muted-foreground/50 hover:!text-destructive text-[11px] transition-colors px-0.5"
+                      className="text-muted-foreground/0 group-hover:text-muted-foreground/50 hover:!text-destructive text-xs transition-colors px-0.5"
                     >
                       ×
                     </span>
@@ -468,7 +539,7 @@ export function Sidebar() {
       {!selectedProject && (
         <button
           onClick={openProject}
-          className="flex items-center gap-1.5 px-3.5 py-2 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border"
+          className="flex items-center gap-1.5 px-3.5 py-2 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           Open Project
@@ -484,7 +555,7 @@ export function Sidebar() {
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
           <circle cx="12" cy="12" r="3" />
         </svg>
-        <span className="text-[10px]">Settings</span>
+        <span className="text-xs">Settings</span>
       </button>
 
       {/* New Worktree Dialog */}
@@ -516,7 +587,11 @@ export function Sidebar() {
                     },
                   }).then(() => {
                     // Write the setup command into the interactive shell
-                    const encoded = btoa(config.setup + "\n");
+                    const encoded = btoa(
+                      Array.from(new TextEncoder().encode(config.setup + "\n"), (b) =>
+                        String.fromCharCode(b)
+                      ).join("")
+                    );
                     invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
                     useUIStore.getState().setFloatingTerminal(worktree.path, {
                       mode: "expanded",

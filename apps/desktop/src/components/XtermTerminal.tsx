@@ -9,6 +9,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { useUIStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
+import { useAppHotkey } from "../hooks/useAppHotkey";
 
 const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
@@ -55,6 +56,21 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart,
     (s) => resolveThemeById(s.activeThemeId, s.customThemes).terminal.background
   );
 
+  useAppHotkey(
+    "CLEAR_TERMINAL",
+    () => { terminalRef.current?.clear(); },
+    { enabled: isFocused },
+  );
+
+  useAppHotkey(
+    "FIND_IN_TERMINAL",
+    () => {
+      setSearchVisible(true);
+      requestAnimationFrame(() => searchInputRef.current?.focus());
+    },
+    { enabled: isFocused },
+  );
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -94,21 +110,10 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart,
     });
 
     const interceptKeys = (e: KeyboardEvent) => {
-      if (e.metaKey) {
-        if (e.key === "d" || e.key === "D" || e.key === "[" || e.key === "]" || e.key === "w" || e.key === ",") {
-          e.stopPropagation();
-        }
-        if (e.key === "k") {
-          e.preventDefault();
-          e.stopPropagation();
-          terminal?.clear();
-        }
-        if (e.key === "f") {
-          e.preventDefault();
-          e.stopPropagation();
-          setSearchVisible(true);
-          requestAnimationFrame(() => searchInputRef.current?.focus());
-        }
+      if (!e.metaKey) return;
+      const hotkeyKeys = ["d", "D", "[", "]", "w", ",", "p", "r", "R", "b", "B", "1", "2", "3", "n", "/", "k", "f"];
+      if (hotkeyKeys.includes(e.key)) {
+        e.stopPropagation();
       }
     };
     container.addEventListener("keydown", interceptKeys, true);

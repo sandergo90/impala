@@ -12,6 +12,7 @@ import { OpenInEditorButton } from "../components/OpenInEditorButton";
 import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { triggerRunScript } from "../lib/run-script";
+import { useAppHotkey } from "../hooks/useAppHotkey";
 
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -35,6 +36,20 @@ export function MainView() {
       .getState()
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: tab });
   };
+
+  // -- Layout hotkeys --
+
+  useAppHotkey("SWITCH_TO_DIFF", () => setTab("diff"));
+  useAppHotkey("SWITCH_TO_TERMINAL", () => setTab("terminal"));
+  useAppHotkey("SWITCH_TO_SPLIT", () => setTab("split"));
+
+  useAppHotkey("TOGGLE_SIDEBAR", () => {
+    setSidebarCollapsed((prev) => !prev);
+  });
+
+  useAppHotkey("TOGGLE_RIGHT_SIDEBAR", () => {
+    setShowSidebar((prev) => !prev);
+  });
 
   const handleFocusPane = useCallback(
     (paneId: string) => {
@@ -66,7 +81,7 @@ export function MainView() {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-2.5 py-1 text-[11px] font-medium rounded-[5px] transition-colors ${
+      className={`px-2.5 py-1 text-xs font-medium rounded-[5px] transition-colors ${
         isActive
           ? "text-foreground"
           : "text-muted-foreground hover:text-foreground"
@@ -116,7 +131,7 @@ export function MainView() {
 
         {/* Center context: project / branch . N ahead of base */}
         <div
-          className="flex-1 flex items-center justify-center gap-1.5 text-[11px]"
+          className="flex-1 flex items-center justify-center gap-1.5 text-xs"
           data-tauri-drag-region
         >
           {selectedWorktree && (
@@ -170,12 +185,12 @@ export function MainView() {
                 {selectedProject?.name}
               </span>
               <span className="text-muted-foreground/40">/</span>
-              <span className="text-foreground font-medium font-mono text-[12px]">
+              <span className="text-foreground font-medium font-mono text-sm">
                 {selectedWorktree.branch}
               </span>
               {dataState?.baseBranch &&
                 (dataState?.commits?.length ?? 0) > 0 && (
-                  <span className="bg-accent rounded-full px-1.5 py-0.5 text-[9px] text-muted-foreground">
+                  <span className="bg-accent rounded-full px-1.5 py-0.5 text-xs text-muted-foreground">
                     {dataState.commits.length} ahead of{" "}
                     {dataState.baseBranch}
                   </span>
