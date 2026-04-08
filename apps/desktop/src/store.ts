@@ -59,6 +59,8 @@ interface UIState {
     worktreePath: string | null;
   };
   setFloatingTerminal: (updates: Partial<UIState['floatingTerminal']>) => void;
+  floatingTerminalSize: { width: number; height: number };
+  setFloatingTerminalSize: (size: { width: number; height: number }) => void;
   linearApiKey: string;
   setLinearApiKey: (key: string) => void;
   preferredEditor: string;
@@ -127,6 +129,8 @@ export const useUIStore = create<UIState>()(
       setFloatingTerminal: (updates) => set((state) => ({
         floatingTerminal: { ...state.floatingTerminal, ...updates },
       })),
+      floatingTerminalSize: { width: 500, height: 300 },
+      setFloatingTerminalSize: (size) => set({ floatingTerminalSize: size }),
       linearApiKey: "",
       setLinearApiKey: (key) => set({ linearApiKey: key }),
       preferredEditor: "cursor",
