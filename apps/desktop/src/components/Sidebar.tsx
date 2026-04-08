@@ -549,7 +549,7 @@ export function Sidebar() {
                         {!isMain && (
                           <span
                             onClick={(e) => { e.stopPropagation(); setWorktreeToDelete(wt); }}
-                            className="absolute inset-0 hidden group-hover:flex items-center justify-center text-muted-foreground/50 hover:!text-destructive text-xs transition-colors"
+                            className="absolute inset-y-0 right-0 hidden group-hover:flex items-center justify-center text-muted-foreground/50 hover:!text-destructive text-xs transition-colors"
                           >
                             ×
                           </span>
