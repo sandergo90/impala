@@ -13,8 +13,20 @@ const MIN_HEIGHT = 200;
 const MAX_WIDTH = 900;
 const MAX_HEIGHT = 700;
 
+function StatusDot({ status }: { status: "running" | "succeeded" | "failed" }) {
+  const color =
+    status === "running"
+      ? "bg-green-500"
+      : status === "failed"
+        ? "bg-red-500"
+        : "bg-muted-foreground";
+  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${color}`} />;
+}
+
 export function FloatingTerminal() {
-  const { mode, sessionId, label, type } = useUIStore((s) => s.floatingTerminal);
+  const { mode, sessionId, label, status } = useUIStore(
+    (s) => s.floatingTerminal
+  );
   const setFloatingTerminal = useUIStore((s) => s.setFloatingTerminal);
   const size = useUIStore((s) => s.floatingTerminalSize);
   const setSize = useUIStore((s) => s.setFloatingTerminalSize);
@@ -41,15 +53,23 @@ export function FloatingTerminal() {
       const failed = exitCode !== 0;
 
       if (failed) {
-        // Stay expanded so the user can see the error output
-        const label = current.type === "setup" ? "Setup failed" : "Run failed";
-        setFloatingTerminal({ label });
+        const failLabel =
+          current.type === "setup" ? "Setup failed" : "Run failed";
+        setFloatingTerminal({ label: failLabel, status: "failed" });
       } else if (current.type === "setup") {
-        setFloatingTerminal({ label: "Setup complete", mode: "pill" });
+        setFloatingTerminal({
+          label: "Setup complete",
+          status: "succeeded",
+          mode: "pill",
+        });
       } else if (current.type === "run") {
-        setFloatingTerminal({ label: "Run stopped", mode: "pill" });
+        setFloatingTerminal({
+          label: "Run stopped",
+          status: "succeeded",
+          mode: "pill",
+        });
       } else {
-        setFloatingTerminal({ mode: "pill" });
+        setFloatingTerminal({ status: "succeeded", mode: "pill" });
       }
     });
 
@@ -76,12 +96,17 @@ export function FloatingTerminal() {
         let newW = startW;
         let newH = startH;
 
-        // Panel is anchored bottom-right, so dragging left/up increases size
         if (edge.includes("left")) {
-          newW = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW + (startX - ev.clientX)));
+          newW = Math.min(
+            MAX_WIDTH,
+            Math.max(MIN_WIDTH, startW + (startX - ev.clientX))
+          );
         }
         if (edge.includes("top")) {
-          newH = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startH + (startY - ev.clientY)));
+          newH = Math.min(
+            MAX_HEIGHT,
+            Math.max(MIN_HEIGHT, startH + (startY - ev.clientY))
+          );
         }
 
         setSize({ width: newW, height: newH });
@@ -109,6 +134,7 @@ export function FloatingTerminal() {
       label: "",
       type: null,
       worktreePath: null,
+      status: "running",
     });
   };
 
@@ -118,17 +144,16 @@ export function FloatingTerminal() {
     return (
       <div
         className="fixed bottom-4 right-4 z-50 bg-card border border-border/80 rounded-full px-3 py-1.5 cursor-pointer flex items-center gap-2 ring-1 ring-black/20"
-        style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.35), 0 1px 6px rgba(0,0,0,0.25)" }}
+        style={{
+          boxShadow:
+            "0 4px 20px rgba(0,0,0,0.35), 0 1px 6px rgba(0,0,0,0.25)",
+        }}
       >
         <button
           onClick={() => setFloatingTerminal({ mode: "expanded" })}
           className="flex items-center gap-2"
         >
-          <span
-            className={`inline-block w-2 h-2 rounded-full ${
-              type === "run" ? "bg-green-500" : "bg-muted-foreground"
-            }`}
-          />
+          <StatusDot status={status} />
           <span className="text-xs text-foreground">{label}</span>
         </button>
         <button
@@ -153,10 +178,11 @@ export function FloatingTerminal() {
       style={{
         width: size.width,
         height: size.height,
-        boxShadow: "0 8px 40px rgba(0,0,0,0.45), 0 2px 12px rgba(0,0,0,0.3)",
+        boxShadow:
+          "0 8px 40px rgba(0,0,0,0.45), 0 2px 12px rgba(0,0,0,0.3)",
       }}
     >
-      {/* Resize handles — top edge, left edge, top-left corner */}
+      {/* Resize handles */}
       <div
         className="absolute top-0 left-3 right-0 h-1 cursor-n-resize z-10"
         onMouseDown={(e) => onResizeStart(e, "top")}
@@ -171,8 +197,11 @@ export function FloatingTerminal() {
       />
 
       <div className="h-8 flex items-center justify-between px-3 border-b border-border/50 bg-background shrink-0">
-        <span className="text-xs text-foreground truncate">{label}</span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <StatusDot status={status} />
+          <span className="text-xs text-foreground truncate">{label}</span>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => setFloatingTerminal({ mode: "pill" })}
             className="text-muted-foreground hover:text-foreground text-xs px-1"

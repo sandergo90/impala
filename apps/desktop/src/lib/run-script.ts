@@ -54,6 +54,7 @@ export async function triggerRunScript() {
       label,
       type: "run",
       worktreePath: selectedWorktree.path,
+      status: "running",
     });
   } catch (e) {
     toast.error(`Failed to run script: ${e}`);

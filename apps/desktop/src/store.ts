@@ -57,6 +57,7 @@ interface UIState {
     label: string;
     type: 'setup' | 'run' | null;
     worktreePath: string | null;
+    status: 'running' | 'succeeded' | 'failed';
   };
   setFloatingTerminal: (updates: Partial<UIState['floatingTerminal']>) => void;
   floatingTerminalSize: { width: number; height: number };
@@ -125,6 +126,7 @@ export const useUIStore = create<UIState>()(
         label: '',
         type: null,
         worktreePath: null,
+        status: 'running',
       },
       setFloatingTerminal: (updates) => set((state) => ({
         floatingTerminal: { ...state.floatingTerminal, ...updates },

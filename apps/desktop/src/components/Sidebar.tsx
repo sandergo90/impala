@@ -517,6 +517,7 @@ export function Sidebar() {
                       label: "Setup",
                       type: "setup",
                       worktreePath: worktree.path,
+                      status: "running",
                     });
                   }).catch((e) => {
                     toast.error(`Failed to run setup script: ${e}`);
