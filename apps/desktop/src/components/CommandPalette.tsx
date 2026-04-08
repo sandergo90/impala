@@ -165,7 +165,6 @@ export function CommandPalette({
                       <rect width="18" height="18" x="3" y="3" rx="2"/>
                     </svg>
                     Switch to Diff
-                    <HotkeyDisplay id="SWITCH_TO_DIFF" className="ml-auto text-muted-foreground/50" />
                   </Command.Item>
                   <Command.Item
                     value="Switch to Terminal view"
@@ -177,7 +176,6 @@ export function CommandPalette({
                       <line x1="12" x2="20" y1="19" y2="19"/>
                     </svg>
                     Switch to Terminal
-                    <HotkeyDisplay id="SWITCH_TO_TERMINAL" className="ml-auto text-muted-foreground/50" />
                   </Command.Item>
                   <Command.Item
                     value="Switch to Split view"
@@ -189,7 +187,6 @@ export function CommandPalette({
                       <path d="M12 3v18"/>
                     </svg>
                     Switch to Split
-                    <HotkeyDisplay id="SWITCH_TO_SPLIT" className="ml-auto text-muted-foreground/50" />
                   </Command.Item>
                 </>
               )}

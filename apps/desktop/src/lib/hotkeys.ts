@@ -51,25 +51,6 @@ export const HOTKEYS = {
     default: "meta+shift+b",
     category: "Layout",
   },
-  SWITCH_TO_DIFF: {
-    label: "Switch to Diff",
-    description: "Switch the main view to the diff tab",
-    default: "meta+1",
-    category: "Layout",
-  },
-  SWITCH_TO_TERMINAL: {
-    label: "Switch to Terminal",
-    description: "Switch the main view to the terminal tab",
-    default: "meta+2",
-    category: "Layout",
-  },
-  SWITCH_TO_SPLIT: {
-    label: "Switch to Split",
-    description: "Switch the main view to the split tab",
-    default: "meta+3",
-    category: "Layout",
-  },
-
   // -- Terminal --
   SPLIT_VERTICAL: {
     label: "Split Vertical",
@@ -133,15 +114,15 @@ export const HOTKEYS = {
     default: "meta+backspace",
     category: "Worktree",
   },
-  JUMP_TO_WORKTREE_1: { label: "Jump to Worktree 1", default: "meta+alt+1", category: "Worktree" },
-  JUMP_TO_WORKTREE_2: { label: "Jump to Worktree 2", default: "meta+alt+2", category: "Worktree" },
-  JUMP_TO_WORKTREE_3: { label: "Jump to Worktree 3", default: "meta+alt+3", category: "Worktree" },
-  JUMP_TO_WORKTREE_4: { label: "Jump to Worktree 4", default: "meta+alt+4", category: "Worktree" },
-  JUMP_TO_WORKTREE_5: { label: "Jump to Worktree 5", default: "meta+alt+5", category: "Worktree" },
-  JUMP_TO_WORKTREE_6: { label: "Jump to Worktree 6", default: "meta+alt+6", category: "Worktree" },
-  JUMP_TO_WORKTREE_7: { label: "Jump to Worktree 7", default: "meta+alt+7", category: "Worktree" },
-  JUMP_TO_WORKTREE_8: { label: "Jump to Worktree 8", default: "meta+alt+8", category: "Worktree" },
-  JUMP_TO_WORKTREE_9: { label: "Jump to Worktree 9", default: "meta+alt+9", category: "Worktree" },
+  JUMP_TO_WORKTREE_1: { label: "Jump to Worktree 1", default: "meta+1", category: "Worktree" },
+  JUMP_TO_WORKTREE_2: { label: "Jump to Worktree 2", default: "meta+2", category: "Worktree" },
+  JUMP_TO_WORKTREE_3: { label: "Jump to Worktree 3", default: "meta+3", category: "Worktree" },
+  JUMP_TO_WORKTREE_4: { label: "Jump to Worktree 4", default: "meta+4", category: "Worktree" },
+  JUMP_TO_WORKTREE_5: { label: "Jump to Worktree 5", default: "meta+5", category: "Worktree" },
+  JUMP_TO_WORKTREE_6: { label: "Jump to Worktree 6", default: "meta+6", category: "Worktree" },
+  JUMP_TO_WORKTREE_7: { label: "Jump to Worktree 7", default: "meta+7", category: "Worktree" },
+  JUMP_TO_WORKTREE_8: { label: "Jump to Worktree 8", default: "meta+8", category: "Worktree" },
+  JUMP_TO_WORKTREE_9: { label: "Jump to Worktree 9", default: "meta+9", category: "Worktree" },
 } as const satisfies Record<string, HotkeyDefinition>;
 
 // ---------------------------------------------------------------------------

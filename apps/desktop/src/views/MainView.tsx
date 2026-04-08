@@ -43,10 +43,6 @@ export function MainView() {
 
   // -- Layout hotkeys --
 
-  useAppHotkey("SWITCH_TO_DIFF", () => setTab("diff"));
-  useAppHotkey("SWITCH_TO_TERMINAL", () => setTab("terminal"));
-  useAppHotkey("SWITCH_TO_SPLIT", () => setTab("split"));
-
   useAppHotkey("TOGGLE_SIDEBAR", () => {
     setSidebarCollapsed((prev) => !prev);
   });
