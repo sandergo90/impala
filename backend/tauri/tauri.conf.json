@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/refs/heads/v2/crates/tauri-cli/schema.json",
-  "productName": "Differ",
+  "productName": "Canopy",
   "version": "0.1.0",
-  "identifier": "com.differ.app",
+  "identifier": "com.canopy.app",
   "build": {
     "beforeDevCommand": "cargo build --manifest-path backend/mcp/Cargo.toml && cd apps/desktop && bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Differ",
+        "title": "Canopy",
         "width": 1200,
         "height": 800,
         "titleBarStyle": "Overlay",
@@ -26,6 +26,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png", "icons/128x128@2x.png", "icons/128x128.png", "icons/32x32.png"]
+    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png", "icons/128x128@2x.png", "icons/128x128.png", "icons/32x32.png"],
+    "resources": {
+      "sounds/*": "sounds/"
+    }
   }
 }
