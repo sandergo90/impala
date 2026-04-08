@@ -10,6 +10,8 @@ import "@xterm/xterm/css/xterm.css";
 import { useUIStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
 import { useAppHotkey } from "../hooks/useAppHotkey";
+import { matchesHotkeyEvent } from "../lib/hotkeys";
+import { useHotkeysStore } from "../stores/hotkeys";
 
 const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
@@ -110,10 +112,15 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart,
     });
 
     const interceptKeys = (e: KeyboardEvent) => {
-      if (!e.metaKey) return;
-      const hotkeyKeys = ["d", "D", "[", "]", "w", ",", "p", "r", "R", "b", "B", "1", "2", "3", "n", "/", "k", "f"];
-      if (hotkeyKeys.includes(e.key)) {
-        e.stopPropagation();
+      if (!e.metaKey && !e.ctrlKey) return;
+      // Dynamically check if the event matches any registered hotkey.
+      // This ensures rebinds in settings are respected by the terminal.
+      const effectiveMap = useHotkeysStore.getState().getEffectiveMap();
+      for (const keys of Object.values(effectiveMap)) {
+        if (keys && matchesHotkeyEvent(e, keys)) {
+          e.stopPropagation();
+          return;
+        }
       }
     };
     container.addEventListener("keydown", interceptKeys, true);
