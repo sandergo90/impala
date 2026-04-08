@@ -521,38 +521,43 @@ export function Sidebar() {
                       : "hover:bg-accent"
                   }`}
                 >
-                  {isActive ? (
-                    <span className="w-3 h-3 flex items-center justify-center shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                    </span>
-                  ) : (
-                    <BranchIcon active={isSelected} />
-                  )}
+                  <div className="relative shrink-0">
+                    {isActive ? (
+                      <span className="w-4 h-4 flex items-center justify-center">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      </span>
+                    ) : (
+                      <BranchIcon active={isSelected} />
+                    )}
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                       {wt.branch}
                     </div>
-                    <div className={`flex items-center gap-1.5 text-xs mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
-                      <span className="truncate">{aheadCount > 0 ? `${aheadCount} ahead` : "up to date"}</span>
-                      {stats && (stats.additions > 0 || stats.deletions > 0) && (
-                        <span className="flex items-center gap-0.5 font-mono shrink-0">
-                          <span className="text-green-500">+{stats.additions}</span>
-                          <span className="text-red-500">-{stats.deletions}</span>
-                        </span>
-                      )}
+                    <div className={`text-xs mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
+                      {aheadCount > 0 ? `${aheadCount} ahead` : "up to date"}
                       {worktreeIssues[wt.path] && (
-                        <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openUrl(`https://linear.app/issue/${worktreeIssues[wt.path].identifier}`);
-                          }}
-                          className="font-mono text-xs text-blue-400 hover:text-blue-300 cursor-pointer shrink-0"
-                        >
-                          {worktreeIssues[wt.path].identifier}
-                        </span>
+                        <>
+                          {" · "}
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openUrl(`https://linear.app/issue/${worktreeIssues[wt.path].identifier}`);
+                            }}
+                            className="font-mono text-blue-400 hover:text-blue-300 cursor-pointer"
+                          >
+                            {worktreeIssues[wt.path].identifier}
+                          </span>
+                        </>
                       )}
                     </div>
                   </div>
+                  {stats && (stats.additions > 0 || stats.deletions > 0) && (
+                    <span className="flex items-center gap-1 text-xs font-mono shrink-0 bg-accent/60 rounded px-1.5 py-0.5">
+                      <span className="text-green-500">+{stats.additions}</span>
+                      <span className="text-red-500">-{stats.deletions}</span>
+                    </span>
+                  )}
                   {!isMain && (
                     <span
                       onClick={(e) => { e.stopPropagation(); setWorktreeToDelete(wt); }}
