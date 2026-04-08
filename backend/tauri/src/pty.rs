@@ -11,7 +11,7 @@ const MAX_BUFFER_SIZE: usize = 512 * 1024; // 512KB scrollback buffer per sessio
 struct PtySession {
     master: Box<dyn portable_pty::MasterPty + Send>,
     writer: Box<dyn Write + Send>,
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     buffer: Arc<Mutex<Vec<u8>>>,
 }
 
@@ -102,10 +102,13 @@ pub fn pty_spawn(
     let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let buffer_for_thread = Arc::clone(&buffer);
 
+    let child = Arc::new(Mutex::new(child));
+    let child_for_thread = Arc::clone(&child);
+
     let session = PtySession {
         master: pair.master,
         writer,
-        _child: child,
+        child,
         buffer,
     };
 
@@ -170,8 +173,16 @@ pub fn pty_spawn(
                 p.clear();
             }
         }
+        // Wait for child to exit and get the real exit code
+        let exit_code = if let Ok(mut child) = child_for_thread.lock() {
+            child.wait()
+                .map(|status| status.exit_code() as i32)
+                .unwrap_or(-1)
+        } else {
+            -1
+        };
         let exit_event = format!("pty-exit-{}", safe_id);
-        let _ = app_handle.emit(&exit_event, 0i32);
+        let _ = app_handle.emit(&exit_event, exit_code);
     });
 
     Ok(true)
@@ -249,10 +260,12 @@ pub fn pty_kill(
     session_id: String,
 ) -> Result<(), String> {
     let mut sessions = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
-    if let Some(mut session) = sessions.remove(&session_id) {
+    if let Some(session) = sessions.remove(&session_id) {
         // Kill child and drop session in background to avoid blocking on process exit
         std::thread::spawn(move || {
-            let _ = session._child.kill();
+            if let Ok(mut child) = session.child.lock() {
+                let _ = child.kill();
+            }
             drop(session);
         });
     }

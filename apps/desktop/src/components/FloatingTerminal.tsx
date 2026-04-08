@@ -34,10 +34,17 @@ export function FloatingTerminal() {
     const safeId = sanitizeEventId(sessionId);
     let cancelled = false;
 
-    const unlistenPromise = listen<number>(`pty-exit-${safeId}`, () => {
+    const unlistenPromise = listen<number>(`pty-exit-${safeId}`, (event) => {
       if (cancelled) return;
+      const exitCode = event.payload;
       const current = useUIStore.getState().floatingTerminal;
-      if (current.type === "setup") {
+      const failed = exitCode !== 0;
+
+      if (failed) {
+        // Stay expanded so the user can see the error output
+        const label = current.type === "setup" ? "Setup failed" : "Run failed";
+        setFloatingTerminal({ label });
+      } else if (current.type === "setup") {
         setFloatingTerminal({ label: "Setup complete", mode: "pill" });
       } else if (current.type === "run") {
         setFloatingTerminal({ label: "Run stopped", mode: "pill" });
