@@ -109,7 +109,10 @@ export function FloatingTerminal() {
 
   if (mode === "pill") {
     return (
-      <div className="fixed bottom-4 right-4 z-50 bg-card border border-border rounded-full px-3 py-1.5 shadow-lg cursor-pointer flex items-center gap-2">
+      <div
+        className="fixed bottom-4 right-4 z-50 bg-card border border-border/80 rounded-full px-3 py-1.5 cursor-pointer flex items-center gap-2 ring-1 ring-black/20"
+        style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.35), 0 1px 6px rgba(0,0,0,0.25)" }}
+      >
         <button
           onClick={() => setFloatingTerminal({ mode: "expanded" })}
           className="flex items-center gap-2"
@@ -139,8 +142,12 @@ export function FloatingTerminal() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 bg-card border border-border rounded-lg overflow-hidden shadow-xl flex flex-col"
-      style={{ width: size.width, height: size.height }}
+      className="fixed bottom-4 right-4 z-50 bg-card border border-border/80 rounded-lg overflow-hidden flex flex-col ring-1 ring-black/20"
+      style={{
+        width: size.width,
+        height: size.height,
+        boxShadow: "0 8px 40px rgba(0,0,0,0.45), 0 2px 12px rgba(0,0,0,0.3)",
+      }}
     >
       {/* Resize handles — top edge, left edge, top-left corner */}
       <div
