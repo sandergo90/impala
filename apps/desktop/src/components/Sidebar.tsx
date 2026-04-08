@@ -12,6 +12,7 @@ import { selectWorktree as sharedSelectWorktree, selectProject as sharedSelectPr
 import type { Worktree, Project, WorktreeIssue } from "../types";
 import { useAgentNotifications } from "../hooks/useAgentNotifications";
 import { useAppHotkey } from "../hooks/useAppHotkey";
+import { HotkeyDisplay } from "./HotkeyDisplay";
 import { NewWorktreeDialog } from "./NewWorktreeDialog";
 import {
   AlertDialog,
@@ -459,7 +460,7 @@ export function Sidebar() {
           <path d="m21 21-4.3-4.3"/>
         </svg>
         <span className="text-xs">Search...</span>
-        <span className="ml-auto text-xs bg-background/50 rounded px-1 py-0.5 font-mono">&#8984;P</span>
+        <HotkeyDisplay id="OPEN_COMMAND_PALETTE" className="ml-auto bg-background/50 rounded px-1 py-0.5" />
       </button>
 
       {/* Worktrees Section */}

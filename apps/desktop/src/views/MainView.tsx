@@ -13,6 +13,7 @@ import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { triggerRunScript } from "../lib/run-script";
 import { useAppHotkey } from "../hooks/useAppHotkey";
+import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -29,6 +30,9 @@ export function MainView() {
   );
 
   const activeTab = navState?.activeTab ?? "diff";
+
+  const sidebarTooltip = useHotkeyTooltip("TOGGLE_SIDEBAR", sidebarCollapsed ? "Show sidebar" : "Hide sidebar");
+  const runScriptTooltip = useHotkeyTooltip("RUN_SCRIPT", "Run script");
 
   const setTab = (tab: "diff" | "terminal" | "split") => {
     if (!selectedWorktree) return;
@@ -105,7 +109,7 @@ export function MainView() {
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className="relative text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent"
-          title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+          title={sidebarTooltip}
         >
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
             <rect
@@ -200,7 +204,7 @@ export function MainView() {
               <button
                 onClick={() => triggerRunScript()}
                 className="relative text-muted-foreground hover:text-foreground px-1.5 py-1 rounded hover:bg-accent"
-                title="Run script (Cmd+Shift+R)"
+                title={runScriptTooltip}
               >
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M4 2l10 6-10 6V2z" />

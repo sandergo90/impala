@@ -50,6 +50,10 @@ export function RootLayout() {
     triggerRunScript();
   });
 
+  useAppHotkey("SHOW_KEYBOARD_SHORTCUTS", () => {
+    router.navigate({ to: "/settings/keyboard" });
+  }, undefined, [router]);
+
   // -- Terminal / split pane shortcuts (only when terminal or split tab is active) --
 
   useAppHotkey(
