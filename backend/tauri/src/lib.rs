@@ -6,12 +6,13 @@ mod linear;
 mod linear_context;
 mod pty;
 mod viewed_files;
+mod hotkeys;
 mod notifications;
 mod watcher;
 mod worktree_issues;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -30,16 +31,20 @@ fn get_projects_file(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn check_git() -> Result<String, String> {
-    let output = std::process::Command::new("git")
-        .arg("--version")
-        .output()
-        .map_err(|_| "Git is not installed. Please install Git to use Canopy.".to_string())?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err("Git is not installed. Please install Git to use Canopy.".to_string())
-    }
+async fn check_git() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        let output = std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map_err(|_| "Git is not installed. Please install Git to use Canopy.".to_string())?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            Err("Git is not installed. Please install Git to use Canopy.".to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -64,42 +69,52 @@ fn save_projects(app_handle: tauri::AppHandle, projects: Vec<String>) -> Result<
 }
 
 #[tauri::command]
-fn list_worktrees(repo_path: String) -> Result<Vec<git::Worktree>, String> {
-    git::list_worktrees(&repo_path)
+async fn list_worktrees(repo_path: String) -> Result<Vec<git::Worktree>, String> {
+    tokio::task::spawn_blocking(move || git::list_worktrees(&repo_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn detect_base_branch(worktree_path: String) -> Result<String, String> {
-    git::detect_base_branch(&worktree_path)
+async fn detect_base_branch(worktree_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || git::detect_base_branch(&worktree_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_diverged_commits(
+async fn get_diverged_commits(
     worktree_path: String,
     base_branch: Option<String>,
 ) -> Result<Vec<git::CommitInfo>, String> {
-    git::get_diverged_commits(&worktree_path, base_branch)
+    tokio::task::spawn_blocking(move || git::get_diverged_commits(&worktree_path, base_branch))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_changed_files(
+async fn get_changed_files(
     worktree_path: String,
     commit_hash: String,
 ) -> Result<Vec<git::ChangedFile>, String> {
-    git::get_changed_files(&worktree_path, &commit_hash)
+    tokio::task::spawn_blocking(move || git::get_changed_files(&worktree_path, &commit_hash))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_commit_diff(
+async fn get_commit_diff(
     worktree_path: String,
     commit_hash: String,
     file_path: String,
 ) -> Result<String, String> {
-    git::get_commit_diff(&worktree_path, &commit_hash, &file_path)
+    tokio::task::spawn_blocking(move || git::get_commit_diff(&worktree_path, &commit_hash, &file_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_full_commit_diff(
+async fn get_full_commit_diff(
     cache: tauri::State<'_, DiffCache>,
     worktree_path: String,
     commit_hash: String,
@@ -111,7 +126,9 @@ fn get_full_commit_diff(
             return Ok(cached.clone());
         }
     }
-    let result = git::get_full_commit_diff(&worktree_path, &commit_hash)?;
+    let result = tokio::task::spawn_blocking(move || git::get_full_commit_diff(&worktree_path, &commit_hash))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))??;
     {
         let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
         c.put(key, result.clone());
@@ -120,22 +137,28 @@ fn get_full_commit_diff(
 }
 
 #[tauri::command]
-fn get_branch_diff(worktree_path: String, file_path: String) -> Result<String, String> {
-    git::get_branch_diff(&worktree_path, &file_path)
+async fn get_branch_diff(worktree_path: String, file_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || git::get_branch_diff(&worktree_path, &file_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_uncommitted_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
-    git::get_uncommitted_files(&worktree_path)
+async fn get_uncommitted_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
+    tokio::task::spawn_blocking(move || git::get_uncommitted_files(&worktree_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_uncommitted_diff(worktree_path: String) -> Result<String, String> {
-    git::get_uncommitted_diff(&worktree_path)
+async fn get_uncommitted_diff(worktree_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || git::get_uncommitted_diff(&worktree_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_full_branch_diff(
+async fn get_full_branch_diff(
     cache: tauri::State<'_, DiffCache>,
     worktree_path: String,
 ) -> Result<String, String> {
@@ -146,7 +169,9 @@ fn get_full_branch_diff(
             return Ok(cached.clone());
         }
     }
-    let result = git::get_full_branch_diff(&worktree_path)?;
+    let result = tokio::task::spawn_blocking(move || git::get_full_branch_diff(&worktree_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))??;
     {
         let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
         c.put(key, result.clone());
@@ -166,33 +191,47 @@ fn invalidate_branch_cache(
 }
 
 #[tauri::command]
-fn get_head_commit(worktree_path: String) -> Result<String, String> {
-    git::get_head_commit(&worktree_path)
+async fn get_head_commit(worktree_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || git::get_head_commit(&worktree_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
-    git::get_all_changed_files(&worktree_path)
+async fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::ChangedFile>, String> {
+    tokio::task::spawn_blocking(move || git::get_all_changed_files(&worktree_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn create_worktree(
+async fn create_worktree(
     repo_path: String,
     branch_name: String,
     base_branch: Option<String>,
     existing: bool,
 ) -> Result<git::Worktree, String> {
-    git::create_worktree(&repo_path, &branch_name, base_branch, existing)
+    tokio::task::spawn_blocking(move || {
+        git::create_worktree(&repo_path, &branch_name, base_branch, existing)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn delete_worktree(repo_path: String, worktree_path: String, force: bool) -> Result<(), String> {
-    git::delete_worktree(&repo_path, &worktree_path, force)
+async fn delete_worktree(repo_path: String, worktree_path: String, force: bool) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        git::delete_worktree(&repo_path, &worktree_path, force)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn list_branches(repo_path: String) -> Result<Vec<git::BranchInfo>, String> {
-    git::list_branches(&repo_path)
+async fn list_branches(repo_path: String) -> Result<Vec<git::BranchInfo>, String> {
+    tokio::task::spawn_blocking(move || git::list_branches(&repo_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -248,12 +287,14 @@ fn set_file_viewed(
 }
 
 #[tauri::command]
-fn get_file_diff_since_commit(
+async fn get_file_diff_since_commit(
     worktree_path: String,
     since_commit: String,
     file_path: String,
 ) -> Result<String, String> {
-    git::get_file_diff_since_commit(&worktree_path, &since_commit, &file_path)
+    tokio::task::spawn_blocking(move || git::get_file_diff_since_commit(&worktree_path, &since_commit, &file_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -287,7 +328,13 @@ fn clear_viewed_files(
 }
 
 #[tauri::command]
-fn setup_claude_integration() -> Result<String, String> {
+async fn setup_claude_integration() -> Result<String, String> {
+    tokio::task::spawn_blocking(setup_claude_integration_sync)
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+fn setup_claude_integration_sync() -> Result<String, String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "Could not determine home directory".to_string())?;
 
@@ -364,26 +411,30 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn open_in_editor(editor: String, path: String) -> Result<(), String> {
-    let app_name = match editor.as_str() {
-        "cursor" => "Cursor",
-        "vscode" => "Visual Studio Code",
-        "zed" => "Zed",
-        "webstorm" => "WebStorm",
-        "sublime" => "Sublime Text",
-        _ => return Err(format!("Unknown editor: {}", editor)),
-    };
-    let output = std::process::Command::new("open")
-        .arg("-a")
-        .arg(app_name)
-        .arg(&path)
-        .output()
-        .map_err(|e| format!("Failed to launch {}: {}", app_name, e))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Failed to open {}: {}", app_name, stderr.trim()));
-    }
-    Ok(())
+async fn open_in_editor(editor: String, path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let app_name = match editor.as_str() {
+            "cursor" => "Cursor",
+            "vscode" => "Visual Studio Code",
+            "zed" => "Zed",
+            "webstorm" => "WebStorm",
+            "sublime" => "Sublime Text",
+            _ => return Err(format!("Unknown editor: {}", editor)),
+        };
+        let output = std::process::Command::new("open")
+            .arg("-a")
+            .arg(app_name)
+            .arg(&path)
+            .output()
+            .map_err(|e| format!("Failed to launch {}: {}", app_name, e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Failed to open {}: {}", app_name, stderr.trim()));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -392,23 +443,31 @@ fn get_hook_port(state: tauri::State<'_, HookPort>) -> u16 {
 }
 
 #[tauri::command]
-fn check_generated_files(worktree_path: String, files: Vec<String>) -> Result<Vec<String>, String> {
-    git::check_generated_files(&worktree_path, &files)
+async fn check_generated_files(worktree_path: String, files: Vec<String>) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || git::check_generated_files(&worktree_path, &files))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn get_my_linear_issues(api_key: String) -> Result<Vec<linear::LinearIssue>, String> {
-    linear::get_my_issues(&api_key)
+async fn get_my_linear_issues(api_key: String) -> Result<Vec<linear::LinearIssue>, String> {
+    tokio::task::spawn_blocking(move || linear::get_my_issues(&api_key))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn search_linear_issues(api_key: String, query: String) -> Result<Vec<linear::LinearIssue>, String> {
-    linear::search_issues(&api_key, &query)
+async fn search_linear_issues(api_key: String, query: String) -> Result<Vec<linear::LinearIssue>, String> {
+    tokio::task::spawn_blocking(move || linear::search_issues(&api_key, &query))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn start_linear_issue(api_key: String, issue_id: String) -> Result<(), String> {
-    linear::start_issue(&api_key, &issue_id)
+async fn start_linear_issue(api_key: String, issue_id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || linear::start_issue(&api_key, &issue_id))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -449,18 +508,155 @@ fn unlink_worktree_issue(
 }
 
 #[tauri::command]
-fn write_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
-    linear_context::write_context(&api_key, &issue_id, &worktree_path, true)
+async fn write_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || linear_context::write_context(&api_key, &issue_id, &worktree_path, true))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn refresh_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
-    linear_context::write_context(&api_key, &issue_id, &worktree_path, false)
+async fn refresh_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || linear_context::write_context(&api_key, &issue_id, &worktree_path, false))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn clean_linear_context(worktree_path: String) -> Result<(), String> {
-    linear_context::clean_context(&worktree_path)
+async fn clean_linear_context(worktree_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || linear_context::clean_context(&worktree_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Exact paths to check first (top-level, highest priority).
+const FAVICON_EXACT: &[&str] = &[
+    "favicon.ico",
+    "favicon.png",
+    "favicon.svg",
+    "logo.png",
+    "logo.svg",
+    "icon.png",
+    "icon.svg",
+    ".github/logo.png",
+    ".github/logo.svg",
+];
+
+/// Glob patterns for deeper searches (monorepos, nested public dirs).
+/// Searched in order; first match wins.
+const FAVICON_GLOBS: &[&str] = &[
+    "**/public/favicon.ico",
+    "**/public/favicon.png",
+    "**/public/favicon.svg",
+    "**/public/icons/favicon.ico",
+    "**/public/icons/favicon.png",
+    "**/public/logo.png",
+    "**/public/logo.svg",
+    "**/static/favicon.ico",
+    "**/static/favicon.png",
+    "**/static/favicon.svg",
+    "**/assets/favicon.ico",
+    "**/assets/favicon.png",
+    "**/assets/icon.png",
+];
+
+/// Max file size for discovered favicons: 256KB
+const MAX_FAVICON_SIZE: u64 = 256 * 1024;
+
+fn mime_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        _ => "application/octet-stream",
+    }
+}
+
+fn read_icon_as_data_url(path: &Path) -> Result<Option<String>, String> {
+    let meta = fs::metadata(path)
+        .map_err(|e| format!("Failed to stat {}: {}", path.display(), e))?;
+    if meta.len() > MAX_FAVICON_SIZE {
+        return Ok(None);
+    }
+    let bytes = fs::read(path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    let mime = mime_for_ext(ext);
+    let b64 = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        &bytes,
+    );
+    Ok(Some(format!("data:{};base64,{}", mime, b64)))
+}
+
+#[tauri::command]
+async fn discover_project_icon(project_path: String) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = Path::new(&project_path);
+
+        // Phase 1: check exact paths (fast)
+        for pattern in FAVICON_EXACT {
+            let candidate = root.join(pattern);
+            if candidate.is_file() {
+                if let Ok(Some(url)) = read_icon_as_data_url(&candidate) {
+                    return Ok(Some(url));
+                }
+            }
+        }
+
+        // Phase 2: glob patterns for monorepos (skipping heavy dirs)
+        use std::collections::HashSet;
+        let skip: HashSet<&str> = ["node_modules", ".git", "dist", "build", ".turbo", ".next", "coverage", "testing"].iter().copied().collect();
+
+        for glob_pattern in FAVICON_GLOBS {
+            if let Some(found) = walk_for_glob(root, glob_pattern, &skip) {
+                if let Ok(Some(url)) = read_icon_as_data_url(&found) {
+                    return Ok(Some(url));
+                }
+            }
+        }
+
+        Ok(None)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Simple glob matcher: splits a `**/name` pattern and walks the tree.
+/// Only supports patterns starting with `**/`.
+fn walk_for_glob(root: &Path, pattern: &str, skip_dirs: &std::collections::HashSet<&str>) -> Option<PathBuf> {
+    let suffix = pattern.strip_prefix("**/")?;
+    walk_dir_for_suffix(root, suffix, skip_dirs, 0)
+}
+
+fn walk_dir_for_suffix(
+    dir: &Path,
+    suffix: &str,
+    skip_dirs: &std::collections::HashSet<&str>,
+    depth: u32,
+) -> Option<PathBuf> {
+    if depth > 5 { return None; }
+    // Check if suffix exists directly under this dir
+    let candidate = dir.join(suffix);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    // Recurse into subdirectories
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if skip_dirs.contains(name) || name.starts_with('.') {
+                    continue;
+                }
+            }
+            if let Some(found) = walk_dir_for_suffix(&path, suffix, skip_dirs, depth + 1) {
+                return Some(found);
+            }
+        }
+    }
+    None
 }
 
 pub fn run() {
@@ -587,6 +783,9 @@ pub fn run() {
             config::read_project_config,
             config::write_project_config,
             notifications::play_notification_sound,
+            discover_project_icon,
+            hotkeys::read_hotkey_overrides,
+            hotkeys::write_hotkey_overrides,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

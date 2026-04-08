@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Outlet, useRouter, useMatchRoute } from "@tanstack/react-router";
+import { useInvoke } from "./hooks/useInvoke";
 import { CommandPalette } from "./components/CommandPalette";
 import { FloatingTerminal } from "./components/FloatingTerminal";
 import { Toaster } from "./components/ui/sonner";
@@ -12,10 +13,10 @@ import {
   getLeaves,
 } from "./lib/split-tree";
 import { triggerRunScript } from "./lib/run-script";
+import { useHotkeysStore } from "./stores/hotkeys";
 
 export function RootLayout() {
-  const [gitError, setGitError] = useState(false);
-  const [checking, setChecking] = useState(true);
+  const { loading: checking, error: gitError } = useInvoke("check_git");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
   const router = useRouter();
@@ -25,9 +26,7 @@ export function RootLayout() {
   const wtPath = selectedWorktree?.path;
 
   useEffect(() => {
-    invoke("check_git")
-      .catch(() => setGitError(true))
-      .finally(() => setChecking(false));
+    useHotkeysStore.getState().load();
   }, []);
 
   useEffect(() => {
