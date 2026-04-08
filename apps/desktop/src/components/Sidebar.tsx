@@ -201,6 +201,22 @@ export function Sidebar() {
     })
   );
 
+  const diffStats = useDataStore(
+    useShallow((s) => {
+      const stats: Record<string, { additions: number; deletions: number }> = {};
+      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
+        let additions = 0;
+        let deletions = 0;
+        for (const c of state.commits ?? []) {
+          additions += c.additions;
+          deletions += c.deletions;
+        }
+        stats[path] = { additions, deletions };
+      }
+      return stats;
+    })
+  );
+
   const agentStatuses = useDataStore(
     useShallow((s) => {
       const statuses: Record<string, string> = {};
@@ -484,6 +500,7 @@ export function Sidebar() {
           {worktrees.map((wt) => {
             const isSelected = selectedWorktree?.path === wt.path;
             const aheadCount = commitCounts[wt.path] ?? 0;
+            const stats = diffStats[wt.path];
             const isMain = wt.branch === "main" || wt.branch === "master" || wt.branch === "develop";
             const isActive = agentStatuses[wt.path] === "working";
 
@@ -505,8 +522,16 @@ export function Sidebar() {
                     <BranchIcon active={isSelected} />
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                      {wt.branch}
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                        {wt.branch}
+                      </span>
+                      {stats && (stats.additions > 0 || stats.deletions > 0) && (
+                        <span className="flex items-center gap-1 text-xs font-mono ml-auto shrink-0">
+                          {stats.additions > 0 && <span className="text-green-500">+{stats.additions}</span>}
+                          {stats.deletions > 0 && <span className="text-red-500">-{stats.deletions}</span>}
+                        </span>
+                      )}
                     </div>
                     <div className={`flex items-center gap-1.5 text-xs mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
                       <span>{aheadCount > 0 ? `${aheadCount} commit${aheadCount === 1 ? "" : "s"} ahead` : "up to date"}</span>
