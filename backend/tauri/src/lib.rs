@@ -6,6 +6,7 @@ mod linear;
 mod linear_context;
 mod pty;
 mod viewed_files;
+mod notifications;
 mod watcher;
 mod worktree_issues;
 
@@ -467,6 +468,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             let app_dir = app
@@ -584,6 +586,7 @@ pub fn run() {
             watcher::unwatch_worktree,
             config::read_project_config,
             config::write_project_config,
+            notifications::play_notification_sound,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
