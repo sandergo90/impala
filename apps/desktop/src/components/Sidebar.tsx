@@ -201,9 +201,10 @@ export function Sidebar() {
     })
   );
 
-  const diffStats = useDataStore(
+  // Encode as "additions:deletions" strings so useShallow can compare primitives
+  const diffStatsRaw = useDataStore(
     useShallow((s) => {
-      const stats: Record<string, { additions: number; deletions: number }> = {};
+      const stats: Record<string, string> = {};
       for (const [path, state] of Object.entries(s.worktreeDataStates)) {
         let additions = 0;
         let deletions = 0;
@@ -211,9 +212,15 @@ export function Sidebar() {
           additions += c.additions;
           deletions += c.deletions;
         }
-        stats[path] = { additions, deletions };
+        stats[path] = `${additions}:${deletions}`;
       }
       return stats;
+    })
+  );
+  const diffStats = Object.fromEntries(
+    Object.entries(diffStatsRaw).map(([path, raw]) => {
+      const [a, d] = raw.split(":").map(Number);
+      return [path, { additions: a, deletions: d }];
     })
   );
 
