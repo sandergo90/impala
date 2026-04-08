@@ -13,7 +13,7 @@ import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { triggerRunScript } from "../lib/run-script";
 import { useAppHotkey } from "../hooks/useAppHotkey";
-import { HotkeyDisplay, useHotkeyTooltip } from "../components/HotkeyDisplay";
+import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -127,21 +127,6 @@ export function MainView() {
               )}
             </div>
           )}
-        </div>
-
-        {/* Center: search / command palette trigger (absolutely centered) */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <button
-            onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true, bubbles: true }))}
-            className="pointer-events-auto flex items-center gap-2 h-7 px-3 rounded-md border border-border/60 bg-accent/50 hover:bg-accent text-muted-foreground text-xs transition-colors cursor-pointer min-w-[200px] max-w-[280px]"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/50">
-              <circle cx="11" cy="11" r="8"/>
-              <path d="m21 21-4.3-4.3"/>
-            </svg>
-            <span className="flex-1 text-left truncate">Search...</span>
-            <HotkeyDisplay id="OPEN_COMMAND_PALETTE" className="text-muted-foreground/50" />
-          </button>
         </div>
 
         {/* Right: open + run + tabs */}
