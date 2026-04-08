@@ -531,23 +531,27 @@ export function Sidebar() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-start gap-1.5">
-                      <span className={`text-xs break-all ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                         {wt.branch}
                       </span>
-                      <span className="ml-auto shrink-0">
+                      <span className="relative ml-auto shrink-0">
+                        {/* Stats badge — visible by default, invisible on hover (keeps layout space) */}
+                        <span className={`flex items-center gap-0.5 text-[10px] font-mono rounded px-1.5 py-0.5 ${
+                          stats && (stats.additions > 0 || stats.deletions > 0)
+                            ? "bg-accent/60 group-hover:invisible"
+                            : "invisible"
+                        }`}>
+                          <span className="text-green-500">+{stats?.additions ?? 0}</span>
+                          <span className="text-red-500">-{stats?.deletions ?? 0}</span>
+                        </span>
+                        {/* Close button — overlaid on hover */}
                         {!isMain && (
                           <span
                             onClick={(e) => { e.stopPropagation(); setWorktreeToDelete(wt); }}
-                            className="hidden group-hover:flex items-center justify-center text-muted-foreground/50 hover:!text-destructive text-xs transition-colors px-1"
+                            className="absolute inset-0 hidden group-hover:flex items-center justify-center text-muted-foreground/50 hover:!text-destructive text-xs transition-colors"
                           >
                             ×
-                          </span>
-                        )}
-                        {stats && (stats.additions > 0 || stats.deletions > 0) && (
-                          <span className="flex group-hover:hidden items-center gap-0.5 text-[10px] font-mono bg-accent/60 rounded px-1.5 py-0.5">
-                            <span className="text-green-500">+{stats.additions}</span>
-                            <span className="text-red-500">-{stats.deletions}</span>
                           </span>
                         )}
                       </span>
