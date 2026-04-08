@@ -504,13 +504,15 @@ export function Sidebar() {
                   invoke("pty_spawn", {
                     sessionId,
                     cwd: worktree.path,
-                    command: [config.setup],
                     envVars: {
                       CANOPY_PROJECT_PATH: selectedProject.path,
                       CANOPY_WORKTREE_PATH: worktree.path,
                       CANOPY_BRANCH: worktree.branch,
                     },
                   }).then(() => {
+                    // Write the setup command into the interactive shell
+                    const encoded = btoa(config.setup + "\n");
+                    invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
                     useUIStore.getState().setFloatingTerminal({
                       mode: "expanded",
                       sessionId,

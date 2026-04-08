@@ -38,13 +38,16 @@ export async function triggerRunScript() {
     await invoke("pty_spawn", {
       sessionId,
       cwd: selectedWorktree.path,
-      command: [config.run],
       envVars: {
         CANOPY_PROJECT_PATH: selectedProject.path,
         CANOPY_WORKTREE_PATH: selectedWorktree.path,
         CANOPY_BRANCH: selectedWorktree.branch,
       },
     });
+
+    // Write the run command into the interactive shell
+    const encoded = btoa(config.run + "\n");
+    await invoke("pty_write", { sessionId, data: encoded });
 
     const label = config.run.length > 30 ? config.run.slice(0, 30) + "..." : config.run;
 
