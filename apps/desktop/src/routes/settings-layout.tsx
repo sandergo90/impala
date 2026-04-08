@@ -21,7 +21,7 @@ export function SettingsLayout() {
     <>
       {/* Title bar */}
       <div
-        className="relative flex items-center h-10 shrink-0 border-b border-border/50 bg-background"
+        className="relative flex items-center h-12 shrink-0 border-b border-border/50 bg-background"
         style={{ paddingLeft: "78px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
