@@ -129,63 +129,18 @@ export function MainView() {
           </svg>
         </button>
 
-        {/* Center context: project / branch . N ahead of base */}
+        {/* Center: project / branch breadcrumb */}
         <div
           className="flex-1 flex items-center justify-center gap-1.5 text-xs"
           data-tauri-drag-region
         >
           {selectedWorktree && (
             <>
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                className="text-muted-foreground/50 shrink-0"
-              >
-                <circle
-                  cx="4"
-                  cy="4"
-                  r="2"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  fill="none"
-                />
-                <circle
-                  cx="4"
-                  cy="12"
-                  r="2"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  fill="none"
-                />
-                <line
-                  x1="4"
-                  y1="6"
-                  x2="4"
-                  y2="10"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                />
-                <path
-                  d="M4 8 L10 4"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                />
-                <circle
-                  cx="12"
-                  cy="4"
-                  r="2"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  fill="none"
-                />
-              </svg>
               <span className="text-muted-foreground/60">
                 {selectedProject?.name}
               </span>
-              <span className="text-muted-foreground/40">/</span>
-              <span className="text-foreground font-medium font-mono text-sm">
+              <span className="text-muted-foreground/30">/</span>
+              <span className="text-foreground font-medium font-mono text-xs">
                 {selectedWorktree.branch}
               </span>
               {dataState?.baseBranch &&
@@ -195,29 +150,29 @@ export function MainView() {
                     {dataState.baseBranch}
                   </span>
                 )}
-              <span className="mx-1 w-px h-3.5 bg-border/50" />
+            </>
+          )}
+        </div>
+
+        {/* Right: actions + tabs */}
+        <div className="relative flex items-center gap-1 pr-3">
+          {selectedWorktree && (
+            <>
               <OpenInEditorButton worktreePath={selectedWorktree.path} />
               <button
                 onClick={() => triggerRunScript()}
                 className="relative text-muted-foreground hover:text-foreground px-1.5 py-1 rounded hover:bg-accent"
                 title={runScriptTooltip}
               >
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M4 2l10 6-10 6V2z" />
                 </svg>
               </button>
-            </>
-          )}
-        </div>
-
-        {/* Right: tabs + changes toggle */}
-        <div className="relative flex items-center gap-1 pr-3">
-          {selectedWorktree && (
-            <>
+              <span className="mx-1 w-px h-3.5 bg-border/50" />
               {tabPill("Diff", activeTab === "diff", () => setTab("diff"))}
               {tabPill("Terminal", activeTab === "terminal", () => setTab("terminal"))}
               {tabPill("Split", activeTab === "split", () => setTab("split"))}
-              <span className="mx-1 w-px h-3.5 bg-border" />
+              <span className="mx-1 w-px h-3.5 bg-border/50" />
             </>
           )}
           {tabPill("Sidebar", showSidebar, () =>
