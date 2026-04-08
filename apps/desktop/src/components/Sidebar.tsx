@@ -535,12 +535,22 @@ export function Sidebar() {
                       <span className={`text-xs truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                         {wt.branch}
                       </span>
-                      {stats && (stats.additions > 0 || stats.deletions > 0) && (
-                        <span className="flex items-center gap-0.5 text-[10px] font-mono shrink-0 ml-auto bg-accent/60 rounded px-1.5 py-0.5">
-                          <span className="text-green-500">+{stats.additions}</span>
-                          <span className="text-red-500">-{stats.deletions}</span>
-                        </span>
-                      )}
+                      <span className="ml-auto shrink-0">
+                        {!isMain && (
+                          <span
+                            onClick={(e) => { e.stopPropagation(); setWorktreeToDelete(wt); }}
+                            className="hidden group-hover:flex items-center justify-center text-muted-foreground/50 hover:!text-destructive text-xs transition-colors px-1"
+                          >
+                            ×
+                          </span>
+                        )}
+                        {stats && (stats.additions > 0 || stats.deletions > 0) && (
+                          <span className="flex group-hover:hidden items-center gap-0.5 text-[10px] font-mono bg-accent/60 rounded px-1.5 py-0.5">
+                            <span className="text-green-500">+{stats.additions}</span>
+                            <span className="text-red-500">-{stats.deletions}</span>
+                          </span>
+                        )}
+                      </span>
                     </div>
                     <div className={`text-xs mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
                       {aheadCount > 0 ? `${aheadCount} ahead` : "up to date"}
@@ -560,14 +570,6 @@ export function Sidebar() {
                       )}
                     </div>
                   </div>
-                  {!isMain && (
-                    <span
-                      onClick={(e) => { e.stopPropagation(); setWorktreeToDelete(wt); }}
-                      className="text-muted-foreground/0 group-hover:text-muted-foreground/50 hover:!text-destructive text-xs transition-colors px-0.5"
-                    >
-                      ×
-                    </span>
-                  )}
                 </button>
               </div>
             );
