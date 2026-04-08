@@ -16,18 +16,24 @@ export const NOTIFICATION_SOUNDS = [
   { id: "tone", name: "Tone" },
 ] as const;
 
+export function playNotificationSound(soundId: string) {
+  invoke("play_notification_sound", { soundId }).catch((err) =>
+    console.warn("Failed to play notification sound:", err)
+  );
+}
+
 export function useAgentNotifications() {
   const windowFocusedRef = useRef(true);
 
-  // Track window focus state
   useEffect(() => {
     let cancelled = false;
+    const window = getCurrentWindow();
 
-    getCurrentWindow().isFocused().then((focused) => {
+    window.isFocused().then((focused) => {
       if (!cancelled) windowFocusedRef.current = focused;
     });
 
-    const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+    const unlisten = window.onFocusChanged(({ payload: focused }) => {
       windowFocusedRef.current = focused;
     });
 
@@ -37,14 +43,12 @@ export function useAgentNotifications() {
     };
   }, []);
 
-  // Request notification permission on mount
   useEffect(() => {
     isPermissionGranted().then((granted) => {
       if (!granted) requestPermission();
     });
   }, []);
 
-  // Listen for agent completion
   useEffect(() => {
     const unlisten = listen<{ worktree_path: string; status: string }>(
       "agent-status",
@@ -52,16 +56,13 @@ export function useAgentNotifications() {
         const { worktree_path, status } = event.payload;
         if (status !== "idle") return;
 
-        // Check suppression: window focused AND this worktree is active
         const selectedWorktree = useUIStore.getState().selectedWorktree;
         if (windowFocusedRef.current && selectedWorktree?.path === worktree_path) {
           return; // Suppress — user is already looking at this worktree
         }
 
-        // Extract worktree name from path (last segment)
         const worktreeName = worktree_path.split("/").pop() ?? worktree_path;
 
-        // Send native notification
         const granted = await isPermissionGranted();
         if (granted) {
           sendNotification({
@@ -70,12 +71,9 @@ export function useAgentNotifications() {
           });
         }
 
-        // Play sound
         const { notificationSoundMuted, selectedSoundId } = useUIStore.getState();
         if (!notificationSoundMuted) {
-          invoke("play_notification_sound", { soundId: selectedSoundId }).catch(
-            (err) => console.warn("Failed to play notification sound:", err)
-          );
+          playNotificationSound(selectedSoundId);
         }
       }
     );

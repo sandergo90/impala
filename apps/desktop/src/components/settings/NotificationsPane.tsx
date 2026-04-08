@@ -1,18 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useUIStore } from "../../store";
-import { NOTIFICATION_SOUNDS } from "../../hooks/useAgentNotifications";
+import { NOTIFICATION_SOUNDS, playNotificationSound } from "../../hooks/useAgentNotifications";
 
 export function NotificationsPane() {
   const soundMuted = useUIStore((s) => s.notificationSoundMuted);
   const setSoundMuted = useUIStore((s) => s.setNotificationSoundMuted);
   const selectedSoundId = useUIStore((s) => s.selectedSoundId);
   const setSelectedSoundId = useUIStore((s) => s.setSelectedSoundId);
-
-  const handlePreview = (soundId: string) => {
-    invoke("play_notification_sound", { soundId }).catch((err) =>
-      console.warn("Failed to play sound:", err)
-    );
-  };
 
   return (
     <div>
@@ -21,7 +14,6 @@ export function NotificationsPane() {
         Configure how you're notified when an agent finishes its task.
       </p>
 
-      {/* Mute toggle */}
       <div className="flex items-center justify-between max-w-lg">
         <div>
           <div className="text-xs font-medium">Notification sounds</div>
@@ -43,7 +35,6 @@ export function NotificationsPane() {
         </button>
       </div>
 
-      {/* Sound selection */}
       <div className={`mt-6 max-w-lg ${soundMuted ? "opacity-50 pointer-events-none" : ""}`}>
         <div className="text-xs font-medium mb-3">Notification sound</div>
         <div className="space-y-1">
@@ -74,7 +65,7 @@ export function NotificationsPane() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  handlePreview(sound.id);
+                  playNotificationSound(sound.id);
                 }}
                 className="text-xs text-muted-foreground hover:text-foreground px-2 py-0.5 rounded hover:bg-muted/50 transition-colors"
               >
