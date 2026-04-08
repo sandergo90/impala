@@ -10,6 +10,7 @@ import { useUIStore, useDataStore } from "../store";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { selectWorktree as sharedSelectWorktree, selectProject as sharedSelectProject } from "../hooks/useWorktreeActions";
 import type { Worktree, Project, WorktreeIssue } from "../types";
+import { useAgentNotifications } from "../hooks/useAgentNotifications";
 import { NewWorktreeDialog } from "./NewWorktreeDialog";
 import {
   AlertDialog,
@@ -126,6 +127,8 @@ export function Sidebar() {
   const worktrees = useDataStore((s) => s.worktrees);
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+
+  useAgentNotifications();
 
   // Listen for agent-status events from the backend
   useEffect(() => {

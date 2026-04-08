@@ -76,6 +76,10 @@ interface UIState {
   setLinearApiKey: (key: string) => void;
   preferredEditor: string;
   setPreferredEditor: (editor: string) => void;
+  notificationSoundMuted: boolean;
+  setNotificationSoundMuted: (muted: boolean) => void;
+  selectedSoundId: string;
+  setSelectedSoundId: (id: string) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -150,6 +154,10 @@ export const useUIStore = create<UIState>()(
       setLinearApiKey: (key) => set({ linearApiKey: key }),
       preferredEditor: "cursor",
       setPreferredEditor: (editor) => set({ preferredEditor: editor }),
+      notificationSoundMuted: false,
+      setNotificationSoundMuted: (muted) => set({ notificationSoundMuted: muted }),
+      selectedSoundId: "chime",
+      setSelectedSoundId: (id) => set({ selectedSoundId: id }),
     }),
     {
       name: "canopy-ui-state",
