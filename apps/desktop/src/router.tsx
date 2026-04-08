@@ -11,6 +11,7 @@ import { SettingsLayout } from "./routes/settings-layout";
 import { AppearanceRoute } from "./routes/settings/appearance";
 import { IntegrationsRoute } from "./routes/settings/integrations";
 import { ProjectSettingsRoute } from "./routes/settings/project";
+import { NotificationsRoute } from "./routes/settings/notifications";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -45,6 +46,12 @@ const settingsIntegrationsRoute = createRoute({
   component: IntegrationsRoute,
 });
 
+const settingsNotificationsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/notifications",
+  component: NotificationsRoute,
+});
+
 export const projectSettingsRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/project/$projectId",
@@ -56,6 +63,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute.addChildren([
     settingsAppearanceRoute,
     settingsIntegrationsRoute,
+    settingsNotificationsRoute,
     projectSettingsRoute,
   ]),
 ]);

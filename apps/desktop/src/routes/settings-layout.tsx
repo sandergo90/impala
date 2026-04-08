@@ -4,6 +4,7 @@ import { useDataStore } from "../store";
 const navItems = [
   { to: "/settings/appearance" as const, label: "Appearance" },
   { to: "/settings/integrations" as const, label: "Integrations" },
+  { to: "/settings/notifications" as const, label: "Notifications" },
 ];
 
 const navLinkClass =
