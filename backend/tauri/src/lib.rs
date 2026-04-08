@@ -2,12 +2,12 @@ mod annotations;
 mod config;
 mod git;
 mod hook_server;
+mod hotkeys;
 mod linear;
 mod linear_context;
+mod notifications;
 mod pty;
 mod viewed_files;
-mod hotkeys;
-mod notifications;
 mod watcher;
 mod worktree_issues;
 

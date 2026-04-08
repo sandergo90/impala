@@ -96,8 +96,8 @@ export const useHotkeysStore = create<HotkeysStore>()((set, get) => ({
   },
 
   getEffective: (id) => {
-    const override = get().overrides[id];
-    if (override !== undefined) return override;
+    const userOverride = get().overrides[id];
+    if (userOverride !== undefined) return userOverride;
     return HOTKEYS[id].default;
   },
 
