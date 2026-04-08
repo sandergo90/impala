@@ -13,7 +13,7 @@ import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { triggerRunScript } from "../lib/run-script";
 import { useAppHotkey } from "../hooks/useAppHotkey";
-import { useHotkeyTooltip } from "../components/HotkeyDisplay";
+import { HotkeyDisplay, useHotkeyTooltip } from "../components/HotkeyDisplay";
 
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -94,85 +94,75 @@ export function MainView() {
 
   return (
     <>
-      {/* Title bar — branch context center, tab pills right */}
+      {/* Title bar */}
       <div
         className="relative flex items-center h-12 shrink-0 border-b border-border/50 bg-background"
-        style={{ paddingLeft: "78px" }}
+        style={{ paddingLeft: "88px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
 
-        {/* Sidebar toggle */}
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="relative text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent"
-          title={sidebarTooltip}
-        >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <rect
-              x="1"
-              y="2"
-              width="14"
-              height="12"
-              rx="2"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              fill="none"
-            />
-            <line
-              x1="5.5"
-              y1="2"
-              x2="5.5"
-              y2="14"
-              stroke="currentColor"
-              strokeWidth="1.4"
-            />
-          </svg>
-        </button>
-
-        {/* Center: project / branch breadcrumb */}
-        <div
-          className="flex-1 flex items-center justify-center gap-1.5 text-xs"
-          data-tauri-drag-region
-        >
+        {/* Left: sidebar toggle + breadcrumb */}
+        <div className="relative flex items-center gap-2 h-full">
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="relative text-muted-foreground hover:text-foreground p-1.5 rounded hover:bg-accent"
+            title={sidebarTooltip}
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.4" fill="none" />
+              <line x1="5.5" y1="2" x2="5.5" y2="14" stroke="currentColor" strokeWidth="1.4" />
+            </svg>
+          </button>
           {selectedWorktree && (
-            <>
-              <span className="text-muted-foreground/60">
-                {selectedProject?.name}
-              </span>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-muted-foreground/60">{selectedProject?.name}</span>
               <span className="text-muted-foreground/30">/</span>
-              <span className="text-foreground font-medium font-mono text-xs">
+              <span className="text-foreground font-medium font-mono text-xs truncate max-w-[200px]">
                 {selectedWorktree.branch}
               </span>
-              {dataState?.baseBranch &&
-                (dataState?.commits?.length ?? 0) > 0 && (
-                  <span className="bg-accent rounded-full px-1.5 py-0.5 text-xs text-muted-foreground">
-                    {dataState.commits.length} ahead of{" "}
-                    {dataState.baseBranch}
-                  </span>
-                )}
-            </>
+              {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
+                <span className="bg-accent rounded-full px-1.5 py-0.5 text-xs text-muted-foreground">
+                  {dataState.commits.length} ahead of {dataState.baseBranch}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
-        {/* Right: actions + tabs */}
-        <div className="relative flex items-center gap-1 pr-3">
+        {/* Center: search / command palette trigger (absolutely centered) */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <button
+            onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true, bubbles: true }))}
+            className="pointer-events-auto flex items-center gap-2 h-7 px-3 rounded-md border border-border/60 bg-accent/50 hover:bg-accent text-muted-foreground text-xs transition-colors cursor-pointer min-w-[200px] max-w-[280px]"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/50">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.3-4.3"/>
+            </svg>
+            <span className="flex-1 text-left truncate">Search...</span>
+            <HotkeyDisplay id="OPEN_COMMAND_PALETTE" className="text-muted-foreground/50" />
+          </button>
+        </div>
+
+        {/* Right: open + run + tabs */}
+        <div className="relative flex items-center gap-1.5 pr-4 ml-auto shrink-0">
           {selectedWorktree && (
             <>
               <OpenInEditorButton worktreePath={selectedWorktree.path} />
               <button
                 onClick={() => triggerRunScript()}
-                className="relative text-muted-foreground hover:text-foreground px-1.5 py-1 rounded hover:bg-accent"
+                className="relative text-muted-foreground hover:text-foreground p-1.5 rounded hover:bg-accent"
                 title={runScriptTooltip}
               >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M4 2l10 6-10 6V2z" />
                 </svg>
               </button>
-              <span className="mx-1 w-px h-3.5 bg-border/50" />
+              <span className="mx-0.5 w-px h-3.5 bg-border/50" />
               {tabPill("Diff", activeTab === "diff", () => setTab("diff"))}
               {tabPill("Terminal", activeTab === "terminal", () => setTab("terminal"))}
               {tabPill("Split", activeTab === "split", () => setTab("split"))}
-              <span className="mx-1 w-px h-3.5 bg-border/50" />
+              <span className="mx-0.5 w-px h-3.5 bg-border/50" />
             </>
           )}
           {tabPill("Sidebar", showSidebar, () =>
