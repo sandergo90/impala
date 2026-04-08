@@ -23,6 +23,7 @@ interface XtermTerminalProps {
   isFocused?: boolean;
   onFocus?: () => void;
   onRestart?: () => void;
+  scrollback?: number;
 }
 
 function sanitizeEventId(id: string): string {
@@ -38,7 +39,7 @@ function decodeBase64(encoded: string): Uint8Array {
   return bytes;
 }
 
-export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart }: XtermTerminalProps) {
+export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart, scrollback = 10000 }: XtermTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -120,7 +121,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart 
       if (cancelled) return;
 
       terminal = new Terminal({
-        scrollback: 10000,
+        scrollback,
         cursorBlink: true,
         cursorStyle: "bar",
         fontSize: 14,
