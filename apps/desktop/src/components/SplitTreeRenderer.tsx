@@ -222,15 +222,26 @@ function LeafPane({
             onSessionSpawned(ptyId);
             if (paneType === "claude" && isNew) {
               const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
-              const claudeCmd = claudeLaunched
-                ? "claude --dangerously-skip-permissions --remote-control --continue\n"
-                : "claude --dangerously-skip-permissions --remote-control\n";
-              const encoded = btoa(
-                Array.from(new TextEncoder().encode(claudeCmd), (b) =>
-                  String.fromCharCode(b)
-                ).join("")
-              );
-              invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
+
+              // Fetch per-project flags, fall back to global
+              Promise.all([
+                invoke<string | null>("get_setting", { key: "claudeFlags", scope: worktreePath }),
+                invoke<string | null>("get_setting", { key: "claudeFlags", scope: "global" }),
+              ]).then(([projectFlags, globalFlags]) => {
+                const flags = projectFlags ?? globalFlags ?? "";
+                const parts = ["claude"];
+                if (flags.trim()) parts.push(flags.trim());
+                if (claudeLaunched) parts.push("--continue");
+                const claudeCmd = parts.join(" ") + "\n";
+
+                const encoded = btoa(
+                  Array.from(new TextEncoder().encode(claudeCmd), (b) =>
+                    String.fromCharCode(b)
+                  ).join("")
+                );
+                invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
+              }).catch(() => {});
+
               useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
             }
           })

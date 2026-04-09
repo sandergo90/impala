@@ -34,13 +34,29 @@ export function ProjectSettingsRoute() {
   setupRef.current = setup;
   runRef.current = run;
 
+  const [claudeFlags, setClaudeFlags] = useState("");
+  const [claudeFlagsLoaded, setClaudeFlagsLoaded] = useState(false);
+  const claudeFlagsDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
   // Reset loaded flag and clean up timers when projectPath changes
   useEffect(() => {
     loadedRef.current = false;
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      if (claudeFlagsDebounceRef.current) clearTimeout(claudeFlagsDebounceRef.current);
     };
+  }, [projectPath]);
+
+  // Load per-project claude flags
+  useEffect(() => {
+    setClaudeFlagsLoaded(false);
+    invoke<string | null>("get_setting", { key: "claudeFlags", scope: projectPath })
+      .then((val) => {
+        setClaudeFlags(val ?? "");
+        setClaudeFlagsLoaded(true);
+      })
+      .catch(() => setClaudeFlagsLoaded(true));
   }, [projectPath]);
 
   // Load config on mount / when projectPath changes
@@ -95,6 +111,23 @@ export function ProjectSettingsRoute() {
     if (loadedRef.current) saveConfig(setupRef.current, value);
   };
 
+  const handleClaudeFlagsChange = (value: string) => {
+    setClaudeFlags(value);
+    if (!claudeFlagsLoaded) return;
+    if (claudeFlagsDebounceRef.current) clearTimeout(claudeFlagsDebounceRef.current);
+    claudeFlagsDebounceRef.current = setTimeout(async () => {
+      try {
+        if (value.trim()) {
+          await invoke("set_setting", { key: "claudeFlags", scope: projectPath, value: value.trim() });
+        } else {
+          await invoke("delete_setting", { key: "claudeFlags", scope: projectPath });
+        }
+      } catch (e) {
+        toast.error(`Failed to save claude flags: ${e}`);
+      }
+    }, 500);
+  };
+
   return (
     <div className="max-w-2xl space-y-6">
       <div>
@@ -141,6 +174,21 @@ export function ProjectSettingsRoute() {
             <span className="text-md text-muted-foreground">Saved ✓</span>
           )}
         </div>
+      </div>
+
+      <div className="p-4 rounded-lg border border-border bg-card space-y-3">
+        <h3 className="text-sm font-medium">Claude Flags</h3>
+        <p className="text-md text-muted-foreground">
+          CLI flags passed to <code className="font-mono text-foreground">claude</code> when
+          starting a session in this project. Leave empty to use the global default.
+        </p>
+        <input
+          type="text"
+          value={claudeFlags}
+          onChange={(e) => handleClaudeFlagsChange(e.target.value)}
+          placeholder="--dangerously-skip-permissions --remote-control"
+          className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
+        />
       </div>
 
       <div className="space-y-2">
