@@ -13,6 +13,8 @@ import { useAppHotkey } from "../hooks/useAppHotkey";
 import { matchesHotkeyEvent } from "../lib/hotkeys";
 import { useHotkeysStore } from "../stores/hotkeys";
 import { createFileLinkProvider } from "../lib/terminal-link-provider";
+import { encodePtyInput } from "../lib/encode-pty";
+import { sanitizeEventId } from "../lib/sanitize-event-id";
 
 const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
@@ -29,10 +31,6 @@ interface XtermTerminalProps {
   onFocus?: () => void;
   onRestart?: () => void;
   scrollback?: number;
-}
-
-function sanitizeEventId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9\-_]/g, "-");
 }
 
 function decodeBase64(encoded: string): Uint8Array {
@@ -93,11 +91,7 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
 
     function writeToPty(text: string) {
       if (exitedRef.current) return;
-      const encoded = btoa(
-        Array.from(new TextEncoder().encode(text), (b) =>
-          String.fromCharCode(b)
-        ).join("")
-      );
+      const encoded = encodePtyInput(text);
       invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
     }
 

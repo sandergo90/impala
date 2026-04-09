@@ -4,15 +4,29 @@ import { listen } from "@tauri-apps/api/event";
 import { useUIStore } from "../store";
 import { XtermTerminal } from "./XtermTerminal";
 import { triggerRunScript } from "../lib/run-script";
-
-function sanitizeEventId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9\-_]/g, "-");
-}
+import { sanitizeEventId } from "../lib/sanitize-event-id";
 
 const MIN_WIDTH = 300;
 const MIN_HEIGHT = 200;
 const MAX_WIDTH = 900;
 const MAX_HEIGHT = 700;
+
+function RestartButton({ onClick, className }: { onClick: () => void; className?: string }) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={`text-muted-foreground hover:text-foreground text-xs ${className ?? ""}`}
+      title="Restart"
+    >
+      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M2 8a6 6 0 0 1 10.3-4.2L14 2v4h-4l1.7-1.7A4.5 4.5 0 1 0 12.5 8" />
+      </svg>
+    </button>
+  );
+}
 
 function StatusDot({ status }: { status: "running" | "stopping" | "stopped" | "succeeded" | "failed" }) {
   const color =
@@ -172,18 +186,7 @@ export function FloatingTerminal() {
           <span className="text-xs text-foreground">{label}</span>
         </button>
         {showRestart && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              triggerRunScript();
-            }}
-            className="text-muted-foreground hover:text-foreground text-xs ml-0.5"
-            title="Restart"
-          >
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M2 8a6 6 0 0 1 10.3-4.2L14 2v4h-4l1.7-1.7A4.5 4.5 0 1 0 12.5 8" />
-            </svg>
-          </button>
+          <RestartButton onClick={() => triggerRunScript()} className="ml-0.5" />
         )}
         <button
           onClick={(e) => {
@@ -232,15 +235,7 @@ export function FloatingTerminal() {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {ft?.type === "run" && (status === "stopped" || status === "failed") && (
-            <button
-              onClick={() => triggerRunScript()}
-              className="text-muted-foreground hover:text-foreground text-xs px-1"
-              title="Restart"
-            >
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M2 8a6 6 0 0 1 10.3-4.2L14 2v4h-4l1.7-1.7A4.5 4.5 0 1 0 12.5 8" />
-              </svg>
-            </button>
+            <RestartButton onClick={() => triggerRunScript()} className="px-1" />
           )}
           <button
             onClick={() => wtPath && setFloatingTerminal(wtPath, { mode: "pill" })}

@@ -419,12 +419,12 @@ async fn open_in_editor(
     col: Option<u32>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let (app_name, _use_cli) = match editor.as_str() {
-            "cursor" => ("Cursor", true),
-            "vscode" => ("Visual Studio Code", true),
-            "zed" => ("Zed", true),
-            "webstorm" => ("WebStorm", false),
-            "sublime" => ("Sublime Text", true),
+        let app_name = match editor.as_str() {
+            "cursor" => "Cursor",
+            "vscode" => "Visual Studio Code",
+            "zed" => "Zed",
+            "webstorm" => "WebStorm",
+            "sublime" => "Sublime Text",
             _ => return Err(format!("Unknown editor: {}", editor)),
         };
 

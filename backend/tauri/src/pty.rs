@@ -7,6 +7,9 @@ use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 
 const MAX_BUFFER_SIZE: usize = 512 * 1024; // 512KB scrollback buffer per session
+const MAX_FLUSH_BYTES: usize = 128 * 1024;
+const BACKPRESSURE_HIGH: usize = 1024 * 1024;
+const BACKPRESSURE_LOW: usize = 256 * 1024;
 
 struct PtySession {
     master: Box<dyn portable_pty::MasterPty + Send>,
@@ -133,10 +136,6 @@ pub fn pty_spawn(
     let event_name_flush = event_name.clone();
 
     // Backpressure: pause reads when pending buffer is too large
-    const MAX_FLUSH_BYTES: usize = 128 * 1024;
-    const BACKPRESSURE_HIGH: usize = 1024 * 1024;
-    const BACKPRESSURE_LOW: usize = 256 * 1024;
-
     let backpressured = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let backpressured_for_read = Arc::clone(&backpressured);
 
@@ -155,8 +154,7 @@ pub fn pty_spawn(
                     std::mem::take(&mut *p)
                 } else {
                     // Flush only MAX_FLUSH_BYTES, keep the rest
-                    let chunk = p[..MAX_FLUSH_BYTES].to_vec();
-                    *p = p[MAX_FLUSH_BYTES..].to_vec();
+                    let chunk = p.drain(..MAX_FLUSH_BYTES).collect::<Vec<_>>();
                     // Set backpressure if remaining > high watermark
                     if p.len() > BACKPRESSURE_HIGH {
                         backpressured.store(true, std::sync::atomic::Ordering::Relaxed);

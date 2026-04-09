@@ -5,6 +5,7 @@ import { openFileInEditor } from "./open-file-in-editor";
 
 const existsCache = new Map<string, { exists: boolean; absPath: string; ts: number }>();
 const CACHE_TTL_MS = 10_000;
+const MAX_CACHE_SIZE = 500;
 
 async function resolveAndCache(
   baseDir: string,
@@ -20,6 +21,16 @@ async function resolveAndCache(
     candidate,
   });
   existsCache.set(key, { absPath, exists, ts: Date.now() });
+  if (existsCache.size > MAX_CACHE_SIZE) {
+    // Evict oldest entries (first inserted)
+    const entriesToDelete = existsCache.size - MAX_CACHE_SIZE;
+    let count = 0;
+    for (const key of existsCache.keys()) {
+      if (count >= entriesToDelete) break;
+      existsCache.delete(key);
+      count++;
+    }
+  }
   return { absPath, exists };
 }
 

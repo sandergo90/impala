@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useUIStore } from "../store";
+import { encodePtyInput } from "./encode-pty";
 
 export async function stopRunScript() {
   const { selectedWorktree, getFloatingTerminal, setFloatingTerminal } = useUIStore.getState();
@@ -12,11 +13,7 @@ export async function stopRunScript() {
 
   setFloatingTerminal(selectedWorktree.path, { status: "stopping", label: "Stopping..." });
 
-  const encoded = btoa(
-    Array.from(new TextEncoder().encode("\x03"), (b) =>
-      String.fromCharCode(b)
-    ).join("")
-  );
+  const encoded = encodePtyInput("\x03");
   await invoke("pty_write", { sessionId: ft.sessionId, data: encoded }).catch(() => {});
 
   const sessionId = ft.sessionId;
@@ -91,11 +88,7 @@ export async function triggerRunScript() {
     });
 
     // Write the run command into the interactive shell
-    const encoded = btoa(
-      Array.from(new TextEncoder().encode(config.run + "\n"), (b) =>
-        String.fromCharCode(b)
-      ).join("")
-    );
+    const encoded = encodePtyInput(config.run + "\n");
     await invoke("pty_write", { sessionId, data: encoded });
 
     const label = config.run.length > 30 ? config.run.slice(0, 30) + "..." : config.run;
