@@ -146,6 +146,16 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
     }),
   );
 
+  const unseenResults = useDataStore(
+    useShallow((s) => {
+      const unseen: Record<string, boolean> = {};
+      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
+        unseen[path] = state.hasUnseenResult ?? false;
+      }
+      return unseen;
+    }),
+  );
+
   const iconUrl = selectedProject
     ? projectIcons[selectedProject.path]
     : undefined;
@@ -198,6 +208,8 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
         worktrees.map((wt) => {
           const isSelected = selectedWorktree?.path === wt.path;
           const isActive = agentStatuses[wt.path] === "working";
+          const hasUnseen = unseenResults[wt.path];
+          const isPermission = agentStatuses[wt.path] === "permission";
           return (
             <button
               key={wt.path}
@@ -208,9 +220,11 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
               title={wt.branch}
             >
               <BranchIcon active={isSelected} />
-              {isActive && (
+              {isActive ? (
                 <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              )}
+              ) : hasUnseen ? (
+                <span className={`absolute bottom-0 right-0 w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
+              ) : null}
             </button>
           );
         })}
@@ -395,6 +409,17 @@ export function Sidebar() {
       return statuses;
     }),
   );
+
+  const unseenResults = useDataStore(
+    useShallow((s) => {
+      const unseen: Record<string, boolean> = {};
+      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
+        unseen[path] = state.hasUnseenResult ?? false;
+      }
+      return unseen;
+    }),
+  );
+
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [worktreeToDelete, setWorktreeToDelete] = useState<Worktree | null>(
@@ -761,6 +786,8 @@ export function Sidebar() {
                 wt.branch === "master" ||
                 wt.branch === "develop";
               const isActive = agentStatuses[wt.path] === "working";
+              const hasUnseen = unseenResults[wt.path];
+              const isPermission = agentStatuses[wt.path] === "permission";
 
               return (
                 <div key={wt.path} className="group relative mx-2 my-0.5">
@@ -776,7 +803,12 @@ export function Sidebar() {
                           <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                         </span>
                       ) : (
-                        <BranchIcon active={isSelected} />
+                        <>
+                          <BranchIcon active={isSelected} />
+                          {hasUnseen && (
+                            <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
+                          )}
+                        </>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
