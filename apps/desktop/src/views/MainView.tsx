@@ -73,6 +73,32 @@ export function MainView() {
     setShowSidebar((prev) => !prev);
   });
 
+  useAppHotkey("TOGGLE_TERMINAL", () => {
+    const state = useUIStore.getState();
+
+    if (state.generalTerminalActive) {
+      // Toggle back to previous worktree
+      state.setGeneralTerminalActive(false);
+      if (state.previousWorktree) {
+        const worktrees = useDataStore.getState().worktrees;
+        const stillExists = worktrees.some(
+          (wt) => wt.path === state.previousWorktree?.path
+        );
+        if (stillExists) {
+          state.setSelectedWorktree(state.previousWorktree);
+        }
+        state.setPreviousWorktree(null);
+      }
+    } else {
+      // Toggle to general terminal
+      if (state.selectedWorktree) {
+        state.setPreviousWorktree(state.selectedWorktree);
+      }
+      state.setSelectedWorktree(null);
+      state.setGeneralTerminalActive(true);
+    }
+  });
+
   const handleFocusPane = useCallback(
     (paneId: string) => {
       if (!wtPath) return;
