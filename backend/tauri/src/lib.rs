@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
-use tauri::menu::{MenuBuilder, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
 struct DbState(Mutex<rusqlite::Connection>);
 struct DiffCache(Mutex<lru::LruCache<String, String>>);
@@ -135,6 +135,17 @@ async fn get_full_commit_diff(
         c.put(key, result.clone());
     }
     Ok(result)
+}
+
+#[tauri::command]
+async fn get_file_at_ref(
+    worktree_path: String,
+    git_ref: String,
+    file_path: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || git::get_file_at_ref(&worktree_path, &git_ref, &file_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -738,8 +749,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .menu(|handle| {
+            let check_updates = MenuItemBuilder::with_id("check_for_updates", "Check for Updates...")
+                .build(handle)?;
             let app_menu = SubmenuBuilder::new(handle, "Canopy")
                 .about(None)
+                .separator()
+                .item(&check_updates)
                 .separator()
                 .services()
                 .separator()
@@ -762,6 +777,11 @@ pub fn run() {
                 .item(&app_menu)
                 .item(&edit_menu)
                 .build()
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "check_for_updates" {
+                let _ = app.emit("check-for-updates", ());
+            }
         })
         .setup(|app| {
             let app_dir = app
@@ -835,6 +855,7 @@ pub fn run() {
             get_changed_files,
             get_commit_diff,
             get_full_commit_diff,
+            get_file_at_ref,
             get_branch_diff,
             get_full_branch_diff,
             get_head_commit,

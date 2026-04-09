@@ -229,6 +229,11 @@ pub fn get_full_branch_diff(worktree_path: &str) -> Result<String, String> {
     run_git(worktree_path, &["diff", &range])
 }
 
+pub fn get_file_at_ref(worktree_path: &str, git_ref: &str, file_path: &str) -> Result<String, String> {
+    let spec = format!("{}:{}", git_ref, file_path);
+    run_git(worktree_path, &["show", &spec])
+}
+
 pub fn get_file_diff_since_commit(
     worktree_path: &str,
     since_commit: &str,
