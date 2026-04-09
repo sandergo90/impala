@@ -223,6 +223,7 @@ export const useUIStore = create<UIState>()(
           previousWorktree,
           generalTerminalSplitTree,
           generalTerminalFocusedPaneId,
+          linearApiKey,
           ...rest
         } = state;
         return rest;

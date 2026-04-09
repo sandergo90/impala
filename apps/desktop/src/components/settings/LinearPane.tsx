@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { useUIStore } from "../../store";
 
 export function LinearPane() {
@@ -14,20 +16,35 @@ export function LinearPane() {
     };
   }, []);
 
-  const handleSave = () => {
-    setLinearApiKey(inputValue.trim());
-    setSaved(true);
-    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-    savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
+  const handleSave = async () => {
+    const trimmed = inputValue.trim();
+    try {
+      if (trimmed) {
+        await invoke("set_setting", { key: "linearApiKey", scope: "global", value: trimmed });
+      } else {
+        await invoke("delete_setting", { key: "linearApiKey", scope: "global" });
+      }
+      setLinearApiKey(trimmed);
+      setSaved(true);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      toast.error(`Failed to save API key: ${e}`);
+    }
   };
 
-  const handleClear = () => {
-    setInputValue("");
-    setLinearApiKey("");
+  const handleClear = async () => {
+    try {
+      await invoke("delete_setting", { key: "linearApiKey", scope: "global" });
+      setInputValue("");
+      setLinearApiKey("");
+    } catch (e) {
+      toast.error(`Failed to clear API key: ${e}`);
+    }
   };
 
   return (
-    <div className="max-w-lg">
+    <div className="max-w-2xl">
       <h2 className="text-lg font-semibold mb-1">Linear</h2>
       <p className="text-sm text-muted-foreground mb-6">
         Connect to Linear to create worktrees from issues.

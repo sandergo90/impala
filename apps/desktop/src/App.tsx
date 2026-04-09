@@ -35,6 +35,24 @@ export function RootLayout() {
 
   useEffect(() => {
     useHotkeysStore.getState().load();
+
+    // Load linearApiKey from backend, migrate from localStorage if needed
+    (async () => {
+      try {
+        const backendKey = await invoke<string | null>("get_setting", { key: "linearApiKey", scope: "global" });
+        if (backendKey) {
+          useUIStore.getState().setLinearApiKey(backendKey);
+        } else {
+          // One-time migration: check if localStorage has the key
+          const localKey = useUIStore.getState().linearApiKey;
+          if (localKey) {
+            await invoke("set_setting", { key: "linearApiKey", scope: "global", value: localKey });
+          }
+        }
+      } catch {
+        // Backend unavailable — fall back to whatever Zustand has
+      }
+    })();
   }, []);
 
   // -- Navigation shortcuts (always active) --
