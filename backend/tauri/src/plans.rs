@@ -9,6 +9,7 @@ pub struct Plan {
     pub title: Option<String>,
     pub status: String,
     pub version: i64,
+    pub content: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -18,6 +19,7 @@ pub struct NewPlan {
     pub plan_path: String,
     pub worktree_path: String,
     pub title: Option<String>,
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,12 +37,22 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             title TEXT,
             status TEXT DEFAULT 'pending',
             version INTEGER DEFAULT 1,
+            content TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_plans_worktree ON plans(worktree_path);",
     )
-    .map_err(|e| format!("Failed to initialize plans table: {}", e))
+    .map_err(|e| format!("Failed to initialize plans table: {}", e))?;
+
+    // Migration: add content column if missing (existing DBs)
+    let has_content = conn.prepare("SELECT content FROM plans LIMIT 0").is_ok();
+    if !has_content {
+        conn.execute_batch("ALTER TABLE plans ADD COLUMN content TEXT;")
+            .map_err(|e| format!("Failed to add content column: {}", e))?;
+    }
+
+    Ok(())
 }
 
 pub fn create_plan(conn: &Connection, new: NewPlan) -> Result<Plan, String> {
@@ -58,9 +70,9 @@ pub fn create_plan(conn: &Connection, new: NewPlan) -> Result<Plan, String> {
         + 1;
 
     conn.execute(
-        "INSERT INTO plans (id, plan_path, worktree_path, title, status, version, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7)",
-        params![id, new.plan_path, new.worktree_path, new.title, version, now, now],
+        "INSERT INTO plans (id, plan_path, worktree_path, title, status, version, content, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8)",
+        params![id, new.plan_path, new.worktree_path, new.title, version, new.content, now, now],
     )
     .map_err(|e| format!("Failed to create plan: {}", e))?;
 
@@ -71,6 +83,7 @@ pub fn create_plan(conn: &Connection, new: NewPlan) -> Result<Plan, String> {
         title: new.title,
         status: "pending".to_string(),
         version,
+        content: new.content,
         created_at: now.clone(),
         updated_at: now,
     })
@@ -82,7 +95,7 @@ pub fn list_plans(
 ) -> Result<Vec<Plan>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, plan_path, worktree_path, title, status, version, created_at, updated_at
+            "SELECT id, plan_path, worktree_path, title, status, version, content, created_at, updated_at
              FROM plans WHERE worktree_path = ?1 ORDER BY created_at DESC",
         )
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
@@ -96,8 +109,9 @@ pub fn list_plans(
                 title: row.get(3)?,
                 status: row.get(4)?,
                 version: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                content: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         })
         .map_err(|e| format!("Failed to query plans: {}", e))?;
@@ -111,7 +125,7 @@ pub fn list_plans(
 
 pub fn get_plan(conn: &Connection, id: &str) -> Result<Plan, String> {
     conn.query_row(
-        "SELECT id, plan_path, worktree_path, title, status, version, created_at, updated_at
+        "SELECT id, plan_path, worktree_path, title, status, version, content, created_at, updated_at
          FROM plans WHERE id = ?1",
         params![id],
         |row| {
@@ -122,8 +136,9 @@ pub fn get_plan(conn: &Connection, id: &str) -> Result<Plan, String> {
                 title: row.get(3)?,
                 status: row.get(4)?,
                 version: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                content: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         },
     )

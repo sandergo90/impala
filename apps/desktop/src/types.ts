@@ -57,6 +57,7 @@ export interface Plan {
   title: string | null;
   status: "pending" | "approved" | "changes_requested";
   version: number;
+  content: string | null;
   created_at: string;
   updated_at: string;
 }

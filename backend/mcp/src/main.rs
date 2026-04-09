@@ -54,6 +54,7 @@ fn ensure_plan_tables(conn: &Connection) -> Result<(), String> {
             title TEXT,
             status TEXT DEFAULT 'pending',
             version INTEGER DEFAULT 1,
+            content TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -70,7 +71,16 @@ fn ensure_plan_tables(conn: &Connection) -> Result<(), String> {
         );
         CREATE INDEX IF NOT EXISTS idx_plan_annotations_scope ON plan_annotations(plan_path, worktree_path);",
     )
-    .map_err(|e| format!("failed to ensure plan tables: {e}"))
+    .map_err(|e| format!("failed to ensure plan tables: {e}"))?;
+
+    // Migration: add content column if missing (existing DBs)
+    let has_content = conn.prepare("SELECT content FROM plans LIMIT 0").is_ok();
+    if !has_content {
+        conn.execute_batch("ALTER TABLE plans ADD COLUMN content TEXT;")
+            .map_err(|e| format!("failed to add content column: {e}"))?;
+    }
+
+    Ok(())
 }
 
 fn row_to_annotation(row: &rusqlite::Row) -> rusqlite::Result<Annotation> {
@@ -218,6 +228,9 @@ fn tool_submit_plan_for_review(conn: &Connection, params: &Value) -> Result<Valu
     let plan_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
+    // Read file content for snapshot
+    let content = std::fs::read_to_string(plan_path).ok();
+
     // Auto-increment version per plan_path
     let version: i64 = conn
         .query_row(
@@ -228,9 +241,9 @@ fn tool_submit_plan_for_review(conn: &Connection, params: &Value) -> Result<Valu
         .map_err(|e| e.to_string())?;
 
     conn.execute(
-        "INSERT INTO plans (id, plan_path, worktree_path, title, status, version, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7)",
-        rusqlite::params![plan_id, plan_path, worktree_path, title, version, now, now],
+        "INSERT INTO plans (id, plan_path, worktree_path, title, status, version, content, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8)",
+        rusqlite::params![plan_id, plan_path, worktree_path, title, version, content, now, now],
     )
     .map_err(|e| e.to_string())?;
 
@@ -313,7 +326,7 @@ fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, St
 
     let plan = conn
         .query_row(
-            "SELECT id, plan_path, worktree_path, title, status, version, created_at, updated_at
+            "SELECT id, plan_path, worktree_path, title, status, version, content, created_at, updated_at
              FROM plans
              WHERE plan_path = ?1 AND worktree_path = ?2
              ORDER BY version DESC LIMIT 1",
@@ -326,8 +339,9 @@ fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, St
                     "title": row.get::<_, Option<String>>(3)?,
                     "status": row.get::<_, String>(4)?,
                     "version": row.get::<_, i64>(5)?,
-                    "created_at": row.get::<_, String>(6)?,
-                    "updated_at": row.get::<_, String>(7)?,
+                    "content": row.get::<_, Option<String>>(6)?,
+                    "created_at": row.get::<_, String>(7)?,
+                    "updated_at": row.get::<_, String>(8)?,
                 }))
             },
         )
@@ -376,7 +390,7 @@ fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, St
 
 fn tool_list_plans(conn: &Connection, params: &Value) -> Result<Value, String> {
     let mut sql = String::from(
-        "SELECT id, plan_path, worktree_path, title, status, version, created_at, updated_at FROM plans",
+        "SELECT id, plan_path, worktree_path, title, status, version, content, created_at, updated_at FROM plans",
     );
     let mut bind_values: Vec<String> = Vec::new();
 
@@ -402,8 +416,9 @@ fn tool_list_plans(conn: &Connection, params: &Value) -> Result<Value, String> {
                 "title": row.get::<_, Option<String>>(3)?,
                 "status": row.get::<_, String>(4)?,
                 "version": row.get::<_, i64>(5)?,
-                "created_at": row.get::<_, String>(6)?,
-                "updated_at": row.get::<_, String>(7)?,
+                "content": row.get::<_, Option<String>>(6)?,
+                "created_at": row.get::<_, String>(7)?,
+                "updated_at": row.get::<_, String>(8)?,
             }))
         })
         .map_err(|e| e.to_string())?;

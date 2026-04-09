@@ -41,10 +41,14 @@ export function PlanView() {
       setMarkdown(null);
       return;
     }
-    readTextFile(activePlan.plan_path)
-      .then((content) => setMarkdown(content))
-      .catch(() => setMarkdown(null));
-  }, [activePlan?.id, activePlan?.plan_path]);
+    if (activePlan.content) {
+      setMarkdown(activePlan.content);
+    } else {
+      readTextFile(activePlan.plan_path)
+        .then((content) => setMarkdown(content))
+        .catch(() => setMarkdown(null));
+    }
+  }, [activePlan?.id, activePlan?.plan_path, activePlan?.content]);
 
   const handleLineClick = useCallback((lineNumber: number) => {
     setPendingLine(lineNumber);
