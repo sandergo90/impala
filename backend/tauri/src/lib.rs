@@ -1,5 +1,6 @@
 mod annotations;
 mod config;
+mod fonts;
 mod git;
 mod hook_server;
 mod hotkeys;
@@ -812,6 +813,11 @@ pub fn run() {
             hook_server::install_claude_hooks();
             hook_server::install_impala_review_skill();
 
+            // Auto-register the Impala MCP server in Claude Code settings
+            if let Err(_) = setup_claude_integration_sync() {
+                // Binary may not be installed yet — not fatal
+            }
+
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.
             {
@@ -906,6 +912,7 @@ pub fn run() {
             discover_project_icon,
             hotkeys::read_hotkey_overrides,
             hotkeys::write_hotkey_overrides,
+            fonts::list_system_fonts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

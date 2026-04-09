@@ -15,9 +15,27 @@ import { useHotkeysStore } from "../stores/hotkeys";
 import { createFileLinkProvider } from "../lib/terminal-link-provider";
 import { encodePtyInput } from "../lib/encode-pty";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
+import {
+  DEFAULT_TERMINAL_FONT_FAMILY,
+  DEFAULT_TERMINAL_FONT_SIZE,
+} from "./settings/FontSettingSection";
 
 const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
+
+/**
+ * Build a CSS font-family string safe for xterm.js.
+ * Custom single-family names (e.g. "JetBrains Mono") must be quoted so that
+ * xterm's internal canvas font shorthand (`14px JetBrains Mono`) is parsed
+ * correctly. A monospace fallback is appended to avoid invisible text if the
+ * font is unavailable.
+ */
+function toXtermFontFamily(custom: string | null): string {
+  if (!custom) return DEFAULT_TERMINAL_FONT_FAMILY;
+  // Already looks like a CSS list with fallbacks — use as-is
+  if (custom.includes(",")) return custom;
+  return `"${custom}", monospace`;
+}
 
 function getTerminalTheme() {
   const state = useUIStore.getState();
@@ -46,6 +64,7 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const webglAddonRef = useRef<WebglAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isFocusedRef = useRef(isFocused);
@@ -130,13 +149,15 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
     const setup = async () => {
       if (cancelled) return;
 
+      const uiState = useUIStore.getState();
+      const fontFamily = toXtermFontFamily(uiState.terminalFontFamily);
+
       terminal = new Terminal({
         scrollback,
         cursorBlink: true,
         cursorStyle: "bar",
-        fontSize: useUIStore.getState().fontSize,
-        fontFamily:
-          "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
+        fontSize: uiState.terminalFontSize ?? uiState.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE,
+        fontFamily,
         theme: getTerminalTheme(),
         allowProposedApi: true,
       });
@@ -162,8 +183,10 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
         webglAddon.onContextLoss(() => {
           webglAddon?.dispose();
           webglAddon = null;
+          webglAddonRef.current = null;
         });
         terminal.loadAddon(webglAddon);
+        webglAddonRef.current = webglAddon;
       } catch {
         webglAddon = null;
       }
@@ -319,6 +342,7 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
       }
       searchAddonRef.current = null;
       fitAddonRef.current = null;
+      webglAddonRef.current = null;
       terminalRef.current = null;
     };
   }, [sessionId]);
@@ -336,7 +360,8 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
 
   useEffect(() => {
     let prevThemeId = useUIStore.getState().activeThemeId;
-    let prevFontSize = useUIStore.getState().fontSize;
+    let prevFontSize = useUIStore.getState().terminalFontSize ?? useUIStore.getState().fontSize;
+    let prevFontFamily = useUIStore.getState().terminalFontFamily;
     const unsubscribe = useUIStore.subscribe((state) => {
       if (state.activeThemeId !== prevThemeId) {
         prevThemeId = state.activeThemeId;
@@ -344,10 +369,20 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
           terminalRef.current.options.theme = getTerminalTheme();
         }
       }
-      if (state.fontSize !== prevFontSize) {
-        prevFontSize = state.fontSize;
+      const effectiveSize = state.terminalFontSize ?? state.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
+      if (effectiveSize !== prevFontSize) {
+        prevFontSize = effectiveSize;
         if (terminalRef.current) {
-          terminalRef.current.options.fontSize = state.fontSize;
+          terminalRef.current.options.fontSize = effectiveSize;
+          webglAddonRef.current?.clearTextureAtlas();
+          fitAddonRef.current?.fit();
+        }
+      }
+      if (state.terminalFontFamily !== prevFontFamily) {
+        prevFontFamily = state.terminalFontFamily;
+        if (terminalRef.current) {
+          terminalRef.current.options.fontFamily = toXtermFontFamily(state.terminalFontFamily);
+          webglAddonRef.current?.clearTextureAtlas();
           fitAddonRef.current?.fit();
         }
       }

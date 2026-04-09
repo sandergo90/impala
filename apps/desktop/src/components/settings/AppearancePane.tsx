@@ -5,6 +5,7 @@ import { useUIStore } from "../../store";
 import { builtInThemes } from "../../themes/built-in";
 import { parseThemeJSON, generateTemplate } from "../../themes/import";
 import { ThemeCard } from "../ThemeCard";
+import { FontSettingSection } from "./FontSettingSection";
 
 const darkThemes = builtInThemes.filter((t) => t.type === "dark");
 const lightThemes = builtInThemes.filter((t) => t.type === "light");
@@ -161,6 +162,16 @@ export function AppearancePane() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Editor Font */}
+      <div className="mt-8 border-t border-border pt-6">
+        <FontSettingSection variant="editor" />
+      </div>
+
+      {/* Terminal Font */}
+      <div className="mt-8 border-t border-border pt-6">
+        <FontSettingSection variant="terminal" />
       </div>
     </div>
   );

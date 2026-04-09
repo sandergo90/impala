@@ -678,8 +678,11 @@ export function DiffView() {
 
   const activeTheme = resolveThemeById(activeThemeId, customThemes);
   const impalaTheme = getDiffsTheme(activeTheme);
-  const fontSize = useUIStore((s) => s.fontSize);
-  const diffViewerStyle = getDiffViewerStyle(activeTheme, fontSize);
+  const globalFontSize = useUIStore((s) => s.fontSize);
+  const editorFontSize = useUIStore((s) => s.editorFontSize);
+  const editorFontFamily = useUIStore((s) => s.editorFontFamily);
+  const fontSize = editorFontSize ?? globalFontSize;
+  const diffViewerStyle = getDiffViewerStyle(activeTheme, fontSize, editorFontFamily);
 
   const diffOptions = {
     theme: impalaTheme,
