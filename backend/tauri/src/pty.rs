@@ -81,6 +81,12 @@ pub fn pty_spawn(
     cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    // Prevent macOS shell session restore from overriding the working directory.
+    // When inherited from a parent terminal (e.g. cargo tauri dev),
+    // TERM_SESSION_ID triggers /etc/zshrc_Apple_Terminal to source a saved
+    // session file that can `cd` to a previously saved directory.
+    cmd.env_remove("TERM_SESSION_ID");
+    cmd.env("TERM_PROGRAM", "Impala");
     if let Some(vars) = &env_vars {
         for (key, value) in vars {
             cmd.env(key, value);
