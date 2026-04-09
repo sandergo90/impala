@@ -139,11 +139,10 @@ export function MainView() {
           )}
         </div>
 
-        {/* Right: open + run + tabs */}
-        <div className="relative flex items-center gap-1.5 pr-4 ml-auto shrink-0">
-          {selectedWorktree && (
-            <>
-              <OpenInEditorButton worktreePath={selectedWorktree.path} />
+        {/* Center: run + tabs */}
+        {selectedWorktree && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingLeft: "88px" }}>
+            <div className="relative flex items-center gap-1.5 pointer-events-auto">
               <button
                 onClick={() => {
                   if (isRunning) stopRunScript();
@@ -167,9 +166,16 @@ export function MainView() {
               {tabPill("Diff", activeTab === "diff", () => setTab("diff"))}
               {tabPill("Terminal", activeTab === "terminal", () => setTab("terminal"))}
               {tabPill("Split", activeTab === "split", () => setTab("split"))}
-              <span className="mx-0.5 w-px h-3.5 bg-border/50" />
-            </>
+            </div>
+          </div>
+        )}
+
+        {/* Right: open + sidebar */}
+        <div className="relative flex items-center gap-1.5 pr-4 ml-auto shrink-0">
+          {selectedWorktree && (
+            <OpenInEditorButton worktreePath={selectedWorktree.path} />
           )}
+          <span className="mx-0.5 w-px h-3.5 bg-border/50" />
           {tabPill("Sidebar", showSidebar, () =>
             setShowSidebar(!showSidebar)
           )}
