@@ -35,6 +35,8 @@ function createDefaultNavState(): WorktreeNavState {
   };
 }
 
+const defaultGeneralTerminalLeaf = createLeaf("shell");
+
 const defaultDataState: WorktreeDataState = {
   paneSessions: {},
   commits: [],
@@ -184,9 +186,9 @@ export const useUIStore = create<UIState>()(
       },
       generalTerminalActive: false,
       setGeneralTerminalActive: (active) => set({ generalTerminalActive: active }),
-      generalTerminalSplitTree: createLeaf("shell"),
+      generalTerminalSplitTree: defaultGeneralTerminalLeaf,
       setGeneralTerminalSplitTree: (tree) => set({ generalTerminalSplitTree: tree }),
-      generalTerminalFocusedPaneId: "",
+      generalTerminalFocusedPaneId: defaultGeneralTerminalLeaf.id,
       setGeneralTerminalFocusedPaneId: (id) => set({ generalTerminalFocusedPaneId: id }),
       previousWorktree: null,
       setPreviousWorktree: (worktree) => set({ previousWorktree: worktree }),
