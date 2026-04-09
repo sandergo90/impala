@@ -219,12 +219,17 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
               }`}
               title={wt.branch}
             >
-              <BranchIcon active={isSelected} />
               {isActive ? (
-                <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <span className="w-3.5 h-3.5 flex items-center justify-center">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                </span>
               ) : hasUnseen ? (
-                <span className={`absolute bottom-0 right-0 w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
-              ) : null}
+                <span className="w-3.5 h-3.5 flex items-center justify-center">
+                  <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
+                </span>
+              ) : (
+                <BranchIcon active={isSelected} />
+              )}
             </button>
           );
         })}
@@ -805,13 +810,12 @@ export function Sidebar() {
                         <span className="w-4 h-4 flex items-center justify-center">
                           <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                         </span>
+                      ) : hasUnseen ? (
+                        <span className="w-4 h-4 flex items-center justify-center">
+                          <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
+                        </span>
                       ) : (
-                        <>
-                          <BranchIcon active={isSelected} />
-                          {hasUnseen && (
-                            <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
-                          )}
-                        </>
+                        <BranchIcon active={isSelected} />
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
