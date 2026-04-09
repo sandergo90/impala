@@ -41,64 +41,15 @@ jobs:
           REPO="${{ github.repository }}"
 
           # Read signatures
-          MAC_ARM64_SIG=""
-          MAC_X64_SIG=""
-          LINUX_SIG=""
+          # Find the updater signature and URL
+          SIGFILE=$(ls release-artifacts/*.tar.gz.sig | head -1)
+          SIG=$(cat "$SIGFILE")
+          BUNDLE_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${SIGFILE%.sig}")"
 
-          for sigfile in release-artifacts/*.sig; do
-            filename=$(basename "$sigfile")
-            content=$(cat "$sigfile")
-            case "$filename" in
-              *aarch64*apple* | *arm64*)
-                MAC_ARM64_SIG="$content"
-                MAC_ARM64_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
-                ;;
-              *x86_64*apple* | *x64*darwin* | *x64*.app*)
-                MAC_X64_SIG="$content"
-                MAC_X64_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
-                ;;
-              *.AppImage.sig)
-                LINUX_SIG="$content"
-                LINUX_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
-                ;;
-            esac
-          done
-
-          # If we couldn't match by the patterns above, try to find them more carefully
-          if [ -z "$MAC_ARM64_SIG" ]; then
-            for sigfile in release-artifacts/*.tar.gz.sig; do
-              filename=$(basename "$sigfile")
-              if echo "$filename" | grep -qi "aarch64\|arm64"; then
-                MAC_ARM64_SIG=$(cat "$sigfile")
-                MAC_ARM64_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
-              elif echo "$filename" | grep -qi "x86_64\|x64"; then
-                MAC_X64_SIG=$(cat "$sigfile")
-                MAC_X64_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
-              fi
-            done
-          fi
-
-          # Build platforms JSON
-          PLATFORMS="{"
-          FIRST=true
-
-          if [ -n "$MAC_ARM64_SIG" ]; then
-            PLATFORMS+="\"darwin-aarch64\":{\"signature\":$(echo "$MAC_ARM64_SIG" | jq -Rs .),\"url\":\"$MAC_ARM64_URL\"}"
-            FIRST=false
-          fi
-
-          if [ -n "$MAC_X64_SIG" ]; then
-            [ "$FIRST" = false ] && PLATFORMS+=","
-            PLATFORMS+="\"darwin-x86_64\":{\"signature\":$(echo "$MAC_X64_SIG" | jq -Rs .),\"url\":\"$MAC_X64_URL\"}"
-            FIRST=false
-          fi
-
-          if [ -n "$LINUX_SIG" ]; then
-            [ "$FIRST" = false ] && PLATFORMS+=","
-            PLATFORMS+="\"linux-x86_64\":{\"signature\":$(echo "$LINUX_SIG" | jq -Rs .),\"url\":\"$LINUX_URL\"}"
-          fi
-
-          PLATFORMS+="}"
+          PLATFORMS=$(jq -n \
+            --arg sig "$SIG" \
+            --arg url "$BUNDLE_URL" \
+            '{"darwin-aarch64": {"signature": $sig, "url": $url}}')
 
           # Write latest.json
           jq -n \

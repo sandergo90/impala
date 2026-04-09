@@ -17,16 +17,7 @@ on:
 
 jobs:
   build-macos:
-    strategy:
-      matrix:
-        include:
-          - runner: macos-latest
-            target: aarch64-apple-darwin
-            arch: arm64
-          - runner: macos-13
-            target: x86_64-apple-darwin
-            arch: x64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -65,65 +56,22 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bunx tauri build --target ${{ matrix.target }}
+        run: bunx tauri build --target aarch64-apple-darwin
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact_prefix }}-mac-${{ matrix.arch }}-dmg
-          path: backend/tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          name: ${{ inputs.artifact_prefix }}-mac-arm64-dmg
+          path: backend/tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           retention-days: ${{ inputs.artifact_retention_days }}
           if-no-files-found: error
 
       - name: Upload updater bundle
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact_prefix }}-mac-${{ matrix.arch }}-updater
+          name: ${{ inputs.artifact_prefix }}-mac-arm64-updater
           path: |
-            backend/tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz
-            backend/tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz.sig
-          retention-days: ${{ inputs.artifact_retention_days }}
-          if-no-files-found: error
-
-  build-linux:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install frontend dependencies
-        run: bun install
-
-      - name: Build Tauri app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: bunx tauri build
-
-      - name: Upload AppImage
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.artifact_prefix }}-linux-x64-appimage
-          path: |
-            backend/tauri/target/release/bundle/appimage/*.AppImage
-            backend/tauri/target/release/bundle/appimage/*.AppImage.sig
-          retention-days: ${{ inputs.artifact_retention_days }}
-          if-no-files-found: error
-
-      - name: Upload deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.artifact_prefix }}-linux-x64-deb
-          path: backend/tauri/target/release/bundle/deb/*.deb
+            backend/tauri/target/aarch64-apple-darwin/release/bundle/macos/*.tar.gz
+            backend/tauri/target/aarch64-apple-darwin/release/bundle/macos/*.tar.gz.sig
           retention-days: ${{ inputs.artifact_retention_days }}
           if-no-files-found: error

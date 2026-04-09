@@ -20,8 +20,8 @@ export function MainView() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarSize = useUIStore((s) => s.sidebarSize);
   const rightSidebarSize = useUIStore((s) => s.rightSidebarSize);
-  const sidebarResizeTimer = useRef<ReturnType<typeof setTimeout>>();
-  const rightSidebarResizeTimer = useRef<ReturnType<typeof setTimeout>>();
+  const sidebarResizeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const rightSidebarResizeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const selectedProject = useUIStore((s) => s.selectedProject);
