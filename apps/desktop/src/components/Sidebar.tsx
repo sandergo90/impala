@@ -78,6 +78,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const projectIcons = useDataStore((s) => s.projectIcons);
   const worktrees = useDataStore((s) => s.worktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+  const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
   const agentStatuses = useDataStore(
     useShallow((s) => {
       const statuses: Record<string, string> = {};
@@ -145,6 +146,31 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
         );
       })}
 
+      {/* General Terminal */}
+      {selectedProject && (
+        <button
+          onClick={() => {
+            const current = useUIStore.getState().selectedWorktree;
+            if (current) {
+              useUIStore.getState().setPreviousWorktree(current);
+            }
+            useUIStore.getState().setSelectedWorktree(null);
+            useUIStore.getState().setGeneralTerminalActive(true);
+          }}
+          className={`w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
+            generalTerminalActive
+              ? "bg-primary/15 text-foreground"
+              : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent"
+          }`}
+          title="Terminal"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 6 8 10 4 14" />
+            <line x1="10" y1="14" x2="14" y2="14" />
+          </svg>
+        </button>
+      )}
+
       <div className="flex-1" />
 
       {/* Settings */}
@@ -172,6 +198,7 @@ export function Sidebar() {
   const worktrees = useDataStore((s) => s.worktrees);
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+  const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
 
   useAgentNotifications();
 
@@ -301,7 +328,10 @@ export function Sidebar() {
     }
   };
 
-  const selectWorktree = sharedSelectWorktree;
+  const selectWorktree = (wt: Worktree) => {
+    useUIStore.getState().setGeneralTerminalActive(false);
+    return sharedSelectWorktree(wt);
+  };
 
   // Load persisted projects on mount and restore selections
   useEffect(() => {
@@ -583,6 +613,31 @@ export function Sidebar() {
       )}
 
       {!selectedProject && <div className="flex-1" />}
+
+      {/* General Terminal — above settings */}
+      {selectedProject && (
+        <button
+          onClick={() => {
+            const current = useUIStore.getState().selectedWorktree;
+            if (current) {
+              useUIStore.getState().setPreviousWorktree(current);
+            }
+            useUIStore.getState().setSelectedWorktree(null);
+            useUIStore.getState().setGeneralTerminalActive(true);
+          }}
+          className={`flex items-center gap-1.5 w-full px-3.5 py-1.5 text-sm transition-colors ${
+            generalTerminalActive
+              ? "text-foreground"
+              : "text-muted-foreground/50 hover:text-muted-foreground"
+          }`}
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 6 8 10 4 14" />
+            <line x1="10" y1="14" x2="14" y2="14" />
+          </svg>
+          <span>Terminal</span>
+        </button>
+      )}
 
       {/* Settings gear — always at bottom */}
       <button
