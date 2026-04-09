@@ -4,7 +4,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
   requestPermission,
-  sendNotification,
   onAction,
 } from "@tauri-apps/plugin-notification";
 import { invoke } from "@tauri-apps/api/core";
@@ -106,7 +105,7 @@ export function useAgentNotifications() {
 
         const granted = await isPermissionGranted();
         if (granted) {
-          sendNotification({ title, body, extra: { worktree_path } });
+          invoke("send_notification", { title, body });
         }
 
         const { notificationSoundMuted, selectedSoundId } = useUIStore.getState();

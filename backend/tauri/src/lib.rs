@@ -899,6 +899,29 @@ pub fn run() {
                 }
             }
 
+            // Register a minimal .app bundle with Launch Services so macOS can
+            // resolve our bundle identifier to the Impala icon for notifications
+            #[cfg(target_os = "macos")]
+            notifications::register_notification_icon(app);
+
+            // Set macOS application icon for dock/window in dev mode
+            #[cfg(target_os = "macos")]
+            {
+                use objc2::MainThreadMarker;
+                use objc2::AnyThread;
+                use objc2_app_kit::{NSApplication, NSImage};
+                use objc2_foundation::NSData;
+
+                let icon_data = include_bytes!("../icons/128x128@2x.png");
+                let data = NSData::with_bytes(icon_data);
+                if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+                    if let Some(mtm) = MainThreadMarker::new() {
+                        let ns_app = NSApplication::sharedApplication(mtm);
+                        unsafe { ns_app.setApplicationIconImage(Some(&image)) };
+                    }
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -959,6 +982,7 @@ pub fn run() {
             watcher::unwatch_worktree,
             config::read_project_config,
             config::write_project_config,
+            notifications::send_notification,
             notifications::play_notification_sound,
             discover_project_icon,
             hotkeys::read_hotkey_overrides,
