@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { planSqliteProvider } from "../providers/plan-sqlite-provider";
 import type { Plan, PlanAnnotation } from "../types";
@@ -52,38 +51,7 @@ export function usePlanAnnotationActions() {
     [worktreePath]
   );
 
-  // Refresh plans and plan annotations when DB changes externally (MCP server)
-  useEffect(() => {
-    if (!worktreePath) return;
-    const unlisten = listen("annotations-changed", async () => {
-      try {
-        const fetchedPlans = await planSqliteProvider.listPlans(worktreePath);
-        const updates: Record<string, unknown> = { plans: fetchedPlans };
-
-        // Also refresh annotations if we have an active plan
-        const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
-        const plan = fetchedPlans.find((p) => p.id === nav.activePlanId);
-        if (plan) {
-          const anns = await planSqliteProvider.listAnnotations(plan.plan_path, worktreePath);
-          updates.planAnnotations = anns;
-        }
-
-        useDataStore.getState().updateWorktreeDataState(worktreePath, updates);
-      } catch {
-        // ignore
-      }
-    });
-    return () => { unlisten.then((fn) => fn()); };
-  }, [worktreePath]);
-
-  // Fetch plans on mount / worktree change
-  useEffect(() => {
-    if (!worktreePath) return;
-    planSqliteProvider.listPlans(worktreePath).then((p) => {
-      updateData({ plans: p });
-    }).catch(() => {});
-  }, [worktreePath, updateData]);
-
+  // Fetch annotations when active plan changes (plan list fetching is handled by usePlanNotifications)
   useEffect(() => {
     if (!activePlan) {
       const current = useDataStore.getState().getWorktreeDataState(worktreePath).planAnnotations;

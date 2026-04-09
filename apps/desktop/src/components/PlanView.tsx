@@ -150,7 +150,7 @@ export function PlanView() {
             const hasAnnotation = annotatedLines.has(lineNumber);
 
             return (
-              <div key={lineNumber}>
+              <div key={lineNumber} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 24px" }}>
                 <div
                   className="flex group"
                   data-plan-line={lineNumber}
