@@ -11,12 +11,71 @@ import { sqliteProvider } from "../providers/sqlite-provider";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
+import { openFileInEditor } from "../lib/open-file-in-editor";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
 
 type AnnotationMeta =
   | { type: 'comment'; annotation: Annotation }
   | { type: 'form' };
+
+function OpenFileButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="text-muted-foreground/60 hover:text-foreground transition-colors shrink-0"
+      title="Open in editor"
+    >
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10 2h4v4" />
+        <path d="M14 2L8 8" />
+        <path d="M13 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4" />
+      </svg>
+    </button>
+  );
+}
+
+function ChangeTypeIcon({ type }: { type: string }) {
+  if (type === "new") {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" className="shrink-0">
+        <line x1="8" y1="4" x2="8" y2="12" stroke="var(--diffs-addition-base, #3fb950)" strokeWidth="1.5" strokeLinecap="round" />
+        <line x1="4" y1="8" x2="12" y2="8" stroke="var(--diffs-addition-base, #3fb950)" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "deleted") {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" className="shrink-0">
+        <line x1="4" y1="8" x2="12" y2="8" stroke="var(--diffs-deletion-base, #f85149)" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  // modified, rename, etc.
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" className="shrink-0">
+      <circle cx="8" cy="8" r="4" fill="none" stroke="var(--diffs-modified-base, #d29922)" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function ChangeBar({ additions, deletions }: { additions: number; deletions: number }) {
+  const total = additions + deletions;
+  if (total === 0) return null;
+  const maxWidth = 54;
+  const delWidth = Math.max(deletions > 0 ? 3 : 0, Math.round((deletions / total) * maxWidth));
+  const addWidth = Math.max(additions > 0 ? 3 : 0, maxWidth - delWidth);
+  return (
+    <div className="flex items-center shrink-0" style={{ gap: deletions > 0 && additions > 0 ? 2 : 0 }}>
+      {deletions > 0 && (
+        <div style={{ height: 4, width: delWidth, borderRadius: additions > 0 ? "2px 0 0 2px" : 2, background: "var(--diffs-deletion-base, #f85149)" }} />
+      )}
+      {additions > 0 && (
+        <div style={{ height: 4, width: addWidth, borderRadius: deletions > 0 ? "0 2px 2px 0" : 2, background: "var(--diffs-addition-base, #3fb950)" }} />
+      )}
+    </div>
+  );
+}
 
 function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: React.MouseEvent) => void }) {
   return (
@@ -46,6 +105,7 @@ function VirtualizedCommitView({
   toolbar, changedFiles, fileDiffs, viewedFiles, collapsedFiles, setCollapsedFiles,
   generatedFiles, diffOptions, diffViewerStyle, annotationsByFile,
   pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler, toggleViewed,
+  worktreePath,
 }: {
   toolbar: React.ReactNode;
   changedFiles: WorktreeDataState["changedFiles"];
@@ -61,6 +121,7 @@ function VirtualizedCommitView({
   renderAnnotation: (annotation: DiffLineAnnotation<AnnotationMeta>) => React.ReactNode;
   makeGutterUtilityClickHandler: (filePath?: string) => (range: { start: number; side?: "deletions" | "additions"; end: number }) => void;
   toggleViewed: (path: string) => void;
+  worktreePath: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -127,6 +188,7 @@ function VirtualizedCommitView({
                     ) : (
                       <span className="flex-1 truncate">{file.path}</span>
                     )}
+                    <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${isRenamed ? newPath : file.path}`)} />
                     <span className="text-xs px-1.5 py-0.5 rounded bg-muted">
                       {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
                     </span>
@@ -178,21 +240,51 @@ function VirtualizedCommitView({
                       return saved.length > 0 ? saved : undefined;
                     })()}
                     renderAnnotation={renderAnnotation}
-                    renderHeaderPrefix={() => (
-                      <button onClick={toggleCollapse} className="text-xs text-muted-foreground px-1">
-                        {isCollapsed ? "▶" : "▼"}
-                      </button>
-                    )}
-                    renderHeaderMetadata={() => (
-                      <div className="flex items-center gap-2">
-                        {isGenerated && (
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                            Generated
+                    renderCustomHeader={(fileDiff) => {
+                      let additions = 0, deletions = 0;
+                      for (const hunk of fileDiff.hunks) {
+                        additions += hunk.additionLines;
+                        deletions += hunk.deletionLines;
+                      }
+                      const lastSlash = fileDiff.name.lastIndexOf("/");
+                      const dir = lastSlash >= 0 ? fileDiff.name.slice(0, lastSlash + 1) : "";
+                      const basename = lastSlash >= 0 ? fileDiff.name.slice(lastSlash + 1) : fileDiff.name;
+                      const nameColor = fileDiff.type === "new" ? "var(--diffs-addition-base, #3fb950)"
+                        : fileDiff.type === "deleted" ? "var(--diffs-deletion-base, #f85149)"
+                        : "var(--diffs-color, #e6edf3)";
+                      return (
+                        <div
+                          className="flex items-center w-full cursor-pointer"
+                          style={{ gap: 10 }}
+                          onClick={toggleCollapse}
+                        >
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {isCollapsed ? "▶" : "▼"}
                           </span>
-                        )}
-                        <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
-                      </div>
-                    )}
+                          <ChangeTypeIcon type={fileDiff.type} />
+                          <span className="truncate min-w-0 text-start text-[13px]" style={{ direction: "rtl" }}>
+                            <bdi>
+                              <span className="text-muted-foreground">{dir}</span>
+                              <span style={{ color: nameColor, fontWeight: 500 }}>{basename}</span>
+                            </bdi>
+                          </span>
+                          <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${file.path}`)} />
+                          <div className="flex-1" />
+                          {isGenerated && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+                              Generated
+                            </span>
+                          )}
+                          <ChangeBar additions={additions} deletions={deletions} />
+                          <span className="text-muted-foreground text-[11px] font-mono shrink-0">
+                            {deletions > 0 && <span style={{ color: "var(--diffs-deletion-base, #f85149)" }}>-{deletions}</span>}
+                            {deletions > 0 && additions > 0 && " "}
+                            {additions > 0 && <span style={{ color: "var(--diffs-addition-base, #3fb950)" }}>+{additions}</span>}
+                          </span>
+                          <ViewedButton isViewed={isViewed} onClick={(e) => { e.stopPropagation(); toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
+                        </div>
+                      );
+                    }}
                   />
               </div>
             );
@@ -455,7 +547,7 @@ export function DiffView() {
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
     enableGutterUtility: true,
-    unsafeCSS: `:host { --diffs-dark-bg: ${activeTheme.terminal.background}; --diffs-light-bg: ${activeTheme.terminal.background}; --diffs-dark: ${activeTheme.terminal.foreground}; --diffs-light: ${activeTheme.terminal.foreground}; } [data-diffs-header] { position: sticky; top: 0; z-index: 10; }`,
+    unsafeCSS: `:host { --diffs-dark-bg: ${activeTheme.terminal.background}; --diffs-light-bg: ${activeTheme.terminal.background}; --diffs-dark: ${activeTheme.terminal.foreground}; --diffs-light: ${activeTheme.terminal.foreground}; --diffs-color: ${activeTheme.terminal.foreground}; } [data-diffs-header] { position: sticky; top: 0; z-index: 10; } [data-diffs-header='custom'] { background-color: var(--diffs-bg); display: flex; align-items: center; min-height: calc(1lh + (var(--diffs-gap-block, var(--diffs-gap-fallback)) * 3)); padding-inline: 16px; font-family: var(--diffs-header-font-family, var(--diffs-header-font-fallback)); } [data-diffs-header='custom'] ::slotted(*) { width: 100%; }`,
   };
 
   const toolbar = (
@@ -530,6 +622,7 @@ export function DiffView() {
       renderAnnotation={renderAnnotation}
       makeGutterUtilityClickHandler={makeGutterUtilityClickHandler}
       toggleViewed={toggleViewed}
+      worktreePath={worktreePath ?? ""}
     />;
   }
 
