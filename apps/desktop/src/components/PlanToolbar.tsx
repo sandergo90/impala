@@ -5,6 +5,7 @@ interface PlanToolbarProps {
   onApprove: () => void;
   onRequestChanges: () => void;
   onClose: () => void;
+  onOpenFile: () => void;
 }
 
 export function PlanToolbar({
@@ -12,6 +13,7 @@ export function PlanToolbar({
   onApprove,
   onRequestChanges,
   onClose,
+  onOpenFile,
 }: PlanToolbarProps) {
   const isPending = plan.status === "pending";
   const title = plan.title ?? plan.plan_path.split("/").pop() ?? "Plan";
@@ -55,6 +57,15 @@ export function PlanToolbar({
           </button>
         </div>
       )}
+      <button
+        onClick={onOpenFile}
+        className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+        title="Open markdown file"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M2 3h5l2 2h5v8H2V3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
+        </svg>
+      </button>
       <button
         onClick={onClose}
         className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"

@@ -141,6 +141,30 @@ export function usePlanAnnotationActions() {
     [handleSetStatus]
   );
 
+  const handleOpenFile = useCallback(async () => {
+    if (!worktreePath) return;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const path = await open({
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+      multiple: false,
+    });
+    if (!path) return;
+    const filePath = path as string;
+    const title = filePath.split("/").pop()?.replace(/\.md$/, "") ?? "Plan";
+    const plan = await planSqliteProvider.createPlan({
+      plan_path: filePath,
+      worktree_path: worktreePath,
+      title,
+    });
+    const currentPlans =
+      useDataStore.getState().getWorktreeDataState(worktreePath).plans;
+    updateData({ plans: [...currentPlans, plan] });
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      activeTab: "plan",
+      activePlanId: plan.id,
+    });
+  }, [worktreePath, updateData]);
+
   return {
     plans,
     activePlan,
@@ -150,5 +174,6 @@ export function usePlanAnnotationActions() {
     handleDelete,
     handleApprove,
     handleRequestChanges,
+    handleOpenFile,
   };
 }

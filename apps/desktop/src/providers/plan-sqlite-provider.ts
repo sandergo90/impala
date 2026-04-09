@@ -6,6 +6,14 @@ export const planSqliteProvider = {
     return invoke<Plan[]>("list_plans", { worktreePath });
   },
 
+  async createPlan(plan: {
+    plan_path: string;
+    worktree_path: string;
+    title?: string;
+  }): Promise<Plan> {
+    return invoke<Plan>("create_plan", { plan });
+  },
+
   async getPlan(id: string): Promise<Plan> {
     return invoke<Plan>("get_plan", { id });
   },
