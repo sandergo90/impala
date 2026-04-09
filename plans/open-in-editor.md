@@ -9,7 +9,7 @@ Add a split button in the header bar (near the branch name) that opens the curre
 - **Button location:** Left side of header, near branch name / worktree context
 - **Button style:** Split button — primary click opens in last-used editor, chevron opens dropdown menu
 - **Supported editors:** Cursor, VS Code, Zed, WebStorm, Sublime Text
-- **Preference storage:** Zustand UI store (`canopy-ui-state` in localStorage)
+- **Preference storage:** Zustand UI store (`impala-ui-state` in localStorage)
 - **Execution:** Backend Tauri command `open_in_editor` — runs `open -a "<app>" <path>` on macOS
 - **Default:** First in list (Cursor) until user picks another
 

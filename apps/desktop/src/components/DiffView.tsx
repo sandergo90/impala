@@ -673,12 +673,12 @@ export function DiffView() {
   }
 
   const activeTheme = resolveThemeById(activeThemeId, customThemes);
-  const canopyTheme = getDiffsTheme(activeTheme);
+  const impalaTheme = getDiffsTheme(activeTheme);
   const fontSize = useUIStore((s) => s.fontSize);
   const diffViewerStyle = getDiffViewerStyle(activeTheme, fontSize);
 
   const diffOptions = {
-    theme: canopyTheme,
+    theme: impalaTheme,
     themeType: activeTheme.type as "dark" | "light",
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,

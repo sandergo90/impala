@@ -150,15 +150,15 @@ export function ProjectSettingsRoute() {
         </p>
         <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
           <div className="flex items-baseline gap-2">
-            <code className="text-md font-mono text-foreground">$CANOPY_PROJECT_PATH</code>
+            <code className="text-md font-mono text-foreground">$IMPALA_PROJECT_PATH</code>
             <span className="text-md text-muted-foreground">— Main repository root</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <code className="text-md font-mono text-foreground">$CANOPY_WORKTREE_PATH</code>
+            <code className="text-md font-mono text-foreground">$IMPALA_WORKTREE_PATH</code>
             <span className="text-md text-muted-foreground">— Worktree directory (also the working directory)</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <code className="text-md font-mono text-foreground">$CANOPY_BRANCH</code>
+            <code className="text-md font-mono text-foreground">$IMPALA_BRANCH</code>
             <span className="text-md text-muted-foreground">— Branch name</span>
           </div>
         </div>

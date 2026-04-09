@@ -21,7 +21,7 @@ function hashString(value: string): string {
 
 function createDiffThemeName(theme: Theme): DiffsThemeNames {
   const sig = hashString(JSON.stringify(theme.terminal) + theme.ui.background + theme.ui.foreground);
-  return `canopy-${theme.id}-${sig}` as DiffsThemeNames;
+  return `impala-${theme.id}-${sig}` as DiffsThemeNames;
 }
 
 /**
@@ -59,7 +59,7 @@ function createShikiTheme(theme: Theme) {
   };
 }
 
-/** Get (or register) a Pierre diff theme for the given Canopy theme. */
+/** Get (or register) a Pierre diff theme for the given Impala theme. */
 export function getDiffsTheme(theme: Theme): DiffsThemeNames {
   const name = createDiffThemeName(theme);
   if (!REGISTERED_DIFF_THEMES.has(name)) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canopy Desktop Release Script
+# Impala Desktop Release Script
 # Usage: ./scripts/create-release.sh [version] [--publish] [--merge]
 #
 # Examples:

@@ -102,7 +102,7 @@ export function parseThemeJSON(json: string, existingIds: Set<string>): ImportRe
 
 export function generateTemplate(): string {
   const template = {
-    _comment: "Canopy theme file. Edit the values below and import via Settings > Appearance.",
+    _comment: "Impala theme file. Edit the values below and import via Settings > Appearance.",
     id: "my-custom-theme",
     name: "My Custom Theme",
     type: "dark",

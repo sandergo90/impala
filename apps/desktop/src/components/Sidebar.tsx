@@ -426,7 +426,7 @@ export function Sidebar() {
     <div className="flex flex-col h-full text-sm overflow-hidden relative bg-sidebar">
       {/* Project Switcher */}
       <div
-        onClick={() => setShowDropdown(!showDropdown)}
+        onClick={() => projects.length === 0 ? openProject() : setShowDropdown(!showDropdown)}
         className="mx-2.5 mt-2.5 mb-1.5 px-2.5 py-1.5 rounded-md flex items-center gap-2 cursor-pointer bg-accent hover:bg-accent/80"
       >
         {selectedProject ? (
@@ -582,16 +582,7 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Bottom: Open Project (shown when no project selected) */}
-      {!selectedProject && (
-        <button
-          onClick={openProject}
-          className="flex items-center gap-1.5 px-3.5 py-2 text-sm text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border"
-        >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-          Open Project
-        </button>
-      )}
+      {!selectedProject && <div className="flex-1" />}
 
       {/* Settings gear — always at bottom */}
       <button
@@ -628,9 +619,9 @@ export function Sidebar() {
                     sessionId,
                     cwd: worktree.path,
                     envVars: {
-                      CANOPY_PROJECT_PATH: selectedProject.path,
-                      CANOPY_WORKTREE_PATH: worktree.path,
-                      CANOPY_BRANCH: worktree.branch,
+                      IMPALA_PROJECT_PATH: selectedProject.path,
+                      IMPALA_WORKTREE_PATH: worktree.path,
+                      IMPALA_BRANCH: worktree.branch,
                     },
                   }).then(() => {
                     // Write the setup command into the interactive shell

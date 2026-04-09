@@ -1,1 +1,8 @@
-{}
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo 'export TAURI_SIGNING_PRIVATE_KEY=\"$\\(cat ~/.tauri/canopy.key\\)\"')",
+      "Bash(echo 'export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\"\"')"
+    ]
+  }
+}

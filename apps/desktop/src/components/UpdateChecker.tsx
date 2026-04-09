@@ -20,7 +20,7 @@ export function UpdateChecker() {
       }
 
       toast(`Update ${update.version} available`, {
-        description: update.body || "A new version of Canopy is ready.",
+        description: update.body || "A new version of Impala is ready.",
         duration: Infinity,
         action: {
           label: "Install & Restart",

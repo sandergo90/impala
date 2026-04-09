@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Canopy",
+  "productName": "Impala",
   "version": "0.1.1",
-  "identifier": "com.canopy.app",
+  "identifier": "be.kodeus.impala",
   "build": {
     "beforeDevCommand": "cargo build --manifest-path backend/mcp/Cargo.toml && cd apps/desktop && bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Canopy",
+        "title": "Impala",
         "width": 1200,
         "height": 800,
         "titleBarStyle": "Overlay",

@@ -94,7 +94,7 @@ export function useAgentNotifications() {
         }
 
         const worktreeName = worktree_path.split("/").pop() ?? worktree_path;
-        const projectName = useUIStore.getState().selectedProject?.name ?? "Canopy";
+        const projectName = useUIStore.getState().selectedProject?.name ?? "Impala";
 
         const isPermission = status === "permission";
         const title = isPermission

@@ -152,7 +152,7 @@ export function RootLayout() {
         <div className="text-center">
           <h2 className="text-lg font-semibold mb-2">Git Not Found</h2>
           <p className="text-muted-foreground">
-            Please install Git to use Canopy.
+            Please install Git to use Impala.
           </p>
           <p className="text-muted-foreground text-md mt-2">
             https://git-scm.com/download

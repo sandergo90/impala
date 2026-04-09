@@ -168,8 +168,8 @@ function LeafPane({
         cwd: worktreePath,
         command: null,
         envVars: {
-          CANOPY_HOOK_PORT: String(hookPort),
-          CANOPY_WORKTREE_PATH: worktreePath,
+          IMPALA_HOOK_PORT: String(hookPort),
+          IMPALA_WORKTREE_PATH: worktreePath,
         },
       })
         .then((isNew) => {

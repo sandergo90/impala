@@ -81,9 +81,9 @@ export async function triggerRunScript() {
       sessionId,
       cwd: selectedWorktree.path,
       envVars: {
-        CANOPY_PROJECT_PATH: selectedProject.path,
-        CANOPY_WORKTREE_PATH: selectedWorktree.path,
-        CANOPY_BRANCH: selectedWorktree.branch,
+        IMPALA_PROJECT_PATH: selectedProject.path,
+        IMPALA_WORKTREE_PATH: selectedWorktree.path,
+        IMPALA_BRANCH: selectedWorktree.branch,
       },
     });
 

@@ -11,7 +11,7 @@ pub struct ProjectConfig {
 }
 
 fn config_path(project_path: &str) -> std::path::PathBuf {
-    Path::new(project_path).join(".canopy").join("config.json")
+    Path::new(project_path).join(".impala").join("config.json")
 }
 
 #[tauri::command]
@@ -31,7 +31,7 @@ pub fn write_project_config(project_path: String, config: ProjectConfig) -> Resu
     let path = config_path(&project_path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create .canopy directory: {}", e))?;
+            .map_err(|e| format!("Failed to create .impala directory: {}", e))?;
     }
     let contents = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;

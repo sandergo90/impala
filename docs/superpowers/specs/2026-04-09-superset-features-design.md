@@ -6,7 +6,7 @@
 
 ## Overview
 
-Three features inspired by Superset's recent releases, adapted for Canopy's Tauri/Rust architecture:
+Three features inspired by Superset's recent releases, adapted for Impala's Tauri/Rust architecture:
 
 1. **Cmd-click file paths to open in editor** — everywhere (terminal, diff view, annotations)
 2. **Stop button for run scripts** — swap play→stop in the title bar while running

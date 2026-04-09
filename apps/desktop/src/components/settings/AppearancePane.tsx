@@ -51,7 +51,7 @@ export function AppearancePane() {
 
   const handleDownloadTemplate = async () => {
     const path = await save({
-      defaultPath: "canopy-theme-template.json",
+      defaultPath: "impala-theme-template.json",
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (!path) return;
@@ -67,7 +67,7 @@ export function AppearancePane() {
   return (
     <div>
       <h2 className="text-base font-semibold text-foreground">Appearance</h2>
-      <p className="text-md text-muted-foreground mt-1 mb-6">Customize the look and feel of Canopy</p>
+      <p className="text-md text-muted-foreground mt-1 mb-6">Customize the look and feel of Impala</p>
 
       {/* Dark themes */}
       <div className="text-md font-semibold uppercase tracking-wider text-muted-foreground mb-3">Dark</div>
@@ -135,23 +135,32 @@ export function AppearancePane() {
       <span className="text-md text-muted-foreground/50 ml-2">JSON file with all tokens</span>
 
       {/* Font size */}
-      <div className="text-md font-semibold uppercase tracking-wider text-muted-foreground mt-8 mb-3">Font Size</div>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setFontSize(Math.max(MIN_FONT_SIZE, fontSize - 1))}
-          disabled={fontSize <= MIN_FONT_SIZE}
-          className="flex items-center justify-center w-7 h-7 rounded-md border border-border bg-background text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-        >
-          −
-        </button>
-        <span className="text-sm text-foreground tabular-nums w-8 text-center">{fontSize}px</span>
-        <button
-          onClick={() => setFontSize(Math.min(MAX_FONT_SIZE, fontSize + 1))}
-          disabled={fontSize >= MAX_FONT_SIZE}
-          className="flex items-center justify-center w-7 h-7 rounded-md border border-border bg-background text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-        >
-          +
-        </button>
+      <div className="mt-8 border-t border-border pt-6">
+        <div className="flex items-center justify-between max-w-lg">
+          <div>
+            <div className="text-md font-medium">Font size</div>
+            <div className="text-md text-muted-foreground mt-0.5">
+              Adjust the size of all text in the app
+            </div>
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5">
+            <button
+              onClick={() => setFontSize(Math.max(MIN_FONT_SIZE, fontSize - 1))}
+              disabled={fontSize <= MIN_FONT_SIZE}
+              className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14"/></svg>
+            </button>
+            <span className="text-sm text-foreground tabular-nums w-10 text-center font-medium">{fontSize}px</span>
+            <button
+              onClick={() => setFontSize(Math.min(MAX_FONT_SIZE, fontSize + 1))}
+              disabled={fontSize >= MAX_FONT_SIZE}
+              className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M12 5v14"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

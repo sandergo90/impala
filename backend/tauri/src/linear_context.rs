@@ -3,8 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-const START_MARKER: &str = "<!-- CANOPY:LINEAR_CONTEXT:START -->";
-const END_MARKER: &str = "<!-- CANOPY:LINEAR_CONTEXT:END -->";
+const START_MARKER: &str = "<!-- IMPALA:LINEAR_CONTEXT:START -->";
+const END_MARKER: &str = "<!-- IMPALA:LINEAR_CONTEXT:END -->";
 const REFRESH_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
 
 /// Resolve the CLAUDE.local.md path for a worktree.

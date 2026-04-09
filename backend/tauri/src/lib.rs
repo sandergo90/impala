@@ -37,11 +37,11 @@ async fn check_git() -> Result<String, String> {
         let output = std::process::Command::new("git")
             .arg("--version")
             .output()
-            .map_err(|_| "Git is not installed. Please install Git to use Canopy.".to_string())?;
+            .map_err(|_| "Git is not installed. Please install Git to use Impala.".to_string())?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         } else {
-            Err("Git is not installed. Please install Git to use Canopy.".to_string())
+            Err("Git is not installed. Please install Git to use Impala.".to_string())
         }
     })
     .await
@@ -371,7 +371,7 @@ fn setup_claude_integration_sync() -> Result<String, String> {
     mcp_servers
         .as_object_mut()
         .ok_or_else(|| "mcpServers is not a JSON object".to_string())?
-        .insert("canopy".to_string(), serde_json::json!({
+        .insert("impala".to_string(), serde_json::json!({
             "command": mcp_binary,
             "args": []
         }));
@@ -386,7 +386,7 @@ fn setup_claude_integration_sync() -> Result<String, String> {
 
 fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
     // Check PATH first
-    if let Ok(output) = std::process::Command::new("which").arg("canopy-mcp").output() {
+    if let Ok(output) = std::process::Command::new("which").arg("impala-mcp").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -396,7 +396,7 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
     }
 
     // Check cargo install location
-    let cargo_bin = home.join(".cargo").join("bin").join("canopy-mcp");
+    let cargo_bin = home.join(".cargo").join("bin").join("impala-mcp");
     if cargo_bin.exists() {
         return Ok(cargo_bin.to_string_lossy().to_string());
     }
@@ -407,19 +407,19 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
         // Tauri binary is in backend/tauri/target/... — MCP binary is in backend/mcp/target/...
         if let Some(tauri_target) = exe_path.ancestors().find(|p| p.ends_with("target")) {
             let mcp_debug = tauri_target.parent().unwrap().parent().unwrap()
-                .join("mcp").join("target").join("debug").join("canopy-mcp");
+                .join("mcp").join("target").join("debug").join("impala-mcp");
             if mcp_debug.exists() {
                 return Ok(mcp_debug.to_string_lossy().to_string());
             }
             let mcp_release = tauri_target.parent().unwrap().parent().unwrap()
-                .join("mcp").join("target").join("release").join("canopy-mcp");
+                .join("mcp").join("target").join("release").join("impala-mcp");
             if mcp_release.exists() {
                 return Ok(mcp_release.to_string_lossy().to_string());
             }
         }
     }
 
-    Err("canopy-mcp binary not found. Build it with: cd backend/mcp && cargo install --path .".to_string())
+    Err("impala-mcp binary not found. Build it with: cd backend/mcp && cargo install --path .".to_string())
 }
 
 #[tauri::command]
@@ -751,7 +751,7 @@ pub fn run() {
         .menu(|handle| {
             let check_updates = MenuItemBuilder::with_id("check_for_updates", "Check for Updates...")
                 .build(handle)?;
-            let app_menu = SubmenuBuilder::new(handle, "Canopy")
+            let app_menu = SubmenuBuilder::new(handle, "Impala")
                 .about(None)
                 .separator()
                 .item(&check_updates)
@@ -810,7 +810,7 @@ pub fn run() {
             app.manage(HookPort(hook_port));
 
             hook_server::install_claude_hooks();
-            hook_server::install_canopy_review_skill();
+            hook_server::install_impala_review_skill();
 
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.
