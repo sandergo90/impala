@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
 import { useUIStore, useDataStore } from "../store";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
-import { selectWorktree as sharedSelectWorktree, selectProject as sharedSelectProject } from "../hooks/useWorktreeActions";
+import { selectWorktree as sharedSelectWorktree, selectProject as sharedSelectProject, activateGeneralTerminal } from "../hooks/useWorktreeActions";
 import type { Worktree, Project, WorktreeIssue } from "../types";
 import { useAgentNotifications } from "../hooks/useAgentNotifications";
 import { useAppHotkey } from "../hooks/useAppHotkey";
@@ -68,6 +68,15 @@ function BranchIcon({ active }: { active: boolean }) {
       <line x1="4" y1="6" x2="4" y2="10" stroke="currentColor" strokeWidth="1.4"/>
       <path d="M4 8 L10 4" stroke="currentColor" strokeWidth="1.4"/>
       <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+    </svg>
+  );
+}
+
+function TerminalIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 6 8 10 4 14" />
+      <line x1="10" y1="14" x2="14" y2="14" />
     </svg>
   );
 }
@@ -149,14 +158,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
       {/* General Terminal */}
       {selectedProject && (
         <button
-          onClick={() => {
-            const current = useUIStore.getState().selectedWorktree;
-            if (current) {
-              useUIStore.getState().setPreviousWorktree(current);
-            }
-            useUIStore.getState().setSelectedWorktree(null);
-            useUIStore.getState().setGeneralTerminalActive(true);
-          }}
+          onClick={activateGeneralTerminal}
           className={`w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
             generalTerminalActive
               ? "bg-primary/15 text-foreground"
@@ -164,10 +166,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
           }`}
           title="Terminal"
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="4 6 8 10 4 14" />
-            <line x1="10" y1="14" x2="14" y2="14" />
-          </svg>
+          <TerminalIcon />
         </button>
       )}
 
@@ -525,11 +524,14 @@ export function Sidebar() {
           <div className="mx-3 mb-1.5 border-b border-border/30" />
           <div className="flex items-center justify-between px-3.5 pt-1 pb-1 shrink-0">
             <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">Worktrees</span>
+          </div>
+          <div className="px-2 pb-1.5 shrink-0">
             <button
               onClick={() => setShowNewWorktree(true)}
-              className="text-muted-foreground/50 hover:text-muted-foreground text-sm leading-none"
+              className="flex items-center justify-center gap-2 w-full px-3 py-1.5 rounded-[5px] border border-border/50 text-sm text-muted-foreground/70 hover:text-muted-foreground hover:border-border hover:bg-accent/50 transition-colors"
             >
-              +
+              <span>+ New Worktree</span>
+              <kbd className="text-[10px] text-muted-foreground/40 ml-auto">⌘N</kbd>
             </button>
           </div>
 
@@ -617,24 +619,14 @@ export function Sidebar() {
       {/* General Terminal — above settings */}
       {selectedProject && (
         <button
-          onClick={() => {
-            const current = useUIStore.getState().selectedWorktree;
-            if (current) {
-              useUIStore.getState().setPreviousWorktree(current);
-            }
-            useUIStore.getState().setSelectedWorktree(null);
-            useUIStore.getState().setGeneralTerminalActive(true);
-          }}
+          onClick={activateGeneralTerminal}
           className={`flex items-center gap-1.5 w-full px-3.5 py-1.5 text-sm transition-colors ${
             generalTerminalActive
               ? "text-foreground"
               : "text-muted-foreground/50 hover:text-muted-foreground"
           }`}
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="4 6 8 10 4 14" />
-            <line x1="10" y1="14" x2="14" y2="14" />
-          </svg>
+          <TerminalIcon />
           <span>Terminal</span>
         </button>
       )}

@@ -16,6 +16,9 @@ import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { triggerRunScript, stopRunScript } from "../lib/run-script";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { useHotkeyTooltip } from "../components/HotkeyDisplay";
+import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
+
+let cachedHomeDir: string | null = null;
 
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -30,9 +33,10 @@ export function MainView() {
   const wtPath = selectedWorktree?.path;
 
   // General terminal state
-  const [homeDirPath, setHomeDirPath] = useState<string | null>(null);
+  const [homeDirPath, setHomeDirPath] = useState<string | null>(cachedHomeDir);
   useEffect(() => {
-    homeDir().then(setHomeDirPath).catch(() => setHomeDirPath("/tmp"));
+    if (cachedHomeDir) return;
+    homeDir().then((dir) => { cachedHomeDir = dir; setHomeDirPath(dir); }).catch(() => { cachedHomeDir = "/tmp"; setHomeDirPath("/tmp"); });
   }, []);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
   const generalTerminalSplitTree = useUIStore((s) => s.generalTerminalSplitTree);
@@ -90,12 +94,7 @@ export function MainView() {
         state.setPreviousWorktree(null);
       }
     } else {
-      // Toggle to general terminal
-      if (state.selectedWorktree) {
-        state.setPreviousWorktree(state.selectedWorktree);
-      }
-      state.setSelectedWorktree(null);
-      state.setGeneralTerminalActive(true);
+      activateGeneralTerminal();
     }
   });
 

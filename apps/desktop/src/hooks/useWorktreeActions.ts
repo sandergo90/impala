@@ -37,6 +37,16 @@ export async function selectWorktree(wt: Worktree) {
   }
 }
 
+export function activateGeneralTerminal() {
+  const state = useUIStore.getState();
+  const current = state.selectedWorktree;
+  if (current) {
+    state.setPreviousWorktree(current);
+  }
+  state.setSelectedWorktree(null);
+  state.setGeneralTerminalActive(true);
+}
+
 export async function selectProject(project: Project) {
   useUIStore.getState().setSelectedProject(project);
   useUIStore.getState().setSelectedWorktree(null);
