@@ -412,22 +412,69 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn open_in_editor(editor: String, path: String) -> Result<(), String> {
+async fn open_in_editor(
+    editor: String,
+    path: String,
+    line: Option<u32>,
+    col: Option<u32>,
+) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let app_name = match editor.as_str() {
-            "cursor" => "Cursor",
-            "vscode" => "Visual Studio Code",
-            "zed" => "Zed",
-            "webstorm" => "WebStorm",
-            "sublime" => "Sublime Text",
+        let (app_name, _use_cli) = match editor.as_str() {
+            "cursor" => ("Cursor", true),
+            "vscode" => ("Visual Studio Code", true),
+            "zed" => ("Zed", true),
+            "webstorm" => ("WebStorm", false),
+            "sublime" => ("Sublime Text", true),
             _ => return Err(format!("Unknown editor: {}", editor)),
         };
-        let output = std::process::Command::new("open")
-            .arg("-a")
-            .arg(app_name)
-            .arg(&path)
-            .output()
-            .map_err(|e| format!("Failed to launch {}: {}", app_name, e))?;
+
+        let output = if let Some(ln) = line {
+            let col = col.unwrap_or(1);
+            match editor.as_str() {
+                "cursor" | "vscode" => {
+                    let cli = if editor == "cursor" { "cursor" } else { "code" };
+                    std::process::Command::new(cli)
+                        .arg("--goto")
+                        .arg(format!("{}:{}:{}", path, ln, col))
+                        .output()
+                        .map_err(|e| format!("Failed to launch {}: {}", app_name, e))?
+                }
+                "zed" => {
+                    std::process::Command::new("zed")
+                        .arg(format!("{}:{}:{}", path, ln, col))
+                        .output()
+                        .map_err(|e| format!("Failed to launch Zed: {}", e))?
+                }
+                "sublime" => {
+                    std::process::Command::new("subl")
+                        .arg(format!("{}:{}:{}", path, ln, col))
+                        .output()
+                        .map_err(|e| format!("Failed to launch Sublime Text: {}", e))?
+                }
+                "webstorm" => {
+                    std::process::Command::new("open")
+                        .arg("-a")
+                        .arg(app_name)
+                        .arg("--args")
+                        .arg("--line")
+                        .arg(ln.to_string())
+                        .arg("--column")
+                        .arg(col.to_string())
+                        .arg(&path)
+                        .output()
+                        .map_err(|e| format!("Failed to launch WebStorm: {}", e))?
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            std::process::Command::new("open")
+                .arg("-a")
+                .arg(app_name)
+                .arg(&path)
+                .output()
+                .map_err(|e| format!("Failed to launch {}: {}", app_name, e))?
+        };
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("Failed to open {}: {}", app_name, stderr.trim()));
@@ -436,6 +483,27 @@ async fn open_in_editor(editor: String, path: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+fn resolve_file_path(base_dir: String, candidate: String) -> Result<(String, bool), String> {
+    let candidate = candidate.trim();
+
+    let abs = if candidate.starts_with('/') {
+        std::path::PathBuf::from(candidate)
+    } else if candidate.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(&candidate[2..])
+        } else {
+            std::path::Path::new(&base_dir).join(candidate)
+        }
+    } else {
+        let clean = candidate.strip_prefix("./").unwrap_or(candidate);
+        std::path::Path::new(&base_dir).join(clean)
+    };
+
+    let exists = abs.exists();
+    Ok((abs.to_string_lossy().to_string(), exists))
 }
 
 #[tauri::command]
@@ -666,6 +734,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .menu(|handle| {
             let app_menu = SubmenuBuilder::new(handle, "Canopy")
@@ -804,6 +874,7 @@ pub fn run() {
             pty::pty_kill,
             check_generated_files,
             open_in_editor,
+            resolve_file_path,
             get_hook_port,
             watcher::watch_worktree,
             watcher::unwatch_worktree,

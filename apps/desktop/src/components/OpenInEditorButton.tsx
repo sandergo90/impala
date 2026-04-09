@@ -40,7 +40,7 @@ export function OpenInEditorButton({ worktreePath }: { worktreePath: string }) {
     setLoading(true);
     setOpen(false);
     try {
-      await invoke("open_in_editor", { editor: editorId, path: worktreePath });
+      await invoke("open_in_editor", { editor: editorId, path: worktreePath, line: null, col: null });
       if (editorId !== preferredEditor) {
         setPreferredEditor(editorId);
       }
