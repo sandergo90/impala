@@ -18,7 +18,7 @@ function RestartButton({ onClick, className }: { onClick: () => void; className?
         e.stopPropagation();
         onClick();
       }}
-      className={`text-muted-foreground hover:text-foreground text-xs ${className ?? ""}`}
+      className={`text-muted-foreground hover:text-foreground text-md ${className ?? ""}`}
       title="Restart"
     >
       <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -183,7 +183,7 @@ export function FloatingTerminal() {
           className="flex items-center gap-2"
         >
           <StatusDot status={status} />
-          <span className="text-xs text-foreground">{label}</span>
+          <span className="text-md text-foreground">{label}</span>
         </button>
         {showRestart && (
           <RestartButton onClick={() => triggerRunScript()} className="ml-0.5" />
@@ -193,7 +193,7 @@ export function FloatingTerminal() {
             e.stopPropagation();
             dismiss();
           }}
-          className="text-muted-foreground hover:text-foreground text-xs ml-1"
+          className="text-muted-foreground hover:text-foreground text-md ml-1"
         >
           &times;
         </button>
@@ -231,7 +231,7 @@ export function FloatingTerminal() {
       <div className="h-8 flex items-center justify-between px-3 border-b border-border/50 bg-background shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <StatusDot status={status} />
-          <span className="text-xs text-foreground truncate">{label}</span>
+          <span className="text-md text-foreground truncate">{label}</span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {ft?.type === "run" && (status === "stopped" || status === "failed") && (
@@ -239,14 +239,14 @@ export function FloatingTerminal() {
           )}
           <button
             onClick={() => wtPath && setFloatingTerminal(wtPath, { mode: "pill" })}
-            className="text-muted-foreground hover:text-foreground text-xs px-1"
+            className="text-muted-foreground hover:text-foreground text-md px-1"
             title="Minimize"
           >
             &#8211;
           </button>
           <button
             onClick={dismiss}
-            className="text-muted-foreground hover:text-foreground text-xs px-1"
+            className="text-muted-foreground hover:text-foreground text-md px-1"
             title="Close"
           >
             &times;

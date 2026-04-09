@@ -57,7 +57,7 @@ export function OpenInEditorButton({ worktreePath }: { worktreePath: string }) {
         <button
           onClick={() => handleOpen(current.id)}
           disabled={loading}
-          className="flex items-center gap-1.5 h-6 pl-1.5 pr-2 text-xs font-medium text-muted-foreground hover:text-foreground rounded-l border border-r-0 border-border/60 bg-secondary/50 hover:bg-secondary hover:border-border disabled:opacity-50 transition-all duration-150"
+          className="flex items-center gap-1.5 h-6 pl-1.5 pr-2 text-md font-medium text-muted-foreground hover:text-foreground rounded-l border border-r-0 border-border/60 bg-secondary/50 hover:bg-secondary hover:border-border disabled:opacity-50 transition-all duration-150"
         >
           <img src={current.icon} alt="" width={14} height={14} className="shrink-0" />
           <span>{loading ? "Opening..." : `Open`}</span>
@@ -77,7 +77,7 @@ export function OpenInEditorButton({ worktreePath }: { worktreePath: string }) {
             <button
               key={editor.id}
               onClick={() => handleOpen(editor.id)}
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-accent flex items-center gap-2"
+              className="w-full px-3 py-1.5 text-left text-md hover:bg-accent flex items-center gap-2"
             >
               <img src={editor.icon} alt="" width={16} height={16} className="shrink-0" />
               <span className={editor.id === current.id ? "text-foreground font-medium" : "text-muted-foreground"}>

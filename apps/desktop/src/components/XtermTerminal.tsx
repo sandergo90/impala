@@ -45,6 +45,7 @@ function decodeBase64(encoded: string): Uint8Array {
 export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, onRestart, scrollback = 10000 }: XtermTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isFocusedRef = useRef(isFocused);
@@ -133,7 +134,7 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
         scrollback,
         cursorBlink: true,
         cursorStyle: "bar",
-        fontSize: 14,
+        fontSize: useUIStore.getState().fontSize,
         fontFamily:
           "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
         theme: getTerminalTheme(),
@@ -143,6 +144,7 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
       terminalRef.current = terminal;
 
       fitAddon = new FitAddon();
+      fitAddonRef.current = fitAddon;
       const searchAddon = new SearchAddon();
       terminal.loadAddon(fitAddon);
       terminal.loadAddon(searchAddon);
@@ -316,6 +318,7 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
         terminal = null;
       }
       searchAddonRef.current = null;
+      fitAddonRef.current = null;
       terminalRef.current = null;
     };
   }, [sessionId]);
@@ -333,11 +336,19 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
 
   useEffect(() => {
     let prevThemeId = useUIStore.getState().activeThemeId;
+    let prevFontSize = useUIStore.getState().fontSize;
     const unsubscribe = useUIStore.subscribe((state) => {
       if (state.activeThemeId !== prevThemeId) {
         prevThemeId = state.activeThemeId;
         if (terminalRef.current) {
           terminalRef.current.options.theme = getTerminalTheme();
+        }
+      }
+      if (state.fontSize !== prevFontSize) {
+        prevFontSize = state.fontSize;
+        if (terminalRef.current) {
+          terminalRef.current.options.fontSize = state.fontSize;
+          fitAddonRef.current?.fit();
         }
       }
     });
@@ -377,11 +388,11 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
             }}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search..."
-            className="bg-transparent text-foreground text-xs outline-none w-40 placeholder:text-muted-foreground"
+            className="bg-transparent text-foreground text-md outline-none w-40 placeholder:text-muted-foreground"
           />
-          <button onClick={() => searchAddonRef.current?.findPrevious(searchQuery)} className="text-muted-foreground hover:text-foreground text-xs px-1">&#9650;</button>
-          <button onClick={() => searchAddonRef.current?.findNext(searchQuery)} className="text-muted-foreground hover:text-foreground text-xs px-1">&#9660;</button>
-          <button onClick={closeSearch} className="text-muted-foreground hover:text-foreground text-xs px-1">&times;</button>
+          <button onClick={() => searchAddonRef.current?.findPrevious(searchQuery)} className="text-muted-foreground hover:text-foreground text-md px-1">&#9650;</button>
+          <button onClick={() => searchAddonRef.current?.findNext(searchQuery)} className="text-muted-foreground hover:text-foreground text-md px-1">&#9660;</button>
+          <button onClick={closeSearch} className="text-muted-foreground hover:text-foreground text-md px-1">&times;</button>
         </div>
       )}
       {loading && (

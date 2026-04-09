@@ -84,6 +84,8 @@ interface UIState {
   setSidebarSize: (size: number | null) => void;
   rightSidebarSize: number | null;
   setRightSidebarSize: (size: number | null) => void;
+  fontSize: number;
+  setFontSize: (size: number) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -166,6 +168,11 @@ export const useUIStore = create<UIState>()(
       setSidebarSize: (size) => set({ sidebarSize: size }),
       rightSidebarSize: null,
       setRightSidebarSize: (size) => set({ rightSidebarSize: size }),
+      fontSize: 14,
+      setFontSize: (size) => {
+        set({ fontSize: size });
+        document.documentElement.style.fontSize = `${size}px`;
+      },
     }),
     {
       name: "canopy-ui-state",
@@ -176,6 +183,7 @@ export const useUIStore = create<UIState>()(
       onRehydrateStorage: () => (state) => {
         if (state) {
           initThemeFromStore(state.activeThemeId, state.customThemes);
+          document.documentElement.style.fontSize = `${state.fontSize ?? 14}px`;
         }
       },
     }

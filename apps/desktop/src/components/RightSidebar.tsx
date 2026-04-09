@@ -10,7 +10,7 @@ export function RightSidebar() {
   const tabPill = (label: string, tab: Tab) => (
     <button
       onClick={() => setActiveTab(tab)}
-      className={`px-2.5 py-1 text-xs font-medium rounded-[5px] transition-colors ${
+      className={`px-2.5 py-1 text-sm font-medium rounded-[5px] transition-colors ${
         activeTab === tab
           ? "text-foreground"
           : "text-muted-foreground hover:text-foreground"

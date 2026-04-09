@@ -216,10 +216,10 @@ export function CommitPanel() {
     <div className="flex flex-col h-full text-sm overflow-hidden bg-card">
       {/* Commits section — top half */}
       <div className="flex flex-col min-h-0 flex-1">
-        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-b border-border">
-          Commits on <span className="font-mono text-xs text-muted-foreground normal-case tracking-normal">{selectedWorktree.branch}</span>
+        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-b border-border">
+          Commits on <span className="font-mono text-sm text-muted-foreground normal-case tracking-normal">{selectedWorktree.branch}</span>
           {commits.length > 0 && (
-            <span className="ml-auto text-xs bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{commits.length}</span>
+            <span className="ml-auto text-sm bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{commits.length}</span>
           )}
         </div>
 
@@ -233,10 +233,10 @@ export function CommitPanel() {
               : "hover:bg-accent"
           }`}
         >
-          <div className={`text-xs font-medium ${viewMode === 'uncommitted' ? "text-foreground" : "text-muted-foreground"}`}>
+          <div className={`text-sm font-medium ${viewMode === 'uncommitted' ? "text-foreground" : "text-muted-foreground"}`}>
             Uncommitted Changes
           </div>
-          <div className="text-xs text-muted-foreground/50 mt-0.5 font-mono">Working tree</div>
+          <div className="text-sm text-muted-foreground/50 mt-0.5 font-mono">Working tree</div>
         </button>
 
         {/* All Changes */}
@@ -248,15 +248,15 @@ export function CommitPanel() {
               : "hover:bg-accent"
           }`}
         >
-          <div className={`text-xs font-medium ${viewMode === 'all-changes' ? "text-foreground" : "text-muted-foreground"}`}>
+          <div className={`text-sm font-medium ${viewMode === 'all-changes' ? "text-foreground" : "text-muted-foreground"}`}>
             All Changes
           </div>
-          <div className="text-xs text-muted-foreground/50 mt-0.5 font-mono">vs {baseBranch || "base"}</div>
+          <div className="text-sm text-muted-foreground/50 mt-0.5 font-mono">vs {baseBranch || "base"}</div>
         </button>
 
         {/* Commits */}
         {commits.length === 0 ? (
-          <div className="px-3.5 py-4 text-muted-foreground/50 text-xs">No commits ahead of {baseBranch}</div>
+          <div className="px-3.5 py-4 text-muted-foreground/50 text-sm">No commits ahead of {baseBranch}</div>
         ) : (
           commits.map((commit) => {
             const isSelected = viewMode === 'commit' && selectedCommit?.hash === commit.hash;
@@ -270,10 +270,10 @@ export function CommitPanel() {
                     : "hover:bg-accent"
                 }`}
               >
-                <div className={`text-xs font-medium truncate ${isSelected ? "text-foreground" : "text-foreground/80"}`}>
+                <div className={`text-sm font-medium truncate ${isSelected ? "text-foreground" : "text-foreground/80"}`}>
                   {commit.message}
                 </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground/50 mt-0.5 font-mono">
+                <div className="flex items-center gap-1 text-sm text-muted-foreground/50 mt-0.5 font-mono">
                   <span>{commit.hash.slice(0, 7)} &middot; {commit.date.split("T")[0]} {commit.date.split("T")[1]?.slice(0, 5)}</span>
                   {(commit.additions > 0 || commit.deletions > 0) && (
                     <span className="ml-auto">
@@ -292,10 +292,10 @@ export function CommitPanel() {
 
       {/* Changed Files — bottom half */}
       <div className="flex flex-col min-h-0 flex-1">
-        <div className="flex items-center px-3.5 py-2 text-xs uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-y border-border">
+        <div className="flex items-center px-3.5 py-2 text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-y border-border">
           Changed Files
           {changedFiles.length > 0 && (
-            <span className="ml-auto text-xs bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{changedFiles.length}</span>
+            <span className="ml-auto text-sm bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{changedFiles.length}</span>
           )}
         </div>
         <div className="overflow-y-auto flex-1 min-h-0">
@@ -312,12 +312,12 @@ export function CommitPanel() {
                     selectFile(file);
                   }
                 }}
-                className={`w-full px-3.5 py-1.5 text-left font-mono text-xs flex items-center gap-1.5 transition-colors truncate ${
+                className={`w-full px-3.5 py-1.5 text-left font-mono text-sm flex items-center gap-1.5 transition-colors truncate ${
                   isSelected ? "text-primary bg-primary/[0.06]" : "text-muted-foreground hover:bg-accent"
                 }`}
                 style={cmdHeld ? { cursor: "pointer" } : undefined}
               >
-                <span className={`text-xs font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
+                <span className={`text-sm font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
                   {file.status}
                 </span>
                 {file.path.split("/").pop()}

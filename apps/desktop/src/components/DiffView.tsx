@@ -80,7 +80,7 @@ function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: R
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded border transition-colors ${
+      className={`flex items-center gap-1.5 text-md px-2 py-0.5 rounded border transition-colors ${
         isViewed
           ? "border-blue-500/60 text-blue-400"
           : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
@@ -239,7 +239,7 @@ function FileDiffItem({
         style={{ gap: 10 }}
         onClick={toggleCollapse}
       >
-        <span className="text-xs text-muted-foreground shrink-0">
+        <span className="text-md text-muted-foreground shrink-0">
           {isCollapsed ? "▶" : "▼"}
         </span>
         <ChangeTypeIcon type={fileDiff.type} />
@@ -252,7 +252,7 @@ function FileDiffItem({
         <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${file.path}`)} />
         <div className="flex-1" />
         {isGenerated && (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+          <span className="text-md px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
             Generated
           </span>
         )}
@@ -389,7 +389,7 @@ function VirtualizedCommitView({
                       <span className="flex-1 truncate">{file.path}</span>
                     )}
                     <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${isRenamed ? newPath : file.path}`)} />
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-muted">
+                    <span className="text-md px-1.5 py-0.5 rounded bg-muted">
                       {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
                     </span>
                     <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
@@ -646,13 +646,13 @@ export function DiffView() {
       const a = meta.annotation;
       if (a.resolved && !showResolved) return null;
       return (
-        <div className="px-3 py-1.5 border-t border-border bg-card/60 text-xs">
+        <div className="px-3 py-1.5 border-t border-border bg-card/60 text-md">
           <span className="font-mono text-muted-foreground mr-2">
             {a.side === "left" ? "L" : "R"}:{a.line_number}
           </span>
           <span className="text-foreground">{a.body}</span>
           {a.resolved && (
-            <span className="ml-2 text-green-400 text-xs">(resolved)</span>
+            <span className="ml-2 text-green-400 text-md">(resolved)</span>
           )}
         </div>
       );
@@ -674,7 +674,8 @@ export function DiffView() {
 
   const activeTheme = resolveThemeById(activeThemeId, customThemes);
   const canopyTheme = getDiffsTheme(activeTheme);
-  const diffViewerStyle = getDiffViewerStyle(activeTheme);
+  const fontSize = useUIStore((s) => s.fontSize);
+  const diffViewerStyle = getDiffViewerStyle(activeTheme, fontSize);
 
   const diffOptions = {
     theme: canopyTheme,
@@ -690,10 +691,10 @@ export function DiffView() {
 
   const toolbar = (
     <div className="flex items-center gap-3 px-3 py-2 border-b shrink-0">
-      <span className="font-mono font-semibold text-xs flex-1 truncate">
+      <span className="font-mono font-semibold text-md flex-1 truncate">
         {selectedFile ? selectedFile.path : selectedCommit?.message ?? "Diff"}
       </span>
-      <div className="flex items-center gap-1 text-xs">
+      <div className="flex items-center gap-1 text-md">
         <button
           onClick={() => setDiffStyle("split")}
           className={`px-2 py-0.5 rounded ${

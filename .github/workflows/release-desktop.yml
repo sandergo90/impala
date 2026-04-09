@@ -120,6 +120,6 @@ jobs:
             release-artifacts/* \
             --title "Canopy ${{ steps.version.outputs.version }}" \
             --notes "${{ steps.changelog.outputs.changelog }}" \
-            --draft
+            --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

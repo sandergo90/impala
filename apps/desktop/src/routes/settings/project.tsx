@@ -107,7 +107,7 @@ export function ProjectSettingsRoute() {
 
         <div className="space-y-1.5">
           <label className="text-sm font-medium">Setup</label>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-md text-muted-foreground">
             Runs automatically after creating a new worktree.
           </p>
           <textarea
@@ -121,7 +121,7 @@ export function ProjectSettingsRoute() {
 
         <div className="space-y-1.5">
           <label className="text-sm font-medium">Run</label>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-md text-muted-foreground">
             Start the dev server. Triggered via Cmd+Shift+R.
           </p>
           <textarea
@@ -135,31 +135,31 @@ export function ProjectSettingsRoute() {
 
         <div className="flex justify-end">
           {saveStatus === "saving" && (
-            <span className="text-xs text-muted-foreground">Saving...</span>
+            <span className="text-md text-muted-foreground">Saving...</span>
           )}
           {saveStatus === "saved" && (
-            <span className="text-xs text-muted-foreground">Saved ✓</span>
+            <span className="text-md text-muted-foreground">Saved ✓</span>
           )}
         </div>
       </div>
 
       <div className="space-y-2">
         <h3 className="text-sm font-medium">Environment variables</h3>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-md text-muted-foreground">
           These variables are available in your scripts:
         </p>
         <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
           <div className="flex items-baseline gap-2">
-            <code className="text-xs font-mono text-foreground">$CANOPY_PROJECT_PATH</code>
-            <span className="text-xs text-muted-foreground">— Main repository root</span>
+            <code className="text-md font-mono text-foreground">$CANOPY_PROJECT_PATH</code>
+            <span className="text-md text-muted-foreground">— Main repository root</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <code className="text-xs font-mono text-foreground">$CANOPY_WORKTREE_PATH</code>
-            <span className="text-xs text-muted-foreground">— Worktree directory (also the working directory)</span>
+            <code className="text-md font-mono text-foreground">$CANOPY_WORKTREE_PATH</code>
+            <span className="text-md text-muted-foreground">— Worktree directory (also the working directory)</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <code className="text-xs font-mono text-foreground">$CANOPY_BRANCH</code>
-            <span className="text-xs text-muted-foreground">— Branch name</span>
+            <code className="text-md font-mono text-foreground">$CANOPY_BRANCH</code>
+            <span className="text-md text-muted-foreground">— Branch name</span>
           </div>
         </div>
       </div>

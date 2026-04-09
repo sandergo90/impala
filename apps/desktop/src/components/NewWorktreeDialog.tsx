@@ -204,7 +204,7 @@ export function NewWorktreeDialog({
         {tab === "new" && (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs text-muted-foreground mb-1">
+              <label className="block text-md text-muted-foreground mb-1">
                 Branch name
               </label>
               <input
@@ -217,7 +217,7 @@ export function NewWorktreeDialog({
               />
             </div>
             <div>
-              <label className="block text-xs text-muted-foreground mb-1">
+              <label className="block text-md text-muted-foreground mb-1">
                 Base branch (optional, defaults to HEAD)
               </label>
               <input
@@ -233,7 +233,7 @@ export function NewWorktreeDialog({
 
         {tab === "existing" && (
           <div>
-            <label className="block text-xs text-muted-foreground mb-1">
+            <label className="block text-md text-muted-foreground mb-1">
               Branch
             </label>
             <select
@@ -263,7 +263,7 @@ export function NewWorktreeDialog({
                     onCancel();
                     navigate({ to: "/settings" });
                   }}
-                  className="text-xs text-blue-400 hover:text-blue-300"
+                  className="text-md text-blue-400 hover:text-blue-300"
                 >
                   Open Settings
                 </button>
@@ -271,13 +271,13 @@ export function NewWorktreeDialog({
             ) : (
               <>
                 <div>
-                  <label className="block text-xs text-muted-foreground mb-1">
+                  <label className="block text-md text-muted-foreground mb-1">
                     Issue
                   </label>
                   <div className="relative" ref={comboboxRef}>
                     {selectedIssue ? (
                       <div className="flex items-center gap-2 w-full px-3 py-1.5 border rounded text-sm bg-background">
-                        <span className="font-mono text-xs text-muted-foreground">
+                        <span className="font-mono text-md text-muted-foreground">
                           {selectedIssue.identifier}
                         </span>
                         <span className="truncate flex-1">{selectedIssue.title}</span>
@@ -286,7 +286,7 @@ export function NewWorktreeDialog({
                             setSelectedIssue(null);
                             setLinearBranchName("");
                           }}
-                          className="text-muted-foreground hover:text-foreground text-xs shrink-0"
+                          className="text-muted-foreground hover:text-foreground text-md shrink-0"
                         >
                           &times;
                         </button>
@@ -305,7 +305,7 @@ export function NewWorktreeDialog({
                     {comboboxOpen && !selectedIssue && (
                       <div className="absolute z-10 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto border rounded bg-popover shadow-lg">
                         {displayedIssues.length === 0 ? (
-                          <div className="px-3 py-2 text-xs text-muted-foreground">
+                          <div className="px-3 py-2 text-md text-muted-foreground">
                             {linearLoading ? "Loading..." : linearQuery ? "No results" : "No issues found"}
                           </div>
                         ) : (
@@ -315,11 +315,11 @@ export function NewWorktreeDialog({
                               onClick={() => selectIssue(issue)}
                               className="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2"
                             >
-                              <span className="font-mono text-xs text-muted-foreground shrink-0">
+                              <span className="font-mono text-md text-muted-foreground shrink-0">
                                 {issue.identifier}
                               </span>
-                              <span className="text-xs truncate flex-1">{issue.title}</span>
-                              <span className="text-xs text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
+                              <span className="text-md truncate flex-1">{issue.title}</span>
+                              <span className="text-md text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
                                 {issue.status}
                               </span>
                             </button>
@@ -331,7 +331,7 @@ export function NewWorktreeDialog({
                 </div>
 
                 <div>
-                  <label className="block text-xs text-muted-foreground mb-1">
+                  <label className="block text-md text-muted-foreground mb-1">
                     Branch name
                   </label>
                   <input
@@ -344,7 +344,7 @@ export function NewWorktreeDialog({
                 </div>
 
                 <div>
-                  <label className="block text-xs text-muted-foreground mb-1">
+                  <label className="block text-md text-muted-foreground mb-1">
                     Base branch (optional, defaults to HEAD)
                   </label>
                   <input

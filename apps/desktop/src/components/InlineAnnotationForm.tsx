@@ -39,7 +39,7 @@ export function InlineAnnotationForm({ onSubmit, onCancel }: InlineAnnotationFor
             onChange={(e) => setBody(e.target.value)}
             placeholder="Leave a comment"
             rows={3}
-            className="w-full px-3 py-2 text-xs rounded-md border border-border bg-background text-foreground resize-y focus:outline-none focus:border-muted-foreground/50 placeholder:text-muted-foreground/50"
+            className="w-full px-3 py-2 text-md rounded-md border border-border bg-background text-foreground resize-y focus:outline-none focus:border-muted-foreground/50 placeholder:text-muted-foreground/50"
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 e.preventDefault();
@@ -54,14 +54,14 @@ export function InlineAnnotationForm({ onSubmit, onCancel }: InlineAnnotationFor
             <button
               type="submit"
               disabled={!body.trim()}
-              className="px-3.5 py-1.5 text-xs font-medium rounded-md border border-border bg-card text-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-3.5 py-1.5 text-md font-medium rounded-md border border-border bg-card text-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Comment
             </button>
             <button
               type="button"
               onClick={onCancel}
-              className="text-xs text-muted-foreground hover:text-foreground"
+              className="text-md text-muted-foreground hover:text-foreground"
             >
               Cancel
             </button>

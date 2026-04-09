@@ -95,7 +95,7 @@ export function AnnotationsPanel() {
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/30">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
-        <span className="text-xs text-center">Click on lines to add annotations</span>
+        <span className="text-sm text-center">Click on lines to add annotations</span>
       </div>
     );
   }
@@ -106,7 +106,7 @@ export function AnnotationsPanel() {
       <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
         <button
           onClick={() => setShowResolved(!showResolved)}
-          className={`px-2 py-0.5 rounded text-xs ${
+          className={`px-2 py-0.5 rounded text-sm ${
             showResolved
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -117,7 +117,7 @@ export function AnnotationsPanel() {
         {hasUnresolved && (
           <button
             onClick={handleSendAllToClaude}
-            className="px-2 py-0.5 rounded text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 ml-auto"
+            className="px-2 py-0.5 rounded text-sm text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 ml-auto"
           >
             Send to Claude
           </button>
@@ -127,7 +127,7 @@ export function AnnotationsPanel() {
       {/* Annotations list */}
       <div className="overflow-y-auto flex-1 min-h-0">
         {scoped.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-muted-foreground/50 text-center">
+          <div className="px-3 py-4 text-sm text-muted-foreground/50 text-center">
             {showResolved ? "No annotations" : "No unresolved annotations"}
           </div>
         ) : selectedFile ? (
@@ -149,7 +149,7 @@ export function AnnotationsPanel() {
           <div className="flex flex-col">
             {[...grouped.entries()].map(([filePath, fileAnnotations]) => (
               <div key={filePath}>
-                <div className="px-3 py-1.5 text-xs uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold border-b border-border/50 font-mono normal-case text-xs truncate">
+                <div className="px-3 py-1.5 text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold border-b border-border/50 font-mono normal-case text-sm truncate">
                   {filePath.split("/").pop()}
                 </div>
                 <div className="flex flex-col gap-1.5 p-2">

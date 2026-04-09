@@ -211,13 +211,13 @@ export function KeyboardShortcutsPane() {
         {hasOverrides && (
           <button
             onClick={() => store.getState().resetAll()}
-            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/50 transition-colors"
+            className="text-md text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/50 transition-colors"
           >
             Reset All
           </button>
         )}
       </div>
-      <p className="text-xs text-muted-foreground mb-6">
+      <p className="text-md text-muted-foreground mb-6">
         Customize keyboard shortcuts. Click a binding to record a new one.
       </p>
 
@@ -249,7 +249,7 @@ export function KeyboardShortcutsPane() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search shortcuts..."
-          className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border border-border/50 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+          className="w-full pl-8 pr-3 py-1.5 text-md rounded-md border border-border/50 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
         />
       </div>
 
@@ -258,7 +258,7 @@ export function KeyboardShortcutsPane() {
         <div className="space-y-6">
           {groupedByCategory.map(({ category, entries }) => (
             <div key={category}>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              <h3 className="text-md font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                 {category}
               </h3>
               <div className="space-y-0.5">
@@ -276,11 +276,11 @@ export function KeyboardShortcutsPane() {
                     >
                       {/* Label + description */}
                       <div className="flex-1 min-w-0 mr-4">
-                        <div className="text-xs font-medium text-foreground">
+                        <div className="text-md font-medium text-foreground">
                           {def.label}
                         </div>
                         {description && (
-                          <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                          <div className="text-md text-muted-foreground mt-0.5 truncate">
                             {description}
                           </div>
                         )}
@@ -293,14 +293,14 @@ export function KeyboardShortcutsPane() {
                             e.stopPropagation();
                             setRecordingId(isRecording ? null : id);
                           }}
-                          className={`min-w-[100px] h-7 flex items-center justify-center rounded-md border text-xs px-2 transition-colors ${
+                          className={`min-w-[100px] h-7 flex items-center justify-center rounded-md border text-md px-2 transition-colors ${
                             isRecording
                               ? "border-primary bg-primary/10 text-primary"
                               : "border-border/50 bg-muted/30 text-foreground hover:border-border hover:bg-muted/50"
                           }`}
                         >
                           {isRecording ? (
-                            <span className="text-xs text-primary animate-pulse">
+                            <span className="text-md text-primary animate-pulse">
                               Recording...
                             </span>
                           ) : effective ? (
@@ -354,7 +354,7 @@ export function KeyboardShortcutsPane() {
           ))}
         </div>
       ) : (
-        <div className="text-xs text-muted-foreground/60 text-center py-8">
+        <div className="text-md text-muted-foreground/60 text-center py-8">
           No shortcuts match "{search}"
         </div>
       )}

@@ -10,14 +10,14 @@ export function NotificationsPane() {
   return (
     <div>
       <h2 className="text-base font-semibold text-foreground">Notifications</h2>
-      <p className="text-xs text-muted-foreground mt-1 mb-6">
+      <p className="text-md text-muted-foreground mt-1 mb-6">
         Configure how you're notified when an agent finishes its task.
       </p>
 
       <div className="flex items-center justify-between max-w-lg">
         <div>
-          <div className="text-xs font-medium">Notification sounds</div>
-          <div className="text-xs text-muted-foreground mt-0.5">
+          <div className="text-md font-medium">Notification sounds</div>
+          <div className="text-md text-muted-foreground mt-0.5">
             Play a sound when an agent completes
           </div>
         </div>
@@ -36,7 +36,7 @@ export function NotificationsPane() {
       </div>
 
       <div className={`mt-6 max-w-lg ${soundMuted ? "opacity-50 pointer-events-none" : ""}`}>
-        <div className="text-xs font-medium mb-3">Notification sound</div>
+        <div className="text-md font-medium mb-3">Notification sound</div>
         <div className="space-y-1">
           {NOTIFICATION_SOUNDS.map((sound) => (
             <div
@@ -60,14 +60,14 @@ export function NotificationsPane() {
                     <div className="w-1.5 h-1.5 rounded-full bg-primary" />
                   )}
                 </div>
-                <span className="text-xs">{sound.name}</span>
+                <span className="text-md">{sound.name}</span>
               </div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   playNotificationSound(sound.id);
                 }}
-                className="text-xs text-muted-foreground hover:text-foreground px-2 py-0.5 rounded hover:bg-muted/50 transition-colors"
+                className="text-md text-muted-foreground hover:text-foreground px-2 py-0.5 rounded hover:bg-muted/50 transition-colors"
               >
                 Preview
               </button>

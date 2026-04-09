@@ -180,14 +180,7 @@ fi
 ok "Build completed successfully!"
 
 # --- Publish release ---
-if [ "$AUTO_PUBLISH" = true ]; then
-    info "Publishing release..."
-    gh release edit "$TAG_NAME" --draft=false
-    ok "Release ${TAG_NAME} published!"
-else
-    info "Release created as draft. Publish it manually or re-run with --publish"
-    echo "  gh release edit ${TAG_NAME} --draft=false"
-fi
+ok "Release will be published automatically by the workflow."
 
 echo ""
 ok "Done! 🎉"

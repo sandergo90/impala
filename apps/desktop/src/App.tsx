@@ -154,7 +154,7 @@ export function RootLayout() {
           <p className="text-muted-foreground">
             Please install Git to use Canopy.
           </p>
-          <p className="text-muted-foreground text-xs mt-2">
+          <p className="text-muted-foreground text-md mt-2">
             https://git-scm.com/download
           </p>
         </div>

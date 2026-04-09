@@ -24,7 +24,7 @@ export function HotkeyDisplay({
   const parts = formatHotkeyParts(effective);
 
   return (
-    <span className={`font-mono text-xs ${className}`}>
+    <span className={`font-mono text-md ${className}`}>
       {parts.map((part, i) => (
         <kbd key={i} className="min-w-[0.75rem] text-center inline-block">
           {part}

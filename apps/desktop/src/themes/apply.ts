@@ -70,19 +70,18 @@ export function getDiffsTheme(theme: Theme): DiffsThemeNames {
 }
 
 const DIFF_FONT_FAMILY = "ui-monospace, Menlo, Consolas, Liberation Mono, monospace";
-const DIFF_FONT_SIZE = 13;
 
 /** CSS variable overrides for Pierre diff styling, applied as inline styles on the container. */
-export function getDiffViewerStyle(theme: Theme): CSSProperties {
+export function getDiffViewerStyle(theme: Theme, fontSize: number = 14): CSSProperties {
   const isDark = theme.type === "dark";
   const additionColor = isDark ? theme.terminal.brightGreen : theme.terminal.green;
   const deletionColor = isDark ? theme.terminal.brightRed : theme.terminal.red;
-  const lineHeight = Math.round(DIFF_FONT_SIZE * 1.5);
+  const lineHeight = Math.round(fontSize * 1.5);
   // Pierre's --diffs-bg uses light-dark(var(--diffs-light-bg), var(--diffs-dark-bg))
   // so we must set the inner variables for the active mode.
   return {
     "--diffs-font-family": DIFF_FONT_FAMILY,
-    "--diffs-font-size": `${DIFF_FONT_SIZE}px`,
+    "--diffs-font-size": `${fontSize}px`,
     "--diffs-line-height": `${lineHeight}px`,
     // Set both light and dark variants so light-dark() works regardless of system color-scheme
     "--diffs-dark": theme.terminal.foreground,

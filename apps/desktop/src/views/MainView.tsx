@@ -91,7 +91,7 @@ export function MainView() {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-2.5 py-1 text-xs font-medium rounded-[5px] transition-colors ${
+      className={`px-2.5 py-1 text-md font-medium rounded-[5px] transition-colors ${
         isActive
           ? "text-foreground"
           : "text-muted-foreground hover:text-foreground"
@@ -106,7 +106,7 @@ export function MainView() {
     <>
       {/* Title bar */}
       <div
-        className="relative flex items-center h-12 shrink-0 border-b border-border/50 bg-background"
+        className="relative flex items-center h-14 shrink-0 border-b border-border/50 bg-background"
         style={{ paddingLeft: "88px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
@@ -124,14 +124,14 @@ export function MainView() {
             </svg>
           </button>
           {selectedWorktree && (
-            <div className="flex items-center gap-1.5 text-xs">
+            <div className="flex items-center gap-1.5 text-md">
               <span className="text-muted-foreground/60">{selectedProject?.name}</span>
               <span className="text-muted-foreground/30">/</span>
-              <span className="text-foreground font-medium font-mono text-xs truncate max-w-[200px]">
+              <span className="text-foreground font-medium font-mono text-md truncate max-w-[200px]">
                 {selectedWorktree.branch}
               </span>
               {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
-                <span className="bg-accent rounded-full px-1.5 py-0.5 text-xs text-muted-foreground">
+                <span className="bg-accent rounded-full px-1.5 py-0.5 text-md text-muted-foreground">
                   {dataState.commits.length} ahead of {dataState.baseBranch}
                 </span>
               )}

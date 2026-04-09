@@ -215,7 +215,7 @@ function LeafPane({
         />
       )}
       {paneType === "claude" && (
-        <div className="absolute top-1 right-2 text-xs font-medium text-muted-foreground/40 z-10 pointer-events-none">
+        <div className="absolute top-1 right-2 text-md font-medium text-muted-foreground/40 z-10 pointer-events-none">
           Claude
         </div>
       )}
