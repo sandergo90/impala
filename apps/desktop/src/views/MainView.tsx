@@ -149,7 +149,11 @@ export function MainView() {
                   else triggerRunScript();
                 }}
                 disabled={isStopping}
-                className="relative text-muted-foreground hover:text-foreground p-1.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
+                className={`relative p-1.5 rounded disabled:opacity-30 disabled:cursor-not-allowed ${
+                  isRunning || isStopping
+                    ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
+                    : "text-green-400 bg-green-500/15 hover:bg-green-500/25"
+                }`}
                 title={runScriptTooltip}
               >
                 {isRunning || isStopping ? (
