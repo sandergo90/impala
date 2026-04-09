@@ -833,64 +833,54 @@ export function Sidebar() {
           repoPath={selectedProject.path}
           onCreated={async (worktree) => {
             setShowNewWorktree(false);
-            try {
-              const wts = await invoke<Worktree[]>("list_worktrees", {
-                repoPath: selectedProject.path,
-              });
-              setWorktrees(wts);
-              // Use the worktree from the refreshed list to ensure path
-              // consistency (git may canonicalize symlinks differently)
-              const resolved = wts.find((wt) => wt.branch === worktree.branch) ?? worktree;
-              selectWorktree(resolved);
+            setWorktrees([...useDataStore.getState().worktrees, worktree]);
+            selectWorktree(worktree);
 
-              // Run setup script if configured (fire-and-forget)
-              invoke<{ setup?: string; run?: string }>("read_project_config", {
-                projectPath: selectedProject.path,
-              })
-                .then((config) => {
-                  if (config.setup?.trim()) {
-                    const sessionId = `floating-setup-${Date.now()}`;
-                    invoke("pty_spawn", {
-                      sessionId,
-                      cwd: resolved.path,
-                      envVars: {
-                        IMPALA_PROJECT_PATH: selectedProject.path,
-                        IMPALA_WORKTREE_PATH: resolved.path,
-                        IMPALA_BRANCH: resolved.branch,
-                      },
+            // Run setup script if configured (fire-and-forget)
+            invoke<{ setup?: string; run?: string }>("read_project_config", {
+              projectPath: selectedProject.path,
+            })
+              .then((config) => {
+                if (config.setup?.trim()) {
+                  const sessionId = `floating-setup-${Date.now()}`;
+                  invoke("pty_spawn", {
+                    sessionId,
+                    cwd: worktree.path,
+                    envVars: {
+                      IMPALA_PROJECT_PATH: selectedProject.path,
+                      IMPALA_WORKTREE_PATH: worktree.path,
+                      IMPALA_BRANCH: worktree.branch,
+                    },
+                  })
+                    .then(() => {
+                      // Write the setup command into the interactive shell
+                      const encoded = btoa(
+                        Array.from(
+                          new TextEncoder().encode(config.setup + "\nexit $?\n"),
+                          (b) => String.fromCharCode(b),
+                        ).join(""),
+                      );
+                      invoke("pty_write", { sessionId, data: encoded }).catch(
+                        () => {},
+                      );
+                      useUIStore
+                        .getState()
+                        .setFloatingTerminal(worktree.path, {
+                          mode: "expanded",
+                          sessionId,
+                          label: "Setup",
+                          type: "setup",
+                          status: "running",
+                        });
                     })
-                      .then(() => {
-                        // Write the setup command into the interactive shell
-                        const encoded = btoa(
-                          Array.from(
-                            new TextEncoder().encode(config.setup + "\n"),
-                            (b) => String.fromCharCode(b),
-                          ).join(""),
-                        );
-                        invoke("pty_write", { sessionId, data: encoded }).catch(
-                          () => {},
-                        );
-                        useUIStore
-                          .getState()
-                          .setFloatingTerminal(resolved.path, {
-                            mode: "expanded",
-                            sessionId,
-                            label: "Setup",
-                            type: "setup",
-                            status: "running",
-                          });
-                      })
-                      .catch((e) => {
-                        toast.error(`Failed to run setup script: ${e}`);
-                      });
-                  }
-                })
-                .catch(() => {
-                  // Silently ignore config read failures
-                });
-            } catch (e) {
-              toast.error("Failed to refresh worktrees");
-            }
+                    .catch((e) => {
+                      toast.error(`Failed to run setup script: ${e}`);
+                    });
+                }
+              })
+              .catch(() => {
+                // Silently ignore config read failures
+              });
           }}
           onCancel={() => setShowNewWorktree(false)}
         />

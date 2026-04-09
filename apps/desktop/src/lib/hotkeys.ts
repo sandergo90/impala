@@ -85,7 +85,7 @@ export const HOTKEYS = {
   TOGGLE_TERMINAL: {
     label: "Toggle Terminal",
     description: "Switch between the general terminal and the last selected worktree",
-    default: "meta+shift+2",
+    default: "meta+shift+t",
     category: "Terminal",
   },
   CLEAR_TERMINAL: {

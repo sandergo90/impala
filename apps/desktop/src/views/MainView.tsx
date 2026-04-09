@@ -212,8 +212,8 @@ export function MainView() {
                 )}
               </button>
               <span className="mx-0.5 w-px h-3.5 bg-border/50" />
-              {tabPill("Diff", activeTab === "diff", () => setTab("diff"))}
               {tabPill("Terminal", activeTab === "terminal", () => setTab("terminal"))}
+              {tabPill("Diff", activeTab === "diff", () => setTab("diff"))}
               {tabPill("Split", activeTab === "split", () => setTab("split"))}
             </div>
           </div>

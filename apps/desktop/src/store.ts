@@ -25,7 +25,7 @@ const defaultFloatingTerminal: FloatingTerminalState = {
 function createDefaultNavState(): WorktreeNavState {
   const leaf = createLeaf("claude");
   return {
-    activeTab: "diff",
+    activeTab: "terminal",
     splitTree: leaf,
     focusedPaneId: leaf.id,
     claudeLaunched: false,

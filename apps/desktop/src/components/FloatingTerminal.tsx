@@ -21,7 +21,7 @@ function RestartButton({ onClick, className }: { onClick: () => void; className?
       className={`text-muted-foreground hover:text-foreground text-md ${className ?? ""}`}
       title="Restart"
     >
-      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M2 8a6 6 0 0 1 10.3-4.2L14 2v4h-4l1.7-1.7A4.5 4.5 0 1 0 12.5 8" />
       </svg>
     </button>
@@ -86,9 +86,11 @@ export function FloatingTerminal() {
         setFloatingTerminal(wtPath, { label: failLabel, status: "failed" });
       } else if (current.type === "setup") {
         setFloatingTerminal(wtPath, {
-          label: "Setup complete",
-          status: "succeeded",
-          mode: "pill",
+          mode: "hidden",
+          sessionId: null,
+          label: "",
+          type: null,
+          status: "running",
         });
       } else if (current.type === "run") {
         setFloatingTerminal(wtPath, {
@@ -193,7 +195,7 @@ export function FloatingTerminal() {
             e.stopPropagation();
             dismiss();
           }}
-          className="text-muted-foreground hover:text-foreground text-md ml-1"
+          className="text-muted-foreground hover:text-foreground text-base ml-1"
         >
           &times;
         </button>
@@ -202,7 +204,7 @@ export function FloatingTerminal() {
   }
 
   // mode === 'expanded'
-  const titleBarHeight = 32;
+  const titleBarHeight = 40;
 
   return (
     <div
@@ -228,7 +230,7 @@ export function FloatingTerminal() {
         onMouseDown={(e) => onResizeStart(e, "top-left")}
       />
 
-      <div className="h-8 flex items-center justify-between px-3 border-b border-border/50 bg-background shrink-0">
+      <div className="h-10 flex items-center justify-between px-3 border-b border-border/50 bg-background shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <StatusDot status={status} />
           <span className="text-md text-foreground truncate">{label}</span>
@@ -239,14 +241,14 @@ export function FloatingTerminal() {
           )}
           <button
             onClick={() => wtPath && setFloatingTerminal(wtPath, { mode: "pill" })}
-            className="text-muted-foreground hover:text-foreground text-md px-1"
+            className="text-muted-foreground hover:text-foreground text-lg px-1"
             title="Minimize"
           >
             &#8211;
           </button>
           <button
             onClick={dismiss}
-            className="text-muted-foreground hover:text-foreground text-md px-1"
+            className="text-muted-foreground hover:text-foreground text-lg px-1"
             title="Close"
           >
             &times;

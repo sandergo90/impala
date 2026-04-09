@@ -175,16 +175,27 @@ export function NewWorktreeDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={onCancel}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
     >
-      <div
+      <form
         className="bg-background border rounded-lg shadow-lg p-6 w-[420px] space-y-4"
         onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleCreate();
+        }}
       >
         <h2 className="text-lg font-semibold">New Worktree</h2>
 
         <div className="flex border-b border-border">
           {tabs.map((t) => (
             <button
+              type="button"
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`px-3 py-1.5 text-sm transition-colors relative ${
@@ -214,6 +225,7 @@ export function NewWorktreeDialog({
                 placeholder="feature/my-branch"
                 className="w-full px-3 py-1.5 border rounded text-sm bg-background"
                 autoFocus
+                spellCheck={false}
               />
             </div>
             <div>
@@ -226,6 +238,7 @@ export function NewWorktreeDialog({
                 onChange={(e) => setBaseBranch(e.target.value)}
                 placeholder="develop"
                 className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+                spellCheck={false}
               />
             </div>
           </div>
@@ -259,6 +272,7 @@ export function NewWorktreeDialog({
                   Add your Linear API key in Settings to use this feature.
                 </p>
                 <button
+                  type="button"
                   onClick={() => {
                     onCancel();
                     navigate({ to: "/settings" });
@@ -282,6 +296,7 @@ export function NewWorktreeDialog({
                         </span>
                         <span className="truncate flex-1">{selectedIssue.title}</span>
                         <button
+                          type="button"
                           onClick={() => {
                             setSelectedIssue(null);
                             setLinearBranchName("");
@@ -297,9 +312,15 @@ export function NewWorktreeDialog({
                         value={linearQuery}
                         onChange={(e) => handleLinearSearch(e.target.value)}
                         onFocus={() => setComboboxOpen(true)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && comboboxOpen) {
+                            e.preventDefault();
+                          }
+                        }}
                         placeholder={linearLoading ? "Loading issues..." : "Search issues..."}
                         className="w-full px-3 py-1.5 border rounded text-sm bg-background"
                         autoFocus
+                        spellCheck={false}
                       />
                     )}
                     {comboboxOpen && !selectedIssue && (
@@ -311,6 +332,7 @@ export function NewWorktreeDialog({
                         ) : (
                           displayedIssues.map((issue) => (
                             <button
+                              type="button"
                               key={issue.id}
                               onClick={() => selectIssue(issue)}
                               className="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2"
@@ -340,6 +362,7 @@ export function NewWorktreeDialog({
                     onChange={(e) => setLinearBranchName(e.target.value)}
                     placeholder="Select an issue to auto-fill"
                     className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+                    spellCheck={false}
                   />
                 </div>
 
@@ -353,6 +376,7 @@ export function NewWorktreeDialog({
                     onChange={(e) => setLinearBaseBranch(e.target.value)}
                     placeholder="develop"
                     className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+                    spellCheck={false}
                   />
                 </div>
               </>
@@ -362,20 +386,21 @@ export function NewWorktreeDialog({
 
         <div className="flex justify-end gap-2 pt-2">
           <button
+            type="button"
             onClick={onCancel}
             className="px-3 py-1.5 text-sm border rounded hover:bg-accent/10"
           >
             Cancel
           </button>
           <button
-            onClick={handleCreate}
+            type="submit"
             disabled={loading || (tab === "linear" && !linearApiKey)}
             className="px-3 py-1.5 text-sm border rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {loading ? "Creating..." : "Create"}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
