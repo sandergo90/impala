@@ -259,7 +259,7 @@ export function FloatingTerminal() {
         </div>
       </div>
       <div style={{ height: size.height - titleBarHeight }}>
-        <XtermTerminal sessionId={sessionId} isFocused scrollback={50000} />
+        <XtermTerminal sessionId={sessionId} baseDir={wtPath ?? undefined} isFocused scrollback={50000} />
       </div>
     </div>
   );

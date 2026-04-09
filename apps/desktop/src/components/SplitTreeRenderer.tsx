@@ -223,6 +223,7 @@ function LeafPane({
         <XtermTerminal
           key={sessionId}
           sessionId={sessionId}
+          baseDir={worktreePath}
           isFocused={isFocused}
           onFocus={onFocus}
           onRestart={handleRestart}

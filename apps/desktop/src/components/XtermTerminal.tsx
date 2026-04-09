@@ -12,6 +12,7 @@ import { resolveThemeById } from "../themes/apply";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { matchesHotkeyEvent } from "../lib/hotkeys";
 import { useHotkeysStore } from "../stores/hotkeys";
+import { createFileLinkProvider } from "../lib/terminal-link-provider";
 
 const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
@@ -23,6 +24,7 @@ function getTerminalTheme() {
 
 interface XtermTerminalProps {
   sessionId: string;
+  baseDir?: string;
   isFocused?: boolean;
   onFocus?: () => void;
   onRestart?: () => void;
@@ -42,7 +44,7 @@ function decodeBase64(encoded: string): Uint8Array {
   return bytes;
 }
 
-export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart, scrollback = 10000 }: XtermTerminalProps) {
+export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, onRestart, scrollback = 10000 }: XtermTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -84,6 +86,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart,
     let resizeObserver: ResizeObserver | null = null;
     let resizeDisposable: { dispose(): void } | null = null;
     let dataDisposable: { dispose(): void } | null = null;
+    let linkDisposable: { dispose(): void } | null = null;
     let unlistenOutput: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
     let unlistenDragDrop: UnlistenFn | null = null;
@@ -151,6 +154,11 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart,
       terminal.loadAddon(searchAddon);
       searchAddonRef.current = searchAddon;
       terminal.open(container);
+
+      const baseDirRef = { current: baseDir ?? null };
+      linkDisposable = terminal.registerLinkProvider(
+        createFileLinkProvider(terminal, () => baseDirRef.current),
+      );
 
       // WebGL must be loaded after open()
       try {
@@ -305,6 +313,7 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart,
       resizeObserver?.disconnect();
       resizeDisposable?.dispose();
       dataDisposable?.dispose();
+      linkDisposable?.dispose();
       webglAddon?.dispose();
       unlistenOutput?.();
       unlistenExit?.();
