@@ -16,10 +16,12 @@ export function PlanView() {
     activePlan,
     plans,
     planAnnotations,
+    planVersions,
     handleCreate,
     handleApprove,
     handleRequestChanges,
     handleOpenFile,
+    handleSelectVersion,
   } = usePlanAnnotationActions();
 
   const [markdown, setMarkdown] = useState<string | null>(null);
@@ -134,10 +136,12 @@ export function PlanView() {
     <div className="flex flex-col h-full">
       <PlanToolbar
         plan={activePlan}
+        versions={planVersions}
         onApprove={handleApprove}
         onRequestChanges={handleRequestChanges}
         onClose={handleClose}
         onOpenFile={handleOpenFile}
+        onSelectVersion={handleSelectVersion}
       />
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-4xl mx-auto py-6">

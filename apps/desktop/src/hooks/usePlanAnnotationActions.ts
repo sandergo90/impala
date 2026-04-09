@@ -23,6 +23,26 @@ export function usePlanAnnotationActions() {
     [plans, activePlanId]
   );
 
+  const planVersions = useMemo(
+    () =>
+      activePlan
+        ? plans
+            .filter((p) => p.plan_path === activePlan.plan_path)
+            .sort((a, b) => b.version - a.version)
+        : [],
+    [plans, activePlan]
+  );
+
+  const handleSelectVersion = useCallback(
+    (planId: string) => {
+      if (!worktreePath) return;
+      useUIStore.getState().updateWorktreeNavState(worktreePath, {
+        activePlanId: planId,
+      });
+    },
+    [worktreePath]
+  );
+
   const updateData = useCallback(
     (updates: Partial<{ plans: typeof plans; planAnnotations: PlanAnnotation[] }>) => {
       if (worktreePath) {
@@ -168,6 +188,7 @@ export function usePlanAnnotationActions() {
   return {
     plans,
     activePlan,
+    planVersions,
     planAnnotations,
     handleCreate,
     handleResolve,
@@ -175,5 +196,6 @@ export function usePlanAnnotationActions() {
     handleApprove,
     handleRequestChanges,
     handleOpenFile,
+    handleSelectVersion,
   };
 }
