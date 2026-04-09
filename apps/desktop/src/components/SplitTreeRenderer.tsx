@@ -224,8 +224,9 @@ function LeafPane({
               const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
 
               // Fetch per-project flags, fall back to global
+              const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
               Promise.all([
-                invoke<string | null>("get_setting", { key: "claudeFlags", scope: worktreePath }),
+                invoke<string | null>("get_setting", { key: "claudeFlags", scope: projectPath }),
                 invoke<string | null>("get_setting", { key: "claudeFlags", scope: "global" }),
               ]).then(([projectFlags, globalFlags]) => {
                 const flags = projectFlags ?? globalFlags ?? "";

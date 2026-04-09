@@ -20,7 +20,7 @@ use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
-struct DbState(Mutex<rusqlite::Connection>);
+pub(crate) struct DbState(pub(crate) Mutex<rusqlite::Connection>);
 struct DiffCache(Mutex<lru::LruCache<String, String>>);
 struct HookPort(u16);
 
@@ -832,6 +832,19 @@ pub fn run() {
                         }
                     }
                     let _ = fs::remove_file(&projects_file);
+                }
+            }
+
+            // Migrate hotkeys.json → settings table
+            {
+                let hotkeys_file = app_dir.join("hotkeys.json");
+                if hotkeys_file.exists() {
+                    if let Ok(contents) = fs::read_to_string(&hotkeys_file) {
+                        if serde_json::from_str::<serde_json::Value>(&contents).is_ok() {
+                            let _ = settings::set_setting(&conn, "hotkeyOverrides", "global", contents.trim());
+                        }
+                    }
+                    let _ = fs::remove_file(&hotkeys_file);
                 }
             }
 
