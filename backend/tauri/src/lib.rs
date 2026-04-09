@@ -7,6 +7,8 @@ mod hotkeys;
 mod linear;
 mod linear_context;
 mod notifications;
+mod plan_annotations;
+mod plans;
 mod pty;
 mod settings;
 mod viewed_files;
@@ -267,6 +269,81 @@ fn delete_annotation(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
     annotations::delete_annotation(&conn, &id)
+}
+
+#[tauri::command]
+fn create_plan(
+    state: tauri::State<'_, DbState>,
+    plan: plans::NewPlan,
+) -> Result<plans::Plan, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plans::create_plan(&conn, plan)
+}
+
+#[tauri::command]
+fn list_plans(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+) -> Result<Vec<plans::Plan>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plans::list_plans(&conn, &worktree_path)
+}
+
+#[tauri::command]
+fn get_plan(
+    state: tauri::State<'_, DbState>,
+    id: String,
+) -> Result<plans::Plan, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plans::get_plan(&conn, &id)
+}
+
+#[tauri::command]
+fn update_plan(
+    state: tauri::State<'_, DbState>,
+    id: String,
+    changes: plans::UpdatePlan,
+) -> Result<plans::Plan, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plans::update_plan(&conn, &id, changes)
+}
+
+#[tauri::command]
+fn create_plan_annotation(
+    state: tauri::State<'_, DbState>,
+    annotation: plan_annotations::NewPlanAnnotation,
+) -> Result<plan_annotations::PlanAnnotation, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plan_annotations::create_plan_annotation(&conn, annotation)
+}
+
+#[tauri::command]
+fn list_plan_annotations(
+    state: tauri::State<'_, DbState>,
+    plan_path: String,
+    worktree_path: Option<String>,
+) -> Result<Vec<plan_annotations::PlanAnnotation>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plan_annotations::list_plan_annotations(&conn, &plan_path, worktree_path.as_deref())
+}
+
+#[tauri::command]
+fn update_plan_annotation(
+    state: tauri::State<'_, DbState>,
+    id: String,
+    changes: plan_annotations::UpdatePlanAnnotation,
+) -> Result<plan_annotations::PlanAnnotation, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plan_annotations::update_plan_annotation(&conn, &id, changes)
+}
+
+#[tauri::command]
+fn delete_plan_annotation(
+    state: tauri::State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plan_annotations::delete_plan_annotation(&conn, &id)
 }
 
 #[tauri::command]
@@ -821,6 +898,10 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize worktree_issues table: {}", e))?;
             settings::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize settings tables: {}", e))?;
+            plans::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize plans table: {}", e))?;
+            plan_annotations::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize plan_annotations table: {}", e))?;
 
             // Migrate projects.json → projects table
             {
@@ -949,6 +1030,14 @@ pub fn run() {
             list_annotations,
             update_annotation,
             delete_annotation,
+            create_plan,
+            list_plans,
+            get_plan,
+            update_plan,
+            create_plan_annotation,
+            list_plan_annotations,
+            update_plan_annotation,
+            delete_plan_annotation,
             set_file_viewed,
             get_file_diff_since_commit,
             unset_file_viewed,
