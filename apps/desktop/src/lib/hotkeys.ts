@@ -37,6 +37,12 @@ export const HOTKEYS = {
     default: "meta+slash",
     category: "Navigation",
   },
+  OPEN_IN_EDITOR: {
+    label: "Open in Editor",
+    description: "Open the current worktree in your preferred code editor",
+    default: "meta+o",
+    category: "Navigation",
+  },
 
   // -- Layout --
   TOGGLE_SIDEBAR: {

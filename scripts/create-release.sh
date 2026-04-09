@@ -143,7 +143,7 @@ ok "Created commit and tag ${TAG_NAME}"
 
 # --- Push ---
 info "Pushing tag ${TAG_NAME}..."
-git push origin "$BRANCH" --follow-tags
+git push origin "$BRANCH" "$TAG_NAME"
 
 ok "Pushed to origin. GitHub Actions will start building."
 

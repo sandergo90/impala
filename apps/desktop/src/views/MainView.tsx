@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/resizable";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { OpenInEditorButton } from "../components/OpenInEditorButton";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { triggerRunScript, stopRunScript } from "../lib/run-script";
@@ -59,6 +61,7 @@ export function MainView() {
 
   const sidebarTooltip = useHotkeyTooltip("TOGGLE_SIDEBAR", sidebarCollapsed ? "Show sidebar" : "Hide sidebar");
   const runScriptTooltip = useHotkeyTooltip("RUN_SCRIPT", isRunning ? "Stop script" : "Run script");
+  const openInEditorTooltip = useHotkeyTooltip("OPEN_IN_EDITOR", "Open in editor");
 
   const setTab = (tab: "diff" | "terminal" | "split") => {
     if (!selectedWorktree) return;
@@ -75,6 +78,17 @@ export function MainView() {
 
   useAppHotkey("TOGGLE_RIGHT_SIDEBAR", () => {
     setShowSidebar((prev) => !prev);
+  });
+
+  useAppHotkey("OPEN_IN_EDITOR", async () => {
+    const wt = useUIStore.getState().selectedWorktree;
+    if (!wt) return;
+    const editor = useUIStore.getState().preferredEditor || "cursor";
+    try {
+      await invoke("open_in_editor", { editor, path: wt.path, line: null, col: null });
+    } catch (e) {
+      toast.error(String(e));
+    }
   });
 
   useAppHotkey("TOGGLE_TERMINAL", () => {
@@ -222,7 +236,7 @@ export function MainView() {
         {/* Right: open + sidebar */}
         <div className="relative flex items-center gap-1.5 pr-4 ml-auto shrink-0">
           {selectedWorktree && (
-            <OpenInEditorButton worktreePath={selectedWorktree.path} />
+            <OpenInEditorButton worktreePath={selectedWorktree.path} tooltip={openInEditorTooltip} />
           )}
           <span className="mx-0.5 w-px h-3.5 bg-border/50" />
           {tabPill("Sidebar", showSidebar, () =>

@@ -17,7 +17,7 @@ const EDITORS = [
   { id: "sublime", label: "Sublime Text", icon: sublimeIcon },
 ] as const;
 
-export function OpenInEditorButton({ worktreePath }: { worktreePath: string }) {
+export function OpenInEditorButton({ worktreePath, tooltip }: { worktreePath: string; tooltip?: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -57,6 +57,7 @@ export function OpenInEditorButton({ worktreePath }: { worktreePath: string }) {
         <button
           onClick={() => handleOpen(current.id)}
           disabled={loading}
+          title={tooltip}
           className="flex items-center gap-1.5 h-6 pl-1.5 pr-2 text-md font-medium text-muted-foreground hover:text-foreground rounded-l border border-r-0 border-border/60 bg-secondary/50 hover:bg-secondary hover:border-border disabled:opacity-50 transition-all duration-150"
         >
           <img src={current.icon} alt="" width={14} height={14} className="shrink-0" />
