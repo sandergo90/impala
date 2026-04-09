@@ -1,9 +1,41 @@
 export interface ThemeUI {
+  // Required core tokens (used as basis for deriving everything else)
   background: string;
   foreground: string;
   primary: string;
   border: string;
   accent: string;
+
+  // Optional granular overrides — when provided, skip derivation
+  card?: string;
+  cardForeground?: string;
+  popover?: string;
+  popoverForeground?: string;
+  primaryForeground?: string;
+  secondary?: string;
+  secondaryForeground?: string;
+  muted?: string;
+  mutedForeground?: string;
+  accentForeground?: string;
+  destructive?: string;
+  destructiveForeground?: string;
+  input?: string;
+  ring?: string;
+  chart1?: string;
+  chart2?: string;
+  chart3?: string;
+  chart4?: string;
+  chart5?: string;
+  sidebar?: string;
+  sidebarForeground?: string;
+  sidebarPrimary?: string;
+  sidebarPrimaryForeground?: string;
+  sidebarAccent?: string;
+  sidebarAccentForeground?: string;
+  sidebarBorder?: string;
+  sidebarRing?: string;
+  highlightMatch?: string;
+  highlightActive?: string;
 }
 
 export interface ThemeTerminal {
@@ -72,4 +104,6 @@ export interface ResolvedCSS {
   sidebarAccentForeground: string;
   sidebarBorder: string;
   sidebarRing: string;
+  highlightMatch: string;
+  highlightActive: string;
 }

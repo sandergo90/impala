@@ -106,7 +106,8 @@ export function getDiffViewerStyle(theme: Theme, fontSize: number = 14, fontFami
 // ---------------------------------------------------------------------------
 
 export function resolveTheme(theme: Theme): ResolvedCSS {
-  const { background, foreground, primary, border, accent } = theme.ui;
+  const ui = theme.ui;
+  const { background, foreground, primary, border, accent } = ui;
   const isDark = theme.type === "dark";
   const mix = (color: string, pct: number, base: string = background) =>
     `color-mix(in lab, ${color} ${pct}%, ${base})`;
@@ -114,35 +115,37 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
   return {
     background,
     foreground,
-    card: isDark ? mix("#ffffff", 4) : mix("#000000", 3),
-    cardForeground: foreground,
-    popover: isDark ? mix("#ffffff", 6) : mix("#000000", 4),
-    popoverForeground: foreground,
+    card: ui.card ?? (isDark ? mix("#ffffff", 4) : mix("#000000", 3)),
+    cardForeground: ui.cardForeground ?? foreground,
+    popover: ui.popover ?? (isDark ? mix("#ffffff", 6) : mix("#000000", 4)),
+    popoverForeground: ui.popoverForeground ?? foreground,
     primary,
-    primaryForeground: isDark ? "#191c22" : "#ffffff",
-    secondary: accent,
-    secondaryForeground: foreground,
-    muted: accent,
-    mutedForeground: mix(foreground, isDark ? 55 : 45),
+    primaryForeground: ui.primaryForeground ?? (isDark ? "#191c22" : "#ffffff"),
+    secondary: ui.secondary ?? accent,
+    secondaryForeground: ui.secondaryForeground ?? foreground,
+    muted: ui.muted ?? accent,
+    mutedForeground: ui.mutedForeground ?? mix(foreground, isDark ? 55 : 45),
     accent,
-    accentForeground: foreground,
-    destructive: isDark ? "#FC6B83" : "#cf222e",
+    accentForeground: ui.accentForeground ?? foreground,
+    destructive: ui.destructive ?? (isDark ? "#FC6B83" : "#cf222e"),
     border,
-    input: border,
-    ring: mix(foreground, 35),
-    chart1: mix(foreground, 85),
-    chart2: mix(foreground, 55),
-    chart3: mix(foreground, 45),
-    chart4: mix(foreground, 35),
-    chart5: mix(foreground, 25),
-    sidebar: isDark ? mix(background, 80, "#000000") : accent,
-    sidebarForeground: foreground,
-    sidebarPrimary: primary,
-    sidebarPrimaryForeground: "#ffffff",
-    sidebarAccent: accent,
-    sidebarAccentForeground: foreground,
-    sidebarBorder: border,
-    sidebarRing: mix(foreground, 35),
+    input: ui.input ?? border,
+    ring: ui.ring ?? mix(foreground, 35),
+    chart1: ui.chart1 ?? mix(foreground, 85),
+    chart2: ui.chart2 ?? mix(foreground, 55),
+    chart3: ui.chart3 ?? mix(foreground, 45),
+    chart4: ui.chart4 ?? mix(foreground, 35),
+    chart5: ui.chart5 ?? mix(foreground, 25),
+    sidebar: ui.sidebar ?? (isDark ? mix(background, 80, "#000000") : accent),
+    sidebarForeground: ui.sidebarForeground ?? foreground,
+    sidebarPrimary: ui.sidebarPrimary ?? primary,
+    sidebarPrimaryForeground: ui.sidebarPrimaryForeground ?? "#ffffff",
+    sidebarAccent: ui.sidebarAccent ?? accent,
+    sidebarAccentForeground: ui.sidebarAccentForeground ?? foreground,
+    sidebarBorder: ui.sidebarBorder ?? border,
+    sidebarRing: ui.sidebarRing ?? mix(foreground, 35),
+    highlightMatch: ui.highlightMatch ?? `color-mix(in srgb, ${primary} 20%, transparent)`,
+    highlightActive: ui.highlightActive ?? `color-mix(in srgb, ${primary} 50%, transparent)`,
   };
 }
 
@@ -179,6 +182,8 @@ const CSS_VAR_MAP: Record<keyof ResolvedCSS, string> = {
   sidebarAccentForeground: "--sidebar-accent-foreground",
   sidebarBorder: "--sidebar-border",
   sidebarRing: "--sidebar-ring",
+  highlightMatch: "--highlight-match",
+  highlightActive: "--highlight-active",
 };
 
 export function applyTheme(theme: Theme): void {
