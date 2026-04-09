@@ -74,6 +74,8 @@ interface UIState {
   setFloatingTerminal: (worktreePath: string, updates: Partial<FloatingTerminalState>) => void;
   floatingTerminalSize: { width: number; height: number };
   setFloatingTerminalSize: (size: { width: number; height: number }) => void;
+  floatingTerminalPosition: { x: number; y: number } | null;
+  setFloatingTerminalPosition: (pos: { x: number; y: number } | null) => void;
   linearApiKey: string;
   setLinearApiKey: (key: string) => void;
   preferredEditor: string;
@@ -88,6 +90,14 @@ interface UIState {
   setRightSidebarSize: (size: number | null) => void;
   fontSize: number;
   setFontSize: (size: number) => void;
+  editorFontFamily: string | null;
+  setEditorFontFamily: (family: string | null) => void;
+  editorFontSize: number | null;
+  setEditorFontSize: (size: number | null) => void;
+  terminalFontFamily: string | null;
+  setTerminalFontFamily: (family: string | null) => void;
+  terminalFontSize: number | null;
+  setTerminalFontSize: (size: number | null) => void;
   // General terminal
   generalTerminalActive: boolean;
   setGeneralTerminalActive: (active: boolean) => void;
@@ -167,6 +177,8 @@ export const useUIStore = create<UIState>()(
         }),
       floatingTerminalSize: { width: 500, height: 300 },
       setFloatingTerminalSize: (size) => set({ floatingTerminalSize: size }),
+      floatingTerminalPosition: null,
+      setFloatingTerminalPosition: (pos) => set({ floatingTerminalPosition: pos }),
       linearApiKey: "",
       setLinearApiKey: (key) => set({ linearApiKey: key }),
       preferredEditor: "cursor",
@@ -184,6 +196,14 @@ export const useUIStore = create<UIState>()(
         set({ fontSize: size });
         document.documentElement.style.fontSize = `${size}px`;
       },
+      editorFontFamily: null,
+      setEditorFontFamily: (family) => set({ editorFontFamily: family }),
+      editorFontSize: null,
+      setEditorFontSize: (size) => set({ editorFontSize: size }),
+      terminalFontFamily: null,
+      setTerminalFontFamily: (family) => set({ terminalFontFamily: family }),
+      terminalFontSize: null,
+      setTerminalFontSize: (size) => set({ terminalFontSize: size }),
       generalTerminalActive: false,
       setGeneralTerminalActive: (active) => set({ generalTerminalActive: active }),
       generalTerminalSplitTree: defaultGeneralTerminalLeaf,

@@ -10,6 +10,15 @@ const MIN_WIDTH = 300;
 const MIN_HEIGHT = 200;
 const MAX_WIDTH = 900;
 const MAX_HEIGHT = 700;
+const DRAG_THRESHOLD = 3;
+const MARGIN = 16;
+
+function clampPosition(x: number, y: number, w: number, h: number) {
+  return {
+    x: Math.max(0, Math.min(x, window.innerWidth - w)),
+    y: Math.max(0, Math.min(y, window.innerHeight - h)),
+  };
+}
 
 function RestartButton({ onClick, className }: { onClick: () => void; className?: string }) {
   return (
@@ -48,18 +57,29 @@ export function FloatingTerminal() {
   const setFloatingTerminal = useUIStore((s) => s.setFloatingTerminal);
   const size = useUIStore((s) => s.floatingTerminalSize);
   const setSize = useUIStore((s) => s.setFloatingTerminalSize);
+  const position = useUIStore((s) => s.floatingTerminalPosition);
+  const setPosition = useUIStore((s) => s.setFloatingTerminalPosition);
 
   const mode = ft?.mode ?? "hidden";
   const sessionId = ft?.sessionId ?? null;
   const label = ft?.label ?? "";
   const status = ft?.status ?? "running";
 
-  const dragRef = useRef<{
+  const containerRef = useRef<HTMLDivElement>(null);
+  const resizeRef = useRef<{
     startX: number;
     startY: number;
     startW: number;
     startH: number;
+    startPosX: number;
+    startPosY: number;
     edge: string;
+  } | null>(null);
+  const moveRef = useRef<{
+    startX: number;
+    startY: number;
+    startPosX: number;
+    startPosY: number;
   } | null>(null);
 
   // Listen for process exit
@@ -109,41 +129,75 @@ export function FloatingTerminal() {
     };
   }, [sessionId, wtPath, setFloatingTerminal]);
 
-  const onResizeStart = useCallback(
-    (e: React.MouseEvent, edge: string) => {
+  // Clamp expanded position on window resize
+  useEffect(() => {
+    const onResize = () => {
+      const pos = useUIStore.getState().floatingTerminalPosition;
+      if (!pos) return;
+      const sz = useUIStore.getState().floatingTerminalSize;
+      const clamped = clampPosition(pos.x, pos.y, sz.width, sz.height);
+      if (clamped.x !== pos.x || clamped.y !== pos.y) {
+        useUIStore.getState().setFloatingTerminalPosition(clamped);
+      }
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Clamp expanded position on mode change
+  useEffect(() => {
+    if (mode !== "expanded") return;
+    requestAnimationFrame(() => {
+      const pos = useUIStore.getState().floatingTerminalPosition;
+      if (!pos) return;
+      const el = containerRef.current;
+      if (!el) return;
+      const clamped = clampPosition(pos.x, pos.y, el.offsetWidth, el.offsetHeight);
+      if (clamped.x !== pos.x || clamped.y !== pos.y) {
+        useUIStore.getState().setFloatingTerminalPosition(clamped);
+      }
+    });
+  }, [mode]);
+
+  // Drag to move (expanded mode)
+  const onMoveStart = useCallback(
+    (e: React.MouseEvent) => {
+      if ((e.target as HTMLElement).closest("button")) return;
       e.preventDefault();
-      dragRef.current = {
+
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const startPos = position ?? { x: rect.left, y: rect.top };
+
+      moveRef.current = {
         startX: e.clientX,
         startY: e.clientY,
-        startW: size.width,
-        startH: size.height,
-        edge,
+        startPosX: startPos.x,
+        startPosY: startPos.y,
       };
 
       const onMouseMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
-        const { startX, startY, startW, startH, edge } = dragRef.current;
-        let newW = startW;
-        let newH = startH;
+        if (!moveRef.current) return;
+        const { startX, startY, startPosX, startPosY } = moveRef.current;
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
 
-        if (edge.includes("left")) {
-          newW = Math.min(
-            MAX_WIDTH,
-            Math.max(MIN_WIDTH, startW + (startX - ev.clientX))
-          );
-        }
-        if (edge.includes("top")) {
-          newH = Math.min(
-            MAX_HEIGHT,
-            Math.max(MIN_HEIGHT, startH + (startY - ev.clientY))
-          );
-        }
+        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
 
-        setSize({ width: newW, height: newH });
+        document.body.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+
+        const el = containerRef.current;
+        const w = el?.offsetWidth ?? size.width;
+        const h = el?.offsetHeight ?? size.height;
+        const clamped = clampPosition(startPosX + dx, startPosY + dy, w, h);
+        setPosition(clamped);
       };
 
       const onMouseUp = () => {
-        dragRef.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        moveRef.current = null;
         window.removeEventListener("mousemove", onMouseMove);
         window.removeEventListener("mouseup", onMouseUp);
       };
@@ -151,7 +205,66 @@ export function FloatingTerminal() {
       window.addEventListener("mousemove", onMouseMove);
       window.addEventListener("mouseup", onMouseUp);
     },
-    [size, setSize]
+    [position, size, setPosition]
+  );
+
+  const onResizeStart = useCallback(
+    (e: React.MouseEvent, edge: string) => {
+      e.preventDefault();
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const startPos = position ?? { x: rect.left, y: rect.top };
+
+      resizeRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        startW: size.width,
+        startH: size.height,
+        startPosX: startPos.x,
+        startPosY: startPos.y,
+        edge,
+      };
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!resizeRef.current) return;
+        const { startX, startY, startW, startH, startPosX, startPosY, edge } =
+          resizeRef.current;
+        let newW = startW;
+        let newH = startH;
+        let newX = startPosX;
+        let newY = startPosY;
+
+        if (edge.includes("left")) {
+          newW = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW + (startX - ev.clientX)));
+          newX = startPosX + (startW - newW);
+          if (newX < 0) {
+            newW = startW + startPosX;
+            newX = 0;
+          }
+        }
+        if (edge.includes("top")) {
+          newH = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startH + (startY - ev.clientY)));
+          newY = startPosY + (startH - newH);
+          if (newY < 0) {
+            newH = startH + startPosY;
+            newY = 0;
+          }
+        }
+
+        setSize({ width: newW, height: newH });
+        setPosition({ x: newX, y: newY });
+      };
+
+      const onMouseUp = () => {
+        resizeRef.current = null;
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [size, setSize, position, setPosition]
   );
 
   const dismiss = () => {
@@ -174,6 +287,7 @@ export function FloatingTerminal() {
     const showRestart = ft?.type === "run" && (status === "stopped" || status === "failed");
     return (
       <div
+        ref={containerRef}
         className="fixed bottom-4 right-4 z-50 bg-card border border-border/80 rounded-full px-3 py-1.5 cursor-pointer flex items-center gap-2 ring-1 ring-black/20"
         style={{
           boxShadow:
@@ -205,11 +319,16 @@ export function FloatingTerminal() {
 
   // mode === 'expanded'
   const titleBarHeight = 40;
+  const positionStyle: React.CSSProperties = position
+    ? { top: position.y, left: position.x }
+    : { bottom: MARGIN, right: MARGIN };
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 bg-card border border-border/80 rounded-lg overflow-hidden flex flex-col ring-1 ring-black/20"
+      ref={containerRef}
+      className="fixed z-50 bg-card border border-border/80 rounded-lg overflow-hidden flex flex-col ring-1 ring-black/20"
       style={{
+        ...positionStyle,
         width: size.width,
         height: size.height,
         boxShadow:
@@ -230,7 +349,10 @@ export function FloatingTerminal() {
         onMouseDown={(e) => onResizeStart(e, "top-left")}
       />
 
-      <div className="h-10 flex items-center justify-between px-3 border-b border-border/50 bg-background shrink-0">
+      <div
+        className="h-10 flex items-center justify-between px-3 border-b border-border/50 bg-background shrink-0 cursor-grab"
+        onMouseDown={onMoveStart}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <StatusDot status={status} />
           <span className="text-md text-foreground truncate">{label}</span>
