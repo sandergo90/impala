@@ -129,6 +129,24 @@ export function usePlanAnnotationActions() {
     [handleSetStatus]
   );
 
+  const openPlan = useCallback(
+    async (filePath: string, title: string) => {
+      const plan = await planSqliteProvider.createPlan({
+        plan_path: filePath,
+        worktree_path: worktreePath,
+        title,
+      });
+      const currentPlans =
+        useDataStore.getState().getWorktreeDataState(worktreePath).plans;
+      updateData({ plans: [...currentPlans, plan] });
+      useUIStore.getState().updateWorktreeNavState(worktreePath, {
+        activeTab: "plan",
+        activePlanId: plan.id,
+      });
+    },
+    [worktreePath, updateData]
+  );
+
   const handleOpenFile = useCallback(async () => {
     if (!worktreePath) return;
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -139,19 +157,21 @@ export function usePlanAnnotationActions() {
     if (!path) return;
     const filePath = path as string;
     const title = filePath.split("/").pop()?.replace(/\.md$/, "") ?? "Plan";
-    const plan = await planSqliteProvider.createPlan({
-      plan_path: filePath,
-      worktree_path: worktreePath,
-      title,
-    });
-    const currentPlans =
-      useDataStore.getState().getWorktreeDataState(worktreePath).plans;
-    updateData({ plans: [...currentPlans, plan] });
-    useUIStore.getState().updateWorktreeNavState(worktreePath, {
-      activeTab: "plan",
-      activePlanId: plan.id,
-    });
-  }, [worktreePath, updateData]);
+    await openPlan(filePath, title);
+  }, [worktreePath, openPlan]);
+
+  const handleOpenDirectory = useCallback(async () => {
+    if (!worktreePath) return;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const { exists } = await import("@tauri-apps/plugin-fs");
+    const dir = await open({ directory: true, multiple: false });
+    if (!dir) return;
+    const dirPath = dir as string;
+    const overviewPath = `${dirPath}/overview.md`;
+    if (!(await exists(overviewPath))) return;
+    const dirName = dirPath.split("/").pop() ?? "Plan";
+    await openPlan(overviewPath, dirName);
+  }, [worktreePath, openPlan]);
 
   return {
     plans,
@@ -164,6 +184,7 @@ export function usePlanAnnotationActions() {
     handleApprove,
     handleRequestChanges,
     handleOpenFile,
+    handleOpenDirectory,
     handleSelectVersion,
   };
 }

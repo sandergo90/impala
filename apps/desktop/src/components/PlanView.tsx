@@ -21,6 +21,7 @@ export function PlanView() {
     handleApprove,
     handleRequestChanges,
     handleOpenFile,
+    handleOpenDirectory,
     handleSelectVersion,
   } = usePlanAnnotationActions();
 
@@ -114,12 +115,20 @@ export function PlanView() {
         ) : (
           <div className="text-sm">No plans yet</div>
         )}
-        <button
-          onClick={handleOpenFile}
-          className="px-3 py-1.5 text-sm font-medium rounded-md border border-border text-foreground hover:bg-accent"
-        >
-          Open Markdown File
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleOpenDirectory}
+            className="px-3 py-1.5 text-sm font-medium rounded-md border border-border text-foreground hover:bg-accent"
+          >
+            Open Plan Directory
+          </button>
+          <button
+            onClick={handleOpenFile}
+            className="px-3 py-1.5 text-sm font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+          >
+            Open File
+          </button>
+        </div>
       </div>
     );
   }
@@ -141,6 +150,7 @@ export function PlanView() {
         onRequestChanges={handleRequestChanges}
         onClose={handleClose}
         onOpenFile={handleOpenFile}
+        onOpenDirectory={handleOpenDirectory}
         onSelectVersion={handleSelectVersion}
       />
       <div className="flex-1 overflow-y-auto min-h-0">
