@@ -1,0 +1,136 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "desktop-v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      version: ${{ github.ref_name }}
+    secrets: inherit
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: desktop-*
+          merge-multiple: true
+
+      - name: List release artifacts
+        run: ls -lhR release-artifacts/
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#desktop-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate update manifest (latest.json)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+
+          # Read signatures
+          MAC_ARM64_SIG=""
+          MAC_X64_SIG=""
+          LINUX_SIG=""
+
+          for sigfile in release-artifacts/*.sig; do
+            filename=$(basename "$sigfile")
+            content=$(cat "$sigfile")
+            case "$filename" in
+              *aarch64*apple* | *arm64*)
+                MAC_ARM64_SIG="$content"
+                MAC_ARM64_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
+                ;;
+              *x86_64*apple* | *x64*darwin* | *x64*.app*)
+                MAC_X64_SIG="$content"
+                MAC_X64_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
+                ;;
+              *.AppImage.sig)
+                LINUX_SIG="$content"
+                LINUX_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
+                ;;
+            esac
+          done
+
+          # If we couldn't match by the patterns above, try to find them more carefully
+          if [ -z "$MAC_ARM64_SIG" ]; then
+            for sigfile in release-artifacts/*.tar.gz.sig; do
+              filename=$(basename "$sigfile")
+              if echo "$filename" | grep -qi "aarch64\|arm64"; then
+                MAC_ARM64_SIG=$(cat "$sigfile")
+                MAC_ARM64_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
+              elif echo "$filename" | grep -qi "x86_64\|x64"; then
+                MAC_X64_SIG=$(cat "$sigfile")
+                MAC_X64_URL="https://github.com/${REPO}/releases/download/desktop-v${VERSION}/$(basename "${sigfile%.sig}")"
+              fi
+            done
+          fi
+
+          # Build platforms JSON
+          PLATFORMS="{"
+          FIRST=true
+
+          if [ -n "$MAC_ARM64_SIG" ]; then
+            PLATFORMS+="\"darwin-aarch64\":{\"signature\":$(echo "$MAC_ARM64_SIG" | jq -Rs .),\"url\":\"$MAC_ARM64_URL\"}"
+            FIRST=false
+          fi
+
+          if [ -n "$MAC_X64_SIG" ]; then
+            [ "$FIRST" = false ] && PLATFORMS+=","
+            PLATFORMS+="\"darwin-x86_64\":{\"signature\":$(echo "$MAC_X64_SIG" | jq -Rs .),\"url\":\"$MAC_X64_URL\"}"
+            FIRST=false
+          fi
+
+          if [ -n "$LINUX_SIG" ]; then
+            [ "$FIRST" = false ] && PLATFORMS+=","
+            PLATFORMS+="\"linux-x86_64\":{\"signature\":$(echo "$LINUX_SIG" | jq -Rs .),\"url\":\"$LINUX_URL\"}"
+          fi
+
+          PLATFORMS+="}"
+
+          # Write latest.json
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "Canopy $VERSION" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson platforms "$PLATFORMS" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
+            > release-artifacts/latest.json
+
+          echo "Generated latest.json:"
+          cat release-artifacts/latest.json
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep '^desktop-v' | head -2 | tail -1)
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "${{ github.ref_name }}" ]; then
+            NOTES=$(git log --pretty=format:"- %s" "$PREV_TAG".."${{ github.ref_name }}" -- . ':!.github')
+          else
+            NOTES="Initial release"
+          fi
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            release-artifacts/* \
+            --title "Canopy ${{ steps.version.outputs.version }}" \
+            --notes "${{ steps.notes.outputs.notes }}" \
+            --draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

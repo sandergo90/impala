@@ -11,7 +11,7 @@ import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
-import type { DiffLineAnnotation } from "@pierre/diffs";
+import type { DiffLineAnnotation, FileDiffOptions } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
 
 type AnnotationMeta =
@@ -178,7 +178,7 @@ function FileDiffItem({
   collapsedFiles: Set<string>;
   setCollapsedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
   generatedFiles: string[];
-  diffOptions: Record<string, unknown>;
+  diffOptions: FileDiffOptions<AnnotationMeta>;
   diffViewerStyle: React.CSSProperties;
   annotationsByFile: Map<string, DiffLineAnnotation<AnnotationMeta>[]>;
   pendingAnnotation: { filePath?: string; lineNumber: number; side: "deletions" | "additions" } | null;
@@ -312,7 +312,7 @@ function VirtualizedCommitView({
   collapsedFiles: Set<string>;
   setCollapsedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
   generatedFiles: string[];
-  diffOptions: Record<string, unknown>;
+  diffOptions: FileDiffOptions<AnnotationMeta>;
   diffViewerStyle: React.CSSProperties;
   annotationsByFile: Map<string, DiffLineAnnotation<AnnotationMeta>[]>;
   pendingAnnotation: { filePath?: string; lineNumber: number; side: "deletions" | "additions" } | null;
@@ -682,10 +682,11 @@ export function DiffView() {
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
     diffStyle,
     enableGutterUtility: true,
-    expandUnchanged: true,
+    expandUnchanged: false,
+    expansionLineCount: 10,
     hunkSeparators: "line-info" as const,
     unsafeCSS: `:host { --diffs-dark-bg: ${activeTheme.terminal.background}; --diffs-light-bg: ${activeTheme.terminal.background}; --diffs-dark: ${activeTheme.terminal.foreground}; --diffs-light: ${activeTheme.terminal.foreground}; --diffs-color: ${activeTheme.terminal.foreground}; } [data-diffs-header] { position: sticky; top: 0; z-index: 10; } [data-diffs-header='custom'] { background-color: var(--diffs-bg); display: flex; align-items: center; min-height: calc(1lh + (var(--diffs-gap-block, var(--diffs-gap-fallback)) * 3)); padding-inline: 16px; font-family: var(--diffs-header-font-family, var(--diffs-header-font-fallback)); } [data-diffs-header='custom'] ::slotted(*) { width: 100%; }`,
-  };
+  } satisfies FileDiffOptions<AnnotationMeta>
 
   const toolbar = (
     <div className="flex items-center gap-3 px-3 py-2 border-b shrink-0">
