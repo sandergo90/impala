@@ -13,3 +13,4 @@ serde_json = "1"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 dirs = "6"
 chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }

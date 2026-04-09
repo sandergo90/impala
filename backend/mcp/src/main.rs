@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Annotation model
@@ -41,6 +43,34 @@ fn open_db() -> Result<Connection, String> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .map_err(|e| format!("failed to set WAL mode: {e}"))?;
     Ok(conn)
+}
+
+fn ensure_plan_tables(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS plans (
+            id TEXT PRIMARY KEY,
+            plan_path TEXT NOT NULL,
+            worktree_path TEXT NOT NULL,
+            title TEXT,
+            status TEXT DEFAULT 'pending',
+            version INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_plans_worktree ON plans(worktree_path);
+        CREATE TABLE IF NOT EXISTS plan_annotations (
+            id TEXT PRIMARY KEY,
+            plan_path TEXT NOT NULL,
+            worktree_path TEXT NOT NULL,
+            line_number INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            resolved INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_plan_annotations_scope ON plan_annotations(plan_path, worktree_path);",
+    )
+    .map_err(|e| format!("failed to ensure plan tables: {e}"))
 }
 
 fn row_to_annotation(row: &rusqlite::Row) -> rusqlite::Result<Annotation> {
@@ -172,6 +202,220 @@ fn tool_list_files_with_annotations(conn: &Connection, params: &Value) -> Result
     Ok(json!(files))
 }
 
+fn tool_submit_plan_for_review(conn: &Connection, params: &Value) -> Result<Value, String> {
+    let plan_path = params
+        .get("plan_path")
+        .and_then(|v| v.as_str())
+        .ok_or("missing required parameter: plan_path")?;
+
+    let title = params.get("title").and_then(|v| v.as_str());
+
+    let worktree_path = params
+        .get("worktree_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let plan_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Auto-increment version per plan_path
+    let version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM plans WHERE plan_path = ?1",
+            rusqlite::params![plan_path],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "INSERT INTO plans (id, plan_path, worktree_path, title, status, version, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7)",
+        rusqlite::params![plan_id, plan_path, worktree_path, title, version, now, now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Poll for status change (blocking)
+    let timeout_secs = 300;
+    let mut elapsed = 0;
+
+    loop {
+        thread::sleep(Duration::from_secs(1));
+        elapsed += 1;
+
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM plans WHERE id = ?1",
+                rusqlite::params![plan_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+
+        if status != "pending" {
+            // Fetch annotations
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, plan_path, worktree_path, line_number, body, resolved, created_at, updated_at
+                     FROM plan_annotations
+                     WHERE plan_path = ?1 AND worktree_path = ?2
+                     ORDER BY line_number ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            let rows = stmt
+                .query_map(rusqlite::params![plan_path, worktree_path], |row| {
+                    Ok(json!({
+                        "id": row.get::<_, String>(0)?,
+                        "plan_path": row.get::<_, String>(1)?,
+                        "worktree_path": row.get::<_, String>(2)?,
+                        "line_number": row.get::<_, i64>(3)?,
+                        "body": row.get::<_, String>(4)?,
+                        "resolved": row.get::<_, i64>(5)? != 0,
+                        "created_at": row.get::<_, String>(6)?,
+                        "updated_at": row.get::<_, String>(7)?,
+                    }))
+                })
+                .map_err(|e| e.to_string())?;
+
+            let mut annotations = Vec::new();
+            for row in rows {
+                annotations.push(row.map_err(|e| e.to_string())?);
+            }
+
+            return Ok(json!({
+                "status": status,
+                "plan_id": plan_id,
+                "version": version,
+                "annotations": annotations
+            }));
+        }
+
+        if elapsed >= timeout_secs {
+            return Ok(json!({
+                "status": "timeout",
+                "plan_id": plan_id,
+                "version": version,
+                "message": "Plan review is still pending. Use get_plan_decision to check later."
+            }));
+        }
+    }
+}
+
+fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, String> {
+    let plan_path = params
+        .get("plan_path")
+        .and_then(|v| v.as_str())
+        .ok_or("missing required parameter: plan_path")?;
+
+    let worktree_path = params
+        .get("worktree_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let plan = conn
+        .query_row(
+            "SELECT id, plan_path, worktree_path, title, status, version, created_at, updated_at
+             FROM plans
+             WHERE plan_path = ?1 AND worktree_path = ?2
+             ORDER BY version DESC LIMIT 1",
+            rusqlite::params![plan_path, worktree_path],
+            |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "plan_path": row.get::<_, String>(1)?,
+                    "worktree_path": row.get::<_, String>(2)?,
+                    "title": row.get::<_, Option<String>>(3)?,
+                    "status": row.get::<_, String>(4)?,
+                    "version": row.get::<_, i64>(5)?,
+                    "created_at": row.get::<_, String>(6)?,
+                    "updated_at": row.get::<_, String>(7)?,
+                }))
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                format!("no plan found for plan_path: {plan_path}")
+            }
+            _ => e.to_string(),
+        })?;
+
+    // Fetch annotations
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, plan_path, worktree_path, line_number, body, resolved, created_at, updated_at
+             FROM plan_annotations
+             WHERE plan_path = ?1 AND worktree_path = ?2
+             ORDER BY line_number ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![plan_path, worktree_path], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "plan_path": row.get::<_, String>(1)?,
+                "worktree_path": row.get::<_, String>(2)?,
+                "line_number": row.get::<_, i64>(3)?,
+                "body": row.get::<_, String>(4)?,
+                "resolved": row.get::<_, i64>(5)? != 0,
+                "created_at": row.get::<_, String>(6)?,
+                "updated_at": row.get::<_, String>(7)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut annotations = Vec::new();
+    for row in rows {
+        annotations.push(row.map_err(|e| e.to_string())?);
+    }
+
+    Ok(json!({
+        "plan": plan,
+        "annotations": annotations
+    }))
+}
+
+fn tool_list_plans(conn: &Connection, params: &Value) -> Result<Value, String> {
+    let mut sql = String::from(
+        "SELECT id, plan_path, worktree_path, title, status, version, created_at, updated_at FROM plans",
+    );
+    let mut bind_values: Vec<String> = Vec::new();
+
+    if let Some(v) = params.get("worktree_path").and_then(|v| v.as_str()) {
+        sql.push_str(&format!(" WHERE worktree_path = ?{}", bind_values.len() + 1));
+        bind_values.push(v.to_string());
+    }
+
+    sql.push_str(" ORDER BY created_at DESC");
+
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = bind_values
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
+        .collect();
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params_refs.as_slice(), |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "plan_path": row.get::<_, String>(1)?,
+                "worktree_path": row.get::<_, String>(2)?,
+                "title": row.get::<_, Option<String>>(3)?,
+                "status": row.get::<_, String>(4)?,
+                "version": row.get::<_, i64>(5)?,
+                "created_at": row.get::<_, String>(6)?,
+                "updated_at": row.get::<_, String>(7)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut plans = Vec::new();
+    for row in rows {
+        plans.push(row.map_err(|e| e.to_string())?);
+    }
+
+    Ok(json!(plans))
+}
+
 // ---------------------------------------------------------------------------
 // MCP protocol definitions
 // ---------------------------------------------------------------------------
@@ -227,6 +471,59 @@ fn tool_definitions() -> Value {
                         "commit_hash": {
                             "type": "string",
                             "description": "Filter by commit hash"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "submit_plan_for_review",
+                "description": "Submit a plan for user review. Blocks until the user approves or requests changes, then returns the decision and all annotations. Times out after 5 minutes with a 'timeout' status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "plan_path": {
+                            "type": "string",
+                            "description": "Path to the plan markdown file"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Optional title for the plan"
+                        },
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Path to the worktree this plan belongs to"
+                        }
+                    },
+                    "required": ["plan_path"]
+                }
+            },
+            {
+                "name": "get_plan_decision",
+                "description": "Get the latest plan status and annotations for a plan_path. Use this to check on a plan after a timeout.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "plan_path": {
+                            "type": "string",
+                            "description": "Path to the plan markdown file"
+                        },
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Path to the worktree this plan belongs to"
+                        }
+                    },
+                    "required": ["plan_path"]
+                }
+            },
+            {
+                "name": "list_plans",
+                "description": "List all tracked plans, optionally filtered by worktree path.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Filter by worktree path"
                         }
                     }
                 }
@@ -328,6 +625,11 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "list_files_with_annotations" => {
                     tool_list_files_with_annotations(conn, &tool_args)
                 }
+                "submit_plan_for_review" => {
+                    tool_submit_plan_for_review(conn, &tool_args)
+                }
+                "get_plan_decision" => tool_get_plan_decision(conn, &tool_args),
+                "list_plans" => tool_list_plans(conn, &tool_args),
                 _ => {
                     return Some(make_response(
                         id,
@@ -359,6 +661,11 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
 
 fn main() {
     let conn = open_db().unwrap_or_else(|e| {
+        eprintln!("impala-mcp: {}", e);
+        std::process::exit(1);
+    });
+
+    ensure_plan_tables(&conn).unwrap_or_else(|e| {
         eprintln!("impala-mcp: {}", e);
         std::process::exit(1);
     });
