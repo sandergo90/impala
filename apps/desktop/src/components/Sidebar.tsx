@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
@@ -13,7 +14,7 @@ import {
   selectProject as sharedSelectProject,
   activateGeneralTerminal,
 } from "../hooks/useWorktreeActions";
-import type { Worktree, Project, WorktreeIssue } from "../types";
+import type { Worktree, Project, WorktreeIssue, WorktreeDataState } from "../types";
 import { useAgentNotifications } from "../hooks/useAgentNotifications";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { HotkeyDisplay } from "./HotkeyDisplay";
@@ -269,6 +270,32 @@ export function Sidebar() {
 
   useAgentNotifications();
 
+  const windowFocusedRef = useRef(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const window = getCurrentWindow();
+    window.isFocused().then((focused) => {
+      if (!cancelled) windowFocusedRef.current = focused;
+    });
+    const unlisten = window.onFocusChanged(({ payload: focused }) => {
+      windowFocusedRef.current = focused;
+      // When window regains focus, clear unseen for the currently selected worktree
+      if (focused) {
+        const selected = useUIStore.getState().selectedWorktree;
+        if (selected) {
+          useDataStore.getState().updateWorktreeDataState(selected.path, {
+            hasUnseenResult: false,
+          });
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Listen for agent-status events from the backend
   useEffect(() => {
     const unlisten = listen<{ worktree_path: string; status: string }>(
@@ -282,10 +309,28 @@ export function Sidebar() {
         ) {
           const current =
             useDataStore.getState().worktreeDataStates[worktree_path];
+          const updates: Partial<WorktreeDataState> = {};
+
           if (current?.agentStatus !== status) {
-            useDataStore.getState().updateWorktreeDataState(worktree_path, {
-              agentStatus: status,
-            });
+            updates.agentStatus = status;
+          }
+
+          if (status === "idle" || status === "permission") {
+            const selected = useUIStore.getState().selectedWorktree;
+            const isFocused =
+              windowFocusedRef.current && selected?.path === worktree_path;
+            if (!isFocused) {
+              updates.hasUnseenResult = true;
+            }
+          } else if (status === "working") {
+            // Clear unseen when a new session starts
+            updates.hasUnseenResult = false;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            useDataStore
+              .getState()
+              .updateWorktreeDataState(worktree_path, updates);
           }
         }
       },
@@ -294,6 +339,19 @@ export function Sidebar() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  // Clear hasUnseenResult when the user selects a worktree
+  useEffect(() => {
+    if (selectedWorktree) {
+      const state =
+        useDataStore.getState().worktreeDataStates[selectedWorktree.path];
+      if (state?.hasUnseenResult) {
+        useDataStore.getState().updateWorktreeDataState(selectedWorktree.path, {
+          hasUnseenResult: false,
+        });
+      }
+    }
+  }, [selectedWorktree]);
 
   const commitCounts = useDataStore(
     useShallow((s) => {

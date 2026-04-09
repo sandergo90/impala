@@ -48,6 +48,7 @@ const defaultDataState: WorktreeDataState = {
   generatedFiles: [],
   annotations: [],
   agentStatus: "idle" as const,
+  hasUnseenResult: false,
 };
 
 interface UIState {

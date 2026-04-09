@@ -81,6 +81,7 @@ export interface WorktreeDataState {
   generatedFiles: string[];
   annotations: Annotation[];
   agentStatus: "idle" | "working" | "permission";
+  hasUnseenResult: boolean;
 }
 
 export interface CommentProvider {
