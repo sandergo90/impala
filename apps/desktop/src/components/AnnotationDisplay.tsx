@@ -1,3 +1,4 @@
+import { openFileInEditor } from "../lib/open-file-in-editor";
 import type { Annotation } from "../types";
 
 interface AnnotationDisplayProps {
@@ -45,7 +46,17 @@ export function AnnotationDisplay({
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <span className="font-mono">
+          <span
+            className="font-mono hover:underline cursor-pointer"
+            title="Cmd+click to open in editor"
+            onClick={(e) => {
+              if (e.metaKey) {
+                e.stopPropagation();
+                const fullPath = `${annotation.repo_path}/${annotation.file_path}`;
+                openFileInEditor(fullPath, annotation.line_number);
+              }
+            }}
+          >
             {sideLabel}:{annotation.line_number}
           </span>
           <span>{formatRelativeTime(annotation.created_at)}</span>

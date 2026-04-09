@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
+import { openFileInEditor } from "../lib/open-file-in-editor";
+import { useCmdHeld } from "../hooks/useCmdClickCursor";
 import type { ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
 
 const statusColor: Record<string, string> = {
@@ -25,6 +27,7 @@ export function CommitPanel() {
   const navState = useUIStore((s) => wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null);
   const dataState = useDataStore((s) => wtPath ? (s.worktreeDataStates[wtPath] ?? null) : null);
 
+  const cmdHeld = useCmdHeld();
   const worktreePath = wtPath ?? "";
   const baseBranch = dataState?.baseBranch ?? null;
   const commits = dataState?.commits ?? [];
@@ -301,10 +304,18 @@ export function CommitPanel() {
             return (
               <button
                 key={file.path}
-                onClick={() => selectFile(file)}
+                onClick={(e) => {
+                  if (e.metaKey && worktreePath) {
+                    e.stopPropagation();
+                    openFileInEditor(`${worktreePath}/${file.path}`);
+                  } else {
+                    selectFile(file);
+                  }
+                }}
                 className={`w-full px-3.5 py-1.5 text-left font-mono text-xs flex items-center gap-1.5 transition-colors truncate ${
                   isSelected ? "text-primary bg-primary/[0.06]" : "text-muted-foreground hover:bg-accent"
                 }`}
+                style={cmdHeld ? { cursor: "pointer" } : undefined}
               >
                 <span className={`text-xs font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
                   {file.status}

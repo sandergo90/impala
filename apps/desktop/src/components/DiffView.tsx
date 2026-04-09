@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";
+// TODO: Wire up Cmd+click on gutter line numbers to openFileInEditor once
+// @pierre/diffs exposes an onLineNumberClick or onGutterClick callback.
 import { PatchDiff } from "@pierre/diffs/react";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
