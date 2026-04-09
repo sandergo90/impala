@@ -22,10 +22,9 @@ export function PlanView() {
   } = usePlanAnnotationActions();
 
   const [markdown, setMarkdown] = useState<string | null>(null);
-  const [lines, setLines] = useState<string[]>([]);
+  const lines = useMemo(() => markdown?.split("\n") ?? [], [markdown]);
   const [pendingLine, setPendingLine] = useState<number | null>(null);
 
-  // Auto-select latest pending plan if none selected
   useEffect(() => {
     if (navState?.activePlanId || plans.length === 0 || !wtPath) return;
     const pending = plans.find((p) => p.status === "pending") ?? plans[0];
@@ -36,23 +35,15 @@ export function PlanView() {
     }
   }, [plans, navState?.activePlanId, wtPath]);
 
-  // Load markdown file
   useEffect(() => {
     if (!activePlan) {
       setMarkdown(null);
-      setLines([]);
       return;
     }
     readTextFile(activePlan.plan_path)
-      .then((content) => {
-        setMarkdown(content);
-        setLines(content.split("\n"));
-      })
-      .catch(() => {
-        setMarkdown(null);
-        setLines([]);
-      });
-  }, [activePlan?.plan_path]);
+      .then((content) => setMarkdown(content))
+      .catch(() => setMarkdown(null));
+  }, [activePlan?.id, activePlan?.plan_path]);
 
   const handleLineClick = useCallback((lineNumber: number) => {
     setPendingLine(lineNumber);
@@ -75,7 +66,6 @@ export function PlanView() {
     });
   }, [wtPath]);
 
-  // Build a set of lines that have annotations for gutter indicators
   const annotatedLines = useMemo(
     () => new Set(planAnnotations.map((a) => a.line_number)),
     [planAnnotations]
@@ -117,7 +107,6 @@ export function PlanView() {
                   className="flex group"
                   data-plan-line={lineNumber}
                 >
-                  {/* Line gutter */}
                   <div
                     className={`shrink-0 w-12 text-right pr-3 py-0.5 text-sm font-mono select-none cursor-pointer ${
                       hasAnnotation
@@ -137,14 +126,12 @@ export function PlanView() {
                       lineNumber
                     )}
                   </div>
-                  {/* Line content */}
                   <div className="flex-1 min-w-0 px-4 py-0.5">
                     <pre className="text-sm text-foreground font-mono whitespace-pre-wrap break-words m-0 p-0 bg-transparent">
                       {line || "\u00A0"}
                     </pre>
                   </div>
                 </div>
-                {/* Inline annotation form */}
                 {pendingLine === lineNumber && (
                   <PlanAnnotationForm
                     lineNumber={lineNumber}

@@ -1,8 +1,8 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { planSqliteProvider } from "../providers/plan-sqlite-provider";
-import type { PlanAnnotation } from "../types";
+import type { Plan, PlanAnnotation } from "../types";
 
 export function usePlanAnnotationActions() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -18,7 +18,10 @@ export function usePlanAnnotationActions() {
   const activePlanId = navState?.activePlanId ?? null;
   const plans = dataState?.plans ?? [];
   const planAnnotations = dataState?.planAnnotations ?? [];
-  const activePlan = plans.find((p) => p.id === activePlanId) ?? null;
+  const activePlan = useMemo(
+    () => plans.find((p) => p.id === activePlanId) ?? null,
+    [plans, activePlanId]
+  );
 
   const updateData = useCallback(
     (updates: Partial<{ plans: typeof plans; planAnnotations: PlanAnnotation[] }>) => {
@@ -61,10 +64,10 @@ export function usePlanAnnotationActions() {
     }).catch(() => {});
   }, [worktreePath, updateData]);
 
-  // Fetch plan annotations when active plan changes
   useEffect(() => {
     if (!activePlan) {
-      updateData({ planAnnotations: [] });
+      const current = useDataStore.getState().getWorktreeDataState(worktreePath).planAnnotations;
+      if (current.length > 0) updateData({ planAnnotations: [] });
       return;
     }
     planSqliteProvider
@@ -115,29 +118,28 @@ export function usePlanAnnotationActions() {
     [worktreePath, updateData]
   );
 
-  const handleApprove = useCallback(async () => {
-    if (!activePlan) return;
-    const updated = await planSqliteProvider.updatePlan(activePlan.id, {
-      status: "approved",
-    });
-    const currentPlans =
-      useDataStore.getState().getWorktreeDataState(worktreePath).plans;
-    updateData({
-      plans: currentPlans.map((p) => (p.id === updated.id ? updated : p)),
-    });
-  }, [activePlan, worktreePath, updateData]);
+  const handleSetStatus = useCallback(
+    async (status: Plan["status"]) => {
+      if (!activePlan) return;
+      const updated = await planSqliteProvider.updatePlan(activePlan.id, { status });
+      const currentPlans =
+        useDataStore.getState().getWorktreeDataState(worktreePath).plans;
+      updateData({
+        plans: currentPlans.map((p) => (p.id === updated.id ? updated : p)),
+      });
+    },
+    [activePlan, worktreePath, updateData]
+  );
 
-  const handleRequestChanges = useCallback(async () => {
-    if (!activePlan) return;
-    const updated = await planSqliteProvider.updatePlan(activePlan.id, {
-      status: "changes_requested",
-    });
-    const currentPlans =
-      useDataStore.getState().getWorktreeDataState(worktreePath).plans;
-    updateData({
-      plans: currentPlans.map((p) => (p.id === updated.id ? updated : p)),
-    });
-  }, [activePlan, worktreePath, updateData]);
+  const handleApprove = useCallback(
+    () => handleSetStatus("approved"),
+    [handleSetStatus]
+  );
+
+  const handleRequestChanges = useCallback(
+    () => handleSetStatus("changes_requested"),
+    [handleSetStatus]
+  );
 
   return {
     plans,
