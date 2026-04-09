@@ -3,6 +3,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
 import { RightSidebar } from "../components/RightSidebar";
 import { DiffView } from "../components/DiffView";
+import { PlanView } from "../components/PlanView";
 import { SplitTreeRenderer } from "../components/SplitTreeRenderer";
 import {
   ResizablePanelGroup,
@@ -64,7 +65,7 @@ export function MainView() {
   const runScriptTooltip = useHotkeyTooltip("RUN_SCRIPT", isRunning ? "Stop script" : "Run script");
   const openInEditorTooltip = useHotkeyTooltip("OPEN_IN_EDITOR", "Open in editor");
 
-  const setTab = (tab: "diff" | "terminal" | "split") => {
+  const setTab = (tab: "diff" | "terminal" | "split" | "plan") => {
     if (!selectedWorktree) return;
     useUIStore
       .getState()
@@ -210,6 +211,7 @@ export function MainView() {
               <TabPill label="Terminal" isActive={activeTab === "terminal"} onClick={() => setTab("terminal")} />
               <TabPill label="Diff" isActive={activeTab === "diff"} onClick={() => setTab("diff")} />
               <TabPill label="Split" isActive={activeTab === "split"} onClick={() => setTab("split")} />
+              <TabPill label="Plan" isActive={activeTab === "plan"} onClick={() => setTab("plan")} />
             </div>
           </div>
         )}
@@ -285,6 +287,8 @@ export function MainView() {
                         Select a worktree
                       </div>
                     )
+                  ) : activeTab === "plan" ? (
+                    <PlanView />
                   ) : activeTab === "split" ? (
                     <ResizablePanelGroup orientation="horizontal">
                       <ResizablePanel defaultSize="50%" minSize={200}>

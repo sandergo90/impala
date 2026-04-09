@@ -1,22 +1,41 @@
 import { useState } from "react";
 import { CommitPanel } from "./CommitPanel";
 import { AnnotationsPanel } from "./AnnotationsPanel";
+import { PlanAnnotationsPanel } from "./PlanAnnotationsPanel";
 import { TabPill } from "./TabPill";
+import { useUIStore } from "../store";
 
 type Tab = "changes" | "annotations";
 
 export function RightSidebar() {
   const [activeTab, setActiveTab] = useState<Tab>("changes");
 
+  const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+  const wtPath = selectedWorktree?.path ?? "";
+  const navState = useUIStore((s) =>
+    wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null
+  );
+  const isInPlanView = navState?.activeTab === "plan";
+
+  if (isInPlanView) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
+          <TabPill label="Plan Annotations" isActive onClick={() => {}} />
+        </div>
+        <div className="flex-1 min-h-0">
+          <PlanAnnotationsPanel />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Tab bar */}
       <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
         <TabPill label="Changes" isActive={activeTab === "changes"} onClick={() => setActiveTab("changes")} />
         <TabPill label="Annotations" isActive={activeTab === "annotations"} onClick={() => setActiveTab("annotations")} />
       </div>
-
-      {/* Tab content */}
       <div className="flex-1 min-h-0">
         {activeTab === "changes" ? <CommitPanel /> : <AnnotationsPanel />}
       </div>
