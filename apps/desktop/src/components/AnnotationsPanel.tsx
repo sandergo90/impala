@@ -91,8 +91,8 @@ export function AnnotationsPanel() {
   // Empty state
   if (!hasAnnotations) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground/50 gap-2 px-4">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/30">
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground/90 gap-2 px-4">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/90">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
         <span className="text-sm text-center">Click on lines to add annotations</span>
@@ -127,7 +127,7 @@ export function AnnotationsPanel() {
       {/* Annotations list */}
       <div className="overflow-y-auto flex-1 min-h-0">
         {scoped.length === 0 ? (
-          <div className="px-3 py-4 text-sm text-muted-foreground/50 text-center">
+          <div className="px-3 py-4 text-sm text-muted-foreground/90 text-center">
             {showResolved ? "No annotations" : "No unresolved annotations"}
           </div>
         ) : selectedFile ? (

@@ -8,7 +8,11 @@ import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
 import { useUIStore, useDataStore } from "../store";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
-import { selectWorktree as sharedSelectWorktree, selectProject as sharedSelectProject, activateGeneralTerminal } from "../hooks/useWorktreeActions";
+import {
+  selectWorktree as sharedSelectWorktree,
+  selectProject as sharedSelectProject,
+  activateGeneralTerminal,
+} from "../hooks/useWorktreeActions";
 import type { Worktree, Project, WorktreeIssue } from "../types";
 import { useAgentNotifications } from "../hooks/useAgentNotifications";
 import { useAppHotkey } from "../hooks/useAppHotkey";
@@ -62,19 +66,62 @@ function ProjectBadge({ name, iconUrl }: { name: string; iconUrl?: string }) {
 
 function BranchIcon({ active }: { active: boolean }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className={`shrink-0 ${active ? "text-primary" : "text-muted-foreground/50"}`}>
-      <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-      <circle cx="4" cy="12" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-      <line x1="4" y1="6" x2="4" y2="10" stroke="currentColor" strokeWidth="1.4"/>
-      <path d="M4 8 L10 4" stroke="currentColor" strokeWidth="1.4"/>
-      <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      className={`shrink-0 ${active ? "text-primary" : "text-muted-foreground/20"}`}
+    >
+      <circle
+        cx="4"
+        cy="4"
+        r="2"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        fill="none"
+      />
+      <circle
+        cx="4"
+        cy="12"
+        r="2"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        fill="none"
+      />
+      <line
+        x1="4"
+        y1="6"
+        x2="4"
+        y2="10"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path d="M4 8 L10 4" stroke="currentColor" strokeWidth="1.4" />
+      <circle
+        cx="12"
+        cy="4"
+        r="2"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        fill="none"
+      />
     </svg>
   );
 }
 
 function TerminalIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="4 6 8 10 4 14" />
       <line x1="10" y1="14" x2="14" y2="14" />
     </svg>
@@ -95,10 +142,12 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
         statuses[path] = state.agentStatus ?? "idle";
       }
       return statuses;
-    })
+    }),
   );
 
-  const iconUrl = selectedProject ? projectIcons[selectedProject.path] : undefined;
+  const iconUrl = selectedProject
+    ? projectIcons[selectedProject.path]
+    : undefined;
 
   return (
     <div className="flex flex-col items-center h-full w-10 bg-sidebar border-r border-border py-2.5 gap-1">
@@ -110,17 +159,21 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
             className="w-7 h-7 rounded-[6px] overflow-hidden shrink-0 mb-2 hover:opacity-80 transition-opacity"
             title={selectedProject.name}
           >
-            <img src={iconUrl} alt={`${selectedProject.name} icon`} className="w-full h-full object-cover" />
+            <img
+              src={iconUrl}
+              alt={`${selectedProject.name} icon`}
+              className="w-full h-full object-cover"
+            />
           </button>
         ) : (
-        <button
-          onClick={onExpand}
-          className="w-7 h-7 rounded-[6px] flex items-center justify-center text-white text-sm font-bold shrink-0 mb-2 hover:opacity-80 transition-opacity"
-          style={{ background: projectColor(selectedProject.name) }}
-          title={selectedProject.name}
-        >
-          {selectedProject.name[0]?.toUpperCase()}
-        </button>
+          <button
+            onClick={onExpand}
+            className="w-7 h-7 rounded-[6px] flex items-center justify-center text-white text-sm font-bold shrink-0 mb-2 hover:opacity-80 transition-opacity"
+            style={{ background: projectColor(selectedProject.name) }}
+            title={selectedProject.name}
+          >
+            {selectedProject.name[0]?.toUpperCase()}
+          </button>
         )
       ) : (
         <button
@@ -128,32 +181,38 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
           className="w-7 h-7 rounded-[6px] flex items-center justify-center bg-accent text-muted-foreground hover:text-foreground mb-2 transition-colors"
           title="Select project"
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M2 8h12M8 2v12"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
       )}
 
       {/* Worktree icons */}
-      {selectedProject && worktrees.map((wt) => {
-        const isSelected = selectedWorktree?.path === wt.path;
-        const isActive = agentStatuses[wt.path] === "working";
-        return (
-          <button
-            key={wt.path}
-            onClick={() => sharedSelectWorktree(wt)}
-            className={`relative w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
-              isSelected
-                ? "bg-primary/15"
-                : "hover:bg-accent"
-            }`}
-            title={wt.branch}
-          >
-            <BranchIcon active={isSelected} />
-            {isActive && (
-              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-            )}
-          </button>
-        );
-      })}
+      {selectedProject &&
+        worktrees.map((wt) => {
+          const isSelected = selectedWorktree?.path === wt.path;
+          const isActive = agentStatuses[wt.path] === "working";
+          return (
+            <button
+              key={wt.path}
+              onClick={() => sharedSelectWorktree(wt)}
+              className={`relative w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
+                isSelected ? "bg-primary/15" : "hover:bg-accent"
+              }`}
+              title={wt.branch}
+            >
+              <BranchIcon active={isSelected} />
+              {isActive && (
+                <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              )}
+            </button>
+          );
+        })}
 
       {/* General Terminal */}
       {selectedProject && (
@@ -175,10 +234,19 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
       {/* Settings */}
       <button
         onClick={() => navigate({ to: "/settings" })}
-        className="w-7 h-7 flex items-center justify-center text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border pt-2"
+        className="w-7 h-7 flex items-center justify-center text-muted-foreground/90 hover:text-muted-foreground transition-colors border-t border-border pt-2"
         title="Settings"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
           <circle cx="12" cy="12" r="3" />
         </svg>
@@ -203,18 +271,28 @@ export function Sidebar() {
 
   // Listen for agent-status events from the backend
   useEffect(() => {
-    const unlisten = listen<{ worktree_path: string; status: string }>("agent-status", (event) => {
-      const { worktree_path, status } = event.payload;
-      if (status === "working" || status === "idle" || status === "permission") {
-        const current = useDataStore.getState().worktreeDataStates[worktree_path];
-        if (current?.agentStatus !== status) {
-          useDataStore.getState().updateWorktreeDataState(worktree_path, {
-            agentStatus: status,
-          });
+    const unlisten = listen<{ worktree_path: string; status: string }>(
+      "agent-status",
+      (event) => {
+        const { worktree_path, status } = event.payload;
+        if (
+          status === "working" ||
+          status === "idle" ||
+          status === "permission"
+        ) {
+          const current =
+            useDataStore.getState().worktreeDataStates[worktree_path];
+          if (current?.agentStatus !== status) {
+            useDataStore.getState().updateWorktreeDataState(worktree_path, {
+              agentStatus: status,
+            });
+          }
         }
-      }
-    });
-    return () => { unlisten.then((fn) => fn()); };
+      },
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
   const commitCounts = useDataStore(
@@ -224,7 +302,7 @@ export function Sidebar() {
         counts[path] = state.commits?.length ?? 0;
       }
       return counts;
-    })
+    }),
   );
 
   // Encode as "additions:deletions" strings so useShallow can compare primitives
@@ -241,13 +319,13 @@ export function Sidebar() {
         stats[path] = `${additions}:${deletions}`;
       }
       return stats;
-    })
+    }),
   );
   const diffStats = Object.fromEntries(
     Object.entries(diffStatsRaw).map(([path, raw]) => {
       const [a, d] = raw.split(":").map(Number);
       return [path, { additions: a, deletions: d }];
-    })
+    }),
   );
 
   const agentStatuses = useDataStore(
@@ -257,18 +335,22 @@ export function Sidebar() {
         statuses[path] = state.agentStatus ?? "idle";
       }
       return statuses;
-    })
+    }),
   );
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [worktreeToDelete, setWorktreeToDelete] = useState<Worktree | null>(null);
+  const [worktreeToDelete, setWorktreeToDelete] = useState<Worktree | null>(
+    null,
+  );
 
   const deleteWorktree = (wt: Worktree) => {
     if (!selectedProject) return;
 
     // Optimistic update: close dialog, remove from list, clear selection immediately
     setWorktreeToDelete(null);
-    setWorktrees(useDataStore.getState().worktrees.filter((w) => w.path !== wt.path));
+    setWorktrees(
+      useDataStore.getState().worktrees.filter((w) => w.path !== wt.path),
+    );
     if (selectedWorktree?.path === wt.path) {
       useUIStore.getState().setSelectedWorktree(null);
     }
@@ -279,15 +361,19 @@ export function Sidebar() {
         const dataState = useDataStore.getState().worktreeDataStates[wt.path];
         const ptyKills = dataState?.paneSessions
           ? Object.values(dataState.paneSessions).map((sessionId) =>
-              invoke("pty_kill", { sessionId }).catch(() => {})
+              invoke("pty_kill", { sessionId }).catch(() => {}),
             )
           : [];
         await Promise.all([
           ...ptyKills,
           invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
           viewedFilesProvider.clearForWorktree(wt.path).catch(() => {}),
-          invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(() => {}),
-          invoke("clean_linear_context", { worktreePath: wt.path }).catch(() => {}),
+          invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(
+            () => {},
+          ),
+          invoke("clean_linear_context", { worktreePath: wt.path }).catch(
+            () => {},
+          ),
         ]);
 
         await invoke("delete_worktree", {
@@ -298,7 +384,9 @@ export function Sidebar() {
       } catch (e) {
         // Rollback: re-fetch the real worktree list
         toast.error(`Failed to remove worktree: ${e}`);
-        const updated = await invoke<Worktree[]>("list_worktrees", { repoPath: selectedProject.path });
+        const updated = await invoke<Worktree[]>("list_worktrees", {
+          repoPath: selectedProject.path,
+        });
         setWorktrees(updated);
       }
     })();
@@ -313,7 +401,8 @@ export function Sidebar() {
   useAppHotkey("DELETE_WORKTREE", () => {
     if (!selectedWorktree) return;
     const branch = selectedWorktree.branch;
-    if (branch === "main" || branch === "master" || branch === "develop") return;
+    if (branch === "main" || branch === "master" || branch === "develop")
+      return;
     setWorktreeToDelete(selectedWorktree);
   });
 
@@ -345,21 +434,32 @@ export function Sidebar() {
 
         // Discover icons for all projects in parallel
         for (const project of loaded) {
-          invoke<string | null>("discover_project_icon", { projectPath: project.path })
+          invoke<string | null>("discover_project_icon", {
+            projectPath: project.path,
+          })
             .then((icon) => {
-              if (icon) useDataStore.getState().setProjectIcon(project.path, icon);
+              if (icon)
+                useDataStore.getState().setProjectIcon(project.path, icon);
             })
             .catch(() => {});
         }
 
         const persistedProject = useUIStore.getState().selectedProject;
-        if (persistedProject && loaded.some((p) => p.path === persistedProject.path)) {
+        if (
+          persistedProject &&
+          loaded.some((p) => p.path === persistedProject.path)
+        ) {
           try {
-            const wts = await invoke<Worktree[]>("list_worktrees", { repoPath: persistedProject.path });
+            const wts = await invoke<Worktree[]>("list_worktrees", {
+              repoPath: persistedProject.path,
+            });
             useDataStore.getState().setWorktrees(wts);
 
             const persistedWorktree = useUIStore.getState().selectedWorktree;
-            if (persistedWorktree && wts.some((wt) => wt.path === persistedWorktree.path)) {
+            if (
+              persistedWorktree &&
+              wts.some((wt) => wt.path === persistedWorktree.path)
+            ) {
               await selectWorktree(persistedWorktree);
             } else {
               useUIStore.getState().setSelectedWorktree(null);
@@ -378,7 +478,9 @@ export function Sidebar() {
     })();
   }, []);
 
-  const [worktreeIssues, setWorktreeIssues] = useState<Record<string, WorktreeIssue>>({});
+  const [worktreeIssues, setWorktreeIssues] = useState<
+    Record<string, WorktreeIssue>
+  >({});
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -415,7 +517,9 @@ export function Sidebar() {
       await persistProjects(updatedProjects);
 
       // Discover favicon for the new project
-      invoke<string | null>("discover_project_icon", { projectPath: project.path })
+      invoke<string | null>("discover_project_icon", {
+        projectPath: project.path,
+      })
         .then((icon) => {
           if (icon) setProjectIcon(project.path, icon);
         })
@@ -429,15 +533,16 @@ export function Sidebar() {
 
   const selectProject = sharedSelectProject;
 
-  const handleRemoveProject = async (
-    e: React.MouseEvent,
-    path: string,
-  ) => {
+  const handleRemoveProject = async (e: React.MouseEvent, path: string) => {
     e.stopPropagation();
     // Clean up viewed files for all worktrees in this project
     try {
-      const wts = await invoke<Worktree[]>("list_worktrees", { repoPath: path });
-      await Promise.all(wts.map((wt) => viewedFilesProvider.clearForWorktree(wt.path)));
+      const wts = await invoke<Worktree[]>("list_worktrees", {
+        repoPath: path,
+      });
+      await Promise.all(
+        wts.map((wt) => viewedFilesProvider.clearForWorktree(wt.path)),
+      );
     } catch {
       // Best-effort cleanup
     }
@@ -455,35 +560,53 @@ export function Sidebar() {
     <div className="flex flex-col h-full text-sm overflow-hidden relative bg-sidebar">
       {/* Project Switcher */}
       <div
-        onClick={() => projects.length === 0 ? openProject() : setShowDropdown(!showDropdown)}
+        onClick={() =>
+          projects.length === 0 ? openProject() : setShowDropdown(!showDropdown)
+        }
         className="mx-2.5 mt-2.5 mb-1.5 px-2.5 py-1.5 rounded-md flex items-center gap-2 cursor-pointer bg-accent hover:bg-accent/80"
       >
         {selectedProject ? (
           <>
-            <ProjectBadge name={selectedProject.name} iconUrl={projectIcons[selectedProject.path]} />
-            <span className="text-foreground text-sm font-medium truncate">{selectedProject.name}</span>
+            <ProjectBadge
+              name={selectedProject.name}
+              iconUrl={projectIcons[selectedProject.path]}
+            />
+            <span className="text-foreground text-sm font-medium truncate">
+              {selectedProject.name}
+            </span>
           </>
         ) : (
           <span className="text-muted-foreground text-sm">Select project</span>
         )}
-        <span className="ml-auto text-muted-foreground/50 text-sm">&#9662;</span>
+        <span className="ml-auto text-muted-foreground/90 text-sm">
+          &#9662;
+        </span>
       </div>
 
       {/* Project Dropdown */}
       {showDropdown && (
         <>
-          <div className="fixed inset-0 z-20" onClick={() => setShowDropdown(false)} />
           <div
-            className="absolute left-2.5 right-2.5 top-[52px] z-30 rounded-md border border-border bg-popover py-1 shadow-lg"
-          >
+            className="fixed inset-0 z-20"
+            onClick={() => setShowDropdown(false)}
+          />
+          <div className="absolute left-2.5 right-2.5 top-[52px] z-30 rounded-md border border-border bg-popover py-1 shadow-lg">
             {projects.map((project) => (
               <div
                 key={project.path}
-                onClick={() => { selectProject(project); setShowDropdown(false); }}
+                onClick={() => {
+                  selectProject(project);
+                  setShowDropdown(false);
+                }}
                 className="group flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent"
               >
-                <ProjectBadge name={project.name} iconUrl={projectIcons[project.path]} />
-                <span className={`text-sm truncate ${selectedProject?.path === project.path ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                <ProjectBadge
+                  name={project.name}
+                  iconUrl={projectIcons[project.path]}
+                />
+                <span
+                  className={`text-sm truncate ${selectedProject?.path === project.path ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                >
                   {project.name}
                 </span>
                 <span
@@ -496,9 +619,19 @@ export function Sidebar() {
             ))}
             <div
               className="border-t border-border mt-1 pt-1 flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent text-muted-foreground text-sm"
-              onClick={() => { openProject(); setShowDropdown(false); }}
+              onClick={() => {
+                openProject();
+                setShowDropdown(false);
+              }}
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2 8h12M8 2v12"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
               Open Project
             </div>
           </div>
@@ -507,15 +640,36 @@ export function Sidebar() {
 
       {/* Search / Command Palette Trigger */}
       <button
-        onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true, bubbles: true }))}
-        className="mx-2.5 mb-1 px-2.5 py-1.5 rounded-md flex items-center gap-2 bg-accent/60 hover:bg-accent text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+        onClick={() =>
+          window.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "p",
+              metaKey: true,
+              bubbles: true,
+            }),
+          )
+        }
+        className="mx-2.5 mb-1 px-2.5 py-1.5 rounded-md flex items-center gap-2 bg-accent/60 hover:bg-accent text-muted-foreground/90 hover:text-muted-foreground transition-colors"
       >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-          <circle cx="11" cy="11" r="8"/>
-          <path d="m21 21-4.3-4.3"/>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="shrink-0"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.3-4.3" />
         </svg>
         <span className="text-sm">Search...</span>
-        <HotkeyDisplay id="OPEN_COMMAND_PALETTE" className="ml-auto bg-background/50 rounded px-1 py-0.5" />
+        <HotkeyDisplay
+          id="OPEN_COMMAND_PALETTE"
+          className="ml-auto bg-background/50 rounded px-1 py-0.5"
+        />
       </button>
 
       {/* Worktrees Section */}
@@ -523,93 +677,114 @@ export function Sidebar() {
         <div className="flex flex-col min-h-0 flex-1">
           <div className="mx-3 mb-1.5 border-b border-border/30" />
           <div className="flex items-center justify-between px-3.5 pt-1 pb-1 shrink-0">
-            <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">Worktrees</span>
+            <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">
+              Worktrees
+            </span>
           </div>
-          <div className="px-2 pb-1.5 shrink-0">
+          <div className="px-2 pt-0.5 pb-2.5 shrink-0">
             <button
               onClick={() => setShowNewWorktree(true)}
-              className="flex items-center justify-center gap-2 w-full px-3 py-1.5 rounded-[5px] border border-border/50 text-sm text-muted-foreground/70 hover:text-muted-foreground hover:border-border hover:bg-accent/50 transition-colors"
+              className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-[5px] border border-border/50 text-sm text-muted-foreground/90 hover:text-muted-foreground hover:border-border hover:bg-accent/50 transition-colors"
             >
               <span>+ New Worktree</span>
-              <kbd className="text-[10px] text-muted-foreground/40 ml-auto">⌘N</kbd>
+              <kbd className="text-[10px] text-muted-foreground/40 ml-auto">
+                ⌘N
+              </kbd>
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto">
-          {worktrees.map((wt) => {
-            const isSelected = selectedWorktree?.path === wt.path;
-            const aheadCount = commitCounts[wt.path] ?? 0;
-            const stats = diffStats[wt.path];
-            const isMain = wt.branch === "main" || wt.branch === "master" || wt.branch === "develop";
-            const isActive = agentStatuses[wt.path] === "working";
+            {worktrees.map((wt) => {
+              const isSelected = selectedWorktree?.path === wt.path;
+              const aheadCount = commitCounts[wt.path] ?? 0;
+              const stats = diffStats[wt.path];
+              const isMain =
+                wt.branch === "main" ||
+                wt.branch === "master" ||
+                wt.branch === "develop";
+              const isActive = agentStatuses[wt.path] === "working";
 
-            return (
-              <div key={wt.path} className="group relative mx-2 my-0.5">
-                <button
-                  onClick={() => selectWorktree(wt)}
-                  className={`flex items-center gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${
-                    isSelected
-                      ? "bg-primary/15"
-                      : "hover:bg-accent"
-                  }`}
-                >
-                  <div className="relative shrink-0">
-                    {isActive ? (
-                      <span className="w-4 h-4 flex items-center justify-center">
-                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                      </span>
-                    ) : (
-                      <BranchIcon active={isSelected} />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                        {wt.branch}
-                      </span>
-                      <span className="relative ml-auto shrink-0">
-                        {/* Stats badge — visible by default, invisible on hover (keeps layout space) */}
-                        <span className={`flex items-center gap-0.5 text-[10px] font-mono rounded px-1.5 py-0.5 ${
-                          stats && (stats.additions > 0 || stats.deletions > 0)
-                            ? "bg-accent/60 group-hover:invisible"
-                            : "invisible"
-                        }`}>
-                          <span className="text-green-500">+{stats?.additions ?? 0}</span>
-                          <span className="text-red-500">-{stats?.deletions ?? 0}</span>
+              return (
+                <div key={wt.path} className="group relative mx-2 my-0.5">
+                  <button
+                    onClick={() => selectWorktree(wt)}
+                    className={`flex items-center gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${
+                      isSelected ? "bg-primary/15" : "hover:bg-accent"
+                    }`}
+                  >
+                    <div className="relative shrink-0">
+                      {isActive ? (
+                        <span className="w-4 h-4 flex items-center justify-center">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                         </span>
-                        {/* Close button — overlaid on hover */}
-                        {!isMain && (
-                          <span
-                            onClick={(e) => { e.stopPropagation(); setWorktreeToDelete(wt); }}
-                            className="absolute inset-y-0 right-0 hidden group-hover:flex items-center justify-center text-muted-foreground/50 hover:!text-destructive text-sm transition-colors"
-                          >
-                            ×
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <div className={`text-sm mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
-                      {aheadCount > 0 ? `${aheadCount} ahead` : "up to date"}
-                      {worktreeIssues[wt.path] && (
-                        <>
-                          {" · "}
-                          <span
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openUrl(`https://linear.app/issue/${worktreeIssues[wt.path].identifier}`);
-                            }}
-                            className="font-mono text-blue-400 hover:text-blue-300 cursor-pointer"
-                          >
-                            {worktreeIssues[wt.path].identifier}
-                          </span>
-                        </>
+                      ) : (
+                        <BranchIcon active={isSelected} />
                       )}
                     </div>
-                  </div>
-                </button>
-              </div>
-            );
-          })}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                        >
+                          {wt.branch}
+                        </span>
+                        <span className="relative ml-auto shrink-0">
+                          {/* Stats badge — visible by default, invisible on hover (keeps layout space) */}
+                          <span
+                            className={`flex items-center gap-0.5 text-[10px] font-mono rounded px-1.5 py-0.5 ${
+                              stats &&
+                              (stats.additions > 0 || stats.deletions > 0)
+                                ? "bg-accent/60 group-hover:invisible"
+                                : "invisible"
+                            }`}
+                          >
+                            <span className="text-green-500">
+                              +{stats?.additions ?? 0}
+                            </span>
+                            <span className="text-red-500">
+                              -{stats?.deletions ?? 0}
+                            </span>
+                          </span>
+                          {/* Close button — overlaid on hover */}
+                          {!isMain && (
+                            <span
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setWorktreeToDelete(wt);
+                              }}
+                              className="absolute inset-y-0 right-0 hidden group-hover:flex items-center justify-center text-muted-foreground/90 hover:!text-destructive text-sm transition-colors"
+                            >
+                              ×
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div
+                        className={`text-sm mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/90"}`}
+                      >
+                        {aheadCount > 0 ? `${aheadCount} ahead` : "up to date"}
+                        {worktreeIssues[wt.path] && (
+                          <>
+                            {" · "}
+                            <span
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openUrl(
+                                  `https://linear.app/issue/${worktreeIssues[wt.path].identifier}`,
+                                );
+                              }}
+                              className="font-mono text-blue-400 hover:text-blue-300 cursor-pointer"
+                            >
+                              {worktreeIssues[wt.path].identifier}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -623,7 +798,7 @@ export function Sidebar() {
           className={`flex items-center gap-1.5 w-full px-3.5 py-1.5 text-sm transition-colors ${
             generalTerminalActive
               ? "text-foreground"
-              : "text-muted-foreground/50 hover:text-muted-foreground"
+              : "text-muted-foreground/90 hover:text-muted-foreground"
           }`}
         >
           <TerminalIcon />
@@ -634,9 +809,18 @@ export function Sidebar() {
       {/* Settings gear — always at bottom */}
       <button
         onClick={() => navigate({ to: "/settings" })}
-        className="flex items-center gap-1.5 px-3.5 py-2.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors border-t border-border"
+        className="flex items-center gap-1.5 px-3.5 py-2.5 text-muted-foreground/90 hover:text-muted-foreground transition-colors border-t border-border"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
           <circle cx="12" cy="12" r="3" />
         </svg>
@@ -654,44 +838,56 @@ export function Sidebar() {
                 repoPath: selectedProject.path,
               });
               setWorktrees(wts);
-              selectWorktree(worktree);
+              // Use the worktree from the refreshed list to ensure path
+              // consistency (git may canonicalize symlinks differently)
+              const resolved = wts.find((wt) => wt.branch === worktree.branch) ?? worktree;
+              selectWorktree(resolved);
 
               // Run setup script if configured (fire-and-forget)
               invoke<{ setup?: string; run?: string }>("read_project_config", {
                 projectPath: selectedProject.path,
-              }).then((config) => {
-                if (config.setup?.trim()) {
-                  const sessionId = `floating-setup-${Date.now()}`;
-                  invoke("pty_spawn", {
-                    sessionId,
-                    cwd: worktree.path,
-                    envVars: {
-                      IMPALA_PROJECT_PATH: selectedProject.path,
-                      IMPALA_WORKTREE_PATH: worktree.path,
-                      IMPALA_BRANCH: worktree.branch,
-                    },
-                  }).then(() => {
-                    // Write the setup command into the interactive shell
-                    const encoded = btoa(
-                      Array.from(new TextEncoder().encode(config.setup + "\n"), (b) =>
-                        String.fromCharCode(b)
-                      ).join("")
-                    );
-                    invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
-                    useUIStore.getState().setFloatingTerminal(worktree.path, {
-                      mode: "expanded",
+              })
+                .then((config) => {
+                  if (config.setup?.trim()) {
+                    const sessionId = `floating-setup-${Date.now()}`;
+                    invoke("pty_spawn", {
                       sessionId,
-                      label: "Setup",
-                      type: "setup",
-                      status: "running",
-                    });
-                  }).catch((e) => {
-                    toast.error(`Failed to run setup script: ${e}`);
-                  });
-                }
-              }).catch(() => {
-                // Silently ignore config read failures
-              });
+                      cwd: resolved.path,
+                      envVars: {
+                        IMPALA_PROJECT_PATH: selectedProject.path,
+                        IMPALA_WORKTREE_PATH: resolved.path,
+                        IMPALA_BRANCH: resolved.branch,
+                      },
+                    })
+                      .then(() => {
+                        // Write the setup command into the interactive shell
+                        const encoded = btoa(
+                          Array.from(
+                            new TextEncoder().encode(config.setup + "\n"),
+                            (b) => String.fromCharCode(b),
+                          ).join(""),
+                        );
+                        invoke("pty_write", { sessionId, data: encoded }).catch(
+                          () => {},
+                        );
+                        useUIStore
+                          .getState()
+                          .setFloatingTerminal(resolved.path, {
+                            mode: "expanded",
+                            sessionId,
+                            label: "Setup",
+                            type: "setup",
+                            status: "running",
+                          });
+                      })
+                      .catch((e) => {
+                        toast.error(`Failed to run setup script: ${e}`);
+                      });
+                  }
+                })
+                .catch(() => {
+                  // Silently ignore config read failures
+                });
             } catch (e) {
               toast.error("Failed to refresh worktrees");
             }
@@ -701,19 +897,30 @@ export function Sidebar() {
       )}
 
       {/* Delete Worktree Dialog */}
-      <AlertDialog open={!!worktreeToDelete} onOpenChange={(open) => { if (!open) setWorktreeToDelete(null); }}>
+      <AlertDialog
+        open={!!worktreeToDelete}
+        onOpenChange={(open) => {
+          if (!open) setWorktreeToDelete(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete worktree</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove the worktree for <span className="font-medium text-foreground">{worktreeToDelete?.branch}</span> and
-              delete its working directory. Any uncommitted changes will be lost.
+              This will remove the worktree for{" "}
+              <span className="font-medium text-foreground">
+                {worktreeToDelete?.branch}
+              </span>{" "}
+              and delete its working directory. Any uncommitted changes will be
+              lost.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => worktreeToDelete && deleteWorktree(worktreeToDelete)}
+              onClick={() =>
+                worktreeToDelete && deleteWorktree(worktreeToDelete)
+              }
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete

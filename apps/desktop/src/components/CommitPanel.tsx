@@ -236,7 +236,7 @@ export function CommitPanel() {
           <div className={`text-sm font-medium ${viewMode === 'uncommitted' ? "text-foreground" : "text-muted-foreground"}`}>
             Uncommitted Changes
           </div>
-          <div className="text-sm text-muted-foreground/50 mt-0.5 font-mono">Working tree</div>
+          <div className="text-sm text-muted-foreground/90 mt-0.5 font-mono">Working tree</div>
         </button>
 
         {/* All Changes */}
@@ -251,12 +251,12 @@ export function CommitPanel() {
           <div className={`text-sm font-medium ${viewMode === 'all-changes' ? "text-foreground" : "text-muted-foreground"}`}>
             All Changes
           </div>
-          <div className="text-sm text-muted-foreground/50 mt-0.5 font-mono">vs {baseBranch || "base"}</div>
+          <div className="text-sm text-muted-foreground/90 mt-0.5 font-mono">vs {baseBranch || "base"}</div>
         </button>
 
         {/* Commits */}
         {commits.length === 0 ? (
-          <div className="px-3.5 py-4 text-muted-foreground/50 text-sm">No commits ahead of {baseBranch}</div>
+          <div className="px-3.5 py-4 text-muted-foreground/90 text-sm">No commits ahead of {baseBranch}</div>
         ) : (
           commits.map((commit) => {
             const isSelected = viewMode === 'commit' && selectedCommit?.hash === commit.hash;
@@ -273,7 +273,7 @@ export function CommitPanel() {
                 <div className={`text-sm font-medium truncate ${isSelected ? "text-foreground" : "text-foreground/80"}`}>
                   {commit.message}
                 </div>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground/50 mt-0.5 font-mono">
+                <div className="flex items-center gap-1 text-sm text-muted-foreground/90 mt-0.5 font-mono">
                   <span>{commit.hash.slice(0, 7)} &middot; {commit.date.split("T")[0]} {commit.date.split("T")[1]?.slice(0, 5)}</span>
                   {(commit.additions > 0 || commit.deletions > 0) && (
                     <span className="ml-auto">

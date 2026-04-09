@@ -74,14 +74,14 @@ export function CommandPalette({
           loop
         >
           <div className="flex items-center border-b border-border px-3">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/50 mr-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90 mr-2">
               <circle cx="11" cy="11" r="8"/>
               <path d="m21 21-4.3-4.3"/>
             </svg>
             <Command.Input
               ref={inputRef}
               placeholder="Search worktrees, projects, actions..."
-              className="flex h-10 w-full bg-transparent py-3 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
+              className="flex h-10 w-full bg-transparent py-3 text-sm text-foreground placeholder:text-muted-foreground/90 outline-none"
             />
           </div>
           <Command.List className="max-h-[400px] overflow-y-auto p-1.5">
@@ -101,7 +101,7 @@ export function CommandPalette({
                       onSelect={() => handleSelectWorktree(wt)}
                       className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md cursor-pointer data-[selected=true]:bg-accent"
                     >
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className={`shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/50"}`}>
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className={`shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/90"}`}>
                         <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
                         <circle cx="4" cy="12" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/>
                         <line x1="4" y1="6" x2="4" y2="10" stroke="currentColor" strokeWidth="1.4"/>
@@ -160,7 +160,7 @@ export function CommandPalette({
                     onSelect={() => handleAction("diff-tab")}
                     className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-accent"
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/50">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
                       <path d="M12 3v18"/>
                       <rect width="18" height="18" x="3" y="3" rx="2"/>
                     </svg>
@@ -171,7 +171,7 @@ export function CommandPalette({
                     onSelect={() => handleAction("terminal-tab")}
                     className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-accent"
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/50">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
                       <polyline points="4 17 10 11 4 5"/>
                       <line x1="12" x2="20" y1="19" y2="19"/>
                     </svg>
@@ -182,7 +182,7 @@ export function CommandPalette({
                     onSelect={() => handleAction("split-tab")}
                     className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-accent"
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/50">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
                       <rect width="18" height="18" x="3" y="3" rx="2"/>
                       <path d="M12 3v18"/>
                     </svg>
@@ -195,24 +195,24 @@ export function CommandPalette({
                 onSelect={() => handleAction("settings")}
                 className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-accent"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/50">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
                   <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                   <circle cx="12" cy="12" r="3" />
                 </svg>
                 Settings
-                <HotkeyDisplay id="OPEN_SETTINGS" className="ml-auto text-muted-foreground/50" />
+                <HotkeyDisplay id="OPEN_SETTINGS" className="ml-auto text-muted-foreground/90" />
               </Command.Item>
               <Command.Item
                 value="Keyboard Shortcuts"
                 onSelect={() => handleAction("keyboard-shortcuts")}
                 className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-accent"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/50">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
                   <rect x="2" y="4" width="20" height="16" rx="2" />
                   <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
                 </svg>
                 Keyboard Shortcuts
-                <HotkeyDisplay id="SHOW_KEYBOARD_SHORTCUTS" className="ml-auto text-muted-foreground/50" />
+                <HotkeyDisplay id="SHOW_KEYBOARD_SHORTCUTS" className="ml-auto text-muted-foreground/90" />
               </Command.Item>
             </Command.Group>
           </Command.List>

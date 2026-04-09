@@ -384,7 +384,7 @@ function VirtualizedCommitView({
                 >
                   <div className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground">
                     {isRenamed ? (
-                      <span className="flex-1 truncate">{oldPath} <span className="text-muted-foreground/50">→</span> {newPath}</span>
+                      <span className="flex-1 truncate">{oldPath} <span className="text-muted-foreground/90">→</span> {newPath}</span>
                     ) : (
                       <span className="flex-1 truncate">{file.path}</span>
                     )}

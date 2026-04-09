@@ -132,7 +132,7 @@ export function AppearancePane() {
       >
         Download template
       </button>
-      <span className="text-md text-muted-foreground/50 ml-2">JSON file with all tokens</span>
+      <span className="text-md text-muted-foreground/90 ml-2">JSON file with all tokens</span>
 
       {/* Font size */}
       <div className="mt-8 border-t border-border pt-6">

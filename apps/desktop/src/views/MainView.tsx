@@ -171,7 +171,7 @@ export function MainView() {
           {selectedWorktree && (
             <div className="flex items-center gap-1.5 text-md">
               <span className="text-muted-foreground/60">{selectedProject?.name}</span>
-              <span className="text-muted-foreground/30">/</span>
+              <span className="text-muted-foreground/90">/</span>
               <span className="text-foreground font-medium font-mono text-md truncate max-w-[200px]">
                 {selectedWorktree.branch}
               </span>

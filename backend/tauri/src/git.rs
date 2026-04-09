@@ -320,14 +320,19 @@ pub fn create_worktree(
         )?;
     }
 
-    // Read back the worktree info
-    let head = run_git(&wt_path, &["rev-parse", "HEAD"])
+    // Read back the canonical path from git to avoid symlink mismatches
+    // (e.g. /tmp -> /private/tmp on macOS)
+    let canonical_path = std::fs::canonicalize(&wt_path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or(wt_path);
+
+    let head = run_git(&canonical_path, &["rev-parse", "HEAD"])
         .unwrap_or_default()
         .trim()
         .to_string();
 
     Ok(Worktree {
-        path: wt_path,
+        path: canonical_path,
         branch: branch_name.to_string(),
         head_commit: head,
     })

@@ -249,7 +249,7 @@ export function KeyboardShortcutsPane() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search shortcuts..."
-          className="w-full pl-8 pr-3 py-1.5 text-md rounded-md border border-border/50 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+          className="w-full pl-8 pr-3 py-1.5 text-md rounded-md border border-border/50 bg-background text-foreground placeholder:text-muted-foreground/90 focus:outline-none focus:ring-1 focus:ring-primary/50"
         />
       </div>
 

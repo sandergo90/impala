@@ -39,7 +39,7 @@ export function InlineAnnotationForm({ onSubmit, onCancel }: InlineAnnotationFor
             onChange={(e) => setBody(e.target.value)}
             placeholder="Leave a comment"
             rows={3}
-            className="w-full px-3 py-2 text-md rounded-md border border-border bg-background text-foreground resize-y focus:outline-none focus:border-muted-foreground/50 placeholder:text-muted-foreground/50"
+            className="w-full px-3 py-2 text-md rounded-md border border-border bg-background text-foreground resize-y focus:outline-none focus:border-muted-foreground/50 placeholder:text-muted-foreground/90"
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 e.preventDefault();
