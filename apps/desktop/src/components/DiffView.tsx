@@ -664,6 +664,10 @@ export function DiffView() {
     [showResolved, handleCreate, pendingAnnotation?.filePath]
   );
 
+  const globalFontSize = useUIStore((s) => s.fontSize);
+  const editorFontSize = useUIStore((s) => s.editorFontSize);
+  const editorFontFamily = useUIStore((s) => s.editorFontFamily);
+
   const hasFileDiffs = Object.keys(fileDiffs).length > 0;
   const showAllFiles = !selectedFile && hasFileDiffs;
   const showSingleFile = selectedFile && diffText;
@@ -678,9 +682,6 @@ export function DiffView() {
 
   const activeTheme = resolveThemeById(activeThemeId, customThemes);
   const impalaTheme = getDiffsTheme(activeTheme);
-  const globalFontSize = useUIStore((s) => s.fontSize);
-  const editorFontSize = useUIStore((s) => s.editorFontSize);
-  const editorFontFamily = useUIStore((s) => s.editorFontFamily);
   const fontSize = editorFontSize ?? globalFontSize;
   const diffViewerStyle = getDiffViewerStyle(activeTheme, fontSize, editorFontFamily);
 
