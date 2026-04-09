@@ -1,8 +1,7 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";
 import { PatchDiff, MultiFileDiff } from "@pierre/diffs/react";
@@ -167,7 +166,7 @@ function useFileContents(
   return contents;
 }
 
-function FileDiffItem({
+const FileDiffItem = memo(function FileDiffItem({
   file, patch, isViewed, worktreePath, viewMode, selectedCommitHash,
   collapsedFiles, setCollapsedFiles, generatedFiles, diffOptions, diffViewerStyle,
   annotationsByFile, pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler,
@@ -181,7 +180,7 @@ function FileDiffItem({
   selectedCommitHash: string | null;
   collapsedFiles: Set<string>;
   setCollapsedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
-  generatedFiles: string[];
+  generatedFiles: Set<string>;
   diffOptions: FileDiffOptions<AnnotationMeta>;
   diffViewerStyle: React.CSSProperties;
   annotationsByFile: Map<string, DiffLineAnnotation<AnnotationMeta>[]>;
@@ -197,7 +196,7 @@ function FileDiffItem({
   const fileContents = useFileContents(worktreePath, file.path, selectedCommitHash, viewMode);
 
   const isLargeFile = (patch ?? "").length > 100_000;
-  const isGenerated = generatedFiles.includes(file.path);
+  const isGenerated = generatedFiles.has(file.path);
   const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !collapsedFiles.has(`expanded:${file.path}`)) || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
 
   const toggleCollapse = () => {
@@ -301,7 +300,7 @@ function FileDiffItem({
       )}
     </div>
   );
-}
+});
 
 function VirtualizedCommitView({
   toolbar, changedFiles, fileDiffs, viewedFiles, collapsedFiles, setCollapsedFiles,
@@ -315,7 +314,7 @@ function VirtualizedCommitView({
   viewedFiles: Set<string>;
   collapsedFiles: Set<string>;
   setCollapsedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
-  generatedFiles: string[];
+  generatedFiles: Set<string>;
   diffOptions: FileDiffOptions<AnnotationMeta>;
   diffViewerStyle: React.CSSProperties;
   annotationsByFile: Map<string, DiffLineAnnotation<AnnotationMeta>[]>;
@@ -345,6 +344,24 @@ function VirtualizedCommitView({
     overscan: 2,
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });
+
+  // Wrap measureElement to defer synchronous measurements out of React's commit phase.
+  // Without this, each item measurement triggers resizeItem → notify → rerender during
+  // commitAttachRef, cascading into "Maximum update depth exceeded" with many diff files.
+  const deferredMeasureElement = useCallback(
+    (node: HTMLElement | null) => {
+      if (!node) {
+        virtualizer.measureElement(node as any);
+        return;
+      }
+      requestAnimationFrame(() => {
+        if (node.isConnected) {
+          virtualizer.measureElement(node as any);
+        }
+      });
+    },
+    [virtualizer],
+  );
 
   const items = virtualizer.getVirtualItems();
 
@@ -380,7 +397,7 @@ function VirtualizedCommitView({
               return (
                 <div
                   key={file.path}
-                  ref={virtualizer.measureElement}
+                  ref={deferredMeasureElement}
                   data-index={virtualRow.index}
                   data-file-path={file.path}
                   className={`absolute left-0 w-full border-b border-border ${isViewed ? "opacity-75" : ""}`}
@@ -423,7 +440,7 @@ function VirtualizedCommitView({
                 toggleViewed={toggleViewed}
                 scrollToFile={scrollToFile}
                 virtualRow={virtualRow}
-                measureElement={virtualizer.measureElement}
+                measureElement={deferredMeasureElement}
                 scrollMargin={virtualizer.options.scrollMargin ?? 0}
               />
             );
@@ -438,9 +455,7 @@ function VirtualizedCommitView({
 export function DiffView() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const diffStyle = useUIStore((s) => s.diffStyle);
-  const setDiffStyle = useUIStore((s) => s.setDiffStyle);
   const wrap = useUIStore((s) => s.wrap);
-  const setWrap = useUIStore((s) => s.setWrap);
   const activeThemeId = useUIStore((s) => s.activeThemeId);
   const customThemes = useUIStore((s) => s.customThemes);
 
@@ -459,7 +474,8 @@ export function DiffView() {
   const changedFiles = dataState?.changedFiles ?? emptyArray;
   const fileDiffs = dataState?.fileDiffs ?? emptyRecord;
   const fileDiffHashes = dataState?.fileDiffHashes ?? emptyRecord;
-  const generatedFiles = dataState?.generatedFiles ?? emptyArray;
+  const generatedFilesRaw = dataState?.generatedFiles ?? emptyArray;
+  const generatedFiles = useMemo(() => new Set(generatedFilesRaw), [generatedFilesRaw]);
   const annotations = dataState?.annotations ?? emptyArray;
 
   const worktreePath = selectedWorktree?.path;
@@ -524,19 +540,20 @@ export function DiffView() {
     if (!worktreePath || !commitHashForViewed) return;
     const patchHash = fileDiffHashes[path] ?? "new-file";
 
-    const isCurrentlyViewed = viewedFiles.has(path);
-    if (isCurrentlyViewed) {
-      viewedFilesProvider.unset(worktreePath, commitHashForViewed, path);
-      setViewedFiles((prev) => {
+    setViewedFiles((prev) => {
+      const isCurrentlyViewed = prev.has(path);
+      if (isCurrentlyViewed) {
+        viewedFilesProvider.unset(worktreePath, commitHashForViewed, path);
         const next = new Set(prev);
         next.delete(path);
         return next;
-      });
-    } else {
-      viewedFilesProvider.set(worktreePath, commitHashForViewed, path, patchHash, selectedWorktree?.head_commit);
-      setViewedFiles((prev) => new Set(prev).add(path));
-    }
-  }, [worktreePath, commitHashForViewed, fileDiffHashes, viewedFiles, selectedWorktree?.head_commit]);
+      } else {
+        const headCommit = useUIStore.getState().selectedWorktree?.head_commit;
+        viewedFilesProvider.set(worktreePath, commitHashForViewed, path, patchHash, headCommit);
+        return new Set(prev).add(path);
+      }
+    });
+  }, [worktreePath, commitHashForViewed, fileDiffHashes]);
 
   // Load all annotations for this worktree
   useEffect(() => {
@@ -553,19 +570,6 @@ export function DiffView() {
         toast.error("Failed to load annotations");
         updateData({ annotations: [] });
       });
-  }, [worktreePath, updateData]);
-
-  // Re-fetch annotations when the DB is modified externally (e.g. MCP server)
-  useEffect(() => {
-    const unlisten = listen("annotations-changed", () => {
-      if (!worktreePath) return;
-      sqliteProvider
-        .list(worktreePath)
-        .then((anns) => updateData({ annotations: anns }))
-        .catch(() => {});
-    });
-
-    return () => { unlisten.then((fn) => fn()); };
   }, [worktreePath, updateData]);
 
   // Filter annotations to those matching the current commit context
@@ -704,7 +708,7 @@ export function DiffView() {
       </span>
       <div className="flex items-center gap-1 text-md">
         <button
-          onClick={() => setDiffStyle("split")}
+          onClick={() => useUIStore.getState().setDiffStyle("split")}
           className={`px-2 py-0.5 rounded ${
             diffStyle === "split"
               ? "bg-accent text-accent-foreground"
@@ -714,7 +718,7 @@ export function DiffView() {
           Split
         </button>
         <button
-          onClick={() => setDiffStyle("unified")}
+          onClick={() => useUIStore.getState().setDiffStyle("unified")}
           className={`px-2 py-0.5 rounded ${
             diffStyle === "unified"
               ? "bg-accent text-accent-foreground"
@@ -725,7 +729,7 @@ export function DiffView() {
         </button>
         <span className="mx-1 text-border">|</span>
         <button
-          onClick={() => setWrap(!wrap)}
+          onClick={() => useUIStore.getState().setWrap(!wrap)}
           className={`px-2 py-0.5 rounded ${
             wrap
               ? "bg-accent text-accent-foreground"

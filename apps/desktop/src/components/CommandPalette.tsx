@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useUIStore, useDataStore } from "../store";
 import { selectWorktree, selectProject } from "../hooks/useWorktreeActions";
 import { HotkeyDisplay } from "./HotkeyDisplay";
+import { projectColor } from "../lib/utils";
 
 export function CommandPalette({
   open,
@@ -220,13 +221,4 @@ export function CommandPalette({
       </div>
     </div>
   );
-}
-
-function projectColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = ((hash % 360) + 360) % 360;
-  return `hsl(${hue}, 60%, 50%)`;
 }

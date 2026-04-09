@@ -30,14 +30,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-function projectColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = ((hash % 360) + 360) % 360;
-  return `hsl(${hue}, 60%, 50%)`;
-}
+import { projectColor } from "../lib/utils";
 
 function ProjectBadge({ name, iconUrl }: { name: string; iconUrl?: string }) {
   const [iconError, setIconError] = useState(false);
@@ -363,17 +356,18 @@ export function Sidebar() {
   }, []);
 
   // Clear hasUnseenResult when the user selects a worktree
+  const selectedWorktreePath = selectedWorktree?.path;
   useEffect(() => {
-    if (selectedWorktree) {
+    if (selectedWorktreePath) {
       const state =
-        useDataStore.getState().worktreeDataStates[selectedWorktree.path];
+        useDataStore.getState().worktreeDataStates[selectedWorktreePath];
       if (state?.hasUnseenResult) {
-        useDataStore.getState().updateWorktreeDataState(selectedWorktree.path, {
+        useDataStore.getState().updateWorktreeDataState(selectedWorktreePath, {
           hasUnseenResult: false,
         });
       }
     }
-  }, [selectedWorktree]);
+  }, [selectedWorktreePath]);
 
   const commitCounts = useDataStore(
     useShallow((s) => {

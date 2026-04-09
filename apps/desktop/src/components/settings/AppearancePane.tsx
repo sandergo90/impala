@@ -15,12 +15,8 @@ const MAX_FONT_SIZE = 24;
 
 export function AppearancePane() {
   const activeThemeId = useUIStore((s) => s.activeThemeId);
-  const setActiveThemeId = useUIStore((s) => s.setActiveThemeId);
   const customThemes = useUIStore((s) => s.customThemes);
-  const addCustomTheme = useUIStore((s) => s.addCustomTheme);
-  const removeCustomTheme = useUIStore((s) => s.removeCustomTheme);
   const fontSize = useUIStore((s) => s.fontSize);
-  const setFontSize = useUIStore((s) => s.setFontSize);
 
   const handleImport = async () => {
     const path = await open({
@@ -39,7 +35,7 @@ export function AppearancePane() {
       }
       if (result.themes.length > 0) {
         for (const theme of result.themes) {
-          addCustomTheme(theme);
+          useUIStore.getState().addCustomTheme(theme);
         }
         toast.success(`Imported ${result.themes.length} theme${result.themes.length > 1 ? "s" : ""}`);
       } else if (result.errors.length === 0) {
@@ -78,7 +74,7 @@ export function AppearancePane() {
             key={theme.id}
             theme={theme}
             isActive={activeThemeId === theme.id}
-            onSelect={() => setActiveThemeId(theme.id)}
+            onSelect={() => useUIStore.getState().setActiveThemeId(theme.id)}
           />
         ))}
       </div>
@@ -91,7 +87,7 @@ export function AppearancePane() {
             key={theme.id}
             theme={theme}
             isActive={activeThemeId === theme.id}
-            onSelect={() => setActiveThemeId(theme.id)}
+            onSelect={() => useUIStore.getState().setActiveThemeId(theme.id)}
           />
         ))}
       </div>
@@ -104,8 +100,8 @@ export function AppearancePane() {
             key={theme.id}
             theme={theme}
             isActive={activeThemeId === theme.id}
-            onSelect={() => setActiveThemeId(theme.id)}
-            onDelete={() => removeCustomTheme(theme.id)}
+            onSelect={() => useUIStore.getState().setActiveThemeId(theme.id)}
+            onDelete={() => useUIStore.getState().removeCustomTheme(theme.id)}
           />
         ))}
 
@@ -146,7 +142,7 @@ export function AppearancePane() {
           </div>
           <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5">
             <button
-              onClick={() => setFontSize(Math.max(MIN_FONT_SIZE, fontSize - 1))}
+              onClick={() => useUIStore.getState().setFontSize(Math.max(MIN_FONT_SIZE, fontSize - 1))}
               disabled={fontSize <= MIN_FONT_SIZE}
               className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
@@ -154,7 +150,7 @@ export function AppearancePane() {
             </button>
             <span className="text-sm text-foreground tabular-nums w-10 text-center font-medium">{fontSize}px</span>
             <button
-              onClick={() => setFontSize(Math.min(MAX_FONT_SIZE, fontSize + 1))}
+              onClick={() => useUIStore.getState().setFontSize(Math.min(MAX_FONT_SIZE, fontSize + 1))}
               disabled={fontSize >= MAX_FONT_SIZE}
               className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >

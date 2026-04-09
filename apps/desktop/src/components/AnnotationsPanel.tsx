@@ -17,32 +17,23 @@ export function AnnotationsPanel() {
     handleSendAllToClaude,
   } = useAnnotationActions();
 
-  // Filter by resolved status
-  const filtered = useMemo(() => {
-    return showResolved
-      ? annotations
-      : annotations.filter((a) => !a.resolved);
-  }, [annotations, showResolved]);
-
-  // Scope: current file only, or all files grouped
-  const scoped = useMemo(() => {
-    if (selectedFile) {
-      return filtered.filter((a) => a.file_path === selectedFile.path);
+  // Filter, scope, sort, and group in a single pass
+  const { scoped, grouped } = useMemo(() => {
+    const scopedItems: Annotation[] = [];
+    const groupedMap = new Map<string, Annotation[]>();
+    for (const a of annotations) {
+      if (!showResolved && a.resolved) continue;
+      if (selectedFile && a.file_path !== selectedFile.path) continue;
+      scopedItems.push(a);
     }
-    return filtered;
-  }, [filtered, selectedFile]);
-
-  // Group by file, sorted by line_number within each group
-  const grouped = useMemo(() => {
-    const map = new Map<string, Annotation[]>();
-    const sorted = [...scoped].sort((a, b) => a.line_number - b.line_number);
-    for (const a of sorted) {
-      const items = map.get(a.file_path) ?? [];
+    scopedItems.sort((a, b) => a.line_number - b.line_number);
+    for (const a of scopedItems) {
+      const items = groupedMap.get(a.file_path) ?? [];
       items.push(a);
-      map.set(a.file_path, items);
+      groupedMap.set(a.file_path, items);
     }
-    return map;
-  }, [scoped]);
+    return { scoped: scopedItems, grouped: groupedMap };
+  }, [annotations, showResolved, selectedFile]);
 
   const hasAnnotations = annotations.length > 0;
   const hasUnresolved = annotations.some((a) => !a.resolved);

@@ -23,8 +23,6 @@ export function useAnnotationActions() {
   const dataState = useDataStore((s) => wtPath ? (s.worktreeDataStates[wtPath] ?? null) : null);
 
   const selectedFile = navState?.selectedFile ?? null;
-  const selectedCommit = navState?.selectedCommit ?? null;
-  const viewMode = navState?.viewMode ?? "commit";
   const annotations = dataState?.annotations ?? [];
 
   const updateData = useCallback(
@@ -51,11 +49,12 @@ export function useAnnotationActions() {
   const handleCreate = useCallback(
     async (body: string, lineNumber: number, side: "left" | "right", filePath?: string) => {
       if (!worktreePath) return;
-      const resolvedFilePath = filePath ?? selectedFile?.path;
+      const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+      const resolvedFilePath = filePath ?? nav.selectedFile?.path;
       if (!resolvedFilePath) return;
       const commitHash =
-        viewMode === "commit" && selectedCommit
-          ? selectedCommit.hash
+        nav.viewMode === "commit" && nav.selectedCommit
+          ? nav.selectedCommit.hash
           : "all-changes";
       const created = await sqliteProvider.create({
         repo_path: worktreePath,
@@ -65,29 +64,34 @@ export function useAnnotationActions() {
         side,
         body,
       });
-      updateData({ annotations: [...annotations, created] });
+      const currentAnnotations = useDataStore.getState().getWorktreeDataState(worktreePath).annotations;
+      updateData({ annotations: [...currentAnnotations, created] });
     },
-    [worktreePath, selectedFile, selectedCommit, viewMode, annotations, updateData]
+    [worktreePath, updateData]
   );
 
   const handleResolve = useCallback(
     async (id: string, resolved: boolean) => {
+      if (!worktreePath) return;
       const updated = await sqliteProvider.update(id, { resolved });
+      const currentAnnotations = useDataStore.getState().getWorktreeDataState(worktreePath).annotations;
       updateData({
-        annotations: annotations.map((a) => (a.id === id ? updated : a)),
+        annotations: currentAnnotations.map((a) => (a.id === id ? updated : a)),
       });
     },
-    [annotations, updateData]
+    [worktreePath, updateData]
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
+      if (!worktreePath) return;
       await sqliteProvider.delete(id);
+      const currentAnnotations = useDataStore.getState().getWorktreeDataState(worktreePath).annotations;
       updateData({
-        annotations: annotations.filter((a) => a.id !== id),
+        annotations: currentAnnotations.filter((a) => a.id !== id),
       });
     },
-    [annotations, updateData]
+    [worktreePath, updateData]
   );
 
   const sendPromptToClaude = useCallback(

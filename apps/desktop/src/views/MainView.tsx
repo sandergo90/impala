@@ -18,6 +18,7 @@ import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { triggerRunScript, stopRunScript } from "../lib/run-script";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { useHotkeyTooltip } from "../components/HotkeyDisplay";
+import { TabPill } from "../components/TabPill";
 import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
 
 let cachedHomeDir: string | null = null;
@@ -141,26 +142,6 @@ export function MainView() {
     useDataStore.getState().updateGeneralTerminalPaneSession(paneId, sessionId);
   }, []);
 
-  const tabPill = (
-    label: string,
-    isActive: boolean,
-    onClick: () => void,
-    disabled?: boolean
-  ) => (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`px-2.5 py-1 text-md font-medium rounded-[5px] transition-colors ${
-        isActive
-          ? "text-foreground"
-          : "text-muted-foreground hover:text-foreground"
-      } disabled:opacity-30 disabled:cursor-not-allowed`}
-      style={isActive ? { background: "var(--accent)" } : undefined}
-    >
-      {label}
-    </button>
-  );
-
   return (
     <>
       {/* Title bar */}
@@ -226,9 +207,9 @@ export function MainView() {
                 )}
               </button>
               <span className="mx-0.5 w-px h-3.5 bg-border/50" />
-              {tabPill("Terminal", activeTab === "terminal", () => setTab("terminal"))}
-              {tabPill("Diff", activeTab === "diff", () => setTab("diff"))}
-              {tabPill("Split", activeTab === "split", () => setTab("split"))}
+              <TabPill label="Terminal" isActive={activeTab === "terminal"} onClick={() => setTab("terminal")} />
+              <TabPill label="Diff" isActive={activeTab === "diff"} onClick={() => setTab("diff")} />
+              <TabPill label="Split" isActive={activeTab === "split"} onClick={() => setTab("split")} />
             </div>
           </div>
         )}
@@ -239,9 +220,7 @@ export function MainView() {
             <OpenInEditorButton worktreePath={selectedWorktree.path} tooltip={openInEditorTooltip} />
           )}
           <span className="mx-0.5 w-px h-3.5 bg-border/50" />
-          {tabPill("Sidebar", showSidebar, () =>
-            setShowSidebar(!showSidebar)
-          )}
+          <TabPill label="Sidebar" isActive={showSidebar} onClick={() => setShowSidebar(!showSidebar)} />
         </div>
       </div>
 

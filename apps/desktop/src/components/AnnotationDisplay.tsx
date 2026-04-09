@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import type { Annotation } from "../types";
 
@@ -23,7 +24,7 @@ function formatRelativeTime(isoDate: string): string {
   return date.toLocaleDateString();
 }
 
-export function AnnotationDisplay({
+export const AnnotationDisplay = memo(function AnnotationDisplay({
   annotation,
   onResolve,
   onDelete,
@@ -96,4 +97,4 @@ export function AnnotationDisplay({
       </div>
     </div>
   );
-}
+});

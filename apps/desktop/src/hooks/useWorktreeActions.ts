@@ -6,8 +6,10 @@ import type { Worktree, CommitInfo, ChangedFile, Project } from "../types";
 export async function selectWorktree(wt: Worktree) {
   useUIStore.getState().setSelectedWorktree(wt);
   try {
-    await invoke("watch_worktree", { worktreePath: wt.path });
-    const base = await invoke<string>("detect_base_branch", { worktreePath: wt.path });
+    const [, base] = await Promise.all([
+      invoke("watch_worktree", { worktreePath: wt.path }),
+      invoke<string>("detect_base_branch", { worktreePath: wt.path }),
+    ]);
     useDataStore.getState().updateWorktreeDataState(wt.path, { baseBranch: base });
     const commits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath: wt.path, baseBranch: base });
     useDataStore.getState().updateWorktreeDataState(wt.path, { commits });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { SplitTreeRenderer } from "./SplitTreeRenderer";
 import { useUIStore, useDataStore } from "../store";
 import { getLeaves } from "../lib/split-tree";
@@ -54,7 +54,7 @@ export function WorktreeTerminals({
   );
 }
 
-function WorktreeTerminalPane({
+const WorktreeTerminalPane = memo(function WorktreeTerminalPane({
   worktreePath,
   isActive,
   onFocusPane,
@@ -88,4 +88,4 @@ function WorktreeTerminalPane({
       onSessionSpawned={onSessionSpawned}
     />
   );
-}
+});
