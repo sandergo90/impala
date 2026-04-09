@@ -26,6 +26,10 @@ interface SplitTreeRendererProps {
   paneSessions: Record<string, string>;
   onFocusPane: (paneId: string) => void;
   onSessionSpawned: (paneId: string, sessionId: string) => void;
+  /** Override cwd for PTY spawn (used by generic terminal) */
+  cwd?: string;
+  /** When true, skip worktree-specific behavior (Linear context, env vars, Claude auto-launch) */
+  isGenericTerminal?: boolean;
 }
 
 export function SplitTreeRenderer({
@@ -35,6 +39,8 @@ export function SplitTreeRenderer({
   paneSessions,
   onFocusPane,
   onSessionSpawned,
+  cwd,
+  isGenericTerminal,
 }: SplitTreeRendererProps) {
   return (
     <SplitNodeRenderer
@@ -44,6 +50,8 @@ export function SplitTreeRenderer({
       paneSessions={paneSessions}
       onFocusPane={onFocusPane}
       onSessionSpawned={onSessionSpawned}
+      cwd={cwd}
+      isGenericTerminal={isGenericTerminal}
     />
   );
 }
@@ -55,6 +63,8 @@ function SplitNodeRenderer({
   paneSessions,
   onFocusPane,
   onSessionSpawned,
+  cwd,
+  isGenericTerminal,
 }: {
   node: SplitNode;
   worktreePath: string;
@@ -62,6 +72,8 @@ function SplitNodeRenderer({
   paneSessions: Record<string, string>;
   onFocusPane: (paneId: string) => void;
   onSessionSpawned: (paneId: string, sessionId: string) => void;
+  cwd?: string;
+  isGenericTerminal?: boolean;
 }) {
   if (node.type === "leaf") {
     return (
@@ -73,6 +85,8 @@ function SplitNodeRenderer({
         sessionId={paneSessions[node.id] ?? null}
         onFocus={() => onFocusPane(node.id)}
         onSessionSpawned={(sessionId) => onSessionSpawned(node.id, sessionId)}
+        cwd={cwd}
+        isGenericTerminal={isGenericTerminal}
       />
     );
   }
@@ -96,6 +110,8 @@ function SplitNodeRenderer({
           paneSessions={paneSessions}
           onFocusPane={onFocusPane}
           onSessionSpawned={onSessionSpawned}
+          cwd={cwd}
+          isGenericTerminal={isGenericTerminal}
         />
       </ResizablePanel>
       <ResizableHandle withHandle />
@@ -107,6 +123,8 @@ function SplitNodeRenderer({
           paneSessions={paneSessions}
           onFocusPane={onFocusPane}
           onSessionSpawned={onSessionSpawned}
+          cwd={cwd}
+          isGenericTerminal={isGenericTerminal}
         />
       </ResizablePanel>
     </ResizablePanelGroup>
@@ -121,6 +139,8 @@ function LeafPane({
   sessionId,
   onFocus,
   onSessionSpawned,
+  cwd,
+  isGenericTerminal,
 }: {
   paneId: string;
   paneType: "claude" | "shell";
@@ -129,72 +149,99 @@ function LeafPane({
   sessionId: string | null;
   onFocus: () => void;
   onSessionSpawned: (sessionId: string) => void;
+  cwd?: string;
+  isGenericTerminal?: boolean;
 }) {
   const handleRestart = useCallback(() => {
     if (!sessionId) return;
     invoke("pty_kill", { sessionId }).catch(() => {});
-    const data = useDataStore.getState().getWorktreeDataState(worktreePath);
-    const { [paneId]: _, ...remaining } = data.paneSessions;
-    useDataStore.getState().updateWorktreeDataState(worktreePath, { paneSessions: remaining });
-  }, [sessionId, paneId, worktreePath]);
+    if (isGenericTerminal) {
+      const { [paneId]: _, ...remaining } = useDataStore.getState().generalTerminalPaneSessions;
+      useDataStore.getState().setGeneralTerminalPaneSessions(remaining);
+    } else {
+      const data = useDataStore.getState().getWorktreeDataState(worktreePath);
+      const { [paneId]: _, ...remaining } = data.paneSessions;
+      useDataStore.getState().updateWorktreeDataState(worktreePath, { paneSessions: remaining });
+    }
+  }, [sessionId, paneId, worktreePath, isGenericTerminal]);
 
   // Auto-spawn PTY session when leaf has no session
   const spawningRef = useRef(false);
+  const spawnCwd = cwd ?? worktreePath;
   useEffect(() => {
     if (sessionId || spawningRef.current) return;
     spawningRef.current = true;
 
-    // Best-effort refresh of Linear context for Claude
-    const linearApiKey = useUIStore.getState().linearApiKey;
-    if (linearApiKey) {
-      invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
-        .then((issue) => {
-          if (issue) {
-            invoke("refresh_linear_context", {
-              apiKey: linearApiKey,
-              issueId: issue.issue_id,
-              worktreePath,
-            }).catch(() => {});
-          }
-        })
-        .catch(() => {});
+    if (!isGenericTerminal) {
+      // Best-effort refresh of Linear context for Claude
+      const linearApiKey = useUIStore.getState().linearApiKey;
+      if (linearApiKey) {
+        invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
+          .then((issue) => {
+            if (issue) {
+              invoke("refresh_linear_context", {
+                apiKey: linearApiKey,
+                issueId: issue.issue_id,
+                worktreePath,
+              }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
     }
 
     const ptyId = paneSessionId(paneId);
 
-    getHookPort().then((hookPort) => {
+    if (isGenericTerminal) {
+      // Generic terminal: no worktree-specific env vars, no Claude auto-launch
       invoke<boolean>("pty_spawn", {
         sessionId: ptyId,
-        cwd: worktreePath,
+        cwd: spawnCwd,
         command: null,
-        envVars: {
-          IMPALA_HOOK_PORT: String(hookPort),
-          IMPALA_WORKTREE_PATH: worktreePath,
-        },
+        envVars: {},
       })
-        .then((isNew) => {
+        .then(() => {
           onSessionSpawned(ptyId);
-          if (paneType === "claude" && isNew) {
-            const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
-            const claudeCmd = claudeLaunched
-              ? "claude --dangerously-skip-permissions --remote-control --continue\n"
-              : "claude --dangerously-skip-permissions --remote-control\n";
-            const encoded = btoa(
-              Array.from(new TextEncoder().encode(claudeCmd), (b) =>
-                String.fromCharCode(b)
-              ).join("")
-            );
-            invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
-            useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
-          }
         })
         .catch((err) => {
           console.error("Failed to spawn PTY:", err);
           spawningRef.current = false;
         });
-    });
+    } else {
+      getHookPort().then((hookPort) => {
+        invoke<boolean>("pty_spawn", {
+          sessionId: ptyId,
+          cwd: spawnCwd,
+          command: null,
+          envVars: {
+            IMPALA_HOOK_PORT: String(hookPort),
+            IMPALA_WORKTREE_PATH: worktreePath,
+          },
+        })
+          .then((isNew) => {
+            onSessionSpawned(ptyId);
+            if (paneType === "claude" && isNew) {
+              const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
+              const claudeCmd = claudeLaunched
+                ? "claude --dangerously-skip-permissions --remote-control --continue\n"
+                : "claude --dangerously-skip-permissions --remote-control\n";
+              const encoded = btoa(
+                Array.from(new TextEncoder().encode(claudeCmd), (b) =>
+                  String.fromCharCode(b)
+                ).join("")
+              );
+              invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
+              useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
+            }
+          })
+          .catch((err) => {
+            console.error("Failed to spawn PTY:", err);
+            spawningRef.current = false;
+          });
+      });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: backend deduplicates spawns
-  }, [paneId, paneType, worktreePath, sessionId]);
+  }, [paneId, paneType, worktreePath, sessionId, isGenericTerminal, spawnCwd]);
 
   return (
     <div

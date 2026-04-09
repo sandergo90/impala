@@ -1,7 +1,9 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { homeDir } from "@tauri-apps/api/path";
 import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
 import { RightSidebar } from "../components/RightSidebar";
 import { DiffView } from "../components/DiffView";
+import { SplitTreeRenderer } from "../components/SplitTreeRenderer";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -26,6 +28,16 @@ export function MainView() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const selectedProject = useUIStore((s) => s.selectedProject);
   const wtPath = selectedWorktree?.path;
+
+  // General terminal state
+  const [homeDirPath, setHomeDirPath] = useState<string | null>(null);
+  useEffect(() => {
+    homeDir().then(setHomeDirPath).catch(() => setHomeDirPath("/tmp"));
+  }, []);
+  const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
+  const generalTerminalSplitTree = useUIStore((s) => s.generalTerminalSplitTree);
+  const generalTerminalFocusedPaneId = useUIStore((s) => s.generalTerminalFocusedPaneId);
+  const generalTerminalPaneSessions = useDataStore((s) => s.generalTerminalPaneSessions);
   const navState = useUIStore((s) =>
     wtPath ? s.worktreeNavStates[wtPath] ?? null : null
   );
@@ -81,6 +93,14 @@ export function MainView() {
     },
     [wtPath]
   );
+
+  const handleGeneralTerminalFocusPane = useCallback((paneId: string) => {
+    useUIStore.getState().setGeneralTerminalFocusedPaneId(paneId);
+  }, []);
+
+  const handleGeneralTerminalSessionSpawned = useCallback((paneId: string, sessionId: string) => {
+    useDataStore.getState().updateGeneralTerminalPaneSession(paneId, sessionId);
+  }, []);
 
   const tabPill = (
     label: string,
@@ -231,9 +251,22 @@ export function MainView() {
                 {/* Tab content */}
                 <div className="flex-1 min-h-0">
                   {!selectedWorktree ? (
-                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                      Select a worktree
-                    </div>
+                    generalTerminalActive && homeDirPath ? (
+                      <SplitTreeRenderer
+                        tree={generalTerminalSplitTree}
+                        worktreePath={homeDirPath}
+                        cwd={homeDirPath}
+                        isGenericTerminal
+                        focusedPaneId={generalTerminalFocusedPaneId}
+                        paneSessions={generalTerminalPaneSessions}
+                        onFocusPane={handleGeneralTerminalFocusPane}
+                        onSessionSpawned={handleGeneralTerminalSessionSpawned}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                        Select a worktree
+                      </div>
+                    )
                   ) : activeTab === "split" ? (
                     <ResizablePanelGroup orientation="horizontal">
                       <ResizablePanel defaultSize="50%" minSize={200}>
@@ -272,7 +305,7 @@ export function MainView() {
             </ResizablePanel>
 
             {/* Right panel -- Changes/Commits */}
-            {showSidebar && (
+            {showSidebar && !generalTerminalActive && (
               <>
                 <ResizableHandle />
                 <ResizablePanel
