@@ -84,10 +84,15 @@ pub fn pty_spawn(
         }
     }
 
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("Failed to spawn command: {}", e))?;
+    let child = match pair.slave.spawn_command(cmd) {
+        Ok(child) => child,
+        Err(e) => {
+            let safe_id = sanitize_event_id(&session_id);
+            let error_event = format!("pty-error-{}", safe_id);
+            let _ = app_handle.emit(&error_event, format!("Failed to spawn: {}", e));
+            return Err(format!("Failed to spawn command: {}", e));
+        }
+    };
 
     let mut reader = pair
         .master
@@ -127,7 +132,15 @@ pub fn pty_spawn(
     let event_name = format!("pty-output-{}", safe_id);
     let event_name_flush = event_name.clone();
 
-    // Flush thread: emits pending data every 8ms (~120fps)
+    // Backpressure: pause reads when pending buffer is too large
+    const MAX_FLUSH_BYTES: usize = 128 * 1024;
+    const BACKPRESSURE_HIGH: usize = 1024 * 1024;
+    const BACKPRESSURE_LOW: usize = 256 * 1024;
+
+    let backpressured = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let backpressured_for_read = Arc::clone(&backpressured);
+
+    // Flush thread: emits pending data every 16ms (~60fps), capped at 128KB per tick
     let flush_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let flush_running_clone = Arc::clone(&flush_running);
     std::thread::spawn(move || {
@@ -136,7 +149,22 @@ pub fn pty_spawn(
             let data = {
                 let mut p = pending_for_flush.lock().unwrap();
                 if p.is_empty() { continue; }
-                std::mem::take(&mut *p)
+                if p.len() <= MAX_FLUSH_BYTES {
+                    // Flush all, clear backpressure
+                    backpressured.store(false, std::sync::atomic::Ordering::Relaxed);
+                    std::mem::take(&mut *p)
+                } else {
+                    // Flush only MAX_FLUSH_BYTES, keep the rest
+                    let chunk = p[..MAX_FLUSH_BYTES].to_vec();
+                    *p = p[MAX_FLUSH_BYTES..].to_vec();
+                    // Set backpressure if remaining > high watermark
+                    if p.len() > BACKPRESSURE_HIGH {
+                        backpressured.store(true, std::sync::atomic::Ordering::Relaxed);
+                    } else if p.len() <= BACKPRESSURE_LOW {
+                        backpressured.store(false, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    chunk
+                }
             };
             let encoded = STANDARD.encode(&data);
             let _ = app_for_flush.emit(&event_name_flush, encoded);
@@ -144,9 +172,15 @@ pub fn pty_spawn(
     });
 
     // Read thread: reads PTY output and appends to pending buffer
+    // Pauses when backpressured to prevent unbounded memory growth
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
+            // Pause reads when backpressured
+            if backpressured_for_read.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(16));
+                continue;
+            }
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
@@ -270,4 +304,26 @@ pub fn pty_kill(
         });
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn pty_is_alive(
+    state: tauri::State<'_, PtyState>,
+    session_id: String,
+) -> Result<bool, String> {
+    let sessions = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+    match sessions.get(&session_id) {
+        None => Ok(false),
+        Some(session) => {
+            if let Ok(mut child) = session.child.lock() {
+                match child.try_wait() {
+                    Ok(Some(_status)) => Ok(false),
+                    Ok(None) => Ok(true),
+                    Err(_) => Ok(false),
+                }
+            } else {
+                Ok(false)
+            }
+        }
+    }
 }

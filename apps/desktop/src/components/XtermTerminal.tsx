@@ -236,17 +236,36 @@ export function XtermTerminal({ sessionId, isFocused = true, onFocus, onRestart,
       // .xterm-viewport is xterm's internal scrollable element — fragile across versions
       const viewport = container.querySelector(".xterm-viewport") as HTMLElement | null;
 
-      unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
-        if (cancelled || !terminal) return;
+      let writeQueue: Uint8Array[] = [];
+      let writeScheduled = false;
+
+      function flushWriteQueue() {
+        writeScheduled = false;
+        if (!terminal || cancelled) return;
+
         let wasAtBottom = true;
         let savedScrollTop = 0;
         if (viewport) {
           savedScrollTop = viewport.scrollTop;
           wasAtBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 5;
         }
-        terminal.write(decodeBase64(event.payload));
+
+        for (const chunk of writeQueue) {
+          terminal.write(chunk);
+        }
+        writeQueue = [];
+
         if (!wasAtBottom && viewport) {
           viewport.scrollTop = savedScrollTop;
+        }
+      }
+
+      unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
+        if (cancelled || !terminal) return;
+        writeQueue.push(decodeBase64(event.payload));
+        if (!writeScheduled) {
+          writeScheduled = true;
+          requestAnimationFrame(flushWriteQueue);
         }
       });
 
