@@ -1,7 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { readTextFile } from "@tauri-apps/plugin-fs";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useUIStore } from "../store";
 import { usePlanAnnotationActions } from "../hooks/usePlanAnnotationActions";
 import { PlanToolbar } from "./PlanToolbar";
@@ -78,7 +76,10 @@ export function PlanView() {
   }, [wtPath]);
 
   // Build a set of lines that have annotations for gutter indicators
-  const annotatedLines = new Set(planAnnotations.map((a) => a.line_number));
+  const annotatedLines = useMemo(
+    () => new Set(planAnnotations.map((a) => a.line_number)),
+    [planAnnotations]
+  );
 
   if (!activePlan) {
     return (
@@ -138,11 +139,9 @@ export function PlanView() {
                   </div>
                   {/* Line content */}
                   <div className="flex-1 min-w-0 px-4 py-0.5">
-                    <div className="prose prose-invert prose-sm max-w-none [&>*]:my-0">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {line}
-                      </ReactMarkdown>
-                    </div>
+                    <pre className="text-sm text-foreground font-mono whitespace-pre-wrap break-words m-0 p-0 bg-transparent">
+                      {line || "\u00A0"}
+                    </pre>
                   </div>
                 </div>
                 {/* Inline annotation form */}
