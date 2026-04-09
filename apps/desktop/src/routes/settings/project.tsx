@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { projectSettingsRoute } from "../../router";
 import { useDataStore } from "../../store";
+import { useDebouncedSetting } from "../../hooks/useDebouncedSetting";
 import { useInvoke } from "../../hooks/useInvoke";
 
 interface ProjectConfig {
@@ -34,9 +35,7 @@ export function ProjectSettingsRoute() {
   setupRef.current = setup;
   runRef.current = run;
 
-  const [claudeFlags, setClaudeFlags] = useState("");
-  const [claudeFlagsLoaded, setClaudeFlagsLoaded] = useState(false);
-  const claudeFlagsDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [claudeFlags, handleClaudeFlagsChange] = useDebouncedSetting("claudeFlags", projectPath);
 
   // Reset loaded flag and clean up timers when projectPath changes
   useEffect(() => {
@@ -44,19 +43,7 @@ export function ProjectSettingsRoute() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-      if (claudeFlagsDebounceRef.current) clearTimeout(claudeFlagsDebounceRef.current);
     };
-  }, [projectPath]);
-
-  // Load per-project claude flags
-  useEffect(() => {
-    setClaudeFlagsLoaded(false);
-    invoke<string | null>("get_setting", { key: "claudeFlags", scope: projectPath })
-      .then((val) => {
-        setClaudeFlags(val ?? "");
-        setClaudeFlagsLoaded(true);
-      })
-      .catch(() => setClaudeFlagsLoaded(true));
   }, [projectPath]);
 
   // Load config on mount / when projectPath changes
@@ -109,23 +96,6 @@ export function ProjectSettingsRoute() {
   const handleRunChange = (value: string) => {
     setRun(value);
     if (loadedRef.current) saveConfig(setupRef.current, value);
-  };
-
-  const handleClaudeFlagsChange = (value: string) => {
-    setClaudeFlags(value);
-    if (!claudeFlagsLoaded) return;
-    if (claudeFlagsDebounceRef.current) clearTimeout(claudeFlagsDebounceRef.current);
-    claudeFlagsDebounceRef.current = setTimeout(async () => {
-      try {
-        if (value.trim()) {
-          await invoke("set_setting", { key: "claudeFlags", scope: projectPath, value: value.trim() });
-        } else {
-          await invoke("delete_setting", { key: "claudeFlags", scope: projectPath });
-        }
-      } catch (e) {
-        toast.error(`Failed to save claude flags: ${e}`);
-      }
-    }, 500);
   };
 
   return (

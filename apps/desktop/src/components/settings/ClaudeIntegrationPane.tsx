@@ -1,41 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
+import { useDebouncedSetting } from "../../hooks/useDebouncedSetting";
 
 export function ClaudeIntegrationPane() {
   const [setting, setSetting] = useState(false);
-  const [flags, setFlags] = useState("");
-  const [flagsLoaded, setFlagsLoaded] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  useEffect(() => {
-    invoke<string | null>("get_setting", { key: "claudeFlags", scope: "global" })
-      .then((val) => {
-        setFlags(val ?? "");
-        setFlagsLoaded(true);
-      })
-      .catch(() => setFlagsLoaded(true));
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  const handleFlagsChange = (value: string) => {
-    setFlags(value);
-    if (!flagsLoaded) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      try {
-        if (value.trim()) {
-          await invoke("set_setting", { key: "claudeFlags", scope: "global", value: value.trim() });
-        } else {
-          await invoke("delete_setting", { key: "claudeFlags", scope: "global" });
-        }
-      } catch (e) {
-        toast.error(`Failed to save claude flags: ${e}`);
-      }
-    }, 500);
-  };
+  const [flags, handleFlagsChange] = useDebouncedSetting("claudeFlags", "global");
 
   async function handleReconfigure() {
     setSetting(true);
