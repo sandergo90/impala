@@ -32,6 +32,7 @@ function createDefaultNavState(): WorktreeNavState {
     viewMode: "commit",
     selectedCommit: null,
     selectedFile: null,
+    activePlanId: null,
   };
 }
 
@@ -47,6 +48,8 @@ const defaultDataState: WorktreeDataState = {
   fileDiffHashes: {},
   generatedFiles: [],
   annotations: [],
+  plans: [],
+  planAnnotations: [],
   agentStatus: "idle" as const,
   hasUnseenResult: false,
 };

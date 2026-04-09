@@ -50,6 +50,35 @@ export interface NewAnnotation {
   body: string;
 }
 
+export interface Plan {
+  id: string;
+  plan_path: string;
+  worktree_path: string;
+  title: string | null;
+  status: "pending" | "approved" | "changes_requested";
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanAnnotation {
+  id: string;
+  plan_path: string;
+  worktree_path: string;
+  line_number: number;
+  body: string;
+  resolved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewPlanAnnotation {
+  plan_path: string;
+  worktree_path: string;
+  line_number: number;
+  body: string;
+}
+
 export type SplitNode =
   | { type: "leaf"; id: string; paneType: "claude" | "shell" }
   | {
@@ -61,13 +90,14 @@ export type SplitNode =
     };
 
 export interface WorktreeNavState {
-  activeTab: "terminal" | "diff" | "split";
+  activeTab: "terminal" | "diff" | "split" | "plan";
   splitTree: SplitNode;
   focusedPaneId: string;
   claudeLaunched: boolean;
   viewMode: "commit" | "all-changes" | "uncommitted";
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
+  activePlanId: string | null;
 }
 
 export interface WorktreeDataState {
@@ -80,6 +110,8 @@ export interface WorktreeDataState {
   fileDiffHashes: Record<string, string>;
   generatedFiles: string[];
   annotations: Annotation[];
+  plans: Plan[];
+  planAnnotations: PlanAnnotation[];
   agentStatus: "idle" | "working" | "permission";
   hasUnseenResult: boolean;
 }
