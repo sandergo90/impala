@@ -294,13 +294,15 @@ export function Sidebar() {
     });
     const unlisten = window.onFocusChanged(({ payload: focused }) => {
       windowFocusedRef.current = focused;
-      // When window regains focus, clear unseen for the currently selected worktree
       if (focused) {
         const selected = useUIStore.getState().selectedWorktree;
         if (selected) {
-          useDataStore.getState().updateWorktreeDataState(selected.path, {
-            hasUnseenResult: false,
-          });
+          const state = useDataStore.getState().worktreeDataStates[selected.path];
+          if (state?.hasUnseenResult) {
+            useDataStore.getState().updateWorktreeDataState(selected.path, {
+              hasUnseenResult: false,
+            });
+          }
         }
       }
     });
@@ -333,12 +335,13 @@ export function Sidebar() {
             const selected = useUIStore.getState().selectedWorktree;
             const isFocused =
               windowFocusedRef.current && selected?.path === worktree_path;
-            if (!isFocused) {
+            if (!isFocused && !current?.hasUnseenResult) {
               updates.hasUnseenResult = true;
             }
           } else if (status === "working") {
-            // Clear unseen when a new session starts
-            updates.hasUnseenResult = false;
+            if (current?.hasUnseenResult) {
+              updates.hasUnseenResult = false;
+            }
           }
 
           if (Object.keys(updates).length > 0) {
