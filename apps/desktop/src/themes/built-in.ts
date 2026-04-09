@@ -105,7 +105,44 @@ export const monokai: Theme = {
   },
 };
 
-export const builtInThemes: Theme[] = [defaultDark, defaultLight, monokai];
+export const oceanicNext: Theme = {
+  id: "oceanic-next",
+  name: "Oceanic Next",
+  type: "dark",
+  author: "Based on Oceanic Next by Dmitri Voronianski",
+  description: "A dark theme inspired by the Oceanic Next color scheme",
+  ui: {
+    background: "#1b2b34",
+    foreground: "#cdd3de",
+    primary: "#6699cc",
+    border: "#343d46",
+    accent: "#253540",
+  },
+  terminal: {
+    background: "#1b2b34",
+    foreground: "#d8dee9",
+    cursor: "#c0c5ce",
+    selectionBackground: "#4d4d4d",
+    black: "#29414f",
+    red: "#ec5f67",
+    green: "#99c794",
+    yellow: "#fac863",
+    blue: "#6699cc",
+    magenta: "#c594c5",
+    cyan: "#5fb3b3",
+    white: "#adb5c0",
+    brightBlack: "#405860",
+    brightRed: "#ec5f67",
+    brightGreen: "#99c794",
+    brightYellow: "#fac863",
+    brightBlue: "#6699cc",
+    brightMagenta: "#c594c5",
+    brightCyan: "#5fb3b3",
+    brightWhite: "#adb5c0",
+  },
+};
+
+export const builtInThemes: Theme[] = [defaultDark, defaultLight, monokai, oceanicNext];
 
 export function getBuiltInTheme(id: string): Theme | undefined {
   return builtInThemes.find((t) => t.id === id);
