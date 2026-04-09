@@ -14,6 +14,10 @@ import { openFileInEditor } from "../lib/open-file-in-editor";
 import type { DiffLineAnnotation, FileDiffOptions } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
 
+// Stable empty references to avoid new object identity on every render
+const emptyArray: never[] = [];
+const emptyRecord: Record<string, string> = {};
+
 type AnnotationMeta =
   | { type: 'comment'; annotation: Annotation }
   | { type: 'form' };
@@ -452,11 +456,11 @@ export function DiffView() {
   const diffText = dataState?.diffText ?? null;
   const selectedCommit = navState?.selectedCommit ?? null;
   const viewMode = navState?.viewMode ?? 'commit';
-  const changedFiles = dataState?.changedFiles ?? [];
-  const fileDiffs = dataState?.fileDiffs ?? {};
-  const fileDiffHashes = dataState?.fileDiffHashes ?? {};
-  const generatedFiles = dataState?.generatedFiles ?? [];
-  const annotations = dataState?.annotations ?? [];
+  const changedFiles = dataState?.changedFiles ?? emptyArray;
+  const fileDiffs = dataState?.fileDiffs ?? emptyRecord;
+  const fileDiffHashes = dataState?.fileDiffHashes ?? emptyRecord;
+  const generatedFiles = dataState?.generatedFiles ?? emptyArray;
+  const annotations = dataState?.annotations ?? emptyArray;
 
   const worktreePath = selectedWorktree?.path;
   const updateData = useCallback(
