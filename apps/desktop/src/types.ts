@@ -112,6 +112,7 @@ export interface WorktreeDataState {
   annotations: Annotation[];
   plans: Plan[];
   planAnnotations: PlanAnnotation[];
+  hasPendingPlan: boolean;
   agentStatus: "idle" | "working" | "permission";
   hasUnseenResult: boolean;
 }

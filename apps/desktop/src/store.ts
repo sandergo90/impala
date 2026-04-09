@@ -50,6 +50,7 @@ const defaultDataState: WorktreeDataState = {
   annotations: [],
   plans: [],
   planAnnotations: [],
+  hasPendingPlan: false,
   agentStatus: "idle" as const,
   hasUnseenResult: false,
 };

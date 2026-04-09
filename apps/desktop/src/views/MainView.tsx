@@ -21,6 +21,7 @@ import { useAppHotkey } from "../hooks/useAppHotkey";
 import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 import { TabPill } from "../components/TabPill";
 import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
+import { usePlanNotifications } from "../hooks/usePlanNotifications";
 
 let cachedHomeDir: string | null = null;
 
@@ -60,6 +61,8 @@ export function MainView() {
   );
   const isRunning = ft?.type === "run" && ft?.status === "running";
   const isStopping = ft?.type === "run" && ft?.status === "stopping";
+
+  usePlanNotifications();
 
   const sidebarTooltip = useHotkeyTooltip("TOGGLE_SIDEBAR", sidebarCollapsed ? "Show sidebar" : "Hide sidebar");
   const runScriptTooltip = useHotkeyTooltip("RUN_SCRIPT", isRunning ? "Stop script" : "Run script");
