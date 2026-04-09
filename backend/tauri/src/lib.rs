@@ -8,6 +8,7 @@ mod linear;
 mod linear_context;
 mod notifications;
 mod pty;
+mod settings;
 mod viewed_files;
 mod watcher;
 mod worktree_issues;
@@ -22,15 +23,6 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 struct DbState(Mutex<rusqlite::Connection>);
 struct DiffCache(Mutex<lru::LruCache<String, String>>);
 struct HookPort(u16);
-
-fn get_projects_file(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let app_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    fs::create_dir_all(&app_dir).map_err(|e| format!("Failed to create app data dir: {}", e))?;
-    Ok(app_dir.join("projects.json"))
-}
 
 #[tauri::command]
 async fn check_git() -> Result<String, String> {
@@ -50,24 +42,15 @@ async fn check_git() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn load_projects(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
-    let path = get_projects_file(&app_handle)?;
-    if !path.exists() {
-        return Ok(vec![]);
-    }
-    let contents = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read projects.json: {}", e))?;
-    serde_json::from_str(&contents)
-        .map_err(|e| format!("Failed to parse projects.json: {}", e))
+fn load_projects(state: tauri::State<'_, DbState>) -> Result<Vec<String>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    settings::load_projects(&conn)
 }
 
 #[tauri::command]
-fn save_projects(app_handle: tauri::AppHandle, projects: Vec<String>) -> Result<(), String> {
-    let path = get_projects_file(&app_handle)?;
-    let contents = serde_json::to_string_pretty(&projects)
-        .map_err(|e| format!("Failed to serialize projects: {}", e))?;
-    fs::write(&path, contents)
-        .map_err(|e| format!("Failed to write projects.json: {}", e))
+fn save_projects(state: tauri::State<'_, DbState>, projects: Vec<String>) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    settings::save_projects(&conn, &projects)
 }
 
 #[tauri::command]
@@ -589,6 +572,37 @@ fn unlink_worktree_issue(
 }
 
 #[tauri::command]
+fn get_setting(
+    state: tauri::State<'_, DbState>,
+    key: String,
+    scope: String,
+) -> Result<Option<String>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    settings::get_setting(&conn, &key, &scope)
+}
+
+#[tauri::command]
+fn set_setting(
+    state: tauri::State<'_, DbState>,
+    key: String,
+    scope: String,
+    value: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    settings::set_setting(&conn, &key, &scope, &value)
+}
+
+#[tauri::command]
+fn delete_setting(
+    state: tauri::State<'_, DbState>,
+    key: String,
+    scope: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    settings::delete_setting(&conn, &key, &scope)
+}
+
+#[tauri::command]
 async fn write_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || linear_context::write_context(&api_key, &issue_id, &worktree_path, true))
         .await
@@ -791,7 +805,12 @@ pub fn run() {
                 .map_err(|e| format!("Failed to get app data dir: {}", e))?;
             fs::create_dir_all(&app_dir)
                 .map_err(|e| format!("Failed to create app data dir: {}", e))?;
-            let db_path = app_dir.join("annotations.db");
+            let old_db_path = app_dir.join("annotations.db");
+            let db_path = app_dir.join("impala.db");
+            if old_db_path.exists() && !db_path.exists() {
+                fs::rename(&old_db_path, &db_path)
+                    .map_err(|e| format!("Failed to rename database: {}", e))?;
+            }
             let conn = rusqlite::Connection::open(&db_path)
                 .map_err(|e| format!("Failed to open database: {}", e))?;
             annotations::init_db(&conn)
@@ -800,6 +819,22 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize viewed_files table: {}", e))?;
             worktree_issues::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize worktree_issues table: {}", e))?;
+            settings::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize settings tables: {}", e))?;
+
+            // Migrate projects.json → projects table
+            {
+                let projects_file = app_dir.join("projects.json");
+                if projects_file.exists() {
+                    if let Ok(contents) = fs::read_to_string(&projects_file) {
+                        if let Ok(paths) = serde_json::from_str::<Vec<String>>(&contents) {
+                            let _ = settings::save_projects(&conn, &paths);
+                        }
+                    }
+                    let _ = fs::remove_file(&projects_file);
+                }
+            }
+
             app.manage(DbState(Mutex::new(conn)));
             app.manage(pty::PtyState::new());
             app.manage(watcher::WatcherState::new());
@@ -821,7 +856,7 @@ pub fn run() {
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.
             {
-                let db_path = app_dir.join("annotations.db");
+                let db_path = app_dir.join("impala.db");
                 let app_handle = app.handle().clone();
                 std::thread::spawn(move || {
                     let Ok(poll_conn) = rusqlite::Connection::open_with_flags(
@@ -891,6 +926,9 @@ pub fn run() {
             get_worktree_issue,
             get_all_worktree_issues,
             unlink_worktree_issue,
+            get_setting,
+            set_setting,
+            delete_setting,
             write_linear_context,
             refresh_linear_context,
             clean_linear_context,
