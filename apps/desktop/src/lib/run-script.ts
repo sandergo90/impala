@@ -2,6 +2,49 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useUIStore } from "../store";
 
+export async function stopRunScript() {
+  const { selectedWorktree, getFloatingTerminal, setFloatingTerminal } = useUIStore.getState();
+  if (!selectedWorktree) return;
+
+  const ft = getFloatingTerminal(selectedWorktree.path);
+  if (ft.type !== "run" || !ft.sessionId) return;
+  if (ft.status !== "running") return;
+
+  setFloatingTerminal(selectedWorktree.path, { status: "stopping", label: "Stopping..." });
+
+  const encoded = btoa(
+    Array.from(new TextEncoder().encode("\x03"), (b) =>
+      String.fromCharCode(b)
+    ).join("")
+  );
+  await invoke("pty_write", { sessionId: ft.sessionId, data: encoded }).catch(() => {});
+
+  const sessionId = ft.sessionId;
+  const worktreePath = selectedWorktree.path;
+  setTimeout(async () => {
+    const current = useUIStore.getState().getFloatingTerminal(worktreePath);
+    if (current.sessionId === sessionId && current.status === "stopping") {
+      await invoke("pty_kill", { sessionId }).catch(() => {});
+      setFloatingTerminal(worktreePath, {
+        status: "stopped",
+        label: "Force stopped",
+      });
+    }
+  }, 3000);
+}
+
+export function toggleRunScript() {
+  const { selectedWorktree, getFloatingTerminal } = useUIStore.getState();
+  if (!selectedWorktree) return;
+
+  const ft = getFloatingTerminal(selectedWorktree.path);
+  if (ft.type === "run" && ft.status === "running") {
+    stopRunScript();
+  } else {
+    triggerRunScript();
+  }
+}
+
 export async function triggerRunScript() {
   const { selectedProject, selectedWorktree, getFloatingTerminal, setFloatingTerminal } = useUIStore.getState();
 

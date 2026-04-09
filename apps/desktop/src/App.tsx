@@ -6,6 +6,7 @@ import { useAppHotkey } from "./hooks/useAppHotkey";
 import { CommandPalette } from "./components/CommandPalette";
 import { FloatingTerminal } from "./components/FloatingTerminal";
 import { Toaster } from "./components/ui/sonner";
+import { UpdateChecker } from "./components/UpdateChecker";
 import { useUIStore, useDataStore } from "./store";
 import {
   splitNode,
@@ -13,7 +14,7 @@ import {
   getAdjacentLeafId,
   getLeaves,
 } from "./lib/split-tree";
-import { triggerRunScript } from "./lib/run-script";
+import { toggleRunScript } from "./lib/run-script";
 import { useHotkeysStore } from "./stores/hotkeys";
 import { selectWorktree } from "./hooks/useWorktreeActions";
 
@@ -48,7 +49,7 @@ export function RootLayout() {
   });
 
   useAppHotkey("RUN_SCRIPT", () => {
-    triggerRunScript();
+    toggleRunScript();
   });
 
   useAppHotkey("SHOW_KEYBOARD_SHORTCUTS", () => {
@@ -171,6 +172,7 @@ export function RootLayout() {
         onClose={() => setCommandPaletteOpen(false)}
       />
       <Toaster />
+      <UpdateChecker />
     </div>
   );
 }

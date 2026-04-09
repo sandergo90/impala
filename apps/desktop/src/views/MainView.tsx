@@ -11,7 +11,7 @@ import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { OpenInEditorButton } from "../components/OpenInEditorButton";
 import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
-import { triggerRunScript } from "../lib/run-script";
+import { triggerRunScript, stopRunScript } from "../lib/run-script";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 
@@ -35,8 +35,14 @@ export function MainView() {
 
   const activeTab = navState?.activeTab ?? "diff";
 
+  const ft = useUIStore((s) =>
+    wtPath ? s.floatingTerminals[wtPath] : undefined
+  );
+  const isRunning = ft?.type === "run" && ft?.status === "running";
+  const isStopping = ft?.type === "run" && ft?.status === "stopping";
+
   const sidebarTooltip = useHotkeyTooltip("TOGGLE_SIDEBAR", sidebarCollapsed ? "Show sidebar" : "Hide sidebar");
-  const runScriptTooltip = useHotkeyTooltip("RUN_SCRIPT", "Run script");
+  const runScriptTooltip = useHotkeyTooltip("RUN_SCRIPT", isRunning ? "Stop script" : "Run script");
 
   const setTab = (tab: "diff" | "terminal" | "split") => {
     if (!selectedWorktree) return;
@@ -139,13 +145,23 @@ export function MainView() {
             <>
               <OpenInEditorButton worktreePath={selectedWorktree.path} />
               <button
-                onClick={() => triggerRunScript()}
-                className="relative text-muted-foreground hover:text-foreground p-1.5 rounded hover:bg-accent"
+                onClick={() => {
+                  if (isRunning) stopRunScript();
+                  else triggerRunScript();
+                }}
+                disabled={isStopping}
+                className="relative text-muted-foreground hover:text-foreground p-1.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
                 title={runScriptTooltip}
               >
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M4 2l10 6-10 6V2z" />
-                </svg>
+                {isRunning || isStopping ? (
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="2" y="2" width="12" height="12" rx="1" />
+                  </svg>
+                ) : (
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M4 2l10 6-10 6V2z" />
+                  </svg>
+                )}
               </button>
               <span className="mx-0.5 w-px h-3.5 bg-border/50" />
               {tabPill("Diff", activeTab === "diff", () => setTab("diff"))}

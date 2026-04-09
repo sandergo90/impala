@@ -11,7 +11,7 @@ export interface FloatingTerminalState {
   sessionId: string | null;
   label: string;
   type: 'setup' | 'run' | null;
-  status: 'running' | 'succeeded' | 'failed';
+  status: 'running' | 'stopping' | 'stopped' | 'succeeded' | 'failed';
 }
 
 const defaultFloatingTerminal: FloatingTerminalState = {

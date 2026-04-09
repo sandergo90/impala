@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore } from "../store";
 import { XtermTerminal } from "./XtermTerminal";
+import { triggerRunScript } from "../lib/run-script";
 
 function sanitizeEventId(id: string): string {
   return id.replace(/[^a-zA-Z0-9\-_]/g, "-");
@@ -13,13 +14,15 @@ const MIN_HEIGHT = 200;
 const MAX_WIDTH = 900;
 const MAX_HEIGHT = 700;
 
-function StatusDot({ status }: { status: "running" | "succeeded" | "failed" }) {
+function StatusDot({ status }: { status: "running" | "stopping" | "stopped" | "succeeded" | "failed" }) {
   const color =
     status === "running"
       ? "bg-green-500"
-      : status === "failed"
-        ? "bg-red-500"
-        : "bg-muted-foreground";
+      : status === "stopping"
+        ? "bg-yellow-500"
+        : status === "failed"
+          ? "bg-red-500"
+          : "bg-muted-foreground";
   return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${color}`} />;
 }
 
@@ -56,9 +59,14 @@ export function FloatingTerminal() {
       if (cancelled) return;
       const exitCode = event.payload;
       const current = useUIStore.getState().getFloatingTerminal(wtPath);
-      const failed = exitCode !== 0;
 
-      if (failed) {
+      if (current.status === "stopping") {
+        setFloatingTerminal(wtPath, {
+          label: "Stopped",
+          status: "stopped",
+          mode: "pill",
+        });
+      } else if (exitCode !== 0) {
         const failLabel =
           current.type === "setup" ? "Setup failed" : "Run failed";
         setFloatingTerminal(wtPath, { label: failLabel, status: "failed" });
@@ -147,6 +155,7 @@ export function FloatingTerminal() {
   if (mode === "hidden" || !sessionId) return null;
 
   if (mode === "pill") {
+    const showRestart = ft?.type === "run" && (status === "stopped" || status === "failed");
     return (
       <div
         className="fixed bottom-4 right-4 z-50 bg-card border border-border/80 rounded-full px-3 py-1.5 cursor-pointer flex items-center gap-2 ring-1 ring-black/20"
@@ -162,6 +171,20 @@ export function FloatingTerminal() {
           <StatusDot status={status} />
           <span className="text-xs text-foreground">{label}</span>
         </button>
+        {showRestart && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerRunScript();
+            }}
+            className="text-muted-foreground hover:text-foreground text-xs ml-0.5"
+            title="Restart"
+          >
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M2 8a6 6 0 0 1 10.3-4.2L14 2v4h-4l1.7-1.7A4.5 4.5 0 1 0 12.5 8" />
+            </svg>
+          </button>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -208,6 +231,17 @@ export function FloatingTerminal() {
           <span className="text-xs text-foreground truncate">{label}</span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {ft?.type === "run" && (status === "stopped" || status === "failed") && (
+            <button
+              onClick={() => triggerRunScript()}
+              className="text-muted-foreground hover:text-foreground text-xs px-1"
+              title="Restart"
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M2 8a6 6 0 0 1 10.3-4.2L14 2v4h-4l1.7-1.7A4.5 4.5 0 1 0 12.5 8" />
+              </svg>
+            </button>
+          )}
           <button
             onClick={() => wtPath && setFloatingTerminal(wtPath, { mode: "pill" })}
             className="text-muted-foreground hover:text-foreground text-xs px-1"
