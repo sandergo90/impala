@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Worktree, Project, WorktreeNavState, WorktreeDataState } from "./types";
+import type { Worktree, Project, WorktreeNavState, WorktreeDataState, SplitNode } from "./types";
 import type { Theme } from "./themes/types";
 import { defaultDark } from "./themes/built-in";
 import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
@@ -86,6 +86,15 @@ interface UIState {
   setRightSidebarSize: (size: number | null) => void;
   fontSize: number;
   setFontSize: (size: number) => void;
+  // General terminal
+  generalTerminalActive: boolean;
+  setGeneralTerminalActive: (active: boolean) => void;
+  generalTerminalSplitTree: SplitNode;
+  setGeneralTerminalSplitTree: (tree: SplitNode) => void;
+  generalTerminalFocusedPaneId: string;
+  setGeneralTerminalFocusedPaneId: (id: string) => void;
+  previousWorktree: Worktree | null;
+  setPreviousWorktree: (worktree: Worktree | null) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -173,11 +182,27 @@ export const useUIStore = create<UIState>()(
         set({ fontSize: size });
         document.documentElement.style.fontSize = `${size}px`;
       },
+      generalTerminalActive: false,
+      setGeneralTerminalActive: (active) => set({ generalTerminalActive: active }),
+      generalTerminalSplitTree: createLeaf("shell"),
+      setGeneralTerminalSplitTree: (tree) => set({ generalTerminalSplitTree: tree }),
+      generalTerminalFocusedPaneId: "",
+      setGeneralTerminalFocusedPaneId: (id) => set({ generalTerminalFocusedPaneId: id }),
+      previousWorktree: null,
+      setPreviousWorktree: (worktree) => set({ previousWorktree: worktree }),
     }),
     {
-      name: "canopy-ui-state",
+      name: "impala-ui-state",
       partialize: (state) => {
-        const { showResolved, floatingTerminals, ...rest } = state;
+        const {
+          showResolved,
+          floatingTerminals,
+          generalTerminalActive,
+          previousWorktree,
+          generalTerminalSplitTree,
+          generalTerminalFocusedPaneId,
+          ...rest
+        } = state;
         return rest;
       },
       onRehydrateStorage: () => (state) => {
@@ -202,6 +227,9 @@ interface DataState {
   worktreeDataStates: Record<string, WorktreeDataState>;
   getWorktreeDataState: (path: string) => WorktreeDataState;
   updateWorktreeDataState: (path: string, updates: Partial<WorktreeDataState>) => void;
+  generalTerminalPaneSessions: Record<string, string>;
+  setGeneralTerminalPaneSessions: (sessions: Record<string, string>) => void;
+  updateGeneralTerminalPaneSession: (paneId: string, sessionId: string) => void;
 }
 
 export const useDataStore = create<DataState>()(
@@ -238,5 +266,11 @@ export const useDataStore = create<DataState>()(
           },
         };
       }),
+    generalTerminalPaneSessions: {},
+    setGeneralTerminalPaneSessions: (sessions) => set({ generalTerminalPaneSessions: sessions }),
+    updateGeneralTerminalPaneSession: (paneId, sessionId) =>
+      set((state) => ({
+        generalTerminalPaneSessions: { ...state.generalTerminalPaneSessions, [paneId]: sessionId },
+      })),
   })
 );

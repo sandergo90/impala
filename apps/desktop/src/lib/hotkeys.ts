@@ -82,6 +82,12 @@ export const HOTKEYS = {
     default: "meta+w",
     category: "Terminal",
   },
+  TOGGLE_TERMINAL: {
+    label: "Toggle Terminal",
+    description: "Switch between the general terminal and the last selected worktree",
+    default: "meta+shift+2",
+    category: "Terminal",
+  },
   CLEAR_TERMINAL: {
     label: "Clear Terminal",
     description: "Clear the focused terminal",
