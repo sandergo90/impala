@@ -8,6 +8,7 @@ mod linear;
 mod linear_context;
 mod notifications;
 mod plan_annotations;
+mod plan_scanner;
 mod plans;
 mod pty;
 mod settings;
@@ -939,6 +940,8 @@ pub fn run() {
             app.manage(DbState(Mutex::new(conn)));
             app.manage(pty::PtyState::new());
             app.manage(watcher::WatcherState::new());
+            app.manage(plan_scanner::PlanScanCache::new());
+            app.manage(plan_scanner::PlanWatcherState::new());
             app.manage(DiffCache(Mutex::new(lru::LruCache::new(
                 std::num::NonZeroUsize::new(50).unwrap(),
             ))));
@@ -1084,6 +1087,9 @@ pub fn run() {
             hotkeys::read_hotkey_overrides,
             hotkeys::write_hotkey_overrides,
             fonts::list_system_fonts,
+            plan_scanner::scan_plan_directories,
+            plan_scanner::watch_plan_directories,
+            plan_scanner::unwatch_plan_directories,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
