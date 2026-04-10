@@ -67,6 +67,8 @@ export function PlanBrowser({
   const [scanning, setScanning] = useState(false);
   const [selectedPlanPath, setSelectedPlanPath] = useState<string | null>(null);
   const [contentCache, setContentCache] = useState<Map<string, string>>(new Map());
+  const [annotationCounts, setAnnotationCounts] = useState<Map<string, number>>(new Map());
+  const [fileCounts, setFileCounts] = useState<Map<string, number>>(new Map());
 
   const knownPlanPaths = useMemo(() => {
     const map = new Map<string, Plan>();
@@ -127,6 +129,38 @@ export function PlanBrowser({
         .catch(() => {});
     });
   }, [discovered]);
+
+  // Fetch annotation counts for all known plans
+  useEffect(() => {
+    plans.forEach((p) => {
+      invoke<any[]>("list_plan_annotations", {
+        planPath: p.plan_path,
+        worktreePath: worktreePath || null,
+      })
+        .then((anns) => {
+          setAnnotationCounts((prev) => {
+            if (prev.get(p.plan_path) === anns.length) return prev;
+            return new Map(prev).set(p.plan_path, anns.length);
+          });
+        })
+        .catch(() => {});
+    });
+  }, [plans, worktreePath]);
+
+  // Fetch file counts for all known plans
+  useEffect(() => {
+    plans.forEach((p) => {
+      invoke<string[]>("list_plan_files", { path: p.plan_path })
+        .then((files) => {
+          const count = files.length;
+          setFileCounts((prev) => {
+            if (prev.get(p.plan_path) === count) return prev;
+            return new Map(prev).set(p.plan_path, count);
+          });
+        })
+        .catch(() => {});
+    });
+  }, [plans]);
 
   const handleOpenPlan = useCallback(
     (planPath: string) => {
@@ -216,6 +250,19 @@ export function PlanBrowser({
                             {p.title ?? p.plan_path.split("/").pop()}
                           </span>
                           <StatusChip status={p.status} />
+                          {(annotationCounts.get(p.plan_path) ?? 0) > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                              </svg>
+                              {annotationCounts.get(p.plan_path)}
+                            </span>
+                          )}
+                          {(fileCounts.get(p.plan_path) ?? 0) > 1 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                              {fileCounts.get(p.plan_path)} files
+                            </span>
+                          )}
                         </div>
                         {desc && (
                           <p className="text-muted-foreground text-xs mt-0.5 truncate">
@@ -280,6 +327,19 @@ export function PlanBrowser({
                           {d.title}
                         </span>
                         {status && <StatusChip status={status} />}
+                        {knownPlan && (annotationCounts.get(d.path) ?? 0) > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                            </svg>
+                            {annotationCounts.get(d.path)}
+                          </span>
+                        )}
+                        {knownPlan && (fileCounts.get(d.path) ?? 0) > 1 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            {fileCounts.get(d.path)} files
+                          </span>
+                        )}
                       </div>
                       {desc && (
                         <p className="text-muted-foreground text-xs mt-0.5 truncate">
