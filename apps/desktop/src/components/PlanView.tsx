@@ -4,6 +4,7 @@ import { useUIStore } from "../store";
 import { usePlanAnnotationActions } from "../hooks/usePlanAnnotationActions";
 import { PlanToolbar } from "./PlanToolbar";
 import { PlanAnnotationForm } from "./PlanAnnotationForm";
+import { PlanBrowser } from "./PlanBrowser";
 
 export function PlanView() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -22,6 +23,7 @@ export function PlanView() {
     handleRequestChanges,
     handleOpenFile,
     handleOpenDirectory,
+    handleOpenDiscoveredPlan,
     handleSelectVersion,
   } = usePlanAnnotationActions();
 
@@ -81,55 +83,16 @@ export function PlanView() {
 
   if (!activePlan) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
-        {plans.length > 0 ? (
-          <div className="w-full max-w-md">
-            <div className="text-sm font-medium text-foreground mb-3">Plans</div>
-            <div className="flex flex-col gap-1">
-              {plans.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    useUIStore.getState().updateWorktreeNavState(wtPath, {
-                      activePlanId: p.id,
-                    });
-                  }}
-                  className="flex items-center gap-2 px-3 py-2 rounded-md text-left hover:bg-accent text-sm"
-                >
-                  <span className="text-foreground truncate">
-                    {p.title ?? p.plan_path.split("/").pop()}
-                  </span>
-                  <span className={`ml-auto text-xs px-1.5 py-0.5 rounded ${
-                    p.status === "approved"
-                      ? "bg-green-800/30 text-green-400"
-                      : p.status === "changes_requested"
-                      ? "bg-amber-800/30 text-amber-400"
-                      : "bg-blue-800/30 text-blue-400"
-                  }`}>
-                    {p.status === "changes_requested" ? "changes requested" : p.status}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm">No plans yet</div>
-        )}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleOpenDirectory}
-            className="px-3 py-1.5 text-sm font-medium rounded-md border border-border text-foreground hover:bg-accent"
-          >
-            Open Plan Directory
-          </button>
-          <button
-            onClick={handleOpenFile}
-            className="px-3 py-1.5 text-sm font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
-          >
-            Open File
-          </button>
-        </div>
-      </div>
+      <PlanBrowser
+        plans={plans}
+        worktreePath={wtPath}
+        onSelectPlan={(planId) => {
+          useUIStore.getState().updateWorktreeNavState(wtPath, {
+            activePlanId: planId,
+          });
+        }}
+        onOpenDiscoveredPlan={handleOpenDiscoveredPlan}
+      />
     );
   }
 

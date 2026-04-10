@@ -147,6 +147,14 @@ export function usePlanAnnotationActions() {
     [worktreePath, updateData]
   );
 
+  const handleOpenDiscoveredPlan = useCallback(
+    async (filePath: string, title: string) => {
+      if (!worktreePath) return;
+      await openPlan(filePath, title);
+    },
+    [worktreePath, openPlan]
+  );
+
   const handleOpenFile = useCallback(async () => {
     if (!worktreePath) return;
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -185,6 +193,7 @@ export function usePlanAnnotationActions() {
     handleRequestChanges,
     handleOpenFile,
     handleOpenDirectory,
+    handleOpenDiscoveredPlan,
     handleSelectVersion,
   };
 }
