@@ -155,26 +155,26 @@
   opacity: 0.7;
 }
 
-/* Plan annotation highlights — uses theme highlight variables */
 .plan-annotation-highlight {
-  background-color: var(--highlight-match);
-  border-bottom: 2px solid var(--highlight-active);
+  background-color: var(--highlight-active);
+  border-bottom: 2px solid var(--sidebar-primary);
   cursor: pointer;
   border-radius: 2px;
   transition: background-color 0.15s;
 }
 
 .plan-annotation-highlight:hover {
-  background-color: var(--highlight-active);
+  background-color: color-mix(in srgb, var(--sidebar-primary) 40%, transparent);
 }
 
 .plan-annotation-highlight.focused {
-  background-color: var(--highlight-active);
+  background-color: color-mix(in srgb, var(--sidebar-primary) 50%, transparent);
+  border-bottom-width: 3px;
 }
 
 .plan-annotation-highlight.comment {
-  background-color: var(--highlight-match);
-  border-bottom-color: var(--highlight-active);
+  background-color: var(--highlight-active);
+  border-bottom-color: var(--sidebar-primary);
 }
 
 .annotation-highlight {
