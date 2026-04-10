@@ -1,6 +1,6 @@
 [package]
 name = "impala"
-version = "0.3.0"
+version = "0.3.1"
 description = "A Tauri App for reviewing git worktree changes"
 authors = ["you"]
 edition = "2021"
