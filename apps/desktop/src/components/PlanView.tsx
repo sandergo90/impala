@@ -99,7 +99,12 @@ export function PlanView() {
       <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground text-sm">
         <span>{loadError ? `Could not load ${activePlan.plan_path}` : "Loading plan..."}</span>
         <button
-          onClick={handleClose}
+          onClick={() => {
+            if (!wtPath) return;
+            useUIStore.getState().updateWorktreeNavState(wtPath, {
+              activePlanId: null,
+            });
+          }}
           className="px-3 py-1.5 text-sm font-medium rounded-md border border-border text-foreground hover:bg-accent"
         >
           Back
