@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownComponents } from "./markdownComponents";
 import { formatRelativeTime } from "../lib/utils";
+import { useUIStore } from "../store";
 import type { Plan } from "../types";
 
 interface PlanBrowserProps {
@@ -52,6 +53,7 @@ export function PlanBrowser({
   worktreePath,
   onSelectPlan,
 }: PlanBrowserProps) {
+  const editorFontFamily = useUIStore((s) => s.editorFontFamily);
   const [selectedPlanPath, setSelectedPlanPath] = useState<string | null>(null);
   const [contentCache, setContentCache] = useState<Map<string, string>>(new Map());
   const [annotationCounts, setAnnotationCounts] = useState<Map<string, number>>(new Map());
@@ -228,7 +230,10 @@ export function PlanBrowser({
                   Open
                 </button>
               </div>
-              <div className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text">
+              <div
+                className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text"
+                style={editorFontFamily ? { "--font-mono": `"${editorFontFamily}", ui-monospace, monospace` } as React.CSSProperties : undefined}
+              >
                 {previewContent ? (
                   <article className="max-w-3xl mx-auto px-6 py-4">
                     <ReactMarkdown

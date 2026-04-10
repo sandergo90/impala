@@ -28,6 +28,7 @@ export function PlanView() {
 
   const articleRef = useRef<HTMLElement>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useSelectedPlanAnnotation();
+  const editorFontFamily = useUIStore((s) => s.editorFontFamily);
 
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -182,7 +183,10 @@ export function PlanView() {
           })}
         </div>
       )}
-      <div className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text">
+      <div
+        className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text"
+        style={editorFontFamily ? { "--font-mono": `"${editorFontFamily}", ui-monospace, monospace` } as React.CSSProperties : undefined}
+      >
         <article ref={articleRef} className="max-w-4xl mx-auto px-8 py-6">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
