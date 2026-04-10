@@ -131,13 +131,22 @@ export function usePlanAnnotationActions() {
 
   const openPlan = useCallback(
     async (filePath: string, title: string) => {
+      // Reuse existing plan record if one exists for this path
+      const currentPlans =
+        useDataStore.getState().getWorktreeDataState(worktreePath).plans;
+      const existing = currentPlans.find((p) => p.plan_path === filePath);
+      if (existing) {
+        useUIStore.getState().updateWorktreeNavState(worktreePath, {
+          activeTab: "plan",
+          activePlanId: existing.id,
+        });
+        return;
+      }
       const plan = await planSqliteProvider.createPlan({
         plan_path: filePath,
         worktree_path: worktreePath,
         title,
       });
-      const currentPlans =
-        useDataStore.getState().getWorktreeDataState(worktreePath).plans;
       updateData({ plans: [...currentPlans, plan] });
       useUIStore.getState().updateWorktreeNavState(worktreePath, {
         activeTab: "plan",
