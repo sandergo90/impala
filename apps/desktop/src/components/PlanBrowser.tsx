@@ -37,7 +37,9 @@ function getFirstLine(content: string | null | undefined): string {
 
 function StatusChip({ status }: { status: Plan["status"] }) {
   const cls =
-    status === "approved"
+    status === "completed"
+      ? "bg-purple-800/30 text-purple-400"
+      : status === "approved"
       ? "bg-green-800/30 text-green-400"
       : status === "changes_requested"
       ? "bg-amber-800/30 text-amber-400"
@@ -51,6 +53,7 @@ function StatusChip({ status }: { status: Plan["status"] }) {
 }
 
 function statusIconColor(status: Plan["status"]): string {
+  if (status === "completed") return "text-purple-400";
   if (status === "approved") return "text-green-400";
   if (status === "changes_requested") return "text-amber-400";
   return "text-blue-400";

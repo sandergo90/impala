@@ -22,6 +22,7 @@ export function PlanView() {
     handleCreate,
     handleApprove,
     handleRequestChanges,
+    handleComplete,
     handleOpenDiscoveredPlan,
     handleSelectVersion,
   } = usePlanAnnotationActions();
@@ -158,6 +159,7 @@ export function PlanView() {
         versions={planVersions}
         onApprove={handleApprove}
         onRequestChanges={handleRequestChanges}
+        onComplete={handleComplete}
         onClose={handleBack}
         onSelectVersion={handleSelectVersion}
       />

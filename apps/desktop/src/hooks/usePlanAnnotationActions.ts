@@ -130,6 +130,11 @@ export function usePlanAnnotationActions() {
     [handleSetStatus]
   );
 
+  const handleComplete = useCallback(
+    () => handleSetStatus("completed"),
+    [handleSetStatus]
+  );
+
   const openPlan = useCallback(
     async (filePath: string, title: string) => {
       // Reuse existing plan record if one exists for this path
@@ -175,6 +180,7 @@ export function usePlanAnnotationActions() {
     handleDelete,
     handleApprove,
     handleRequestChanges,
+    handleComplete,
     handleOpenDiscoveredPlan,
     handleSelectVersion,
   };

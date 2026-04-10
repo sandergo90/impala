@@ -55,7 +55,7 @@ export interface Plan {
   plan_path: string;
   worktree_path: string;
   title: string | null;
-  status: "pending" | "approved" | "changes_requested";
+  status: "pending" | "approved" | "changes_requested" | "completed";
   version: number;
   content: string | null;
   created_at: string;
