@@ -355,6 +355,23 @@ fn delete_plan_annotation(
 }
 
 #[tauri::command]
+async fn read_plan_file(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let p = std::path::Path::new(&path);
+        // If path is a directory, try overview.md inside it
+        let file_path = if p.is_dir() {
+            p.join("overview.md")
+        } else {
+            p.to_path_buf()
+        };
+        std::fs::read_to_string(&file_path)
+            .map_err(|e| format!("Failed to read {}: {}", file_path.display(), e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
 fn set_file_viewed(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
@@ -1075,6 +1092,7 @@ pub fn run() {
             pty::pty_is_alive,
             check_generated_files,
             open_in_editor,
+            read_plan_file,
             resolve_file_path,
             get_hook_port,
             watcher::watch_worktree,

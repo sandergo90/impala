@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
 import { useUIStore } from "../store";
 import { usePlanAnnotationActions } from "../hooks/usePlanAnnotationActions";
 import { PlanToolbar } from "./PlanToolbar";
@@ -37,19 +37,9 @@ export function PlanView() {
       setMarkdown(activePlan.content);
     } else {
       setMarkdown(null);
-      const path = activePlan.plan_path;
-      readTextFile(path)
+      invoke<string>("read_plan_file", { path: activePlan.plan_path })
         .then((content) => setMarkdown(content))
-        .catch(() => {
-          // Path might be a directory — try overview.md inside it
-          if (!path.endsWith(".md")) {
-            readTextFile(`${path}/overview.md`)
-              .then((content) => setMarkdown(content))
-              .catch(() => setLoadError(true));
-          } else {
-            setLoadError(true);
-          }
-        });
+        .catch(() => setLoadError(true));
     }
   }, [activePlan?.id, activePlan?.plan_path, activePlan?.content]);
 
