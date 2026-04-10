@@ -75,21 +75,6 @@ export function MainView() {
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: tab });
   };
 
-  // -- Tab switching via Cmd+1/2/3/4 --
-  useEffect(() => {
-    const tabs = ["terminal", "diff", "split", "plan"] as const;
-    function onKeyDown(e: KeyboardEvent) {
-      if (!e.metaKey && !e.ctrlKey) return;
-      const idx = parseInt(e.key) - 1;
-      if (idx >= 0 && idx < tabs.length) {
-        e.preventDefault();
-        setTab(tabs[idx]);
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [selectedWorktree]);
-
   // -- Layout hotkeys --
 
   useAppHotkey("TOGGLE_SIDEBAR", () => {
