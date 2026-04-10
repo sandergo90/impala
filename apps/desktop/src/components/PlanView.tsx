@@ -9,10 +9,6 @@ import { PlanBrowser } from "./PlanBrowser";
 export function PlanView() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path ?? "";
-  const navState = useUIStore((s) =>
-    wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null
-  );
-
   const {
     activePlan,
     plans,
@@ -26,30 +22,24 @@ export function PlanView() {
   } = usePlanAnnotationActions();
 
   const [markdown, setMarkdown] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const lines = useMemo(() => markdown?.split("\n") ?? [], [markdown]);
   const [pendingLine, setPendingLine] = useState<number | null>(null);
 
   useEffect(() => {
-    if (navState?.activePlanId || plans.length === 0 || !wtPath) return;
-    const pending = plans.find((p) => p.status === "pending") ?? plans[0];
-    if (pending) {
-      useUIStore.getState().updateWorktreeNavState(wtPath, {
-        activePlanId: pending.id,
-      });
-    }
-  }, [plans, navState?.activePlanId, wtPath]);
-
-  useEffect(() => {
     if (!activePlan) {
       setMarkdown(null);
+      setLoadError(false);
       return;
     }
+    setLoadError(false);
     if (activePlan.content) {
       setMarkdown(activePlan.content);
     } else {
+      setMarkdown(null);
       readTextFile(activePlan.plan_path)
         .then((content) => setMarkdown(content))
-        .catch(() => setMarkdown(null));
+        .catch(() => setLoadError(true));
     }
   }, [activePlan?.id, activePlan?.plan_path, activePlan?.content]);
 
@@ -94,10 +84,16 @@ export function PlanView() {
     );
   }
 
-  if (markdown === null) {
+  if (loadError || markdown === null) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        Loading plan...
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground text-sm">
+        <span>{loadError ? `Could not load ${activePlan.plan_path}` : "Loading plan..."}</span>
+        <button
+          onClick={handleClose}
+          className="px-3 py-1.5 text-sm font-medium rounded-md border border-border text-foreground hover:bg-accent"
+        >
+          Back
+        </button>
       </div>
     );
   }
