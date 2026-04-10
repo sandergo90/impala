@@ -101,6 +101,7 @@ export interface WorktreeNavState {
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
   activePlanId: string | null;
+  selectedPlanAnnotationId: string | null;
 }
 
 export interface WorktreeDataState {

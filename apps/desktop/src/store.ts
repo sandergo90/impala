@@ -33,6 +33,7 @@ function createDefaultNavState(): WorktreeNavState {
     selectedCommit: null,
     selectedFile: null,
     activePlanId: null,
+    selectedPlanAnnotationId: null,
   };
 }
 

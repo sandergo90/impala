@@ -90,7 +90,19 @@ export function PlanView() {
   } = usePlanAnnotationActions();
 
   const articleRef = useRef<HTMLElement>(null);
-  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+
+  const selectedAnnotationId = useUIStore((s) => {
+    const nav = wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null;
+    return nav?.selectedPlanAnnotationId ?? null;
+  });
+
+  const setSelectedAnnotationId = useCallback((id: string | null) => {
+    if (!wtPath) return;
+    useUIStore.getState().updateWorktreeNavState(wtPath, {
+      selectedPlanAnnotationId: id,
+    });
+  }, [wtPath]);
+
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [directoryFiles, setDirectoryFiles] = useState<string[]>([]);
