@@ -384,6 +384,11 @@ async fn list_plan_files(path: String) -> Result<Vec<String>, String> {
             return Ok(vec![]);
         };
 
+        // Only show file tabs for plan directories (those containing overview.md)
+        if !dir.join("overview.md").exists() {
+            return Ok(vec![]);
+        }
+
         let mut files: Vec<String> = std::fs::read_dir(&dir)
             .map_err(|e| format!("Failed to read directory: {}", e))?
             .flatten()
