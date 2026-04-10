@@ -37,9 +37,19 @@ export function PlanView() {
       setMarkdown(activePlan.content);
     } else {
       setMarkdown(null);
-      readTextFile(activePlan.plan_path)
+      const path = activePlan.plan_path;
+      readTextFile(path)
         .then((content) => setMarkdown(content))
-        .catch(() => setLoadError(true));
+        .catch(() => {
+          // Path might be a directory — try overview.md inside it
+          if (!path.endsWith(".md")) {
+            readTextFile(`${path}/overview.md`)
+              .then((content) => setMarkdown(content))
+              .catch(() => setLoadError(true));
+          } else {
+            setLoadError(true);
+          }
+        });
     }
   }, [activePlan?.id, activePlan?.plan_path, activePlan?.content]);
 
