@@ -75,6 +75,21 @@ export function MainView() {
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: tab });
   };
 
+  // -- Tab switching via Cmd+1/2/3/4 --
+  useEffect(() => {
+    const tabs = ["terminal", "diff", "split", "plan"] as const;
+    function onKeyDown(e: KeyboardEvent) {
+      if (!e.metaKey && !e.ctrlKey) return;
+      const idx = parseInt(e.key) - 1;
+      if (idx >= 0 && idx < tabs.length) {
+        e.preventDefault();
+        setTab(tabs[idx]);
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [selectedWorktree]);
+
   // -- Layout hotkeys --
 
   useAppHotkey("TOGGLE_SIDEBAR", () => {
@@ -211,10 +226,25 @@ export function MainView() {
                 )}
               </button>
               <span className="mx-0.5 w-px h-3.5 bg-border/50" />
-              <TabPill label="Terminal" isActive={activeTab === "terminal"} onClick={() => setTab("terminal")} />
-              <TabPill label="Diff" isActive={activeTab === "diff"} onClick={() => setTab("diff")} />
-              <TabPill label="Split" isActive={activeTab === "split"} onClick={() => setTab("split")} />
-              <TabPill label="Plan" isActive={activeTab === "plan"} onClick={() => setTab("plan")} />
+              {([
+                { tab: "terminal" as const, label: "Terminal", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
+                { tab: "diff" as const, label: "Diff", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M3 12h18"/></svg> },
+                { tab: "split" as const, label: "Split", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg> },
+                { tab: "plan" as const, label: "Plan", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
+              ]).map(({ tab, label, icon }) => (
+                <button
+                  key={tab}
+                  onClick={() => setTab(tab)}
+                  className={`flex items-center gap-1.5 px-3 py-1 text-md font-medium rounded-[5px] transition-colors ${
+                    activeTab === tab
+                      ? "text-foreground bg-accent"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {icon}
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
         )}
