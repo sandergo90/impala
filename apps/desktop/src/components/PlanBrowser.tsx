@@ -57,6 +57,11 @@ export function PlanBrowser({
   const [annotationCounts, setAnnotationCounts] = useState<Map<string, number>>(new Map());
   const [fileCounts, setFileCounts] = useState<Map<string, number>>(new Map());
 
+  // Reset selection when worktree changes
+  useEffect(() => {
+    setSelectedPlanPath(null);
+  }, [worktreePath]);
+
   // Load content for all plans lazily into a cache
   useEffect(() => {
     plans.forEach((p) => {
