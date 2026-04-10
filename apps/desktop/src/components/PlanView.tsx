@@ -1,10 +1,76 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useUIStore } from "../store";
 import { usePlanAnnotationActions } from "../hooks/usePlanAnnotationActions";
 import { PlanToolbar } from "./PlanToolbar";
-import { PlanAnnotationForm } from "./PlanAnnotationForm";
 import { PlanBrowser } from "./PlanBrowser";
+import type { Components } from "react-markdown";
+
+const markdownComponents: Partial<Components> = {
+  code: ({ className, children }) => {
+    const isBlock = className?.startsWith("language-");
+    if (isBlock) {
+      return (
+        <code className={className}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono">
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => (
+    <pre className="bg-muted/50 border border-border rounded-md p-4 overflow-x-auto my-4 text-sm font-mono">
+      {children}
+    </pre>
+  ),
+  table: ({ children }) => (
+    <div className="overflow-x-auto my-4">
+      <table className="w-max min-w-full divide-y divide-border">
+        {children}
+      </table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th className="px-4 py-2 text-left text-sm font-semibold bg-muted align-top">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="px-4 py-2 text-sm border-t border-border align-top">
+      {children}
+    </td>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-4">
+      {children}
+    </blockquote>
+  ),
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      className="text-primary underline underline-offset-2 hover:text-primary/80"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {children}
+    </a>
+  ),
+  hr: () => <hr className="my-8 border-border" />,
+  li: ({ children, className }) => {
+    const isTaskItem = className?.includes("task-list-item");
+    return (
+      <li className={isTaskItem ? "list-none flex items-start gap-2" : undefined}>
+        {children}
+      </li>
+    );
+  },
+};
 
 export function PlanView() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -12,9 +78,7 @@ export function PlanView() {
   const {
     activePlan,
     plans,
-    planAnnotations,
     planVersions,
-    handleCreate,
     handleApprove,
     handleRequestChanges,
     handleOpenDiscoveredPlan,
@@ -25,8 +89,6 @@ export function PlanView() {
   const [loadError, setLoadError] = useState(false);
   const [directoryFiles, setDirectoryFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
-  const lines = useMemo(() => markdown?.split("\n") ?? [], [markdown]);
-  const [pendingLine, setPendingLine] = useState<number | null>(null);
 
   // Detect if plan is a directory and list its files
   useEffect(() => {
@@ -70,30 +132,12 @@ export function PlanView() {
     }
   }, [activePlan?.id, activePlan?.plan_path, activePlan?.content, activeFile]);
 
-  const handleLineClick = useCallback((lineNumber: number) => {
-    setPendingLine(lineNumber);
-  }, []);
-
-  const handleAnnotationSubmit = useCallback(
-    (body: string) => {
-      if (pendingLine == null) return;
-      handleCreate(body, pendingLine);
-      setPendingLine(null);
-    },
-    [pendingLine, handleCreate]
-  );
-
   const handleBack = useCallback(() => {
     if (!wtPath) return;
     useUIStore.getState().updateWorktreeNavState(wtPath, {
       activePlanId: null,
     });
   }, [wtPath]);
-
-  const annotatedLines = useMemo(
-    () => new Set(planAnnotations.map((a) => a.line_number)),
-    [planAnnotations]
-  );
 
   if (!activePlan) {
     return (
@@ -160,54 +204,15 @@ export function PlanView() {
           })}
         </div>
       )}
-      <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="max-w-4xl mx-auto py-6">
-          {lines.map((line, index) => {
-            const lineNumber = index + 1;
-            const hasAnnotation = annotatedLines.has(lineNumber);
-
-            return (
-              <div key={lineNumber} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 24px" }}>
-                <div
-                  className="flex group"
-                  data-plan-line={lineNumber}
-                >
-                  <div
-                    className={`shrink-0 w-12 text-right pr-3 py-0.5 text-sm font-mono select-none cursor-pointer ${
-                      hasAnnotation
-                        ? "text-blue-400"
-                        : "text-muted-foreground/40 group-hover:text-muted-foreground"
-                    }`}
-                    onClick={() => handleLineClick(lineNumber)}
-                    title={`Line ${lineNumber} — click to annotate`}
-                  >
-                    {hasAnnotation ? (
-                      <span className="inline-flex items-center justify-end w-full">
-                        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                          <circle cx="8" cy="8" r="4" />
-                        </svg>
-                      </span>
-                    ) : (
-                      lineNumber
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0 px-4 py-0.5">
-                    <pre className="text-sm text-foreground font-mono whitespace-pre-wrap break-words m-0 p-0 bg-transparent">
-                      {line || "\u00A0"}
-                    </pre>
-                  </div>
-                </div>
-                {pendingLine === lineNumber && (
-                  <PlanAnnotationForm
-                    lineNumber={lineNumber}
-                    onSubmit={handleAnnotationSubmit}
-                    onCancel={() => setPendingLine(null)}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
+      <div className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text">
+        <article className="max-w-4xl mx-auto px-8 py-6">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={markdownComponents}
+          >
+            {markdown}
+          </ReactMarkdown>
+        </article>
       </div>
     </div>
   );
