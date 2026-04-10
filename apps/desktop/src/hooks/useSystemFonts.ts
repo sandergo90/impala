@@ -122,6 +122,8 @@ function discoverWellKnownFonts(): FontInfo[] {
 }
 
 let cachedFonts: FontInfo[] | null = null;
+let loadPromise: Promise<FontInfo[]> | null = null;
+const listeners = new Set<() => void>();
 
 /**
  * Set of font family names known to be installed (from system enumeration).
@@ -130,89 +132,111 @@ let cachedFonts: FontInfo[] | null = null;
  */
 export const knownSystemFonts = new Set<string>();
 
+// Yield to the main thread to avoid blocking UI during heavy measurement loops
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function loadFontsAsync(): Promise<FontInfo[]> {
+  await document.fonts.ready;
+
+  const result: FontInfo[] = [];
+  const seen = new Set<string>();
+
+  // Add registered @font-face fonts (e.g. SF Mono on macOS)
+  for (const font of REGISTERED_FONTS) {
+    if (isFontAvailable(font.family)) {
+      result.push(font);
+      seen.add(font.family);
+    }
+  }
+
+  // Add well-known fonts detected via canvas measurement
+  for (const font of discoverWellKnownFonts()) {
+    if (!seen.has(font.family)) {
+      seen.add(font.family);
+      result.push(font);
+    }
+  }
+
+  // Use Tauri backend to enumerate all system fonts
+  try {
+    const systemFamilies = await invoke<string[]>("list_system_fonts");
+    let count = 0;
+    for (const family of systemFamilies) {
+      if (seen.has(family)) continue;
+      seen.add(family);
+
+      let category = classifyFont(family);
+      if (category === "other" && isMonospaceByMeasurement(family)) {
+        category = "mono";
+      }
+      result.push({ family, category });
+
+      // Yield every 50 fonts to keep the UI responsive
+      if (++count % 50 === 0) await yieldToMain();
+    }
+  } catch {
+    if ("queryLocalFonts" in window) {
+      try {
+        const fontData = await (window as any).queryLocalFonts();
+        let count = 0;
+        for (const fd of fontData) {
+          if (seen.has(fd.family)) continue;
+          seen.add(fd.family);
+
+          let category = classifyFont(fd.family);
+          if (category === "other" && isMonospaceByMeasurement(fd.family)) {
+            category = "mono";
+          }
+          result.push({ family: fd.family, category });
+          if (++count % 50 === 0) await yieldToMain();
+        }
+      } catch {
+        // Neither method available
+      }
+    }
+  }
+
+  result.sort((a, b) => a.family.localeCompare(b.family));
+
+  for (const font of result) {
+    knownSystemFonts.add(font.family);
+  }
+  cachedFonts = result;
+  listeners.forEach((fn) => fn());
+  return result;
+}
+
+/** Start loading fonts eagerly — call once at app startup. */
+export function preloadSystemFonts() {
+  if (cachedFonts || loadPromise) return;
+  loadPromise = loadFontsAsync().catch(() => []);
+}
+
 export function useSystemFonts() {
   const [fonts, setFonts] = useState<FontInfo[]>(cachedFonts ?? []);
   const [isLoading, setIsLoading] = useState(cachedFonts === null);
 
   useEffect(() => {
-    if (cachedFonts) return;
-
-    let cancelled = false;
-
-    async function loadFonts() {
-      await document.fonts.ready;
-
-      const result: FontInfo[] = [];
-      const seen = new Set<string>();
-
-      // Add registered @font-face fonts (e.g. SF Mono on macOS)
-      for (const font of REGISTERED_FONTS) {
-        if (isFontAvailable(font.family)) {
-          result.push(font);
-          seen.add(font.family);
-        }
-      }
-
-      // Add well-known fonts detected via canvas measurement
-      for (const font of discoverWellKnownFonts()) {
-        if (!seen.has(font.family)) {
-          seen.add(font.family);
-          result.push(font);
-        }
-      }
-
-      // Use Tauri backend to enumerate all system fonts. On macOS this uses
-      // NSFontManager which returns the exact CSS-compatible family names that
-      // WebKit recognises — no canvas validation needed.
-      try {
-        const systemFamilies = await invoke<string[]>("list_system_fonts");
-        for (const family of systemFamilies) {
-          if (seen.has(family)) continue;
-          seen.add(family);
-
-          let category = classifyFont(family);
-          if (category === "other" && isMonospaceByMeasurement(family)) {
-            category = "mono";
-          }
-          result.push({ family, category });
-        }
-      } catch {
-        // Fallback: try Chromium queryLocalFonts if available
-        if ("queryLocalFonts" in window) {
-          try {
-            const fontData = await (window as any).queryLocalFonts();
-            for (const fd of fontData) {
-              if (seen.has(fd.family)) continue;
-              seen.add(fd.family);
-
-              let category = classifyFont(fd.family);
-              if (category === "other" && isMonospaceByMeasurement(fd.family)) {
-                category = "mono";
-              }
-              result.push({ family: fd.family, category });
-            }
-          } catch {
-            // Neither method available
-          }
-        }
-      }
-
-      result.sort((a, b) => a.family.localeCompare(b.family));
-
-      for (const font of result) {
-        knownSystemFonts.add(font.family);
-      }
-      cachedFonts = result;
-      if (!cancelled) {
-        setFonts(result);
-        setIsLoading(false);
-      }
+    if (cachedFonts) {
+      setFonts(cachedFonts);
+      setIsLoading(false);
+      return;
     }
 
-    loadFonts().catch(() => {});
-    return () => {
-      cancelled = true;
+    // Start loading if not already started
+    if (!loadPromise) preloadSystemFonts();
+
+    const onDone = () => {
+      if (cachedFonts) {
+        setFonts(cachedFonts);
+        setIsLoading(false);
+      }
     };
+
+    listeners.add(onDone);
+    return () => { listeners.delete(onDone); };
   }, []);
 
   return { fonts, isLoading };
