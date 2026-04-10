@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Annotation model
@@ -247,70 +245,14 @@ fn tool_submit_plan_for_review(conn: &Connection, params: &Value) -> Result<Valu
     )
     .map_err(|e| e.to_string())?;
 
-    // Poll for status change (blocking)
-    let timeout_secs = 300;
-    let mut elapsed = 0;
+    let signal_path = format!("/tmp/impala-plan-{}.decided", plan_id);
 
-    loop {
-        thread::sleep(Duration::from_secs(1));
-        elapsed += 1;
-
-        let status: String = conn
-            .query_row(
-                "SELECT status FROM plans WHERE id = ?1",
-                rusqlite::params![plan_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-
-        if status != "pending" {
-            // Fetch annotations
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, plan_path, worktree_path, line_number, body, resolved, created_at, updated_at
-                     FROM plan_annotations
-                     WHERE plan_path = ?1 AND worktree_path = ?2
-                     ORDER BY line_number ASC",
-                )
-                .map_err(|e| e.to_string())?;
-
-            let rows = stmt
-                .query_map(rusqlite::params![plan_path, worktree_path], |row| {
-                    Ok(json!({
-                        "id": row.get::<_, String>(0)?,
-                        "plan_path": row.get::<_, String>(1)?,
-                        "worktree_path": row.get::<_, String>(2)?,
-                        "line_number": row.get::<_, i64>(3)?,
-                        "body": row.get::<_, String>(4)?,
-                        "resolved": row.get::<_, i64>(5)? != 0,
-                        "created_at": row.get::<_, String>(6)?,
-                        "updated_at": row.get::<_, String>(7)?,
-                    }))
-                })
-                .map_err(|e| e.to_string())?;
-
-            let mut annotations = Vec::new();
-            for row in rows {
-                annotations.push(row.map_err(|e| e.to_string())?);
-            }
-
-            return Ok(json!({
-                "status": status,
-                "plan_id": plan_id,
-                "version": version,
-                "annotations": annotations
-            }));
-        }
-
-        if elapsed >= timeout_secs {
-            return Ok(json!({
-                "status": "timeout",
-                "plan_id": plan_id,
-                "version": version,
-                "message": "Plan review is still pending. Use get_plan_decision to check later."
-            }));
-        }
-    }
+    Ok(json!({
+        "status": "pending",
+        "plan_id": plan_id,
+        "version": version,
+        "signal_path": signal_path
+    }))
 }
 
 fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, String> {
@@ -492,7 +434,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "submit_plan_for_review",
-                "description": "Submit a plan for user review. Blocks until the user approves or requests changes, then returns the decision and all annotations. Times out after 5 minutes with a 'timeout' status.",
+                "description": "Submit a plan for user review. Returns immediately with a signal_path. The Monitor watches the signal file to know when the user decides.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

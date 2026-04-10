@@ -305,7 +305,14 @@ fn update_plan(
     changes: plans::UpdatePlan,
 ) -> Result<plans::Plan, String> {
     let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    plans::update_plan(&conn, &id, changes)
+    let updated = plans::update_plan(&conn, &id, changes)?;
+
+    if updated.status != "pending" {
+        let signal_path = format!("/tmp/impala-plan-{}.decided", id);
+        let _ = std::fs::write(&signal_path, &updated.status);
+    }
+
+    Ok(updated)
 }
 
 #[tauri::command]
