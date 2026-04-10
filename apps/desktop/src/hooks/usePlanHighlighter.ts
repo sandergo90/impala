@@ -243,10 +243,20 @@ export function usePlanHighlighter({
   }, [containerRef, containerReady]);
 
   useEffect(() => {
+    // Remove marks for annotations that no longer exist
+    const annotationIds = new Set(annotations.map((a) => a.id));
+    const marks = containerRef.current?.querySelectorAll("[data-annotation-id]");
+    marks?.forEach((el) => {
+      const id = (el as HTMLElement).dataset.annotationId;
+      if (id && !annotationIds.has(id)) {
+        removeHighlight(id);
+      }
+    });
+
     // Small delay to let react-markdown finish rendering before we walk the DOM
     const timer = setTimeout(() => applyAnnotations(annotations), 50);
     return () => clearTimeout(timer);
-  }, [annotations, applyAnnotations]);
+  }, [annotations, applyAnnotations, removeHighlight, containerRef]);
 
   useEffect(() => {
     if (!containerRef.current) return;
