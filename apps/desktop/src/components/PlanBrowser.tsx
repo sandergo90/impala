@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { TabPill } from "./TabPill";
@@ -31,10 +31,11 @@ export function PlanBrowser({
   const [discovered, setDiscovered] = useState<DiscoveredPlan[]>([]);
   const [scanning, setScanning] = useState(false);
 
-  const knownPlanPaths = new Map<string, Plan>();
-  for (const p of plans) {
-    knownPlanPaths.set(p.plan_path, p);
-  }
+  const knownPlanPaths = useMemo(() => {
+    const map = new Map<string, Plan>();
+    for (const p of plans) map.set(p.plan_path, p);
+    return map;
+  }, [plans]);
 
   useEffect(() => {
     if (!worktreePath) return;
