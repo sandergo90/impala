@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useUIStore } from "../store";
 import { usePlanAnnotationActions } from "../hooks/usePlanAnnotationActions";
+import { usePlanHighlighter } from "../hooks/usePlanHighlighter";
 import { PlanToolbar } from "./PlanToolbar";
 import { PlanBrowser } from "./PlanBrowser";
+import { PlanAnnotationForm } from "./PlanAnnotationForm";
 import type { Components } from "react-markdown";
 
 const markdownComponents: Partial<Components> = {
@@ -79,12 +81,16 @@ export function PlanView() {
     activePlan,
     plans,
     planVersions,
+    planAnnotations,
+    handleCreate,
     handleApprove,
     handleRequestChanges,
     handleOpenDiscoveredPlan,
     handleSelectVersion,
   } = usePlanAnnotationActions();
 
+  const articleRef = useRef<HTMLElement>(null);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [directoryFiles, setDirectoryFiles] = useState<string[]>([]);
@@ -150,6 +156,27 @@ export function PlanView() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [activePlan, handleBack]);
+
+  const {
+    commentPopover,
+    handleCommentSubmit,
+    handleCommentClose,
+  } = usePlanHighlighter({
+    containerRef: articleRef,
+    annotations: planAnnotations,
+    selectedAnnotationId,
+    onSelectAnnotation: setSelectedAnnotationId,
+  });
+
+  const handleAnnotationSubmit = useCallback(
+    (body: string) => {
+      const result = handleCommentSubmit(body);
+      if (result) {
+        handleCreate(body, result.originalText, result.highlightSource);
+      }
+    },
+    [handleCommentSubmit, handleCreate]
+  );
 
   if (!activePlan) {
     return (
@@ -217,7 +244,7 @@ export function PlanView() {
         </div>
       )}
       <div className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text">
-        <article className="max-w-4xl mx-auto px-8 py-6">
+        <article ref={articleRef} className="max-w-4xl mx-auto px-8 py-6">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={markdownComponents}
@@ -226,6 +253,14 @@ export function PlanView() {
           </ReactMarkdown>
         </article>
       </div>
+      {commentPopover && (
+        <PlanAnnotationForm
+          anchorEl={commentPopover.anchorEl}
+          contextText={commentPopover.contextText}
+          onSubmit={handleAnnotationSubmit}
+          onCancel={handleCommentClose}
+        />
+      )}
     </div>
   );
 }
