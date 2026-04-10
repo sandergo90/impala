@@ -139,6 +139,18 @@ export function PlanView() {
     });
   }, [wtPath]);
 
+  useEffect(() => {
+    if (!activePlan) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleBack();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [activePlan, handleBack]);
+
   if (!activePlan) {
     return (
       <PlanBrowser
