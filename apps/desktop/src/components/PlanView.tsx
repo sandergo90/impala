@@ -23,7 +23,6 @@ export function PlanView() {
     handleApprove,
     handleRequestChanges,
     handleComplete,
-    handleOpenDiscoveredPlan,
     handleSelectVersion,
   } = usePlanAnnotationActions();
 
@@ -128,7 +127,6 @@ export function PlanView() {
             activePlanId: planId,
           });
         }}
-        onOpenDiscoveredPlan={handleOpenDiscoveredPlan}
       />
     );
   }

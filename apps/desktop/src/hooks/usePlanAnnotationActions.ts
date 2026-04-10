@@ -135,41 +135,6 @@ export function usePlanAnnotationActions() {
     [handleSetStatus]
   );
 
-  const openPlan = useCallback(
-    async (filePath: string, title: string) => {
-      // Reuse existing plan record if one exists for this path
-      const currentPlans =
-        useDataStore.getState().getWorktreeDataState(worktreePath).plans;
-      const existing = currentPlans.find((p) => p.plan_path === filePath);
-      if (existing) {
-        useUIStore.getState().updateWorktreeNavState(worktreePath, {
-          activeTab: "plan",
-          activePlanId: existing.id,
-        });
-        return;
-      }
-      const plan = await planSqliteProvider.createPlan({
-        plan_path: filePath,
-        worktree_path: worktreePath,
-        title,
-      });
-      updateData({ plans: [...currentPlans, plan] });
-      useUIStore.getState().updateWorktreeNavState(worktreePath, {
-        activeTab: "plan",
-        activePlanId: plan.id,
-      });
-    },
-    [worktreePath, updateData]
-  );
-
-  const handleOpenDiscoveredPlan = useCallback(
-    async (filePath: string, title: string) => {
-      if (!worktreePath) return;
-      await openPlan(filePath, title);
-    },
-    [worktreePath, openPlan]
-  );
-
   return {
     plans,
     activePlan,
@@ -181,7 +146,6 @@ export function usePlanAnnotationActions() {
     handleApprove,
     handleRequestChanges,
     handleComplete,
-    handleOpenDiscoveredPlan,
     handleSelectVersion,
   };
 }
