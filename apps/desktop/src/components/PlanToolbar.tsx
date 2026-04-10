@@ -8,8 +8,6 @@ interface PlanToolbarProps {
   onApprove: () => void;
   onRequestChanges: () => void;
   onClose: () => void;
-  onOpenFile: () => void;
-  onOpenDirectory: () => void;
   onSelectVersion: (planId: string) => void;
 }
 
@@ -19,8 +17,6 @@ export function PlanToolbar({
   onApprove,
   onRequestChanges,
   onClose,
-  onOpenFile,
-  onOpenDirectory,
   onSelectVersion,
 }: PlanToolbarProps) {
   const isPending = plan.status === "pending";
@@ -116,25 +112,6 @@ export function PlanToolbar({
           </button>
         </div>
       )}
-      <button
-        onClick={onOpenDirectory}
-        className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
-        title="Open plan directory"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-          <path d="M2 3h5l2 2h5v8H2V3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
-        </svg>
-      </button>
-      <button
-        onClick={onOpenFile}
-        className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
-        title="Open markdown file"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-          <path d="M3 2h7l3 3v8a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
-          <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
-        </svg>
-      </button>
       <button
         onClick={onClose}
         className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"

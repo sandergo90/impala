@@ -21,8 +21,6 @@ export function PlanView() {
     handleCreate,
     handleApprove,
     handleRequestChanges,
-    handleOpenFile,
-    handleOpenDirectory,
     handleOpenDiscoveredPlan,
     handleSelectVersion,
   } = usePlanAnnotationActions();
@@ -112,8 +110,6 @@ export function PlanView() {
         onApprove={handleApprove}
         onRequestChanges={handleRequestChanges}
         onClose={handleClose}
-        onOpenFile={handleOpenFile}
-        onOpenDirectory={handleOpenDirectory}
         onSelectVersion={handleSelectVersion}
       />
       <div className="flex-1 overflow-y-auto min-h-0">

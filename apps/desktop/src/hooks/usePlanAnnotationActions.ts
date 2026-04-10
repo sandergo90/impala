@@ -155,32 +155,6 @@ export function usePlanAnnotationActions() {
     [worktreePath, openPlan]
   );
 
-  const handleOpenFile = useCallback(async () => {
-    if (!worktreePath) return;
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const path = await open({
-      filters: [{ name: "Markdown", extensions: ["md"] }],
-      multiple: false,
-    });
-    if (!path) return;
-    const filePath = path as string;
-    const title = filePath.split("/").pop()?.replace(/\.md$/, "") ?? "Plan";
-    await openPlan(filePath, title);
-  }, [worktreePath, openPlan]);
-
-  const handleOpenDirectory = useCallback(async () => {
-    if (!worktreePath) return;
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const { exists } = await import("@tauri-apps/plugin-fs");
-    const dir = await open({ directory: true, multiple: false });
-    if (!dir) return;
-    const dirPath = dir as string;
-    const overviewPath = `${dirPath}/overview.md`;
-    if (!(await exists(overviewPath))) return;
-    const dirName = dirPath.split("/").pop() ?? "Plan";
-    await openPlan(overviewPath, dirName);
-  }, [worktreePath, openPlan]);
-
   return {
     plans,
     activePlan,
@@ -191,8 +165,6 @@ export function usePlanAnnotationActions() {
     handleDelete,
     handleApprove,
     handleRequestChanges,
-    handleOpenFile,
-    handleOpenDirectory,
     handleOpenDiscoveredPlan,
     handleSelectVersion,
   };
