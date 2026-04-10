@@ -14,26 +14,14 @@ export function PlanAnnotationsPanel() {
     const items = planAnnotations.filter(
       (a) => showResolved || !a.resolved
     );
-    items.sort((a, b) => a.line_number - b.line_number);
+    items.sort((a, b) => a.created_at.localeCompare(b.created_at));
     return items;
   }, [planAnnotations, showResolved]);
 
   const hasAnnotations = planAnnotations.length > 0;
 
-  const scrollToLine = (lineNumber: number) => {
-    requestAnimationFrame(() => {
-      const lineEl = document.querySelector(
-        `[data-plan-line="${lineNumber}"]`
-      );
-      if (lineEl) {
-        lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
-        lineEl.classList.add("annotation-highlight");
-        setTimeout(
-          () => lineEl.classList.remove("annotation-highlight"),
-          1500
-        );
-      }
-    });
+  const scrollToAnnotation = (_id: string) => {
+    // Highlight scrolling will be handled by web-highlighter in a future task
   };
 
   if (!hasAnnotations) {
@@ -74,7 +62,7 @@ export function PlanAnnotationsPanel() {
               <div
                 key={a.id}
                 className="cursor-pointer"
-                onClick={() => scrollToLine(a.line_number)}
+                onClick={() => scrollToAnnotation(a.id)}
               >
                 <PlanAnnotationDisplay
                   annotation={a}

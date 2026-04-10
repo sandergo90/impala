@@ -6,7 +6,8 @@ pub struct PlanAnnotation {
     pub id: String,
     pub plan_path: String,
     pub worktree_path: String,
-    pub line_number: i64,
+    pub original_text: String,
+    pub highlight_source: Option<String>,
     pub body: String,
     pub resolved: bool,
     pub created_at: String,
@@ -17,7 +18,8 @@ pub struct PlanAnnotation {
 pub struct NewPlanAnnotation {
     pub plan_path: String,
     pub worktree_path: String,
-    pub line_number: i64,
+    pub original_text: String,
+    pub highlight_source: Option<String>,
     pub body: String,
 }
 
@@ -29,11 +31,13 @@ pub struct UpdatePlanAnnotation {
 
 pub fn init_db(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS plan_annotations (
+        "DROP TABLE IF EXISTS plan_annotations;
+        CREATE TABLE plan_annotations (
             id TEXT PRIMARY KEY,
             plan_path TEXT NOT NULL,
             worktree_path TEXT NOT NULL,
-            line_number INTEGER NOT NULL,
+            original_text TEXT NOT NULL,
+            highlight_source TEXT,
             body TEXT NOT NULL,
             resolved INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
@@ -52,9 +56,9 @@ pub fn create_plan_annotation(
     let now = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO plan_annotations (id, plan_path, worktree_path, line_number, body, resolved, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)",
-        params![id, new.plan_path, new.worktree_path, new.line_number, new.body, now, now],
+        "INSERT INTO plan_annotations (id, plan_path, worktree_path, original_text, highlight_source, body, resolved, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
+        params![id, new.plan_path, new.worktree_path, new.original_text, new.highlight_source, new.body, now, now],
     )
     .map_err(|e| format!("Failed to create plan annotation: {}", e))?;
 
@@ -62,7 +66,8 @@ pub fn create_plan_annotation(
         id,
         plan_path: new.plan_path,
         worktree_path: new.worktree_path,
-        line_number: new.line_number,
+        original_text: new.original_text,
+        highlight_source: new.highlight_source,
         body: new.body,
         resolved: false,
         created_at: now.clone(),
@@ -76,14 +81,14 @@ pub fn list_plan_annotations(
     worktree_path: Option<&str>,
 ) -> Result<Vec<PlanAnnotation>, String> {
     let mut sql = String::from(
-        "SELECT id, plan_path, worktree_path, line_number, body, resolved, created_at, updated_at
+        "SELECT id, plan_path, worktree_path, original_text, highlight_source, body, resolved, created_at, updated_at
          FROM plan_annotations WHERE plan_path = ?1",
     );
 
     if worktree_path.is_some() {
         sql.push_str(" AND worktree_path = ?2");
     }
-    sql.push_str(" ORDER BY line_number ASC");
+    sql.push_str(" ORDER BY created_at ASC");
 
     let mut stmt = conn
         .prepare(&sql)
@@ -99,16 +104,17 @@ pub fn list_plan_annotations(
 
     let rows = stmt
         .query_map(param_refs.as_slice(), |row| {
-            let resolved_int: i64 = row.get(5)?;
+            let resolved_int: i64 = row.get(6)?;
             Ok(PlanAnnotation {
                 id: row.get(0)?,
                 plan_path: row.get(1)?,
                 worktree_path: row.get(2)?,
-                line_number: row.get(3)?,
-                body: row.get(4)?,
+                original_text: row.get(3)?,
+                highlight_source: row.get(4)?,
+                body: row.get(5)?,
                 resolved: resolved_int != 0,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         })
         .map_err(|e| format!("Failed to query plan annotations: {}", e))?;
@@ -161,20 +167,21 @@ pub fn update_plan_annotation(
     }
 
     conn.query_row(
-        "SELECT id, plan_path, worktree_path, line_number, body, resolved, created_at, updated_at
+        "SELECT id, plan_path, worktree_path, original_text, highlight_source, body, resolved, created_at, updated_at
          FROM plan_annotations WHERE id = ?1",
         params![id],
         |row| {
-            let resolved_int: i64 = row.get(5)?;
+            let resolved_int: i64 = row.get(6)?;
             Ok(PlanAnnotation {
                 id: row.get(0)?,
                 plan_path: row.get(1)?,
                 worktree_path: row.get(2)?,
-                line_number: row.get(3)?,
-                body: row.get(4)?,
+                original_text: row.get(3)?,
+                highlight_source: row.get(4)?,
+                body: row.get(5)?,
                 resolved: resolved_int != 0,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         },
     )

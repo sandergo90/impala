@@ -66,7 +66,8 @@ export interface PlanAnnotation {
   id: string;
   plan_path: string;
   worktree_path: string;
-  line_number: number;
+  original_text: string;
+  highlight_source: string | null;
   body: string;
   resolved: boolean;
   created_at: string;
@@ -76,7 +77,8 @@ export interface PlanAnnotation {
 export interface NewPlanAnnotation {
   plan_path: string;
   worktree_path: string;
-  line_number: number;
+  original_text: string;
+  highlight_source: string | null;
   body: string;
 }
 

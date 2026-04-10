@@ -26,7 +26,9 @@ export const PlanAnnotationDisplay = memo(function PlanAnnotationDisplay({
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <span className="font-mono">L:{annotation.line_number}</span>
+          <span className="font-mono truncate max-w-[120px]" title={annotation.original_text}>
+            &ldquo;{annotation.original_text}&rdquo;
+          </span>
           <span>{formatRelativeTime(annotation.created_at)}</span>
         </div>
         <p className="mt-0.5 text-foreground whitespace-pre-wrap break-words">

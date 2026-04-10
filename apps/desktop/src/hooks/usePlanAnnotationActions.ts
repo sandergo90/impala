@@ -65,12 +65,13 @@ export function usePlanAnnotationActions() {
   }, [activePlan?.id, activePlan?.plan_path, worktreePath, updateData]);
 
   const handleCreate = useCallback(
-    async (body: string, lineNumber: number) => {
+    async (body: string, originalText: string, highlightSource: string | null) => {
       if (!worktreePath || !activePlan) return;
       const created = await planSqliteProvider.createAnnotation({
         plan_path: activePlan.plan_path,
         worktree_path: worktreePath,
-        line_number: lineNumber,
+        original_text: originalText,
+        highlight_source: highlightSource,
         body,
       });
       const current =
