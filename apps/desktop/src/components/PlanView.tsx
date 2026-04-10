@@ -147,18 +147,6 @@ export function PlanView() {
     });
   }, [wtPath]);
 
-  useEffect(() => {
-    if (!activePlan) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        handleBack();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activePlan, handleBack]);
-
   const {
     commentPopover,
     handleCommentSubmit,
@@ -169,6 +157,22 @@ export function PlanView() {
     selectedAnnotationId,
     onSelectAnnotation: setSelectedAnnotationId,
   });
+
+  useEffect(() => {
+    if (!activePlan) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (commentPopover) {
+          handleCommentClose();
+        } else {
+          handleBack();
+        }
+        e.preventDefault();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [activePlan, handleBack, commentPopover, handleCommentClose]);
 
   const handleAnnotationSubmit = useCallback(
     (body: string) => {
