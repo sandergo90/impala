@@ -75,6 +75,12 @@ export function MainView() {
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: tab });
   };
 
+  // -- Tab switching via Cmd+Shift+1/2/3/4 --
+  useAppHotkey("SWITCH_TAB_TERMINAL", () => setTab("terminal"));
+  useAppHotkey("SWITCH_TAB_DIFF", () => setTab("diff"));
+  useAppHotkey("SWITCH_TAB_SPLIT", () => setTab("split"));
+  useAppHotkey("SWITCH_TAB_PLAN", () => setTab("plan"));
+
   // -- Layout hotkeys --
 
   useAppHotkey("TOGGLE_SIDEBAR", () => {
