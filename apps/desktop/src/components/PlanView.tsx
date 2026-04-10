@@ -23,9 +23,35 @@ export function PlanView() {
 
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [directoryFiles, setDirectoryFiles] = useState<string[]>([]);
+  const [activeFile, setActiveFile] = useState<string | null>(null);
   const lines = useMemo(() => markdown?.split("\n") ?? [], [markdown]);
   const [pendingLine, setPendingLine] = useState<number | null>(null);
 
+  // Detect if plan is a directory and list its files
+  useEffect(() => {
+    if (!activePlan) {
+      setDirectoryFiles([]);
+      setActiveFile(null);
+      return;
+    }
+    invoke<string[]>("list_plan_files", { path: activePlan.plan_path })
+      .then((files) => {
+        if (files.length > 1) {
+          setDirectoryFiles(files);
+          setActiveFile(files[0]);
+        } else {
+          setDirectoryFiles([]);
+          setActiveFile(null);
+        }
+      })
+      .catch(() => {
+        setDirectoryFiles([]);
+        setActiveFile(null);
+      });
+  }, [activePlan?.id, activePlan?.plan_path]);
+
+  // Load the active file content
   useEffect(() => {
     if (!activePlan) {
       setMarkdown(null);
@@ -33,15 +59,16 @@ export function PlanView() {
       return;
     }
     setLoadError(false);
-    if (activePlan.content) {
+    if (activePlan.content && !activeFile) {
       setMarkdown(activePlan.content);
     } else {
       setMarkdown(null);
-      invoke<string>("read_plan_file", { path: activePlan.plan_path })
+      const pathToRead = activeFile ?? activePlan.plan_path;
+      invoke<string>("read_plan_file", { path: pathToRead })
         .then((content) => setMarkdown(content))
         .catch(() => setLoadError(true));
     }
-  }, [activePlan?.id, activePlan?.plan_path, activePlan?.content]);
+  }, [activePlan?.id, activePlan?.plan_path, activePlan?.content, activeFile]);
 
   const handleLineClick = useCallback((lineNumber: number) => {
     setPendingLine(lineNumber);
@@ -112,6 +139,27 @@ export function PlanView() {
         onClose={handleBack}
         onSelectVersion={handleSelectVersion}
       />
+      {directoryFiles.length > 1 && (
+        <div className="flex items-center gap-1 px-4 py-1.5 border-b border-border shrink-0 overflow-x-auto">
+          {directoryFiles.map((file) => {
+            const name = file.split("/").pop() ?? file;
+            const isActive = file === activeFile;
+            return (
+              <button
+                key={file}
+                onClick={() => setActiveFile(file)}
+                className={`px-2 py-0.5 text-sm font-mono rounded whitespace-nowrap ${
+                  isActive
+                    ? "text-foreground bg-accent"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {name}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-4xl mx-auto py-6">
           {lines.map((line, index) => {

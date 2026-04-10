@@ -372,6 +372,48 @@ async fn read_plan_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn list_plan_files(path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let p = std::path::Path::new(&path);
+        // Resolve to directory: if path is a file, use its parent
+        let dir = if p.is_dir() {
+            p.to_path_buf()
+        } else if let Some(parent) = p.parent() {
+            if parent.is_dir() { parent.to_path_buf() } else { return Ok(vec![]); }
+        } else {
+            return Ok(vec![]);
+        };
+
+        let mut files: Vec<String> = std::fs::read_dir(&dir)
+            .map_err(|e| format!("Failed to read directory: {}", e))?
+            .flatten()
+            .filter(|e| {
+                e.path().extension().is_some_and(|ext| ext == "md") && e.path().is_file()
+            })
+            .map(|e| e.path().to_string_lossy().to_string())
+            .collect();
+
+        // Sort: overview.md first, then task-N.md in order, then rest
+        files.sort_by(|a, b| {
+            let a_name = std::path::Path::new(a).file_name().unwrap_or_default().to_string_lossy();
+            let b_name = std::path::Path::new(b).file_name().unwrap_or_default().to_string_lossy();
+            let rank = |name: &str| -> u32 {
+                if name == "overview.md" { 0 }
+                else if name.starts_with("task-") { 1 }
+                else { 2 }
+            };
+            let ra = rank(&a_name);
+            let rb = rank(&b_name);
+            if ra != rb { ra.cmp(&rb) } else { a_name.cmp(&b_name) }
+        });
+
+        Ok(files)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
 fn set_file_viewed(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
@@ -1093,6 +1135,7 @@ pub fn run() {
             check_generated_files,
             open_in_editor,
             read_plan_file,
+            list_plan_files,
             resolve_file_path,
             get_hook_port,
             watcher::watch_worktree,
