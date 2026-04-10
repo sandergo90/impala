@@ -44,7 +44,7 @@ function StatusChip({ status }: { status: Plan["status"] }) {
       : "bg-blue-800/30 text-blue-400";
   const label = status === "changes_requested" ? "changes requested" : status;
   return (
-    <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${cls}`}>
+    <span className={`shrink-0 text-sm px-2 py-0.5 rounded ${cls}`}>
       {label}
     </span>
   );
@@ -227,7 +227,7 @@ export function PlanBrowser({
                       key={p.id}
                       onClick={() => setSelectedPlanPath(p.plan_path)}
                       onDoubleClick={() => onSelectPlan(p.id)}
-                      className={`flex items-start gap-2.5 px-3 py-2 rounded-md text-left text-sm transition-colors ${
+                      className={`flex items-start gap-2.5 px-3 py-2 rounded-md text-left text-base transition-colors ${
                         isSelected ? "bg-accent" : "hover:bg-accent/50"
                       }`}
                     >
@@ -251,7 +251,7 @@ export function PlanBrowser({
                           </span>
                           <StatusChip status={p.status} />
                           {(annotationCounts.get(p.plan_path) ?? 0) > 0 && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
+                            <span className="text-sm px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
                               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                               </svg>
@@ -259,17 +259,17 @@ export function PlanBrowser({
                             </span>
                           )}
                           {(fileCounts.get(p.plan_path) ?? 0) > 1 && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            <span className="text-sm px-2 py-0.5 rounded bg-muted text-muted-foreground">
                               {fileCounts.get(p.plan_path)} files
                             </span>
                           )}
                         </div>
                         {desc && (
-                          <p className="text-muted-foreground text-xs mt-0.5 truncate">
+                          <p className="text-muted-foreground text-sm mt-0.5 truncate">
                             {desc}
                           </p>
                         )}
-                        <p className="text-muted-foreground/60 text-xs mt-0.5">
+                        <p className="text-muted-foreground/60 text-sm mt-0.5">
                           {formatRelativeTime(p.updated_at)}
                         </p>
                       </div>
@@ -304,7 +304,7 @@ export function PlanBrowser({
                         onOpenDiscoveredPlan(d.path, d.title);
                       }
                     }}
-                    className={`flex items-start gap-2.5 px-3 py-2 rounded-md text-left text-sm transition-colors ${
+                    className={`flex items-start gap-2.5 px-3 py-2 rounded-md text-left text-base transition-colors ${
                       isSelected ? "bg-accent" : "hover:bg-accent/50"
                     }`}
                   >
@@ -328,7 +328,7 @@ export function PlanBrowser({
                         </span>
                         {status && <StatusChip status={status} />}
                         {knownPlan && (annotationCounts.get(d.path) ?? 0) > 0 && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
+                          <span className="text-sm px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                             </svg>
@@ -336,17 +336,17 @@ export function PlanBrowser({
                           </span>
                         )}
                         {knownPlan && (fileCounts.get(d.path) ?? 0) > 1 && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                          <span className="text-sm px-2 py-0.5 rounded bg-muted text-muted-foreground">
                             {fileCounts.get(d.path)} files
                           </span>
                         )}
                       </div>
                       {desc && (
-                        <p className="text-muted-foreground text-xs mt-0.5 truncate">
+                        <p className="text-muted-foreground text-sm mt-0.5 truncate">
                           {desc}
                         </p>
                       )}
-                      <p className="text-muted-foreground/60 text-xs mt-0.5">
+                      <p className="text-muted-foreground/60 text-sm mt-0.5">
                         {formatRelativeTime(d.modified_at)}
                       </p>
                     </div>
@@ -367,7 +367,7 @@ export function PlanBrowser({
                 </span>
                 <button
                   onClick={() => handleOpenPlan(selectedPlanPath)}
-                  className="px-3 py-1 text-xs font-medium rounded-md border border-border text-foreground hover:bg-accent"
+                  className="px-3 py-1 text-sm font-medium rounded-md border border-border text-foreground hover:bg-accent"
                 >
                   Open
                 </button>
