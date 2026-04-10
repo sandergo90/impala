@@ -1,7 +1,10 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { TabPill } from "./TabPill";
+import { markdownComponents } from "./markdownComponents";
 import { formatRelativeTime } from "../lib/utils";
 import type { Plan } from "../types";
 
@@ -21,6 +24,38 @@ interface PlanBrowserProps {
 
 type Tab = "recent" | "browse";
 
+function getFirstLine(content: string | null | undefined): string {
+  if (!content) return "";
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith("#") && !trimmed.startsWith("---")) {
+      return trimmed.slice(0, 120);
+    }
+  }
+  return "";
+}
+
+function StatusChip({ status }: { status: Plan["status"] }) {
+  const cls =
+    status === "approved"
+      ? "bg-green-800/30 text-green-400"
+      : status === "changes_requested"
+      ? "bg-amber-800/30 text-amber-400"
+      : "bg-blue-800/30 text-blue-400";
+  const label = status === "changes_requested" ? "changes requested" : status;
+  return (
+    <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function statusIconColor(status: Plan["status"]): string {
+  if (status === "approved") return "text-green-400";
+  if (status === "changes_requested") return "text-amber-400";
+  return "text-blue-400";
+}
+
 export function PlanBrowser({
   plans,
   worktreePath,
@@ -30,6 +65,8 @@ export function PlanBrowser({
   const [activeTab, setActiveTab] = useState<Tab>(plans.length > 0 ? "recent" : "browse");
   const [discovered, setDiscovered] = useState<DiscoveredPlan[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [selectedPlanPath, setSelectedPlanPath] = useState<string | null>(null);
+  const [contentCache, setContentCache] = useState<Map<string, string>>(new Map());
 
   const knownPlanPaths = useMemo(() => {
     const map = new Map<string, Plan>();
@@ -37,6 +74,7 @@ export function PlanBrowser({
     return map;
   }, [plans]);
 
+  // Scan for discovered plans
   useEffect(() => {
     if (!worktreePath) return;
 
@@ -62,6 +100,70 @@ export function PlanBrowser({
     };
   }, [worktreePath]);
 
+  // Load content for all plans lazily into a cache
+  useEffect(() => {
+    plans.forEach((p) => {
+      if (contentCache.has(p.plan_path)) return;
+      if (p.content) {
+        setContentCache((prev) => new Map(prev).set(p.plan_path, p.content!));
+      } else {
+        invoke<string>("read_plan_file", { path: p.plan_path })
+          .then((content) => {
+            setContentCache((prev) => new Map(prev).set(p.plan_path, content));
+          })
+          .catch(() => {});
+      }
+    });
+  }, [plans]);
+
+  // Also load content for discovered plans
+  useEffect(() => {
+    discovered.forEach((d) => {
+      if (contentCache.has(d.path)) return;
+      invoke<string>("read_plan_file", { path: d.path })
+        .then((content) => {
+          setContentCache((prev) => new Map(prev).set(d.path, content));
+        })
+        .catch(() => {});
+    });
+  }, [discovered]);
+
+  const handleOpenPlan = useCallback(
+    (planPath: string) => {
+      const knownPlan = knownPlanPaths.get(planPath);
+      if (knownPlan) {
+        onSelectPlan(knownPlan.id);
+      } else {
+        const disc = discovered.find((d) => d.path === planPath);
+        if (disc) {
+          onOpenDiscoveredPlan(disc.path, disc.title);
+        }
+      }
+    },
+    [knownPlanPaths, discovered, onSelectPlan, onOpenDiscoveredPlan]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && selectedPlanPath) {
+        handleOpenPlan(selectedPlanPath);
+      }
+    },
+    [selectedPlanPath, handleOpenPlan]
+  );
+
+  const previewContent = selectedPlanPath ? contentCache.get(selectedPlanPath) : undefined;
+
+  // Find title for selected plan
+  const selectedTitle = useMemo(() => {
+    if (!selectedPlanPath) return "";
+    const known = knownPlanPaths.get(selectedPlanPath);
+    if (known?.title) return known.title;
+    const disc = discovered.find((d) => d.path === selectedPlanPath);
+    if (disc) return disc.title;
+    return selectedPlanPath.split("/").pop() ?? "";
+  }, [selectedPlanPath, knownPlanPaths, discovered]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
@@ -69,81 +171,170 @@ export function PlanBrowser({
         <TabPill label="Browse" isActive={activeTab === "browse"} onClick={() => setActiveTab("browse")} />
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0">
-        {activeTab === "recent" ? (
-          plans.length === 0 ? (
+      <div className="flex flex-1 min-h-0">
+        {/* Left pane: list */}
+        <div
+          className="w-[45%] border-r border-border overflow-y-auto min-h-0 outline-none"
+          tabIndex={0}
+          onKeyDown={handleKeyDown}
+        >
+          {activeTab === "recent" ? (
+            plans.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                No plans reviewed yet
+              </div>
+            ) : (
+              <div className="flex flex-col gap-0.5 p-1.5">
+                {plans.map((p) => {
+                  const isSelected = selectedPlanPath === p.plan_path;
+                  const desc = getFirstLine(contentCache.get(p.plan_path));
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => setSelectedPlanPath(p.plan_path)}
+                      onDoubleClick={() => onSelectPlan(p.id)}
+                      className={`flex items-start gap-2.5 px-3 py-2 rounded-md text-left text-sm transition-colors ${
+                        isSelected ? "bg-accent" : "hover:bg-accent/50"
+                      }`}
+                    >
+                      <svg
+                        className={`w-4 h-4 mt-0.5 shrink-0 ${statusIconColor(p.status)}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={1.5}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                        />
+                      </svg>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-foreground truncate flex-1 font-medium">
+                            {p.title ?? p.plan_path.split("/").pop()}
+                          </span>
+                          <StatusChip status={p.status} />
+                        </div>
+                        {desc && (
+                          <p className="text-muted-foreground text-xs mt-0.5 truncate">
+                            {desc}
+                          </p>
+                        )}
+                        <p className="text-muted-foreground/60 text-xs mt-0.5">
+                          {formatRelativeTime(p.updated_at)}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          ) : scanning ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              No plans reviewed yet
+              Scanning...
+            </div>
+          ) : discovered.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+              No plans found in .claude/plans/ or docs/plans/
             </div>
           ) : (
-            <div className="flex flex-col gap-1 p-2">
-              {plans.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => onSelectPlan(p.id)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-md text-left hover:bg-accent text-sm"
-                >
-                  <span className="text-foreground truncate flex-1">
-                    {p.title ?? p.plan_path.split("/").pop()}
-                  </span>
-                  <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${
-                    p.status === "approved"
-                      ? "bg-green-800/30 text-green-400"
-                      : p.status === "changes_requested"
-                      ? "bg-amber-800/30 text-amber-400"
-                      : "bg-blue-800/30 text-blue-400"
-                  }`}>
-                    {p.status === "changes_requested" ? "changes requested" : p.status}
-                  </span>
-                </button>
-              ))}
+            <div className="flex flex-col gap-0.5 p-1.5">
+              {discovered.map((d) => {
+                const knownPlan = knownPlanPaths.get(d.path);
+                const isSelected = selectedPlanPath === d.path;
+                const desc = getFirstLine(contentCache.get(d.path));
+                const status = knownPlan?.status;
+                return (
+                  <button
+                    key={d.path}
+                    onClick={() => setSelectedPlanPath(d.path)}
+                    onDoubleClick={() => {
+                      if (knownPlan) {
+                        onSelectPlan(knownPlan.id);
+                      } else {
+                        onOpenDiscoveredPlan(d.path, d.title);
+                      }
+                    }}
+                    className={`flex items-start gap-2.5 px-3 py-2 rounded-md text-left text-sm transition-colors ${
+                      isSelected ? "bg-accent" : "hover:bg-accent/50"
+                    }`}
+                  >
+                    <svg
+                      className={`w-4 h-4 mt-0.5 shrink-0 ${status ? statusIconColor(status) : "text-muted-foreground"}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                      />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-foreground truncate flex-1 font-medium">
+                          {d.title}
+                        </span>
+                        {status && <StatusChip status={status} />}
+                      </div>
+                      {desc && (
+                        <p className="text-muted-foreground text-xs mt-0.5 truncate">
+                          {desc}
+                        </p>
+                      )}
+                      <p className="text-muted-foreground/60 text-xs mt-0.5">
+                        {formatRelativeTime(d.modified_at)}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          )
-        ) : scanning ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            Scanning...
-          </div>
-        ) : discovered.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            No plans found in .claude/plans/ or docs/plans/
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1 p-2">
-            {discovered.map((d) => {
-              const knownPlan = knownPlanPaths.get(d.path);
-              return (
+          )}
+        </div>
+
+        {/* Right pane: preview */}
+        <div className="w-[55%] flex flex-col min-h-0">
+          {selectedPlanPath ? (
+            <>
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
+                <span className="text-sm font-medium text-foreground truncate flex-1">
+                  {selectedTitle}
+                </span>
                 <button
-                  key={d.path}
-                  onClick={() => {
-                    if (knownPlan) {
-                      onSelectPlan(knownPlan.id);
-                    } else {
-                      onOpenDiscoveredPlan(d.path, d.title);
-                    }
-                  }}
-                  className="flex items-center gap-2 px-3 py-2 rounded-md text-left hover:bg-accent text-sm"
+                  onClick={() => handleOpenPlan(selectedPlanPath)}
+                  className="px-3 py-1 text-xs font-medium rounded-md border border-border text-foreground hover:bg-accent"
                 >
-                  <span className="text-foreground truncate flex-1">{d.title}</span>
-                  {knownPlan ? (
-                    <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${
-                      knownPlan.status === "approved"
-                        ? "bg-green-800/30 text-green-400"
-                        : knownPlan.status === "changes_requested"
-                        ? "bg-amber-800/30 text-amber-400"
-                        : "bg-blue-800/30 text-blue-400"
-                    }`}>
-                      {knownPlan.status === "changes_requested" ? "changes" : knownPlan.status}
-                    </span>
-                  ) : (
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {formatRelativeTime(d.modified_at)}
-                    </span>
-                  )}
+                  Open
                 </button>
-              );
-            })}
-          </div>
-        )}
+              </div>
+              <div className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text">
+                {previewContent ? (
+                  <article className="max-w-3xl mx-auto px-6 py-4">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={markdownComponents}
+                    >
+                      {previewContent}
+                    </ReactMarkdown>
+                  </article>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                    Loading...
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+              Select a plan to preview
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
