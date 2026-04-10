@@ -68,6 +68,7 @@ export function PlanAnnotationForm({
           className="w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground resize-y focus:outline-none focus:border-muted-foreground/50 placeholder:text-muted-foreground/90"
           onKeyDown={(e) => {
             if (e.key === "Escape") {
+              e.stopPropagation();
               e.preventDefault();
               onCancel();
             } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {

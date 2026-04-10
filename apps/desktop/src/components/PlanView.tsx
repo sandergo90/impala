@@ -161,18 +161,15 @@ export function PlanView() {
   useEffect(() => {
     if (!activePlan) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        if (commentPopover) {
-          handleCommentClose();
-        } else {
-          handleBack();
-        }
-        e.preventDefault();
-      }
+      if (e.key !== "Escape") return;
+      // Don't close the plan if a popover is open — the popover handles its own Escape
+      if (document.querySelector(".plan-comment-popover")) return;
+      e.preventDefault();
+      handleBack();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activePlan, handleBack, commentPopover, handleCommentClose]);
+  }, [activePlan, handleBack]);
 
   const handleAnnotationSubmit = useCallback(
     (body: string) => {
