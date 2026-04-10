@@ -66,10 +66,9 @@ export function PlanView() {
     [pendingLine, handleCreate]
   );
 
-  const handleClose = useCallback(() => {
+  const handleBack = useCallback(() => {
     if (!wtPath) return;
     useUIStore.getState().updateWorktreeNavState(wtPath, {
-      activeTab: "diff",
       activePlanId: null,
     });
   }, [wtPath]);
@@ -120,7 +119,7 @@ export function PlanView() {
         versions={planVersions}
         onApprove={handleApprove}
         onRequestChanges={handleRequestChanges}
-        onClose={handleClose}
+        onClose={handleBack}
         onSelectVersion={handleSelectVersion}
       />
       <div className="flex-1 overflow-y-auto min-h-0">
