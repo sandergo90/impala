@@ -13,35 +13,43 @@ export function usePlanNotifications() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const worktreePath = selectedWorktree?.path ?? "";
   const prevPlanIdsRef = useRef<Set<string>>(new Set());
+  const initialLoadRef = useRef(true);
 
   useEffect(() => {
     if (!worktreePath) return;
+    // Reset for new worktree — first fetch should seed the ref, not show toasts
+    initialLoadRef.current = true;
+    prevPlanIdsRef.current = new Set();
 
     async function refresh() {
       try {
         const plans = await planSqliteProvider.listPlans(worktreePath);
         const updates: Record<string, unknown> = { plans };
 
-        // Detect new pending plans for toast
-        const prev = prevPlanIdsRef.current;
-        for (const plan of plans) {
-          if (plan.status === "pending" && !prev.has(plan.id)) {
-            const title = plan.title ?? plan.plan_path.split("/").pop() ?? "Plan";
-            updates.hasPendingPlan = true;
+        // Only show toasts after the initial load (not on worktree switch)
+        if (initialLoadRef.current) {
+          initialLoadRef.current = false;
+        } else {
+          const prev = prevPlanIdsRef.current;
+          for (const plan of plans) {
+            if (plan.status === "pending" && !prev.has(plan.id)) {
+              const title = plan.title ?? plan.plan_path.split("/").pop() ?? "Plan";
+              updates.hasPendingPlan = true;
 
-            toast("Plan ready for review", {
-              description: title,
-              action: {
-                label: "Review",
-                onClick: () => {
-                  useUIStore.getState().updateWorktreeNavState(worktreePath, {
-                    activeTab: "plan",
-                    activePlanId: plan.id,
-                  });
+              toast("Plan ready for review", {
+                description: title,
+                action: {
+                  label: "Review",
+                  onClick: () => {
+                    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+                      activeTab: "plan",
+                      activePlanId: plan.id,
+                    });
+                  },
                 },
-              },
-            });
-            break;
+              });
+              break;
+            }
           }
         }
         prevPlanIdsRef.current = new Set(plans.map((p) => p.id));
