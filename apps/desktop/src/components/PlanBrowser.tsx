@@ -249,6 +249,16 @@ export function PlanBrowser({
                           <span className="text-foreground truncate flex-1 font-medium">
                             {p.title ?? p.plan_path.split("/").pop()}
                           </span>
+                          <span className="text-sm text-muted-foreground/60 shrink-0">
+                            {formatRelativeTime(p.updated_at)}
+                          </span>
+                        </div>
+                        {desc && (
+                          <p className="text-muted-foreground text-sm mt-0.5 truncate">
+                            {desc}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-1.5 mt-1.5">
                           <StatusChip status={p.status} />
                           {(annotationCounts.get(p.plan_path) ?? 0) > 0 && (
                             <span className="text-sm px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
@@ -264,14 +274,6 @@ export function PlanBrowser({
                             </span>
                           )}
                         </div>
-                        {desc && (
-                          <p className="text-muted-foreground text-sm mt-0.5 truncate">
-                            {desc}
-                          </p>
-                        )}
-                        <p className="text-muted-foreground/60 text-sm mt-0.5">
-                          {formatRelativeTime(p.updated_at)}
-                        </p>
                       </div>
                     </button>
                   );
@@ -326,6 +328,16 @@ export function PlanBrowser({
                         <span className="text-foreground truncate flex-1 font-medium">
                           {d.title}
                         </span>
+                        <span className="text-sm text-muted-foreground/60 shrink-0">
+                          {formatRelativeTime(d.modified_at)}
+                        </span>
+                      </div>
+                      {desc && (
+                        <p className="text-muted-foreground text-sm mt-0.5 truncate">
+                          {desc}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-1.5">
                         {status && <StatusChip status={status} />}
                         {knownPlan && (annotationCounts.get(d.path) ?? 0) > 0 && (
                           <span className="text-sm px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
@@ -341,14 +353,6 @@ export function PlanBrowser({
                           </span>
                         )}
                       </div>
-                      {desc && (
-                        <p className="text-muted-foreground text-sm mt-0.5 truncate">
-                          {desc}
-                        </p>
-                      )}
-                      <p className="text-muted-foreground/60 text-sm mt-0.5">
-                        {formatRelativeTime(d.modified_at)}
-                      </p>
                     </div>
                   </button>
                 );
