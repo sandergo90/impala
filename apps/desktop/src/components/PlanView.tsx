@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { useUIStore } from "../store";
 import { usePlanAnnotationActions } from "../hooks/usePlanAnnotationActions";
 import { usePlanHighlighter } from "../hooks/usePlanHighlighter";
+import { useSelectedPlanAnnotation } from "../hooks/useSelectedPlanAnnotation";
 import { PlanToolbar } from "./PlanToolbar";
 import { PlanBrowser } from "./PlanBrowser";
 import { PlanAnnotationForm } from "./PlanAnnotationForm";
@@ -90,18 +91,7 @@ export function PlanView() {
   } = usePlanAnnotationActions();
 
   const articleRef = useRef<HTMLElement>(null);
-
-  const selectedAnnotationId = useUIStore((s) => {
-    const nav = wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null;
-    return nav?.selectedPlanAnnotationId ?? null;
-  });
-
-  const setSelectedAnnotationId = useCallback((id: string | null) => {
-    if (!wtPath) return;
-    useUIStore.getState().updateWorktreeNavState(wtPath, {
-      selectedPlanAnnotationId: id,
-    });
-  }, [wtPath]);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useSelectedPlanAnnotation();
 
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -182,7 +172,7 @@ export function PlanView() {
 
   const handleAnnotationSubmit = useCallback(
     (body: string) => {
-      const result = handleCommentSubmit(body);
+      const result = handleCommentSubmit();
       if (result) {
         handleCreate(body, result.originalText, result.highlightSource);
       }

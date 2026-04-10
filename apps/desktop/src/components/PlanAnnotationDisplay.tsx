@@ -9,11 +9,6 @@ interface PlanAnnotationDisplayProps {
   onDelete: (id: string) => void;
 }
 
-function truncateText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength) + "...";
-}
-
 export const PlanAnnotationDisplay = memo(function PlanAnnotationDisplay({
   annotation,
   selected,
@@ -38,7 +33,7 @@ export const PlanAnnotationDisplay = memo(function PlanAnnotationDisplay({
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-xs text-muted-foreground mb-1 font-mono truncate">
-          "{truncateText(annotation.original_text, 60)}"
+          "{annotation.original_text}"
         </div>
         <p className="mt-0.5 text-foreground whitespace-pre-wrap break-words">
           {annotation.body}

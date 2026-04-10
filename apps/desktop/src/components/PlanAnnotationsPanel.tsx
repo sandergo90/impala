@@ -1,27 +1,14 @@
-import { useMemo, useEffect, useRef, useCallback } from "react";
+import { useMemo, useEffect, useRef } from "react";
 import { useUIStore } from "../store";
 import { usePlanAnnotationActions } from "../hooks/usePlanAnnotationActions";
+import { useSelectedPlanAnnotation } from "../hooks/useSelectedPlanAnnotation";
 import { PlanAnnotationDisplay } from "./PlanAnnotationDisplay";
 
 export function PlanAnnotationsPanel() {
   const showResolved = useUIStore((s) => s.showResolved);
   const setShowResolved = useUIStore((s) => s.setShowResolved);
   const listRef = useRef<HTMLDivElement>(null);
-
-  const selectedWorktree = useUIStore((s) => s.selectedWorktree);
-  const wtPath = selectedWorktree?.path ?? "";
-
-  const selectedAnnotationId = useUIStore((s) => {
-    const nav = wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null;
-    return nav?.selectedPlanAnnotationId ?? null;
-  });
-
-  const setSelectedAnnotationId = useCallback((id: string | null) => {
-    if (!wtPath) return;
-    useUIStore.getState().updateWorktreeNavState(wtPath, {
-      selectedPlanAnnotationId: id,
-    });
-  }, [wtPath]);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useSelectedPlanAnnotation();
 
   const { planAnnotations, handleResolve, handleDelete } =
     usePlanAnnotationActions();
@@ -30,10 +17,7 @@ export function PlanAnnotationsPanel() {
     const items = planAnnotations.filter(
       (a) => showResolved || !a.resolved
     );
-    items.sort(
-      (a, b) =>
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    );
+    items.sort((a, b) => a.created_at.localeCompare(b.created_at));
     return items;
   }, [planAnnotations, showResolved]);
 

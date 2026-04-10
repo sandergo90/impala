@@ -24,6 +24,8 @@ export function usePlanHighlighter({
   const highlighterRef = useRef<Highlighter | null>(null);
   const onSelectAnnotationRef = useRef(onSelectAnnotation);
   const pendingSourceRef = useRef<any>(null);
+  // Tracks whether the container element is mounted so the init effect can re-run
+  const [containerReady, setContainerReady] = useState(false);
 
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
 
@@ -31,7 +33,11 @@ export function usePlanHighlighter({
     onSelectAnnotationRef.current = onSelectAnnotation;
   }, [onSelectAnnotation]);
 
-  // --- DOM text search for restoring highlights ---
+  // Detect when the container element actually mounts in the DOM
+  useEffect(() => {
+    const el = containerRef.current;
+    setContainerReady(!!el);
+  });
 
   const findTextInDOM = useCallback(
     (searchText: string): Range | null => {
@@ -105,8 +111,6 @@ export function usePlanHighlighter({
     [containerRef]
   );
 
-  // --- Restore highlights from annotations ---
-
   const applyAnnotations = useCallback(
     (anns: PlanAnnotation[]) => {
       if (!containerRef.current) return;
@@ -177,8 +181,6 @@ export function usePlanHighlighter({
     [findTextInDOM, containerRef]
   );
 
-  // --- Remove a single highlight ---
-
   const removeHighlight = useCallback(
     (id: string) => {
       highlighterRef.current?.remove(id);
@@ -189,15 +191,14 @@ export function usePlanHighlighter({
         const parent = el.parentNode;
         while (el.firstChild) parent?.insertBefore(el.firstChild, el);
         el.remove();
+        parent?.normalize();
       });
     },
     [containerRef]
   );
 
-  // --- Initialize web-highlighter ---
-
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !containerReady) return;
 
     const highlighter = new Highlighter({
       $root: containerRef.current,
@@ -216,7 +217,6 @@ export function usePlanHighlighter({
         const doms = highlighter.getDoms(source.id);
         if (!doms?.length) return;
 
-        // Clean up previous pending selection
         if (pendingSourceRef.current) {
           highlighter.remove(pendingSourceRef.current.id);
         }
@@ -240,17 +240,13 @@ export function usePlanHighlighter({
       highlighter.dispose();
       highlighterRef.current = null;
     };
-  }, [containerRef]);
-
-  // --- Restore highlights when annotations or content changes ---
+  }, [containerRef, containerReady]);
 
   useEffect(() => {
-    // Small delay to ensure react-markdown has rendered
+    // Small delay to let react-markdown finish rendering before we walk the DOM
     const timer = setTimeout(() => applyAnnotations(annotations), 50);
     return () => clearTimeout(timer);
   }, [annotations, applyAnnotations]);
-
-  // --- Scroll to selected annotation's highlight ---
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -276,30 +272,23 @@ export function usePlanHighlighter({
     return () => clearTimeout(timer);
   }, [selectedAnnotationId, containerRef]);
 
-  // --- Popover handlers ---
-
   const handleCommentSubmit = useCallback(
-    (_body: string): { originalText: string; highlightSource: string | null } | null => {
+    (): { originalText: string; highlightSource: string | null } | null => {
       if (!commentPopover?.source) return null;
 
       const source = commentPopover.source;
       const highlighter = highlighterRef.current;
 
-      // Apply the "comment" CSS class to the highlight
       if (highlighter) {
         try {
           highlighter.addClass("comment", source.id);
-        } catch {}
-      }
-
-      // Also set data-annotation-id on the web-highlighter marks
-      if (highlighter) {
-        try {
           const doms = highlighter.getDoms(source.id);
           doms?.forEach((dom: HTMLElement) => {
             dom.dataset.annotationId = source.id;
           });
-        } catch {}
+        } catch (e) {
+          console.warn("Failed to apply highlight class:", e);
+        }
       }
 
       const result = {
