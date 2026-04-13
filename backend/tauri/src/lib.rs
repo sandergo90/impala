@@ -15,6 +15,7 @@ mod settings;
 mod viewed_files;
 mod watcher;
 mod worktree_issues;
+mod worktrees;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -57,10 +58,33 @@ fn save_projects(state: tauri::State<'_, DbState>, projects: Vec<String>) -> Res
 }
 
 #[tauri::command]
-async fn list_worktrees(repo_path: String) -> Result<Vec<git::Worktree>, String> {
-    tokio::task::spawn_blocking(move || git::list_worktrees(&repo_path))
+async fn list_worktrees(
+    state: tauri::State<'_, DbState>,
+    repo_path: String,
+) -> Result<Vec<git::Worktree>, String> {
+    let mut worktrees = tokio::task::spawn_blocking(move || git::list_worktrees(&repo_path))
         .await
-        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| format!("Task join error: {}", e))??;
+
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    for wt in worktrees.iter_mut() {
+        if worktrees::is_main_branch(&wt.branch) {
+            // Main worktrees never get a title row.
+            wt.title = None;
+            continue;
+        }
+        match worktrees::get_title(&conn, &wt.path)? {
+            Some(title) => {
+                wt.title = Some(title);
+            }
+            None => {
+                let derived = worktrees::default_title_from_branch(&wt.branch);
+                worktrees::upsert_title(&conn, &wt.path, &derived)?;
+                wt.title = Some(derived);
+            }
+        }
+    }
+    Ok(worktrees)
 }
 
 #[tauri::command]
@@ -968,6 +992,8 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize viewed_files table: {}", e))?;
             worktree_issues::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize worktree_issues table: {}", e))?;
+            worktrees::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize worktrees table: {}", e))?;
             settings::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize settings tables: {}", e))?;
             plans::init_db(&conn)

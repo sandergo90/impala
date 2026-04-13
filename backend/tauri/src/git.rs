@@ -6,6 +6,7 @@ pub struct Worktree {
     pub path: String,
     pub branch: String,
     pub head_commit: String,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,6 +57,7 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
                     std::mem::take(branch)
                 },
                 head_commit: std::mem::take(head),
+                title: None,
             });
         }
     };
@@ -335,6 +337,7 @@ pub fn create_worktree(
         path: canonical_path,
         branch: branch_name.to_string(),
         head_commit: head,
+        title: None,
     })
 }
 
