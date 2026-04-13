@@ -141,14 +141,28 @@ export function CommitPanel() {
       // Silently fail
     }
 
-    // Always refresh commit list so sidebar counts stay accurate
+    // Always refresh commit list so sidebar counts stay accurate.
+    // Skip the store update if the list is unchanged to avoid churning
+    // downstream re-renders (which can flicker the diff panel).
     if (baseBranch) {
       try {
-        const commits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath, baseBranch });
-        updateData({ commits });
+        const nextCommits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath, baseBranch });
+        const prev = useDataStore.getState().getWorktreeDataState(worktreePath).commits;
+        const sameLen = prev.length === nextCommits.length;
+        const sameHashes = sameLen && prev.every((c, i) => c.hash === nextCommits[i].hash);
+        if (!sameHashes) {
+          updateData({ commits: nextCommits });
+        }
       } catch {
         // Silently fail on auto-refresh
       }
+    }
+
+    // When viewing a specific commit, the commit's diff is immutable — no
+    // refetch needed. Leaving `fileDiffs`/`fileDiffHashes` untouched also
+    // preserves the per-file "viewed" state in DiffView.
+    if (viewMode === 'commit') {
+      return;
     }
 
     if (viewMode === 'uncommitted') {
