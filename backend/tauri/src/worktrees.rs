@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection};
+use std::collections::HashMap;
 
 pub fn init_db(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
@@ -14,14 +15,8 @@ pub fn is_main_branch(branch: &str) -> bool {
     matches!(branch, "main" | "master" | "develop")
 }
 
-/// Derive a human-readable title from a branch name.
-///
-/// Rules:
-/// 1. Strip everything up to and including the last `/`.
-/// 2. Strip a leading Linear-style ticket ID like `ENG-123-`.
-/// 3. Replace `-` and `_` with spaces.
-/// 4. Sentence case (capitalize the first character only; leave the rest alone).
-/// 5. If the result is empty or whitespace, fall back to the raw branch name.
+/// Derive a human-readable title from a branch name
+/// (e.g. `feature/ENG-123-add-auth` → `Add auth`).
 pub fn default_title_from_branch(branch: &str) -> String {
     let after_slash = branch.rsplit('/').next().unwrap_or(branch);
     let without_ticket = strip_ticket_prefix(after_slash);
@@ -78,19 +73,19 @@ fn strip_ticket_prefix(s: &str) -> &str {
     &s[i..]
 }
 
-pub fn get_title(conn: &Connection, path: &str) -> Result<Option<String>, String> {
+pub fn get_all_titles(conn: &Connection) -> Result<HashMap<String, String>, String> {
     let mut stmt = conn
-        .prepare("SELECT title FROM worktrees WHERE path = ?1")
+        .prepare("SELECT path, title FROM worktrees")
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
-    let mut rows = stmt
-        .query_map(params![path], |row| row.get::<_, String>(0))
-        .map_err(|e| format!("Failed to query worktree title: {}", e))?;
-    match rows.next() {
-        Some(row) => Ok(Some(
-            row.map_err(|e| format!("Failed to read row: {}", e))?,
-        )),
-        None => Ok(None),
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| format!("Failed to query worktree titles: {}", e))?;
+    let mut map = HashMap::new();
+    for row in rows {
+        let (path, title) = row.map_err(|e| format!("Failed to read row: {}", e))?;
+        map.insert(path, title);
     }
+    Ok(map)
 }
 
 pub fn upsert_title(conn: &Connection, path: &str, title: &str) -> Result<(), String> {

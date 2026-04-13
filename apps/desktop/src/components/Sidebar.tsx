@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -462,10 +462,12 @@ export function Sidebar() {
   };
 
   const commitRename = async (wt: Worktree) => {
+    // Guards against the re-entrant call that blur fires when setEditingPath(null)
+    // unmounts the input.
+    if (editingPath !== wt.path) return;
     const next = editingTitle.trim();
     setEditingPath(null);
     if (!next || next === wt.title) return;
-    // Optimistic local update
     setWorktrees(
       useDataStore.getState().worktrees.map((w) =>
         w.path === wt.path ? { ...w, title: next } : w,
@@ -478,7 +480,6 @@ export function Sidebar() {
       });
     } catch (e) {
       toast.error(`Failed to rename: ${e}`);
-      // Rollback via refresh
       if (selectedProject) {
         const updated = await invoke<Worktree[]>("list_worktrees", {
           repoPath: selectedProject.path,
@@ -985,7 +986,7 @@ export function Sidebar() {
               );
 
               return isMain ? (
-                <div key={wt.path}>{row}</div>
+                <Fragment key={wt.path}>{row}</Fragment>
               ) : (
                 <ContextMenu
                   key={wt.path}

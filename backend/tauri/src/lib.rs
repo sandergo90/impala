@@ -66,23 +66,21 @@ async fn list_worktrees(
         .await
         .map_err(|e| format!("Task join error: {}", e))??;
 
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let titles = {
+        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        worktrees::get_all_titles(&conn)?
+    };
     for wt in worktrees.iter_mut() {
         if worktrees::is_main_branch(&wt.branch) {
-            // Main worktrees never get a title row.
             wt.title = None;
             continue;
         }
-        match worktrees::get_title(&conn, &wt.path)? {
-            Some(title) => {
-                wt.title = Some(title);
-            }
-            None => {
-                let derived = worktrees::default_title_from_branch(&wt.branch);
-                worktrees::upsert_title(&conn, &wt.path, &derived)?;
-                wt.title = Some(derived);
-            }
-        }
+        wt.title = Some(
+            titles
+                .get(&wt.path)
+                .cloned()
+                .unwrap_or_else(|| worktrees::default_title_from_branch(&wt.branch)),
+        );
     }
     Ok(worktrees)
 }
@@ -243,7 +241,6 @@ async fn create_worktree(
     .await
     .map_err(|e| format!("Task join error: {}", e))??;
 
-    // Main worktrees are never created through this code path, but be defensive.
     if !worktrees::is_main_branch(&worktree.branch) {
         let title = match initial_title {
             Some(t) if !t.trim().is_empty() => t.trim().to_string(),

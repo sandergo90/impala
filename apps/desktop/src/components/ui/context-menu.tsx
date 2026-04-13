@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 export interface ContextMenuItem {
   label: string;
   onSelect: () => void;
-  destructive?: boolean;
 }
 
 interface ContextMenuProps {
@@ -39,12 +38,7 @@ export function ContextMenu({ children, items, className }: ContextMenuProps) {
               <ContextMenuPrimitive.Item
                 key={item.label}
                 onClick={() => item.onSelect()}
-                className={cn(
-                  "px-3 py-1.5 cursor-pointer select-none outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground",
-                  item.destructive
-                    ? "text-destructive data-highlighted:text-destructive"
-                    : "text-foreground",
-                )}
+                className="px-3 py-1.5 cursor-pointer select-none outline-none text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground"
               >
                 {item.label}
               </ContextMenuPrimitive.Item>
