@@ -131,14 +131,15 @@ function useFileContents(
         } else if (viewMode === "uncommitted") {
           // For uncommitted: old = HEAD:file, new = working copy
           const oldResult = await invoke<string>("get_file_at_ref", { worktreePath, gitRef: "HEAD", filePath }).catch(() => "");
-          // Read the working copy from disk
+          // Read the working copy from disk. If the file is missing (a legitimate
+          // deletion) newContent is "". If the read fails for any other reason,
+          // let the error propagate so the outer catch falls back to PatchDiff —
+          // otherwise a read failure would render as a full-file deletion.
           const fullPath = `${worktreePath}/${filePath}`;
+          const { readTextFile, exists } = await import("@tauri-apps/plugin-fs");
           let workingCopy = "";
-          try {
-            const { readTextFile } = await import("@tauri-apps/plugin-fs");
+          if (await exists(fullPath)) {
             workingCopy = await readTextFile(fullPath);
-          } catch {
-            workingCopy = "";
           }
           oldContent = oldResult;
           newContent = workingCopy;
