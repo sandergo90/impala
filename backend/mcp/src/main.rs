@@ -28,7 +28,7 @@ struct Annotation {
 
 fn db_path() -> Result<PathBuf, String> {
     let data_dir = dirs::data_dir().ok_or("could not determine data directory")?;
-    let path = data_dir.join("com.impala.app").join("impala.db");
+    let path = data_dir.join("be.kodeus.impala").join("impala.db");
     if !path.exists() {
         return Err(format!("database not found at {}", path.display()));
     }
