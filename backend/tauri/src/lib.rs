@@ -761,6 +761,29 @@ fn unlink_worktree_issue(
 }
 
 #[tauri::command]
+fn rename_worktree_title(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+    title: String,
+) -> Result<(), String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Err("Title cannot be empty".to_string());
+    }
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    worktrees::upsert_title(&conn, &worktree_path, trimmed)
+}
+
+#[tauri::command]
+fn unlink_worktree_title(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    worktrees::delete_row(&conn, &worktree_path)
+}
+
+#[tauri::command]
 fn get_setting(
     state: tauri::State<'_, DbState>,
     key: String,
@@ -1167,6 +1190,8 @@ pub fn run() {
             get_worktree_issue,
             get_all_worktree_issues,
             unlink_worktree_issue,
+            rename_worktree_title,
+            unlink_worktree_title,
             get_setting,
             set_setting,
             delete_setting,

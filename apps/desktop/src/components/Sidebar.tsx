@@ -29,6 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ContextMenu } from "@/components/ui/context-menu";
 
 import { projectColor } from "../lib/utils";
 
@@ -452,6 +453,44 @@ export function Sidebar() {
   const [worktreeToDelete, setWorktreeToDelete] = useState<Worktree | null>(
     null,
   );
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+
+  const startRename = (wt: Worktree) => {
+    setEditingPath(wt.path);
+    setEditingTitle(wt.title ?? wt.branch);
+  };
+
+  const commitRename = async (wt: Worktree) => {
+    const next = editingTitle.trim();
+    setEditingPath(null);
+    if (!next || next === wt.title) return;
+    // Optimistic local update
+    setWorktrees(
+      useDataStore.getState().worktrees.map((w) =>
+        w.path === wt.path ? { ...w, title: next } : w,
+      ),
+    );
+    try {
+      await invoke("rename_worktree_title", {
+        worktreePath: wt.path,
+        title: next,
+      });
+    } catch (e) {
+      toast.error(`Failed to rename: ${e}`);
+      // Rollback via refresh
+      if (selectedProject) {
+        const updated = await invoke<Worktree[]>("list_worktrees", {
+          repoPath: selectedProject.path,
+        });
+        setWorktrees(updated);
+      }
+    }
+  };
+
+  const cancelRename = () => {
+    setEditingPath(null);
+  };
 
   const deleteWorktree = (wt: Worktree) => {
     if (!selectedProject) return;
@@ -479,6 +518,9 @@ export function Sidebar() {
           invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
           viewedFilesProvider.clearForWorktree(wt.path).catch(() => {}),
           invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(
+            () => {},
+          ),
+          invoke("unlink_worktree_title", { worktreePath: wt.path }).catch(
             () => {},
           ),
           invoke("clean_linear_context", { worktreePath: wt.path }).catch(
@@ -817,8 +859,8 @@ export function Sidebar() {
               const isPermission = agentStatuses[wt.path] === "permission";
               const hasPendingPlan = pendingPlans[wt.path];
 
-              return (
-                <div key={wt.path} className="group relative mx-2 my-0.5">
+              const row = (
+                <div className="group relative mx-2 my-0.5">
                   <button
                     onClick={() => selectWorktree(wt)}
                     className={`flex items-center gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${
@@ -851,6 +893,24 @@ export function Sidebar() {
                           >
                             {wt.branch}
                           </span>
+                        ) : editingPath === wt.path ? (
+                          <input
+                            autoFocus
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                commitRename(wt);
+                              } else if (e.key === "Escape") {
+                                e.preventDefault();
+                                cancelRename();
+                              }
+                            }}
+                            onBlur={() => commitRename(wt)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-sm bg-background border border-border rounded px-1 py-0.5 min-w-0 flex-1 outline-none focus:border-primary"
+                          />
                         ) : (
                           <>
                             <span
@@ -922,6 +982,19 @@ export function Sidebar() {
                     </div>
                   </button>
                 </div>
+              );
+
+              return isMain ? (
+                <div key={wt.path}>{row}</div>
+              ) : (
+                <ContextMenu
+                  key={wt.path}
+                  items={[
+                    { label: "Rename", onSelect: () => startRename(wt) },
+                  ]}
+                >
+                  {row}
+                </ContextMenu>
               );
             })}
           </div>
