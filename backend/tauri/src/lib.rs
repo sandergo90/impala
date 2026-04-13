@@ -229,16 +229,32 @@ async fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::Changed
 
 #[tauri::command]
 async fn create_worktree(
+    state: tauri::State<'_, DbState>,
     repo_path: String,
     branch_name: String,
     base_branch: Option<String>,
     existing: bool,
+    initial_title: Option<String>,
 ) -> Result<git::Worktree, String> {
-    tokio::task::spawn_blocking(move || {
-        git::create_worktree(&repo_path, &branch_name, base_branch, existing)
+    let branch_for_task = branch_name.clone();
+    let mut worktree = tokio::task::spawn_blocking(move || {
+        git::create_worktree(&repo_path, &branch_for_task, base_branch, existing)
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| format!("Task join error: {}", e))??;
+
+    // Main worktrees are never created through this code path, but be defensive.
+    if !worktrees::is_main_branch(&worktree.branch) {
+        let title = match initial_title {
+            Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+            _ => worktrees::default_title_from_branch(&branch_name),
+        };
+        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        worktrees::upsert_title(&conn, &worktree.path, &title)?;
+        worktree.title = Some(title);
+    }
+
+    Ok(worktree)
 }
 
 #[tauri::command]

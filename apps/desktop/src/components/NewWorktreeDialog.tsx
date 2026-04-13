@@ -145,6 +145,7 @@ export function NewWorktreeDialog({
         branchName: name,
         baseBranch: base,
         existing,
+        initialTitle: tab === "linear" && selectedIssue ? selectedIssue.title : null,
       });
       // Best-effort: link to Linear issue and move to In Progress (fire-and-forget)
       if (tab === "linear" && selectedIssue) {
