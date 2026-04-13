@@ -221,7 +221,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
               className={`relative w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
                 isSelected ? "bg-primary/15" : "hover:bg-accent"
               }`}
-              title={wt.branch}
+              title={wt.title ?? wt.branch}
             >
               {isActive ? (
                 <span className="w-3.5 h-3.5 flex items-center justify-center">
@@ -844,11 +844,29 @@ export function Sidebar() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span
-                          className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
-                        >
-                          {wt.branch}
-                        </span>
+                        {isMain ? (
+                          <span
+                            className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                            title={wt.branch}
+                          >
+                            {wt.branch}
+                          </span>
+                        ) : (
+                          <>
+                            <span
+                              className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                              title={wt.title ?? wt.branch}
+                            >
+                              {wt.title ?? wt.branch}
+                            </span>
+                            <span
+                              className="font-mono text-[10px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground shrink-0 max-w-[120px] truncate"
+                              title={wt.branch}
+                            >
+                              {wt.branch.split("/").pop() || wt.branch}
+                            </span>
+                          </>
+                        )}
                         <span className="relative ml-auto shrink-0">
                           {/* Stats badge — visible by default, invisible on hover (keeps layout space) */}
                           <span
