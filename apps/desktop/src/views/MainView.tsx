@@ -176,36 +176,28 @@ export function MainView() {
           {selectedWorktree && (() => {
             const branch = selectedWorktree.branch;
             const isMain = branch === "main" || branch === "master" || branch === "develop";
+            const aheadCount = dataState?.commits?.length ?? 0;
+            const primary = isMain ? branch : (selectedWorktree.title ?? branch);
+            const metaParts: string[] = [];
+            if (selectedProject?.name) metaParts.push(selectedProject.name);
+            if (!isMain) metaParts.push(branch);
+            if (dataState?.baseBranch && aheadCount > 0) {
+              metaParts.push(`${aheadCount} ahead of ${dataState.baseBranch}`);
+            }
             return (
-              <div className="flex items-center gap-1.5 text-md">
-                <span className="text-muted-foreground/60">{selectedProject?.name}</span>
-                <span className="text-muted-foreground/90">/</span>
-                {isMain ? (
+              <div className="flex flex-col justify-center min-w-0">
+                <span
+                  className={`truncate max-w-[420px] text-[15px] font-semibold text-foreground ${isMain ? "font-mono" : ""}`}
+                  title={primary}
+                >
+                  {primary}
+                </span>
+                {metaParts.length > 0 && (
                   <span
-                    className="text-foreground font-medium font-mono text-md truncate max-w-[200px]"
-                    title={branch}
+                    className="truncate max-w-[420px] text-[11px] text-muted-foreground/80 font-mono"
+                    title={metaParts.join(" · ")}
                   >
-                    {branch}
-                  </span>
-                ) : (
-                  <>
-                    <span
-                      className="text-foreground font-medium text-md truncate max-w-[280px]"
-                      title={selectedWorktree.title ?? branch}
-                    >
-                      {selectedWorktree.title ?? branch}
-                    </span>
-                    <span
-                      className="font-mono text-[11px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground shrink-0 max-w-[180px] truncate"
-                      title={branch}
-                    >
-                      {branch.split("/").pop() || branch}
-                    </span>
-                  </>
-                )}
-                {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
-                  <span className="bg-accent rounded-full px-1.5 py-0.5 text-md text-muted-foreground">
-                    {dataState.commits.length} ahead of {dataState.baseBranch}
+                    {metaParts.join(" · ")}
                   </span>
                 )}
               </div>
