@@ -94,7 +94,7 @@ export type SplitNode =
     };
 
 export interface UserTab {
-  /** Stable ID, used as the paneId key (`tab-user-${id}`). Never reused. */
+  /** Stable ID, used as the paneId key (`tab-user-${id}`) in single-leaf mode. Never reused. */
   id: string;
   /** What to run inside the tab. Terminal = shell; Claude = `claude` command. */
   kind: "terminal" | "claude";
@@ -102,6 +102,17 @@ export interface UserTab {
   label: string;
   /** Creation timestamp; stable ordering. */
   createdAt: number;
+  /**
+   * Recursive split tree of panes inside this tab. Optional for backward
+   * compatibility with tabs created before Phase 4: when absent, the
+   * renderer synthesizes a single leaf with id `tab-user-${id}`.
+   */
+  splitTree?: SplitNode;
+  /**
+   * Id of the currently focused leaf inside `splitTree`. Optional; the
+   * renderer falls back to the first leaf when absent or stale.
+   */
+  focusedPaneId?: string;
 }
 
 export interface WorktreeNavState {

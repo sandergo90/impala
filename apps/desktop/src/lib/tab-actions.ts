@@ -1,7 +1,38 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useUIStore, useDataStore } from "../store";
 import { CLAUDE_PANE_ID, RUN_PANE_ID, userTabPaneId } from "./pane-ids";
-import type { UserTab } from "../types";
+import {
+  splitNode,
+  removeNode,
+  getLeaves,
+  getAdjacentLeafId,
+  findLeaf,
+} from "./split-tree";
+import type { SplitNode, UserTab } from "../types";
+
+/**
+ * Return the effective split tree for a user tab. Phase-4+ tabs carry their
+ * own `splitTree`. Older persisted tabs don't; we synthesize a single leaf
+ * whose id matches the pre-Phase-4 paneId convention so the existing PTY
+ * session key (`pty-tab-user-${tabId}`) still resolves.
+ */
+export function getEffectiveUserTabSplitTree(tab: UserTab): SplitNode {
+  if (tab.splitTree) return tab.splitTree;
+  const paneType = tab.kind === "claude" ? "claude" : "shell";
+  return { type: "leaf", id: userTabPaneId(tab.id), paneType };
+}
+
+/**
+ * Return the effective focused pane id for a user tab. Falls back to the
+ * first leaf if the stored id is missing or no longer in the tree.
+ */
+export function getEffectiveUserTabFocusedPaneId(tab: UserTab): string {
+  const tree = getEffectiveUserTabSplitTree(tab);
+  const stored = tab.focusedPaneId;
+  if (stored && findLeaf(tree, stored)) return stored;
+  const leaves = getLeaves(tree);
+  return leaves[0]?.id ?? userTabPaneId(tab.id);
+}
 
 /**
  * Allocate a new user tab, push it into the worktree's userTabs, and activate it.
@@ -16,11 +47,19 @@ export function createUserTab(
 
   const counter = nav.tabCounters[kind];
   const label = kind === "terminal" ? `Terminal ${counter}` : `Claude ${counter}`;
+  const tabId = `${kind}-${counter}-${Date.now()}`;
+  const rootLeaf: SplitNode = {
+    type: "leaf",
+    id: userTabPaneId(tabId),
+    paneType: kind === "claude" ? "claude" : "shell",
+  };
   const newTab: UserTab = {
-    id: `${kind}-${counter}-${Date.now()}`,
+    id: tabId,
     kind,
     label,
     createdAt: Date.now(),
+    splitTree: rootLeaf,
+    focusedPaneId: rootLeaf.id,
   };
 
   uiState.updateWorktreeNavState(worktreePath, {
@@ -163,4 +202,138 @@ export function stepActiveTab(worktreePath: string, delta: 1 | -1): void {
   const nextId = order[nextIndex];
 
   uiState.updateWorktreeNavState(worktreePath, { activeTerminalsTab: nextId });
+}
+
+/**
+ * Split the focused pane inside a user tab. Returns the new leaf id, or null
+ * if the operation was a no-op (tab not found, or not a user tab).
+ */
+export function splitUserTabPane(
+  worktreePath: string,
+  tabId: string,
+  orientation: "horizontal" | "vertical",
+): string | null {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tab = nav.userTabs.find((t) => t.id === tabId);
+  if (!tab) return null;
+
+  const tree = getEffectiveUserTabSplitTree(tab);
+  const focusedId = getEffectiveUserTabFocusedPaneId(tab);
+
+  const result = splitNode(tree, focusedId, orientation);
+  if (!result) return null;
+
+  const nextTabs = nav.userTabs.map((t) =>
+    t.id === tabId
+      ? { ...t, splitTree: result.tree, focusedPaneId: result.newLeafId }
+      : t,
+  );
+
+  uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
+  return result.newLeafId;
+}
+
+/**
+ * Close the focused pane inside a user tab.
+ * - If the tab has more than one leaf, the pane is removed and focus moves to
+ *   the previously-adjacent pane. The tab survives.
+ * - If the tab has exactly one leaf, the tab itself is closed (delegates to
+ *   `closeUserTab` with `previousActive: null`).
+ *
+ * Kills the PTY session for the removed pane.
+ */
+export function closeUserTabFocusedPane(
+  worktreePath: string,
+  tabId: string,
+): void {
+  const uiState = useUIStore.getState();
+  const dataStore = useDataStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tab = nav.userTabs.find((t) => t.id === tabId);
+  if (!tab) return;
+
+  const tree = getEffectiveUserTabSplitTree(tab);
+  const leaves = getLeaves(tree);
+
+  if (leaves.length <= 1) {
+    closeUserTab(worktreePath, tabId, { previousActive: null });
+    return;
+  }
+
+  const focusedId = getEffectiveUserTabFocusedPaneId(tab);
+  const adjacentId = getAdjacentLeafId(tree, focusedId, -1);
+  const newTree = removeNode(tree, focusedId);
+  if (!newTree) {
+    closeUserTab(worktreePath, tabId, { previousActive: null });
+    return;
+  }
+
+  const sessionId = dataStore.getWorktreeDataState(worktreePath).paneSessions[focusedId];
+  if (sessionId) {
+    invoke("pty_kill", { sessionId }).catch(() => {});
+    const dataState = dataStore.getWorktreeDataState(worktreePath);
+    const { [focusedId]: _removed, ...remaining } = dataState.paneSessions;
+    dataStore.updateWorktreeDataState(worktreePath, { paneSessions: remaining });
+  }
+
+  const newLeaves = getLeaves(newTree);
+  const newFocusedId = newLeaves.some((l) => l.id === adjacentId)
+    ? adjacentId
+    : newLeaves[0]?.id ?? focusedId;
+
+  const nextTabs = nav.userTabs.map((t) =>
+    t.id === tabId ? { ...t, splitTree: newTree, focusedPaneId: newFocusedId } : t,
+  );
+
+  uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
+}
+
+/**
+ * Move focus to the next/previous leaf within a user tab's split tree.
+ * `direction`: 1 for next, -1 for previous. Wraps around.
+ * No-op on tabs with a single leaf.
+ */
+export function focusAdjacentUserTabPane(
+  worktreePath: string,
+  tabId: string,
+  direction: 1 | -1,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tab = nav.userTabs.find((t) => t.id === tabId);
+  if (!tab) return;
+
+  const tree = getEffectiveUserTabSplitTree(tab);
+  const leaves = getLeaves(tree);
+  if (leaves.length <= 1) return;
+
+  const focusedId = getEffectiveUserTabFocusedPaneId(tab);
+  const nextId = getAdjacentLeafId(tree, focusedId, direction);
+  if (nextId === focusedId) return;
+
+  const nextTabs = nav.userTabs.map((t) =>
+    t.id === tabId ? { ...t, focusedPaneId: nextId } : t,
+  );
+  uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
+}
+
+/**
+ * Set the focused pane of a user tab directly (used by click-to-focus from
+ * the renderer).
+ */
+export function setUserTabFocusedPane(
+  worktreePath: string,
+  tabId: string,
+  paneId: string,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tab = nav.userTabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  if (tab.focusedPaneId === paneId) return;
+  const nextTabs = nav.userTabs.map((t) =>
+    t.id === tabId ? { ...t, focusedPaneId: paneId } : t,
+  );
+  uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
 }
