@@ -156,7 +156,7 @@ export function MainView() {
     <>
       {/* Title bar */}
       <div
-        className="relative flex items-center h-14 shrink-0 border-b border-border/50 bg-background"
+        className="relative flex items-center h-16 shrink-0 border-b border-border/50 bg-background"
         style={{ paddingLeft: "88px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
