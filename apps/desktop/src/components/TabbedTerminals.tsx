@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { XtermTerminal } from "./XtermTerminal";
 import { useUIStore, useDataStore } from "../store";
-import type { UserTab, WorktreeIssue } from "../types";
+import type { WorktreeIssue } from "../types";
 import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
 import {
@@ -26,7 +26,6 @@ interface TabDescriptor {
   useContinueFlag: boolean;
   paneId: string;
   isSystem: boolean;
-  userTab: UserTab | null;
 }
 
 /**
@@ -80,7 +79,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         useContinueFlag: true,
         paneId: CLAUDE_PANE_ID,
         isSystem: true,
-        userTab: null,
       },
     ];
     if (hasRunTab) {
@@ -91,7 +89,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         useContinueFlag: false,
         paneId: RUN_PANE_ID,
         isSystem: true,
-        userTab: null,
       });
     }
     for (const t of userTabs) {
@@ -102,7 +99,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         useContinueFlag: false,
         paneId: userTabPaneId(t.id),
         isSystem: false,
-        userTab: t,
       });
     }
     return out;

@@ -17,6 +17,7 @@ import { toggleRunScript } from "./lib/run-script";
 import { useHotkeysStore } from "./stores/hotkeys";
 import { selectWorktree } from "./hooks/useWorktreeActions";
 import { closeUserTab } from "./lib/tab-actions";
+import { CLAUDE_PANE_ID, RUN_PANE_ID } from "./lib/pane-ids";
 
 export function RootLayout() {
   const { loading: checking, error: gitError } = useInvoke("check_git");
@@ -134,16 +135,10 @@ export function RootLayout() {
         uiState.setGeneralTerminalFocusedPaneId(newFocusId);
       } else if (selectedWorktreePath) {
         const nav = uiState.getWorktreeNavState(selectedWorktreePath);
-        if (
-          nav.activeTerminalsTab === "tab-claude" ||
-          nav.activeTerminalsTab === "tab-run"
-        ) {
-          return;
-        }
-        if (!nav.userTabs.some((t) => t.id === nav.activeTerminalsTab)) return;
-        closeUserTab(selectedWorktreePath, nav.activeTerminalsTab, {
-          previousActive: null,
-        });
+        const activeTabId = nav.activeTerminalsTab;
+        if (activeTabId === CLAUDE_PANE_ID || activeTabId === RUN_PANE_ID) return;
+        if (!nav.userTabs.some((t) => t.id === activeTabId)) return;
+        closeUserTab(selectedWorktreePath, activeTabId, { previousActive: null });
       }
     },
     { enabled: closePaneEnabled },

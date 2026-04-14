@@ -48,11 +48,11 @@ export function closeUserTab(
   if (!nav.userTabs.some((t) => t.id === tabId)) return;
 
   const paneId = userTabPaneId(tabId);
-  const sessionId = dataStore.getWorktreeDataState(worktreePath).paneSessions[paneId];
+  const dataState = dataStore.getWorktreeDataState(worktreePath);
+  const sessionId = dataState.paneSessions[paneId];
   if (sessionId) {
     invoke("pty_kill", { sessionId }).catch(() => {});
-    const current = dataStore.getWorktreeDataState(worktreePath);
-    const { [paneId]: _removed, ...remaining } = current.paneSessions;
+    const { [paneId]: _removed, ...remaining } = dataState.paneSessions;
     dataStore.updateWorktreeDataState(worktreePath, { paneSessions: remaining });
   }
 
