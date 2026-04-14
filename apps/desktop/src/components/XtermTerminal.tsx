@@ -257,8 +257,20 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
       });
 
       terminal.attachCustomKeyEventHandler((e) => {
-        if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
-          // Send Kitty keyboard protocol sequence for Shift+Enter
+        if (e.type !== "keydown") return true;
+
+        // Never let xterm consume a key that matches an app hotkey — the
+        // window-level useAppHotkey handler takes it. Without this, Cmd+D and
+        // friends leak into the shell (e.g. zsh shows its PROMPT_EOL_MARK).
+        if (e.metaKey || e.ctrlKey) {
+          const effectiveMap = useHotkeysStore.getState().getEffectiveMap();
+          for (const keys of Object.values(effectiveMap)) {
+            if (keys && matchesHotkeyEvent(e, keys)) return false;
+          }
+        }
+
+        if (e.key === "Enter" && e.shiftKey) {
+          // Kitty keyboard protocol sequence for Shift+Enter
           writeToPty("\x1b[13;2u");
           return false;
         }
