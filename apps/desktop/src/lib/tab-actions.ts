@@ -38,6 +38,22 @@ function killPaneSession(worktreePath: string, paneId: string): void {
   dataStore.updateWorktreeDataState(worktreePath, { paneSessions: remaining });
 }
 
+// Find the smallest positive integer >= `start` not currently in `used`.
+function smallestUnused(used: Set<number>, start: number): number {
+  let n = start;
+  while (used.has(n)) n++;
+  return n;
+}
+
+// Parse an auto-generated label like "Terminal 4" or "Claude 7" back to its
+// number. Returns null for renamed tabs so their numeric slot is freed up
+// and can be reused.
+function parseLabelNumber(label: string, prefix: string): number | null {
+  if (!label.startsWith(`${prefix} `)) return null;
+  const n = Number(label.slice(prefix.length + 1));
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 export function createUserTab(
   worktreePath: string,
   kind: "terminal" | "claude",
@@ -45,9 +61,20 @@ export function createUserTab(
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
 
-  const counter = nav.tabCounters[kind];
-  const label = kind === "terminal" ? `Terminal ${counter}` : `Claude ${counter}`;
-  const tabId = `${kind}-${counter}-${Date.now()}`;
+  // Slot = smallest positive integer not already in use by another tab of
+  // this kind. Claude starts at 2 because the primary Claude pane is
+  // conceptually "Claude 1". Renamed tabs don't occupy a slot.
+  const prefix = kind === "terminal" ? "Terminal" : "Claude";
+  const startAt = kind === "terminal" ? 1 : 2;
+  const used = new Set<number>();
+  for (const t of nav.userTabs) {
+    if (t.kind !== kind) continue;
+    const n = parseLabelNumber(t.label, prefix);
+    if (n !== null) used.add(n);
+  }
+  const slot = smallestUnused(used, startAt);
+  const label = `${prefix} ${slot}`;
+  const tabId = `${kind}-${slot}-${Date.now()}`;
   const rootLeaf: SplitNode = {
     type: "leaf",
     id: userTabPaneId(tabId),
@@ -64,7 +91,6 @@ export function createUserTab(
 
   uiState.updateWorktreeNavState(worktreePath, {
     userTabs: [...nav.userTabs, newTab],
-    tabCounters: { ...nav.tabCounters, [kind]: counter + 1 },
     activeTerminalsTab: newTab.id,
   });
 
@@ -94,15 +120,9 @@ export function closeUserTab(
   const nextActive =
     previousActive && validIds.has(previousActive) ? previousActive : CLAUDE_PANE_ID;
 
-  // Reset the auto-numbering when the last user tab closes, so the next
-  // created tab starts at "Terminal 1" / "Claude 2" again instead of
-  // climbing forever.
-  const resetCounters = remainingTabs.length === 0;
-
   uiState.updateWorktreeNavState(worktreePath, {
     userTabs: remainingTabs,
     activeTerminalsTab: nextActive,
-    ...(resetCounters ? { tabCounters: { terminal: 1, claude: 2 } } : {}),
   });
 }
 

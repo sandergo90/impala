@@ -137,8 +137,6 @@ export interface WorktreeNavState {
   runStatus: "idle" | "running" | "stopping";
   /** User-added tabs (plus button). Empty when the user hasn't created any. */
   userTabs: UserTab[];
-  /** Next number to use when auto-labelling a new tab. Monotonic; never reset on close. */
-  tabCounters: { terminal: number; claude: number };
   /** Last observed exit code for the Run tab's PTY; null if never exited. */
   runExitCode: number | null;
   /** True when the Run script exited non-zero and the user has not yet viewed the Run tab. */

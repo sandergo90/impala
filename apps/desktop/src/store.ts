@@ -19,7 +19,6 @@ function createDefaultNavState(): WorktreeNavState {
     setupRanAt: null,
     runStatus: "idle",
     userTabs: [],
-    tabCounters: { terminal: 1, claude: 2 },
     runExitCode: null,
     hasUnreadRunFailure: false,
   };
