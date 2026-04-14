@@ -35,18 +35,17 @@ pub fn default_title_from_branch(branch: &str) -> String {
     }
 }
 
-/// Match `ENG-123-`, `ABC-42-`, etc. at the start of the string and remove it.
+/// Match `ENG-123-`, `int-42-`, etc. at the start of the string and remove it.
+/// Case-insensitive so lowercased branch prefixes like `int-394-…` are handled.
 fn strip_ticket_prefix(s: &str) -> &str {
     let bytes = s.as_bytes();
     let mut i = 0;
-    // [A-Z]
-    if i >= bytes.len() || !(bytes[i].is_ascii_uppercase()) {
+    if i >= bytes.len() || !(bytes[i].is_ascii_alphabetic()) {
         return s;
     }
     i += 1;
-    // [A-Z0-9]+
     let letters_start = i;
-    while i < bytes.len() && (bytes[i].is_ascii_uppercase() || bytes[i].is_ascii_digit()) {
+    while i < bytes.len() && (bytes[i].is_ascii_alphanumeric()) {
         i += 1;
     }
     if i == letters_start {
@@ -119,6 +118,15 @@ mod tests {
     fn de_slug_ticket_prefix() {
         assert_eq!(default_title_from_branch("ENG-123-add-auth"), "Add auth");
         assert_eq!(default_title_from_branch("feature/ENG-42-new-thing"), "New thing");
+    }
+
+    #[test]
+    fn de_slug_lowercase_ticket_prefix() {
+        assert_eq!(
+            default_title_from_branch("sandergoossens/int-394-after-renaming"),
+            "After renaming"
+        );
+        assert_eq!(default_title_from_branch("int-7-foo-bar"), "Foo bar");
     }
 
     #[test]
