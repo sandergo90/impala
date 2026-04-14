@@ -16,8 +16,13 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { XtermTerminal } from "./XtermTerminal";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 import { useUIStore, useDataStore } from "../store";
-import type { UserTab, WorktreeIssue } from "../types";
+import type { SplitNode, UserTab, WorktreeIssue } from "../types";
 import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
 import {
@@ -31,6 +36,9 @@ import {
   closeUserTab,
   renameUserTab,
   reorderUserTabs,
+  setUserTabFocusedPane,
+  getEffectiveUserTabSplitTree,
+  getEffectiveUserTabFocusedPaneId,
 } from "../lib/tab-actions";
 
 type TabKind = "terminal" | "claude";
@@ -455,6 +463,9 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       <div className="relative flex-1 min-h-0">
         {tabs.map((t) => {
           const visible = activeId === t.id;
+          const userTab = !t.isSystem
+            ? userTabs.find((u) => u.id === t.id) ?? null
+            : null;
           return (
             <div
               key={t.id}
@@ -465,14 +476,23 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                 pointerEvents: visible ? "auto" : "none",
               }}
             >
-              <TabBody
-                paneId={t.paneId}
-                kind={t.kind}
-                useContinueFlag={t.useContinueFlag}
-                worktreePath={worktreePath}
-                sessionId={paneSessions[t.paneId] ?? null}
-                isActive={isActive && visible}
-              />
+              {userTab ? (
+                <UserTabSplitRenderer
+                  tab={userTab}
+                  worktreePath={worktreePath}
+                  paneSessions={paneSessions}
+                  isActive={isActive && visible}
+                />
+              ) : (
+                <TabBody
+                  paneId={t.paneId}
+                  kind={t.kind}
+                  useContinueFlag={t.useContinueFlag}
+                  worktreePath={worktreePath}
+                  sessionId={paneSessions[t.paneId] ?? null}
+                  isActive={isActive && visible}
+                />
+              )}
             </div>
           );
         })}
@@ -610,6 +630,105 @@ function TabBody({
       isFocused={isActive}
       onRestart={handleRestart}
     />
+  );
+}
+
+function UserTabSplitRenderer({
+  tab,
+  worktreePath,
+  paneSessions,
+  isActive,
+}: {
+  tab: UserTab;
+  worktreePath: string;
+  paneSessions: Record<string, string>;
+  isActive: boolean;
+}) {
+  const tree = getEffectiveUserTabSplitTree(tab);
+  const focusedPaneId = getEffectiveUserTabFocusedPaneId(tab);
+
+  return (
+    <SplitNodeRenderer
+      node={tree}
+      tab={tab}
+      worktreePath={worktreePath}
+      paneSessions={paneSessions}
+      focusedPaneId={focusedPaneId}
+      isActive={isActive}
+    />
+  );
+}
+
+function SplitNodeRenderer({
+  node,
+  tab,
+  worktreePath,
+  paneSessions,
+  focusedPaneId,
+  isActive,
+}: {
+  node: SplitNode;
+  tab: UserTab;
+  worktreePath: string;
+  paneSessions: Record<string, string>;
+  focusedPaneId: string;
+  isActive: boolean;
+}) {
+  if (node.type === "leaf") {
+    const isFocused = node.id === focusedPaneId;
+    const paneKind: TabKind = node.paneType === "claude" ? "claude" : "terminal";
+    return (
+      <div
+        className="h-full w-full relative"
+        style={{
+          opacity: isFocused || !isActive ? 1 : 0.6,
+          transition: "opacity 150ms ease",
+        }}
+        onMouseDownCapture={() => {
+          if (!isFocused) setUserTabFocusedPane(worktreePath, tab.id, node.id);
+        }}
+      >
+        <TabBody
+          paneId={node.id}
+          kind={paneKind}
+          useContinueFlag={false}
+          worktreePath={worktreePath}
+          sessionId={paneSessions[node.id] ?? null}
+          isActive={isActive && isFocused}
+        />
+      </div>
+    );
+  }
+
+  const panelOrientation =
+    node.orientation === "horizontal" ? "vertical" : "horizontal";
+  const firstPercent = Math.round(node.ratio * 100);
+  const secondPercent = 100 - firstPercent;
+
+  return (
+    <ResizablePanelGroup orientation={panelOrientation} className="h-full w-full">
+      <ResizablePanel defaultSize={`${firstPercent}%`} minSize={10}>
+        <SplitNodeRenderer
+          node={node.first}
+          tab={tab}
+          worktreePath={worktreePath}
+          paneSessions={paneSessions}
+          focusedPaneId={focusedPaneId}
+          isActive={isActive}
+        />
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel defaultSize={`${secondPercent}%`} minSize={10}>
+        <SplitNodeRenderer
+          node={node.second}
+          tab={tab}
+          worktreePath={worktreePath}
+          paneSessions={paneSessions}
+          focusedPaneId={focusedPaneId}
+          isActive={isActive}
+        />
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }
 
