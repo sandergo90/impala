@@ -82,3 +82,36 @@ export function getTabOrder(userTabs: UserTab[], hasRunTab: boolean): string[] {
   for (const t of userTabs) order.push(t.id);
   return order;
 }
+
+/**
+ * Cycle the active tab by `delta` (+1 for next, -1 for previous). Wraps around.
+ *
+ * Uses heuristics to detect the Run tab without an async project-config read: if
+ * paneSessions already contains tab-run, OR runStatus is non-idle, OR setupRanAt
+ * was set, we treat the Run tab as present. Edge case: a run-configured worktree
+ * whose Run tab has never materialised yet will cycle without it. Acceptable for
+ * a navigation convenience.
+ */
+export function stepActiveTab(worktreePath: string, delta: 1 | -1): void {
+  const uiState = useUIStore.getState();
+  const dataStore = useDataStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+
+  const paneSessions = dataStore.getWorktreeDataState(worktreePath).paneSessions;
+  const hasRunTab =
+    paneSessions[RUN_PANE_ID] !== undefined ||
+    nav.runStatus !== "idle" ||
+    nav.setupRanAt !== null;
+
+  const order = getTabOrder(nav.userTabs, hasRunTab);
+  if (order.length <= 1) return;
+
+  const activeId = order.includes(nav.activeTerminalsTab)
+    ? nav.activeTerminalsTab
+    : CLAUDE_PANE_ID;
+  const currentIndex = order.indexOf(activeId);
+  const nextIndex = (currentIndex + delta + order.length) % order.length;
+  const nextId = order[nextIndex];
+
+  uiState.updateWorktreeNavState(worktreePath, { activeTerminalsTab: nextId });
+}

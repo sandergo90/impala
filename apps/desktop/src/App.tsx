@@ -16,6 +16,7 @@ import {
 import { toggleRunScript } from "./lib/run-script";
 import { useHotkeysStore } from "./stores/hotkeys";
 import { selectWorktree } from "./hooks/useWorktreeActions";
+import { closeUserTab } from "./lib/tab-actions";
 
 export function RootLayout() {
   const { loading: checking, error: gitError } = useInvoke("check_git");
@@ -93,6 +94,16 @@ export function RootLayout() {
   useAppHotkey("NEXT_PANE", () => handleFocusAdjacentPane(1), { enabled: generalTerminalActive }, [generalTerminalActive]);
   useAppHotkey("PREV_PANE", () => handleFocusAdjacentPane(-1), { enabled: generalTerminalActive }, [generalTerminalActive]);
 
+  const selectedWorktreePath = useUIStore((s) => s.selectedWorktree?.path ?? null);
+  const worktreeActiveTab = useUIStore((s) =>
+    selectedWorktreePath
+      ? s.worktreeNavStates[selectedWorktreePath]?.activeTab ?? null
+      : null,
+  );
+  const closePaneEnabled =
+    generalTerminalActive ||
+    (selectedWorktreePath !== null && worktreeActiveTab === "terminal");
+
   useAppHotkey(
     "CLOSE_PANE",
     () => {
@@ -121,10 +132,22 @@ export function RootLayout() {
           : newLeaves[0]?.id ?? "default";
         uiState.setGeneralTerminalSplitTree(newTree);
         uiState.setGeneralTerminalFocusedPaneId(newFocusId);
+      } else if (selectedWorktreePath) {
+        const nav = uiState.getWorktreeNavState(selectedWorktreePath);
+        if (
+          nav.activeTerminalsTab === "tab-claude" ||
+          nav.activeTerminalsTab === "tab-run"
+        ) {
+          return;
+        }
+        if (!nav.userTabs.some((t) => t.id === nav.activeTerminalsTab)) return;
+        closeUserTab(selectedWorktreePath, nav.activeTerminalsTab, {
+          previousActive: null,
+        });
       }
     },
-    { enabled: generalTerminalActive },
-    [generalTerminalActive],
+    { enabled: closePaneEnabled },
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab],
   );
 
   // -- Worktree jump shortcuts (always active) --

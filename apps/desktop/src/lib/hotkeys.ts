@@ -83,8 +83,8 @@ export const HOTKEYS = {
     category: "Terminal",
   },
   CLOSE_PANE: {
-    label: "Close Pane",
-    description: "Close the focused terminal pane (won't close the last pane or Claude panes)",
+    label: "Close Tab / Pane",
+    description: "Close the active user tab in a worktree, or the focused pane in the general terminal",
     default: "meta+w",
     category: "Terminal",
   },
@@ -110,6 +110,30 @@ export const HOTKEYS = {
     label: "Run Script",
     description: "Run the project's configured run script",
     default: "meta+shift+r",
+    category: "Terminal",
+  },
+  NEW_TERMINAL_TAB: {
+    label: "New Terminal Tab",
+    description: "Open a new terminal tab in the current worktree",
+    default: "meta+t",
+    category: "Terminal",
+  },
+  NEW_CLAUDE_TAB: {
+    label: "New Claude Tab",
+    description: "Open a new Claude tab in the current worktree",
+    default: "meta+alt+t",
+    category: "Terminal",
+  },
+  NEXT_TAB: {
+    label: "Next Tab",
+    description: "Switch to the next terminal tab",
+    default: "meta+shift+]",
+    category: "Terminal",
+  },
+  PREV_TAB: {
+    label: "Previous Tab",
+    description: "Switch to the previous terminal tab",
+    default: "meta+shift+[",
     category: "Terminal",
   },
 

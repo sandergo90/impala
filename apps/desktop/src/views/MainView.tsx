@@ -22,6 +22,7 @@ import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 import { TabPill } from "../components/TabPill";
 import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
 import { usePlanNotifications } from "../hooks/usePlanNotifications";
+import { createUserTab, stepActiveTab } from "../lib/tab-actions";
 
 let cachedHomeDir: string | null = null;
 
@@ -80,6 +81,46 @@ export function MainView() {
   useAppHotkey("SWITCH_TAB_DIFF", () => setTab("diff"));
   useAppHotkey("SWITCH_TAB_SPLIT", () => setTab("split"));
   useAppHotkey("SWITCH_TAB_PLAN", () => setTab("plan"));
+
+  const isWorktreeTerminalActive = Boolean(wtPath) && activeTab === "terminal";
+
+  useAppHotkey(
+    "NEW_TERMINAL_TAB",
+    () => {
+      if (wtPath) createUserTab(wtPath, "terminal");
+    },
+    { enabled: isWorktreeTerminalActive },
+    [wtPath, isWorktreeTerminalActive],
+  );
+
+  useAppHotkey(
+    "NEW_CLAUDE_TAB",
+    () => {
+      if (wtPath) createUserTab(wtPath, "claude");
+    },
+    { enabled: isWorktreeTerminalActive },
+    [wtPath, isWorktreeTerminalActive],
+  );
+
+  useAppHotkey(
+    "NEXT_TAB",
+    () => {
+      if (!wtPath) return;
+      stepActiveTab(wtPath, 1);
+    },
+    { enabled: isWorktreeTerminalActive },
+    [wtPath, isWorktreeTerminalActive],
+  );
+
+  useAppHotkey(
+    "PREV_TAB",
+    () => {
+      if (!wtPath) return;
+      stepActiveTab(wtPath, -1);
+    },
+    { enabled: isWorktreeTerminalActive },
+    [wtPath, isWorktreeTerminalActive],
+  );
 
   // -- Layout hotkeys --
 
