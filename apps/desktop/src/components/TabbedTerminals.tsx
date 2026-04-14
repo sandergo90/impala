@@ -12,7 +12,12 @@ import {
   userTabPaneId,
   runPtySessionId,
 } from "../lib/pane-ids";
-import { createUserTab, closeUserTab, renameUserTab } from "../lib/tab-actions";
+import {
+  createUserTab,
+  closeUserTab,
+  renameUserTab,
+  reorderUserTabs,
+} from "../lib/tab-actions";
 
 type TabKind = "terminal" | "claude";
 
@@ -187,6 +192,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   const [menuOpen, setMenuOpen] = useState(false);
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState("");
+  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
 
   const startRenaming = useCallback((tabId: string, currentLabel: string) => {
     setEditingTabId(tabId);
@@ -258,11 +264,39 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         {tabs.map((t) => (
           <div
             key={t.id}
+            draggable={!t.isSystem && editingTabId !== t.id}
+            onDragStart={(e) => {
+              if (t.isSystem) return;
+              e.dataTransfer.setData("text/x-impala-tab-id", t.id);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onDragOver={(e) => {
+              if (t.isSystem) return;
+              if (!e.dataTransfer.types.includes("text/x-impala-tab-id")) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (dragOverTabId !== t.id) setDragOverTabId(t.id);
+            }}
+            onDragLeave={() => {
+              if (dragOverTabId === t.id) setDragOverTabId(null);
+            }}
+            onDrop={(e) => {
+              if (t.isSystem) return;
+              e.preventDefault();
+              const fromId = e.dataTransfer.getData("text/x-impala-tab-id");
+              setDragOverTabId(null);
+              if (fromId && fromId !== t.id) {
+                reorderUserTabs(worktreePath, fromId, t.id);
+              }
+            }}
+            onDragEnd={() => setDragOverTabId(null)}
             className={`group flex items-center ${
               activeId === t.id
                 ? "text-foreground bg-accent"
                 : "text-muted-foreground hover:text-foreground"
-            } rounded-t`}
+            } rounded-t ${
+              dragOverTabId === t.id ? "ring-1 ring-primary" : ""
+            }`}
           >
             {editingTabId === t.id ? (
               <input

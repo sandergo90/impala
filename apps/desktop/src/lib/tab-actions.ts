@@ -93,6 +93,35 @@ export function renameUserTab(
 }
 
 /**
+ * Move a user tab to a new position within userTabs. `toTabId` is the tab
+ * currently occupying the destination slot — the dragged tab is inserted
+ * at that index (pushing the target tab over).
+ *
+ * Silent no-op if either ID is missing or if `fromTabId === toTabId`.
+ */
+export function reorderUserTabs(
+  worktreePath: string,
+  fromTabId: string,
+  toTabId: string,
+): void {
+  if (fromTabId === toTabId) return;
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+
+  const fromIndex = nav.userTabs.findIndex((t) => t.id === fromTabId);
+  const toIndex = nav.userTabs.findIndex((t) => t.id === toTabId);
+  if (fromIndex === -1 || toIndex === -1) return;
+
+  const next = [...nav.userTabs];
+  const [moved] = next.splice(fromIndex, 1);
+  // After splice, toIndex may have shifted by 1 if fromIndex < toIndex.
+  const adjustedToIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+  next.splice(adjustedToIndex, 0, moved);
+
+  uiState.updateWorktreeNavState(worktreePath, { userTabs: next });
+}
+
+/**
  * Return the ordered list of tab IDs currently visible: system tabs first, then user tabs.
  * Pure — no store writes. Used by hotkey handlers for prev/next navigation.
  */
