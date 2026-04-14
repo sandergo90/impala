@@ -3,6 +3,17 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
+/* Force xterm's internal elements to fill the cached wrapper. Without this
+   the viewport/screen can lag behind container resizes during drag, briefly
+   exposing the background and flashing. */
+.xterm,
+.xterm .xterm-scrollable-element,
+.xterm .xterm-viewport,
+.xterm .xterm-screen {
+    height: 100%;
+    width: 100%;
+}
+
 @custom-variant dark (&:is([data-theme-type="dark"] *));
 
 @theme inline {

@@ -123,10 +123,14 @@ async function createCachedTerminal(
   terminal.loadAddon(searchAddon);
 
   // Detached wrapper — xterm.open() mutates this div, then we appendChild it
-  // into whichever component container currently hosts this session.
+  // into whichever component container currently hosts this session. Keep it
+  // minimal: only 100% sizing, no padding/background. Padding on the wrapper
+  // shows transient container background during drag resizes, which flashes
+  // against the xterm canvas. The outer component provides the visible bg
+  // and any breathing room.
   const wrapper = document.createElement("div");
-  wrapper.className = "h-full w-full";
-  wrapper.style.padding = "4px";
+  wrapper.style.width = "100%";
+  wrapper.style.height = "100%";
   terminal.open(wrapper);
 
   const baseDirRef = { current: null as string | null };
@@ -179,25 +183,9 @@ async function createCachedTerminal(
   }
 
   entry.onDataDisposable = terminal.onData((data: string) => writeToPty(data));
-
-  // Debounce pty_resize so that dragging a split handle doesn't SIGWINCH the
-  // shell on every animation frame. Each SIGWINCH makes zsh redraw its
-  // prompt (clear-line + redraw), which looks like a flash during the drag.
-  // We let xterm's local cells re-flow live, then push the final size to the
-  // PTY once the drag settles.
-  let pendingResize: { cols: number; rows: number } | null = null;
-  let resizeTimer: number | null = null;
   entry.onResizeDisposable = terminal.onResize(({ cols, rows }) => {
     if (entry.exitedRef.current) return;
-    pendingResize = { cols, rows };
-    if (resizeTimer !== null) clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => {
-      resizeTimer = null;
-      if (!pendingResize || entry.exitedRef.current) return;
-      const { cols: c, rows: r } = pendingResize;
-      pendingResize = null;
-      invoke("pty_resize", { sessionId, rows: r, cols: c }).catch(() => {});
-    }, 80);
+    invoke("pty_resize", { sessionId, rows, cols }).catch(() => {});
   });
 
   terminal.attachCustomKeyEventHandler((e) => {
@@ -503,7 +491,10 @@ export function XtermTerminal({
   };
 
   return (
-    <div className="relative h-full w-full" style={{ background: termBg }}>
+    <div
+      className="relative h-full w-full"
+      style={{ background: termBg, padding: "4px" }}
+    >
       {searchVisible && (
         <div className="absolute top-1 right-2 z-30 flex items-center gap-1 bg-background border border-border rounded px-2 py-1 shadow-lg">
           <input
