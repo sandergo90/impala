@@ -173,20 +173,44 @@ export function MainView() {
               <line x1="5.5" y1="2" x2="5.5" y2="14" stroke="currentColor" strokeWidth="1.4" />
             </svg>
           </button>
-          {selectedWorktree && (
-            <div className="flex items-center gap-1.5 text-md">
-              <span className="text-muted-foreground/60">{selectedProject?.name}</span>
-              <span className="text-muted-foreground/90">/</span>
-              <span className="text-foreground font-medium font-mono text-md truncate max-w-[200px]">
-                {selectedWorktree.branch}
-              </span>
-              {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
-                <span className="bg-accent rounded-full px-1.5 py-0.5 text-md text-muted-foreground">
-                  {dataState.commits.length} ahead of {dataState.baseBranch}
-                </span>
-              )}
-            </div>
-          )}
+          {selectedWorktree && (() => {
+            const branch = selectedWorktree.branch;
+            const isMain = branch === "main" || branch === "master" || branch === "develop";
+            return (
+              <div className="flex items-center gap-1.5 text-md">
+                <span className="text-muted-foreground/60">{selectedProject?.name}</span>
+                <span className="text-muted-foreground/90">/</span>
+                {isMain ? (
+                  <span
+                    className="text-foreground font-medium font-mono text-md truncate max-w-[200px]"
+                    title={branch}
+                  >
+                    {branch}
+                  </span>
+                ) : (
+                  <>
+                    <span
+                      className="text-foreground font-medium text-md truncate max-w-[280px]"
+                      title={selectedWorktree.title ?? branch}
+                    >
+                      {selectedWorktree.title ?? branch}
+                    </span>
+                    <span
+                      className="font-mono text-[11px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground shrink-0 max-w-[180px] truncate"
+                      title={branch}
+                    >
+                      {branch.split("/").pop() || branch}
+                    </span>
+                  </>
+                )}
+                {dataState?.baseBranch && (dataState?.commits?.length ?? 0) > 0 && (
+                  <span className="bg-accent rounded-full px-1.5 py-0.5 text-md text-muted-foreground">
+                    {dataState.commits.length} ahead of {dataState.baseBranch}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Center: run + tabs */}
