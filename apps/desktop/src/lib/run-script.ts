@@ -112,9 +112,17 @@ export async function triggerRunScript() {
       activeTab: "terminal",
       activeTerminalsTab: "run",
       runStatus: "running",
+      runExitCode: null,
     });
 
-    const encoded = encodePtyInput(config.run + "\n");
+    // Append an OSC 6969 sentinel that carries the command's exit code.
+    // xterm silently drops unknown OSC codes, so the bytes printf emits
+    // never render — TabbedTerminals scans the raw PTY stream for the
+    // marker and flips runStatus back to idle. The ';printf ...' tail is
+    // visible in the typed command line; that's the tradeoff for not
+    // installing shell integration.
+    const sentinel = String.raw`; printf '\033]6969;%d\007' $?`;
+    const encoded = encodePtyInput(config.run + sentinel + "\n");
     await invoke("pty_write", { sessionId, data: encoded });
   } catch (e) {
     toast.error(`Failed to run script: ${e}`);
