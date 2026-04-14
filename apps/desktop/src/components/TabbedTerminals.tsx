@@ -678,6 +678,10 @@ function SplitNodeRenderer({
     return (
       <div
         className="h-full w-full relative"
+        style={{
+          opacity: isFocused || !isActive ? 1 : 0.6,
+          transition: "opacity 150ms ease",
+        }}
         onMouseDownCapture={() => {
           if (!isFocused) setUserTabFocusedPane(worktreePath, tabId, node.id);
         }}
@@ -690,17 +694,6 @@ function SplitNodeRenderer({
           sessionId={paneSessions[node.id] ?? null}
           isActive={isActive && isFocused}
         />
-        {/* Focus ring overlay. Using an absolutely-positioned child with
-            pointer-events:none keeps the focus indicator out of the xterm
-            canvas's compositing layer — dimming the whole pane via
-            `opacity: 0.6` put the WebGL canvas in its own GPU layer and
-            caused visible flicker during drag resizes. */}
-        {isActive && !isFocused && (
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{ background: "rgba(0,0,0,0.4)" }}
-          />
-        )}
       </div>
     );
   }
