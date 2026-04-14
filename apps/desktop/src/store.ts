@@ -73,10 +73,10 @@ interface UIState {
   setNotificationSoundMuted: (muted: boolean) => void;
   selectedSoundId: string;
   setSelectedSoundId: (id: string) => void;
-  sidebarSize: number | null;
-  setSidebarSize: (size: number | null) => void;
-  rightSidebarSize: number | null;
-  setRightSidebarSize: (size: number | null) => void;
+  sidebarWidth: number | null;
+  setSidebarWidth: (width: number | null) => void;
+  rightSidebarWidth: number | null;
+  setRightSidebarWidth: (width: number | null) => void;
   fontSize: number;
   setFontSize: (size: number) => void;
   editorFontFamily: string | null;
@@ -157,10 +157,10 @@ export const useUIStore = create<UIState>()(
       setNotificationSoundMuted: (muted) => set({ notificationSoundMuted: muted }),
       selectedSoundId: "chime",
       setSelectedSoundId: (id) => set({ selectedSoundId: id }),
-      sidebarSize: null,
-      setSidebarSize: (size) => set({ sidebarSize: size }),
-      rightSidebarSize: null,
-      setRightSidebarSize: (size) => set({ rightSidebarSize: size }),
+      sidebarWidth: null,
+      setSidebarWidth: (width) => set({ sidebarWidth: width }),
+      rightSidebarWidth: null,
+      setRightSidebarWidth: (width) => set({ rightSidebarWidth: width }),
       fontSize: 14,
       setFontSize: (size) => {
         set({ fontSize: size });
@@ -185,7 +185,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 1,
+      version: 2,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};
@@ -194,6 +194,13 @@ export const useUIStore = create<UIState>()(
             cleaned[path] = rest;
           }
           persistedState.worktreeNavStates = cleaned;
+        }
+        if (fromVersion < 2 && persistedState) {
+          // v1 stored percentages under sidebarSize/rightSidebarSize for
+          // react-resizable-panels. v2 stores pixels under sidebarWidth/
+          // rightSidebarWidth. Drop the legacy fields and let defaults apply.
+          delete persistedState.sidebarSize;
+          delete persistedState.rightSidebarSize;
         }
         return persistedState;
       },

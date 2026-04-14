@@ -910,7 +910,7 @@ export function Sidebar() {
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 min-w-0">
                         {isMain ? (
                           <span
                             className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
@@ -939,17 +939,19 @@ export function Sidebar() {
                         ) : (
                           <>
                             <span
-                              className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                              className={`text-sm truncate grow min-w-0 ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
                               title={wt.title ?? wt.branch}
                             >
                               {wt.title ?? wt.branch}
                             </span>
-                            <span
-                              className="font-mono text-[10px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground shrink-0 max-w-[120px] truncate"
-                              title={wt.branch}
-                            >
-                              {wt.branch.split("/").pop() || wt.branch}
-                            </span>
+                            {wt.title && wt.title !== wt.branch && (
+                              <span
+                                className="font-mono text-[10px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground min-w-0 max-w-[120px] truncate"
+                                title={wt.branch}
+                              >
+                                {wt.branch.split("/").pop() || wt.branch}
+                              </span>
+                            )}
                           </>
                         )}
                         <span className="relative ml-auto shrink-0">

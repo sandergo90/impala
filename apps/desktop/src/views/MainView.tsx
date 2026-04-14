@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
 import { RightSidebar } from "../components/RightSidebar";
@@ -7,9 +7,17 @@ import { PlanView } from "../components/PlanView";
 import { SplitTreeRenderer } from "../components/SplitTreeRenderer";
 import {
   ResizablePanelGroup,
-  ResizablePanel,
+  ResizablePanel as RrpResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
+import { ResizablePanel } from "../components/ResizablePanel";
+
+const DEFAULT_SIDEBAR_WIDTH = 220;
+const MIN_SIDEBAR_WIDTH = 180;
+const MAX_SIDEBAR_WIDTH = 360;
+const DEFAULT_RIGHT_SIDEBAR_WIDTH = 300;
+const MIN_RIGHT_SIDEBAR_WIDTH = 220;
+const MAX_RIGHT_SIDEBAR_WIDTH = 500;
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { OpenInEditorButton } from "../components/OpenInEditorButton";
 import { invoke } from "@tauri-apps/api/core";
@@ -29,10 +37,11 @@ let cachedHomeDir: string | null = null;
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const sidebarSize = useUIStore((s) => s.sidebarSize);
-  const rightSidebarSize = useUIStore((s) => s.rightSidebarSize);
-  const sidebarResizeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const rightSidebarResizeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth) ?? DEFAULT_SIDEBAR_WIDTH;
+  const rightSidebarWidth =
+    useUIStore((s) => s.rightSidebarWidth) ?? DEFAULT_RIGHT_SIDEBAR_WIDTH;
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
+  const [isRightSidebarResizing, setIsRightSidebarResizing] = useState(false);
 
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const selectedProject = useUIStore((s) => s.selectedProject);
@@ -304,109 +313,99 @@ export function MainView() {
         }}
         highlighterOptions={{}}
       >
-        <div className="flex flex-1 min-h-0">
-          {sidebarCollapsed && (
+        <div className="flex flex-1 min-h-0 min-w-0">
+          {sidebarCollapsed ? (
             <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
+          ) : (
+            <ResizablePanel
+              width={sidebarWidth}
+              onWidthChange={(w) => useUIStore.getState().setSidebarWidth(w)}
+              isResizing={isSidebarResizing}
+              onResizingChange={setIsSidebarResizing}
+              minWidth={MIN_SIDEBAR_WIDTH}
+              maxWidth={MAX_SIDEBAR_WIDTH}
+              handleSide="right"
+              onDoubleClickHandle={() =>
+                useUIStore.getState().setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
+              }
+            >
+              <Sidebar />
+            </ResizablePanel>
           )}
-          <ResizablePanelGroup
-            key={`${sidebarCollapsed}-${showSidebar}`}
-            orientation="horizontal"
-            className="flex-1 min-h-0"
-          >
-            {/* Sidebar */}
-            {!sidebarCollapsed && (
-              <>
-                <ResizablePanel
-                  defaultSize={sidebarSize != null ? `${sidebarSize}%` : "15%"}
-                  minSize={140}
-                  maxSize={300}
-                  onResize={(size) => {
-                    clearTimeout(sidebarResizeTimer.current);
-                    sidebarResizeTimer.current = setTimeout(() => useUIStore.getState().setSidebarSize(size.asPercentage), 300);
-                  }}
-                >
-                  <Sidebar />
-                </ResizablePanel>
-                <ResizableHandle />
-              </>
-            )}
 
-            {/* Content — no defaultSize so it absorbs whatever remains */}
-            <ResizablePanel>
-              <div className="flex flex-col h-full">
-                {/* Tab content */}
-                <div className="flex-1 min-h-0">
-                  {!selectedWorktree ? (
-                    generalTerminalActive && homeDirPath ? (
-                      <SplitTreeRenderer
-                        tree={generalTerminalSplitTree}
-                        worktreePath={homeDirPath}
-                        cwd={homeDirPath}
-                        isGenericTerminal
-                        focusedPaneId={generalTerminalFocusedPaneId}
-                        paneSessions={generalTerminalPaneSessions}
-                        onFocusPane={handleGeneralTerminalFocusPane}
-                        onSessionSpawned={handleGeneralTerminalSessionSpawned}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                        Select a worktree
-                      </div>
-                    )
-                  ) : activeTab === "plan" ? (
-                    <PlanView />
-                  ) : activeTab === "split" ? (
-                    <ResizablePanelGroup orientation="horizontal">
-                      <ResizablePanel defaultSize="50%" minSize={200}>
-                        <WorktreeTerminals activeWorktreePath={wtPath!} claudeOnly />
-                      </ResizablePanel>
-                      <ResizableHandle withHandle />
-                      <ResizablePanel defaultSize="50%" minSize={200}>
-                        <DiffView />
-                      </ResizablePanel>
-                    </ResizablePanelGroup>
-                  ) : (
-                    <div className="relative h-full">
-                      {/* Solid bg — xterm's WebGL canvas is on its own GPU
-                          layer and doesn't reliably respect the parent's
-                          `visibility: hidden` under WebKit, so without a
-                          backdrop here it bleeds through the Diff view. */}
-                      <div
-                        className={`absolute inset-0 bg-background ${activeTab === "diff" ? "z-10" : "z-0 invisible"}`}
-                      >
-                        <DiffView />
-                      </div>
-                      <div className={`absolute inset-0 ${activeTab !== "diff" ? "z-10" : "z-0 invisible"}`}>
-                        <WorktreeTerminals
-                          activeWorktreePath={
-                            activeTab === "terminal" ? wtPath! : null
-                          }
-                        />
-                      </div>
-                    </div>
-                  )}
+          {/* Content */}
+          <div className="flex flex-1 min-w-0 min-h-0">
+            {!selectedWorktree ? (
+              generalTerminalActive && homeDirPath ? (
+                <SplitTreeRenderer
+                  tree={generalTerminalSplitTree}
+                  worktreePath={homeDirPath}
+                  cwd={homeDirPath}
+                  isGenericTerminal
+                  focusedPaneId={generalTerminalFocusedPaneId}
+                  paneSessions={generalTerminalPaneSessions}
+                  onFocusPane={handleGeneralTerminalFocusPane}
+                  onSessionSpawned={handleGeneralTerminalSessionSpawned}
+                />
+              ) : (
+                <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+                  Select a worktree
+                </div>
+              )
+            ) : activeTab === "plan" ? (
+              <div className="flex-1 min-w-0">
+                <PlanView />
+              </div>
+            ) : activeTab === "split" ? (
+              <ResizablePanelGroup orientation="horizontal">
+                <RrpResizablePanel defaultSize="50%" minSize={200}>
+                  <WorktreeTerminals activeWorktreePath={wtPath!} claudeOnly />
+                </RrpResizablePanel>
+                <ResizableHandle withHandle />
+                <RrpResizablePanel defaultSize="50%" minSize={200}>
+                  <DiffView />
+                </RrpResizablePanel>
+              </ResizablePanelGroup>
+            ) : (
+              <div className="relative flex-1 min-w-0">
+                {/* Solid bg — xterm's WebGL canvas is on its own GPU layer
+                    and doesn't reliably respect the parent's
+                    `visibility: hidden` under WebKit, so without a backdrop
+                    here it bleeds through the Diff view. */}
+                <div
+                  className={`absolute inset-0 bg-background ${activeTab === "diff" ? "z-10" : "z-0 invisible"}`}
+                >
+                  <DiffView />
+                </div>
+                <div className={`absolute inset-0 ${activeTab !== "diff" ? "z-10" : "z-0 invisible"}`}>
+                  <WorktreeTerminals
+                    activeWorktreePath={
+                      activeTab === "terminal" ? wtPath! : null
+                    }
+                  />
                 </div>
               </div>
-            </ResizablePanel>
-
-            {/* Right panel -- Changes/Commits */}
-            {showSidebar && !generalTerminalActive && (
-              <>
-                <ResizableHandle />
-                <ResizablePanel
-                  defaultSize={rightSidebarSize != null ? `${rightSidebarSize}%` : "20%"}
-                  minSize={180}
-                  maxSize={400}
-                  onResize={(size) => {
-                    clearTimeout(rightSidebarResizeTimer.current);
-                    rightSidebarResizeTimer.current = setTimeout(() => useUIStore.getState().setRightSidebarSize(size.asPercentage), 300);
-                  }}
-                >
-                  <RightSidebar />
-                </ResizablePanel>
-              </>
             )}
-          </ResizablePanelGroup>
+          </div>
+
+          {showSidebar && !generalTerminalActive && (
+            <ResizablePanel
+              width={rightSidebarWidth}
+              onWidthChange={(w) => useUIStore.getState().setRightSidebarWidth(w)}
+              isResizing={isRightSidebarResizing}
+              onResizingChange={setIsRightSidebarResizing}
+              minWidth={MIN_RIGHT_SIDEBAR_WIDTH}
+              maxWidth={MAX_RIGHT_SIDEBAR_WIDTH}
+              handleSide="left"
+              onDoubleClickHandle={() =>
+                useUIStore
+                  .getState()
+                  .setRightSidebarWidth(DEFAULT_RIGHT_SIDEBAR_WIDTH)
+              }
+            >
+              <RightSidebar />
+            </ResizablePanel>
+          )}
         </div>
       </WorkerPoolContextProvider>
     </>
