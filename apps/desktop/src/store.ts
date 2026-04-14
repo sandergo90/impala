@@ -15,9 +15,11 @@ function createDefaultNavState(): WorktreeNavState {
     selectedFile: null,
     activePlanId: null,
     selectedPlanAnnotationId: null,
-    activeTerminalsTab: "claude",
+    activeTerminalsTab: "tab-claude",
     setupRanAt: null,
     runStatus: "idle",
+    userTabs: [],
+    tabCounters: { terminal: 1, claude: 2 },
   };
 }
 

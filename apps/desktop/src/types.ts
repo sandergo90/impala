@@ -93,6 +93,17 @@ export type SplitNode =
       second: SplitNode;
     };
 
+export interface UserTab {
+  /** Stable ID, used as the paneId key (`tab-user-${id}`). Never reused. */
+  id: string;
+  /** What to run inside the tab. Terminal = shell; Claude = `claude` command. */
+  kind: "terminal" | "claude";
+  /** Display label shown on the tab. Auto-numbered at creation time (monotonic). */
+  label: string;
+  /** Creation timestamp; stable ordering. */
+  createdAt: number;
+}
+
 export interface WorktreeNavState {
   activeTab: "terminal" | "diff" | "split" | "plan";
   claudeLaunched: boolean;
@@ -101,12 +112,22 @@ export interface WorktreeNavState {
   selectedFile: ChangedFile | null;
   activePlanId: string | null;
   selectedPlanAnnotationId: string | null;
-  /** Which tab inside the terminals pane is active. */
-  activeTerminalsTab: "claude" | "run";
+  /**
+   * ID of the currently active tab inside the terminals pane.
+   * `"tab-claude"` and `"tab-run"` refer to the system tabs. Any other
+   * value is a user-tab ID from `userTabs`. On restore, if the ID no
+   * longer resolves to a visible tab, `TabbedTerminals` falls back to
+   * `"tab-claude"`.
+   */
+  activeTerminalsTab: string;
   /** Timestamp (ms) when the setup script was last auto-run; null if never. */
   setupRanAt: number | null;
   /** Status of the user-configured run script in the Run tab. */
   runStatus: "idle" | "running" | "stopping";
+  /** User-added tabs (plus button). Empty when the user hasn't created any. */
+  userTabs: UserTab[];
+  /** Next number to use when auto-labelling a new tab. Monotonic; never reset on close. */
+  tabCounters: { terminal: number; claude: number };
 }
 
 export interface WorktreeDataState {
