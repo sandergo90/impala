@@ -4,7 +4,6 @@ import { Outlet, useRouter, useMatchRoute } from "@tanstack/react-router";
 import { useInvoke } from "./hooks/useInvoke";
 import { useAppHotkey } from "./hooks/useAppHotkey";
 import { CommandPalette } from "./components/CommandPalette";
-import { FloatingTerminal } from "./components/FloatingTerminal";
 import { Toaster } from "./components/ui/sonner";
 import { UpdateChecker } from "./components/UpdateChecker";
 import { useUIStore, useDataStore } from "./store";
@@ -24,14 +23,6 @@ export function RootLayout() {
 
   const router = useRouter();
   const matchRoute = useMatchRoute();
-
-  const selectedWorktree = useUIStore((s) => s.selectedWorktree);
-  const wtPath = selectedWorktree?.path;
-
-  const activeTab = useUIStore((s) =>
-    wtPath ? s.getWorktreeNavState(wtPath).activeTab : null,
-  );
-  const isTerminalTab = activeTab === "terminal" || activeTab === "split";
 
   useEffect(() => {
     useHotkeysStore.getState().load();
@@ -86,16 +77,6 @@ export function RootLayout() {
         uiState.setGeneralTerminalSplitTree(result.tree);
         uiState.setGeneralTerminalFocusedPaneId(result.newLeafId);
       }
-    } else if (wtPath) {
-      const nav = uiState.getWorktreeNavState(wtPath);
-      if (nav.activeTab === "split") return;
-      const result = splitNode(nav.splitTree, nav.focusedPaneId, direction);
-      if (result) {
-        uiState.updateWorktreeNavState(wtPath, {
-          splitTree: result.tree,
-          focusedPaneId: result.newLeafId,
-        });
-      }
     }
   };
 
@@ -104,17 +85,13 @@ export function RootLayout() {
     if (uiState.generalTerminalActive) {
       const targetId = getAdjacentLeafId(uiState.generalTerminalSplitTree, uiState.generalTerminalFocusedPaneId, direction);
       uiState.setGeneralTerminalFocusedPaneId(targetId);
-    } else if (wtPath) {
-      const nav = uiState.getWorktreeNavState(wtPath);
-      const targetId = getAdjacentLeafId(nav.splitTree, nav.focusedPaneId, direction);
-      uiState.updateWorktreeNavState(wtPath, { focusedPaneId: targetId });
     }
   };
 
-  useAppHotkey("SPLIT_VERTICAL", () => handleSplit("vertical"), { enabled: isTerminalTab || generalTerminalActive }, [wtPath, generalTerminalActive]);
-  useAppHotkey("SPLIT_HORIZONTAL", () => handleSplit("horizontal"), { enabled: isTerminalTab || generalTerminalActive }, [wtPath, generalTerminalActive]);
-  useAppHotkey("NEXT_PANE", () => handleFocusAdjacentPane(1), { enabled: isTerminalTab || generalTerminalActive }, [wtPath, generalTerminalActive]);
-  useAppHotkey("PREV_PANE", () => handleFocusAdjacentPane(-1), { enabled: isTerminalTab || generalTerminalActive }, [wtPath, generalTerminalActive]);
+  useAppHotkey("SPLIT_VERTICAL", () => handleSplit("vertical"), { enabled: generalTerminalActive }, [generalTerminalActive]);
+  useAppHotkey("SPLIT_HORIZONTAL", () => handleSplit("horizontal"), { enabled: generalTerminalActive }, [generalTerminalActive]);
+  useAppHotkey("NEXT_PANE", () => handleFocusAdjacentPane(1), { enabled: generalTerminalActive }, [generalTerminalActive]);
+  useAppHotkey("PREV_PANE", () => handleFocusAdjacentPane(-1), { enabled: generalTerminalActive }, [generalTerminalActive]);
 
   useAppHotkey(
     "CLOSE_PANE",
@@ -144,47 +121,10 @@ export function RootLayout() {
           : newLeaves[0]?.id ?? "default";
         uiState.setGeneralTerminalSplitTree(newTree);
         uiState.setGeneralTerminalFocusedPaneId(newFocusId);
-      } else if (wtPath) {
-        const nav = uiState.getWorktreeNavState(wtPath);
-        const { focusedPaneId: focusedId, splitTree: tree } = nav;
-        const leaves = getLeaves(tree);
-        if (leaves.length <= 1) return; // don't close last pane
-
-        // Don't close Claude panes
-        const focusedLeaf = leaves.find((l) => l.id === focusedId);
-        if (focusedLeaf?.paneType === "claude") return;
-
-        // Determine adjacent pane BEFORE removing, so we know the neighbor
-        const adjacentId = getAdjacentLeafId(tree, focusedId, -1);
-
-        const newTree = removeNode(tree, focusedId);
-        if (!newTree) return;
-
-        // Kill the PTY session for the closed pane
-        const data = useDataStore.getState().getWorktreeDataState(wtPath);
-        const sessionId = data.paneSessions[focusedId];
-        if (sessionId) {
-          invoke("pty_kill", { sessionId }).catch(() => {});
-          const { [focusedId]: _, ...remaining } = data.paneSessions;
-          useDataStore
-            .getState()
-            .updateWorktreeDataState(wtPath, { paneSessions: remaining });
-        }
-
-        // Focus adjacent pane (fall back to first leaf if adjacent was the one removed)
-        const newLeaves = getLeaves(newTree);
-        const newLeafIds = new Set(newLeaves.map((l) => l.id));
-        const newFocusId = newLeafIds.has(adjacentId)
-          ? adjacentId
-          : newLeaves[0]?.id ?? "default";
-        uiState.updateWorktreeNavState(wtPath, {
-          splitTree: newTree,
-          focusedPaneId: newFocusId,
-        });
       }
     },
-    { enabled: isTerminalTab || generalTerminalActive },
-    [wtPath, generalTerminalActive],
+    { enabled: generalTerminalActive },
+    [generalTerminalActive],
   );
 
   // -- Worktree jump shortcuts (always active) --
@@ -224,7 +164,6 @@ export function RootLayout() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground flex flex-col">
       <Outlet />
-      <FloatingTerminal />
 
       <CommandPalette
         open={commandPaletteOpen}

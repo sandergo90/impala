@@ -95,8 +95,6 @@ export type SplitNode =
 
 export interface WorktreeNavState {
   activeTab: "terminal" | "diff" | "split" | "plan";
-  splitTree: SplitNode;
-  focusedPaneId: string;
   claudeLaunched: boolean;
   viewMode: "commit" | "all-changes" | "uncommitted";
   selectedCommit: CommitInfo | null;

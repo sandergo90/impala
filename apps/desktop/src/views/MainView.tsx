@@ -123,27 +123,6 @@ export function MainView() {
     }
   });
 
-  const handleFocusPane = useCallback(
-    (paneId: string) => {
-      if (!wtPath) return;
-      useUIStore
-        .getState()
-        .updateWorktreeNavState(wtPath, { focusedPaneId: paneId });
-    },
-    [wtPath]
-  );
-
-  const handleSessionSpawned = useCallback(
-    (paneId: string, sessionId: string) => {
-      if (!wtPath) return;
-      const current = useDataStore.getState().getWorktreeDataState(wtPath);
-      useDataStore.getState().updateWorktreeDataState(wtPath, {
-        paneSessions: { ...current.paneSessions, [paneId]: sessionId },
-      });
-    },
-    [wtPath]
-  );
-
   const handleGeneralTerminalFocusPane = useCallback((paneId: string) => {
     useUIStore.getState().setGeneralTerminalFocusedPaneId(paneId);
   }, []);
@@ -332,12 +311,7 @@ export function MainView() {
                   ) : activeTab === "split" ? (
                     <ResizablePanelGroup orientation="horizontal">
                       <ResizablePanel defaultSize="50%" minSize={200}>
-                        <WorktreeTerminals
-                          activeWorktreePath={wtPath!}
-                          onFocusPane={handleFocusPane}
-                          onSessionSpawned={handleSessionSpawned}
-                          claudeOnly
-                        />
+                        <WorktreeTerminals activeWorktreePath={wtPath!} claudeOnly />
                       </ResizablePanel>
                       <ResizableHandle withHandle />
                       <ResizablePanel defaultSize="50%" minSize={200}>
@@ -356,8 +330,6 @@ export function MainView() {
                           activeWorktreePath={
                             activeTab === "terminal" ? wtPath! : null
                           }
-                          onFocusPane={handleFocusPane}
-                          onSessionSpawned={handleSessionSpawned}
                         />
                       </div>
                     </div>

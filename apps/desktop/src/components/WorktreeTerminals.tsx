@@ -10,10 +10,6 @@ export function WorktreeTerminals({
   claudeOnly = false,
 }: {
   activeWorktreePath: string | null;
-  /** Unused after the tabs refactor. Retained so MainView's existing call sites keep compiling. */
-  onFocusPane?: (paneId: string) => void;
-  /** Unused after the tabs refactor. Retained so MainView's existing call sites keep compiling. */
-  onSessionSpawned?: (paneId: string, sessionId: string) => void;
   claudeOnly?: boolean;
 }) {
   const [visitedPaths, setVisitedPaths] = useState<Set<string>>(new Set());

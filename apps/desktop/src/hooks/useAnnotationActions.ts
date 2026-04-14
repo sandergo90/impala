@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { sqliteProvider } from "../providers/sqlite-provider";
-import { paneSessionId } from "../lib/split-tree";
 import type { Annotation } from "../types";
 
 function encodeForPty(text: string): string {
@@ -98,17 +97,7 @@ export function useAnnotationActions() {
     async (prompt: string) => {
       if (!worktreePath) return;
 
-      const paneSessions = useDataStore.getState().getWorktreeDataState(worktreePath).paneSessions;
-      const focusedPaneId = useUIStore.getState().getWorktreeNavState(worktreePath).focusedPaneId;
-      let sessionId = paneSessions[focusedPaneId] ?? Object.values(paneSessions)[0] ?? null;
-      if (!sessionId) {
-        sessionId = paneSessionId(focusedPaneId);
-        await invoke("pty_spawn", { sessionId, cwd: worktreePath });
-        useDataStore.getState().updateWorktreeDataState(worktreePath, {
-          paneSessions: { ...paneSessions, [focusedPaneId]: sessionId },
-        });
-      }
-
+      const sessionId = `pty-tab-claude-${worktreePath}`;
       await invoke("pty_write", { sessionId, data: encodeForPty(prompt + "\r") });
     },
     [worktreePath]

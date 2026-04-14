@@ -6,28 +6,9 @@ import { defaultDark } from "./themes/built-in";
 import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
 import { createLeaf } from "./lib/split-tree";
 
-export interface FloatingTerminalState {
-  mode: 'hidden' | 'expanded' | 'pill';
-  sessionId: string | null;
-  label: string;
-  type: 'setup' | 'run' | null;
-  status: 'running' | 'stopping' | 'stopped' | 'succeeded' | 'failed';
-}
-
-const defaultFloatingTerminal: FloatingTerminalState = {
-  mode: 'hidden',
-  sessionId: null,
-  label: '',
-  type: null,
-  status: 'running',
-};
-
 function createDefaultNavState(): WorktreeNavState {
-  const leaf = createLeaf("claude");
   return {
     activeTab: "terminal",
-    splitTree: leaf,
-    focusedPaneId: leaf.id,
     claudeLaunched: false,
     viewMode: "commit",
     selectedCommit: null,
@@ -80,13 +61,6 @@ interface UIState {
   removeCustomTheme: (id: string) => void;
   showResolved: boolean;
   setShowResolved: (show: boolean) => void;
-  floatingTerminals: Record<string, FloatingTerminalState>;
-  getFloatingTerminal: (worktreePath: string) => FloatingTerminalState;
-  setFloatingTerminal: (worktreePath: string, updates: Partial<FloatingTerminalState>) => void;
-  floatingTerminalSize: { width: number; height: number };
-  setFloatingTerminalSize: (size: { width: number; height: number }) => void;
-  floatingTerminalPosition: { x: number; y: number } | null;
-  setFloatingTerminalPosition: (pos: { x: number; y: number } | null) => void;
   linearApiKey: string;
   setLinearApiKey: (key: string) => void;
   preferredEditor: string;
@@ -136,7 +110,6 @@ export const useUIStore = create<UIState>()(
         const stored = get().worktreeNavStates[path];
         if (!stored) return createDefaultNavState();
         const defaults = createDefaultNavState();
-        // Merge with defaults to handle old persisted state missing new fields (splitTree, focusedPaneId)
         return {
           ...defaults,
           ...Object.fromEntries(Object.entries(stored).filter(([, v]) => v !== undefined)),
@@ -172,24 +145,6 @@ export const useUIStore = create<UIState>()(
       },
       showResolved: false,
       setShowResolved: (show) => set({ showResolved: show }),
-      floatingTerminals: {},
-      getFloatingTerminal: (worktreePath: string): FloatingTerminalState => {
-        return get().floatingTerminals[worktreePath] ?? defaultFloatingTerminal;
-      },
-      setFloatingTerminal: (worktreePath: string, updates: Partial<FloatingTerminalState>) =>
-        set((state) => {
-          const current = state.floatingTerminals[worktreePath] ?? { ...defaultFloatingTerminal };
-          return {
-            floatingTerminals: {
-              ...state.floatingTerminals,
-              [worktreePath]: { ...current, ...updates },
-            },
-          };
-        }),
-      floatingTerminalSize: { width: 500, height: 300 },
-      setFloatingTerminalSize: (size) => set({ floatingTerminalSize: size }),
-      floatingTerminalPosition: null,
-      setFloatingTerminalPosition: (pos) => set({ floatingTerminalPosition: pos }),
       linearApiKey: "",
       setLinearApiKey: (key) => set({ linearApiKey: key }),
       preferredEditor: "cursor",
@@ -226,10 +181,21 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
+      version: 1,
+      migrate: (persistedState: any, fromVersion: number) => {
+        if (fromVersion < 1 && persistedState?.worktreeNavStates) {
+          const cleaned: Record<string, any> = {};
+          for (const [path, nav] of Object.entries(persistedState.worktreeNavStates)) {
+            const { splitTree, focusedPaneId, ...rest } = nav as Record<string, unknown>;
+            cleaned[path] = rest;
+          }
+          persistedState.worktreeNavStates = cleaned;
+        }
+        return persistedState;
+      },
       partialize: (state) => {
         const {
           showResolved,
-          floatingTerminals,
           generalTerminalActive,
           previousWorktree,
           generalTerminalSplitTree,
