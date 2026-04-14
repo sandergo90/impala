@@ -32,6 +32,7 @@ import {
 import { ContextMenu } from "@/components/ui/context-menu";
 
 import { projectColor } from "../lib/utils";
+import { encodePtyInput } from "../lib/encode-pty";
 
 function ProjectBadge({ name, iconUrl }: { name: string; iconUrl?: string }) {
   const [iconError, setIconError] = useState(false);
@@ -1055,50 +1056,53 @@ export function Sidebar() {
             setWorktrees([...useDataStore.getState().worktrees, worktree]);
             selectWorktree(worktree);
 
-            // Run setup script if configured (fire-and-forget)
+            // Force the Terminal top-level tab + Run tab so the user sees setup running.
+            useUIStore.getState().updateWorktreeNavState(worktree.path, {
+              activeTab: "terminal",
+              activeTerminalsTab: "run",
+            });
+
+            // Run setup script if configured (fire-and-forget).
+            if (!selectedProject) return;
             invoke<{ setup?: string; run?: string }>("read_project_config", {
               projectPath: selectedProject.path,
             })
-              .then((config) => {
-                if (config.setup?.trim()) {
-                  const sessionId = `floating-setup-${Date.now()}`;
-                  invoke("pty_spawn", {
-                    sessionId,
+              .then(async (config) => {
+                if (!config.setup?.trim()) return;
+
+                const ptyId = `pty-tab-run-${worktree.path}`;
+                try {
+                  await invoke("pty_spawn", {
+                    sessionId: ptyId,
                     cwd: worktree.path,
                     envVars: {
                       IMPALA_PROJECT_PATH: selectedProject.path,
                       IMPALA_WORKTREE_PATH: worktree.path,
                       IMPALA_BRANCH: worktree.branch,
                     },
-                  })
-                    .then(() => {
-                      // Write the setup command into the interactive shell
-                      const encoded = btoa(
-                        Array.from(
-                          new TextEncoder().encode(config.setup + "\nexit $?\n"),
-                          (b) => String.fromCharCode(b),
-                        ).join(""),
-                      );
-                      invoke("pty_write", { sessionId, data: encoded }).catch(
-                        () => {},
-                      );
-                      useUIStore
-                        .getState()
-                        .setFloatingTerminal(worktree.path, {
-                          mode: "expanded",
-                          sessionId,
-                          label: "Setup",
-                          type: "setup",
-                          status: "running",
-                        });
-                    })
-                    .catch((e) => {
-                      toast.error(`Failed to run setup script: ${e}`);
-                    });
+                  });
+
+                  // Register the session so TabbedTerminals reuses it instead of re-spawning.
+                  const data = useDataStore
+                    .getState()
+                    .getWorktreeDataState(worktree.path);
+                  useDataStore.getState().updateWorktreeDataState(worktree.path, {
+                    paneSessions: { ...data.paneSessions, "tab-run": ptyId },
+                  });
+
+                  // Write the setup command into the interactive shell.
+                  const encoded = encodePtyInput(config.setup + "\n");
+                  await invoke("pty_write", { sessionId: ptyId, data: encoded });
+
+                  useUIStore.getState().updateWorktreeNavState(worktree.path, {
+                    setupRanAt: Date.now(),
+                  });
+                } catch (e) {
+                  toast.error(`Failed to run setup script: ${e}`);
                 }
               })
               .catch(() => {
-                // Silently ignore config read failures
+                // Silently ignore config read failures.
               });
           }}
           onCancel={() => setShowNewWorktree(false)}

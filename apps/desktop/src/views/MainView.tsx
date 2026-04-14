@@ -56,11 +56,11 @@ export function MainView() {
 
   const activeTab = navState?.activeTab ?? "diff";
 
-  const ft = useUIStore((s) =>
-    wtPath ? s.floatingTerminals[wtPath] : undefined
+  const runStatus = useUIStore((s) =>
+    wtPath ? s.worktreeNavStates[wtPath]?.runStatus ?? "idle" : "idle",
   );
-  const isRunning = ft?.type === "run" && ft?.status === "running";
-  const isStopping = ft?.type === "run" && ft?.status === "stopping";
+  const isRunning = runStatus === "running";
+  const isStopping = runStatus === "stopping";
 
   usePlanNotifications();
 

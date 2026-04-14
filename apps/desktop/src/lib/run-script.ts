@@ -1,64 +1,107 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { useUIStore } from "../store";
+import { useUIStore, useDataStore } from "../store";
 import { encodePtyInput } from "./encode-pty";
 
+const RUN_PANE_ID = "tab-run";
+
+function runPtySessionId(worktreePath: string): string {
+  return `pty-${RUN_PANE_ID}-${worktreePath}`;
+}
+
+/**
+ * Ensure the Run tab's PTY session exists. If TabbedTerminals has already lazy-spawned it,
+ * returns the existing session ID. Otherwise spawns a new one and registers it in the data store.
+ */
+export async function ensureRunTabSession(worktreePath: string): Promise<string> {
+  const data = useDataStore.getState().getWorktreeDataState(worktreePath);
+  const existing = data.paneSessions[RUN_PANE_ID];
+  if (existing) return existing;
+
+  const ptyId = runPtySessionId(worktreePath);
+  const project = useUIStore.getState().selectedProject;
+  await invoke("pty_spawn", {
+    sessionId: ptyId,
+    cwd: worktreePath,
+    envVars: {
+      IMPALA_PROJECT_PATH: project?.path ?? worktreePath,
+      IMPALA_WORKTREE_PATH: worktreePath,
+    },
+  });
+  useDataStore.getState().updateWorktreeDataState(worktreePath, {
+    paneSessions: { ...data.paneSessions, [RUN_PANE_ID]: ptyId },
+  });
+  return ptyId;
+}
+
+/**
+ * Send Ctrl+C to the Run tab's foreground process. Does not kill the PTY —
+ * the tab survives so the user can re-run.
+ */
 export async function stopRunScript() {
-  const { selectedWorktree, getFloatingTerminal, setFloatingTerminal } = useUIStore.getState();
-  if (!selectedWorktree) return;
+  const wt = useUIStore.getState().selectedWorktree;
+  if (!wt) return;
 
-  const ft = getFloatingTerminal(selectedWorktree.path);
-  if (ft.type !== "run" || !ft.sessionId) return;
-  if (ft.status !== "running") return;
+  const data = useDataStore.getState().getWorktreeDataState(wt.path);
+  const sessionId = data.paneSessions[RUN_PANE_ID];
+  if (!sessionId) return;
 
-  setFloatingTerminal(selectedWorktree.path, { status: "stopping", label: "Stopping..." });
+  const nav = useUIStore.getState().getWorktreeNavState(wt.path);
+  if (nav.runStatus !== "running") return;
+
+  useUIStore
+    .getState()
+    .updateWorktreeNavState(wt.path, { runStatus: "stopping" });
 
   const encoded = encodePtyInput("\x03");
-  await invoke("pty_write", { sessionId: ft.sessionId, data: encoded }).catch(() => {});
+  await invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
 
-  const sessionId = ft.sessionId;
-  const worktreePath = selectedWorktree.path;
-  setTimeout(async () => {
-    const current = useUIStore.getState().getFloatingTerminal(worktreePath);
-    if (current.sessionId === sessionId && current.status === "stopping") {
-      await invoke("pty_kill", { sessionId }).catch(() => {});
-      setFloatingTerminal(worktreePath, {
-        status: "stopped",
-        label: "Force stopped",
-      });
+  // Best-effort: assume the process accepts Ctrl+C and clear back to idle after a short delay.
+  // Real exit detection lands in Phase 3 alongside the status indicators.
+  const worktreePath = wt.path;
+  setTimeout(() => {
+    const current = useUIStore.getState().getWorktreeNavState(worktreePath);
+    if (current.runStatus === "stopping") {
+      useUIStore
+        .getState()
+        .updateWorktreeNavState(worktreePath, { runStatus: "idle" });
     }
-  }, 3000);
+  }, 1000);
 }
 
 export function toggleRunScript() {
-  const { selectedWorktree, getFloatingTerminal } = useUIStore.getState();
-  if (!selectedWorktree) return;
-
-  const ft = getFloatingTerminal(selectedWorktree.path);
-  if (ft.type === "run" && ft.status === "running") {
+  const wt = useUIStore.getState().selectedWorktree;
+  if (!wt) return;
+  const nav = useUIStore.getState().getWorktreeNavState(wt.path);
+  if (nav.runStatus === "running") {
     stopRunScript();
   } else {
     triggerRunScript();
   }
 }
 
+/**
+ * Run the configured run script in the Run tab. If the Run tab's PTY doesn't exist yet
+ * (e.g. the user hasn't visited the Terminal tab on this worktree), spawn it first.
+ * Writes the run command into the existing PTY rather than respawning, so scrollback survives.
+ */
 export async function triggerRunScript() {
-  const { selectedProject, selectedWorktree, getFloatingTerminal, setFloatingTerminal } = useUIStore.getState();
+  const project = useUIStore.getState().selectedProject;
+  const wt = useUIStore.getState().selectedWorktree;
+  if (!project || !wt) return;
 
-  if (!selectedProject || !selectedWorktree) return;
+  const nav = useUIStore.getState().getWorktreeNavState(wt.path);
 
-  const ft = getFloatingTerminal(selectedWorktree.path);
-
-  // Block if setup is running
-  if (ft.type === 'setup' && ft.mode !== 'hidden') {
-    toast("Setup in progress...");
+  // Block if setup is still running. setupRanAt is set after setup is dispatched,
+  // and runStatus stays "idle" until the user (or this function) sets it.
+  if (nav.setupRanAt && nav.runStatus === "running") {
+    toast("A run is already in progress");
     return;
   }
 
-  // Read project config
   let config: { setup?: string; run?: string };
   try {
-    config = await invoke("read_project_config", { projectPath: selectedProject.path });
+    config = await invoke("read_project_config", { projectPath: project.path });
   } catch {
     toast.error("Failed to read project config");
     return;
@@ -69,38 +112,22 @@ export async function triggerRunScript() {
     return;
   }
 
-  // Kill existing floating terminal session if any
-  if (ft.sessionId) {
-    await invoke("pty_kill", { sessionId: ft.sessionId }).catch(() => {});
-  }
-
-  // Spawn new session
-  const sessionId = `floating-run-${Date.now()}`;
   try {
-    await invoke("pty_spawn", {
-      sessionId,
-      cwd: selectedWorktree.path,
-      envVars: {
-        IMPALA_PROJECT_PATH: selectedProject.path,
-        IMPALA_WORKTREE_PATH: selectedWorktree.path,
-        IMPALA_BRANCH: selectedWorktree.branch,
-      },
+    const sessionId = await ensureRunTabSession(wt.path);
+
+    // Make sure the Run tab is visible and the Terminal top-level tab is active.
+    useUIStore.getState().updateWorktreeNavState(wt.path, {
+      activeTab: "terminal",
+      activeTerminalsTab: "run",
+      runStatus: "running",
     });
 
-    // Write the run command into the interactive shell
     const encoded = encodePtyInput(config.run + "\n");
     await invoke("pty_write", { sessionId, data: encoded });
-
-    const label = config.run.length > 30 ? config.run.slice(0, 30) + "..." : config.run;
-
-    setFloatingTerminal(selectedWorktree.path, {
-      mode: "expanded",
-      sessionId,
-      label,
-      type: "run",
-      status: "running",
-    });
   } catch (e) {
     toast.error(`Failed to run script: ${e}`);
+    useUIStore
+      .getState()
+      .updateWorktreeNavState(wt.path, { runStatus: "idle" });
   }
 }
