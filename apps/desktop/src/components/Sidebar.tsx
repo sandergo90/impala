@@ -743,7 +743,13 @@ export function Sidebar() {
             className="fixed inset-0 z-20"
             onClick={() => setShowDropdown(false)}
           />
-          <div className="absolute left-2.5 right-2.5 top-[52px] z-30 rounded-md border border-border bg-popover py-1 shadow-lg">
+          <div
+            className="absolute left-2.5 right-2.5 top-[42px] z-30 rounded-md border border-border py-1 shadow-2xl ring-1 ring-black/30"
+            style={{
+              background:
+                "color-mix(in srgb, var(--popover) 100%, white 6%)",
+            }}
+          >
             {projects.map((project) => (
               <div
                 key={project.path}
@@ -751,7 +757,7 @@ export function Sidebar() {
                   selectProject(project);
                   setShowDropdown(false);
                 }}
-                className="group flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent"
+                className="group flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-accent"
               >
                 <ProjectBadge
                   name={project.name}
@@ -771,7 +777,7 @@ export function Sidebar() {
               </div>
             ))}
             <div
-              className="border-t border-border mt-1 pt-1 flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-accent text-muted-foreground text-sm"
+              className="border-t border-border mt-1 pt-2 flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-accent text-muted-foreground text-sm"
               onClick={() => {
                 openProject();
                 setShowDropdown(false);
