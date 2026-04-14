@@ -103,6 +103,12 @@ export interface WorktreeNavState {
   selectedFile: ChangedFile | null;
   activePlanId: string | null;
   selectedPlanAnnotationId: string | null;
+  /** Which tab inside the terminals pane is active. */
+  activeTerminalsTab: "claude" | "run";
+  /** Timestamp (ms) when the setup script was last auto-run; null if never. */
+  setupRanAt: number | null;
+  /** Status of the user-configured run script in the Run tab. */
+  runStatus: "idle" | "running" | "stopping";
 }
 
 export interface WorktreeDataState {

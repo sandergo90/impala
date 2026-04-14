@@ -34,6 +34,9 @@ function createDefaultNavState(): WorktreeNavState {
     selectedFile: null,
     activePlanId: null,
     selectedPlanAnnotationId: null,
+    activeTerminalsTab: "claude",
+    setupRanAt: null,
+    runStatus: "idle",
   };
 }
 
