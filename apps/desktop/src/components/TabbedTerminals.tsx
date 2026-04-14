@@ -1,9 +1,23 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { XtermTerminal } from "./XtermTerminal";
 import { useUIStore, useDataStore } from "../store";
-import type { WorktreeIssue } from "../types";
+import type { UserTab, WorktreeIssue } from "../types";
 import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
 import {
@@ -20,6 +34,11 @@ import {
 } from "../lib/tab-actions";
 
 type TabKind = "terminal" | "claude";
+
+// Stable empty array — returning `[]` from the userTabs selector would create
+// a new reference every call, breaking Zustand's useSyncExternalStore snapshot
+// equality and triggering an infinite re-render loop.
+const EMPTY_USER_TABS: UserTab[] = [];
 
 interface ProjectConfig {
   setup?: string | null;
@@ -58,7 +77,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     (s) => s.worktreeNavStates[worktreePath]?.activeTerminalsTab ?? CLAUDE_PANE_ID,
   );
   const userTabs = useUIStore(
-    (s) => s.worktreeNavStates[worktreePath]?.userTabs ?? [],
+    (s) => s.worktreeNavStates[worktreePath]?.userTabs ?? EMPTY_USER_TABS,
   );
   const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
   const paneSessions = dataState?.paneSessions ?? {};
@@ -192,7 +211,28 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   const [menuOpen, setMenuOpen] = useState(false);
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState("");
-  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      // Require a 5px drag before activation so clicks on the label button
+      // and close button still register as clicks, not drags.
+      activationConstraint: { distance: 5 },
+    }),
+  );
+
+  const userTabIds = useMemo(() => userTabs.map((t) => t.id), [userTabs]);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over) return;
+      const fromId = String(active.id);
+      const toId = String(over.id);
+      if (fromId === toId) return;
+      reorderUserTabs(worktreePath, fromId, toId);
+    },
+    [worktreePath],
+  );
 
   const startRenaming = useCallback((tabId: string, currentLabel: string) => {
     setEditingTabId(tabId);
@@ -258,99 +298,104 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     );
   }
 
+  const renderTabInner = (t: TabDescriptor): ReactNode => (
+    <>
+      {editingTabId === t.id ? (
+        <input
+          autoFocus
+          value={editingLabel}
+          onChange={(e) => setEditingLabel(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitRename();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelRename();
+            }
+          }}
+          onBlur={commitRename}
+          onFocus={(e) => e.currentTarget.select()}
+          className="mx-3 my-1 w-24 bg-background border border-border rounded px-1 text-md font-medium outline-none focus:ring-1 focus:ring-primary"
+        />
+      ) : (
+        <button
+          onClick={() => setActive(t.id)}
+          onDoubleClick={() => {
+            if (!t.isSystem) startRenaming(t.id, t.label);
+          }}
+          className="px-3 py-1 text-md font-medium transition-colors flex items-center gap-1.5"
+        >
+          {t.label}
+          {t.id === RUN_PANE_ID && (
+            <RunStatusDot status={runStatus} exitCode={runExitCode} />
+          )}
+        </button>
+      )}
+      {!t.isSystem && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCloseUserTab(t.id);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="mr-1 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-background/50 transition-opacity"
+          aria-label={`Close ${t.label}`}
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M3 3L13 13M13 3L3 13"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      )}
+    </>
+  );
+
+  const systemTabs = tabs.filter((t) => t.isSystem);
+  const userTabDescriptors = tabs.filter((t) => !t.isSystem);
+
+  const baseTabClass = (t: TabDescriptor) =>
+    `group flex items-center ${
+      activeId === t.id
+        ? "text-foreground bg-accent"
+        : "text-muted-foreground hover:text-foreground"
+    } rounded-t`;
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex shrink-0 items-center gap-0.5 px-2 pt-1 border-b border-border/40">
-        {tabs.map((t) => (
-          <div
-            key={t.id}
-            draggable={!t.isSystem && editingTabId !== t.id}
-            onDragStart={(e) => {
-              if (t.isSystem) return;
-              e.dataTransfer.setData("text/x-impala-tab-id", t.id);
-              e.dataTransfer.effectAllowed = "move";
-            }}
-            onDragOver={(e) => {
-              if (t.isSystem) return;
-              if (!e.dataTransfer.types.includes("text/x-impala-tab-id")) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              if (dragOverTabId !== t.id) setDragOverTabId(t.id);
-            }}
-            onDragLeave={() => {
-              if (dragOverTabId === t.id) setDragOverTabId(null);
-            }}
-            onDrop={(e) => {
-              if (t.isSystem) return;
-              e.preventDefault();
-              const fromId = e.dataTransfer.getData("text/x-impala-tab-id");
-              setDragOverTabId(null);
-              if (fromId && fromId !== t.id) {
-                reorderUserTabs(worktreePath, fromId, t.id);
-              }
-            }}
-            onDragEnd={() => setDragOverTabId(null)}
-            className={`group flex items-center ${
-              activeId === t.id
-                ? "text-foreground bg-accent"
-                : "text-muted-foreground hover:text-foreground"
-            } rounded-t ${
-              dragOverTabId === t.id ? "ring-1 ring-primary" : ""
-            }`}
-          >
-            {editingTabId === t.id ? (
-              <input
-                autoFocus
-                value={editingLabel}
-                onChange={(e) => setEditingLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    commitRename();
-                  } else if (e.key === "Escape") {
-                    e.preventDefault();
-                    cancelRename();
-                  }
-                }}
-                onBlur={commitRename}
-                onFocus={(e) => e.currentTarget.select()}
-                className="mx-3 my-1 w-24 bg-background border border-border rounded px-1 text-md font-medium outline-none focus:ring-1 focus:ring-primary"
-              />
-            ) : (
-              <button
-                onClick={() => setActive(t.id)}
-                onDoubleClick={() => {
-                  if (!t.isSystem) startRenaming(t.id, t.label);
-                }}
-                className="px-3 py-1 text-md font-medium transition-colors flex items-center gap-1.5"
-              >
-                {t.label}
-                {t.id === RUN_PANE_ID && (
-                  <RunStatusDot status={runStatus} exitCode={runExitCode} />
-                )}
-              </button>
-            )}
-            {!t.isSystem && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCloseUserTab(t.id);
-                }}
-                className="mr-1 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-background/50 transition-opacity"
-                aria-label={`Close ${t.label}`}
-              >
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                  <path
-                    d="M3 3L13 13M13 3L3 13"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            )}
+        {systemTabs.map((t) => (
+          <div key={t.id} className={baseTabClass(t)}>
+            {renderTabInner(t)}
           </div>
         ))}
+
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={userTabIds}
+            strategy={horizontalListSortingStrategy}
+          >
+            {userTabDescriptors.map((t) => (
+              <SortableUserTab
+                key={t.id}
+                tabId={t.id}
+                disabled={editingTabId === t.id}
+                className={baseTabClass(t)}
+              >
+                {renderTabInner(t)}
+              </SortableUserTab>
+            ))}
+          </SortableContext>
+        </DndContext>
+
 
         <div className="relative flex items-center ml-1">
           <button
@@ -565,6 +610,38 @@ function TabBody({
       isFocused={isActive}
       onRestart={handleRestart}
     />
+  );
+}
+
+function SortableUserTab({
+  tabId,
+  disabled,
+  className,
+  children,
+}: {
+  tabId: string;
+  disabled: boolean;
+  className: string;
+  children: ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: tabId, disabled });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+    cursor: disabled ? undefined : "grab",
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={className}
+      {...attributes}
+      {...listeners}
+    >
+      {children}
+    </div>
   );
 }
 
