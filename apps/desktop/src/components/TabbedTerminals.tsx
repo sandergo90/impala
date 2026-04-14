@@ -12,7 +12,7 @@ import {
   userTabPaneId,
   runPtySessionId,
 } from "../lib/pane-ids";
-import { createUserTab, closeUserTab } from "../lib/tab-actions";
+import { createUserTab, closeUserTab, renameUserTab } from "../lib/tab-actions";
 
 type TabKind = "terminal" | "claude";
 
@@ -185,6 +185,26 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [editingLabel, setEditingLabel] = useState("");
+
+  const startRenaming = useCallback((tabId: string, currentLabel: string) => {
+    setEditingTabId(tabId);
+    setEditingLabel(currentLabel);
+  }, []);
+
+  const commitRename = useCallback(() => {
+    if (editingTabId !== null) {
+      renameUserTab(worktreePath, editingTabId, editingLabel);
+    }
+    setEditingTabId(null);
+    setEditingLabel("");
+  }, [worktreePath, editingTabId, editingLabel]);
+
+  const cancelRename = useCallback(() => {
+    setEditingTabId(null);
+    setEditingLabel("");
+  }, []);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const caretRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -244,15 +264,38 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                 : "text-muted-foreground hover:text-foreground"
             } rounded-t`}
           >
-            <button
-              onClick={() => setActive(t.id)}
-              className="px-3 py-1 text-md font-medium transition-colors flex items-center gap-1.5"
-            >
-              {t.label}
-              {t.id === RUN_PANE_ID && (
-                <RunStatusDot status={runStatus} exitCode={runExitCode} />
-              )}
-            </button>
+            {editingTabId === t.id ? (
+              <input
+                autoFocus
+                value={editingLabel}
+                onChange={(e) => setEditingLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitRename();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancelRename();
+                  }
+                }}
+                onBlur={commitRename}
+                onFocus={(e) => e.currentTarget.select()}
+                className="mx-3 my-1 w-24 bg-background border border-border rounded px-1 text-md font-medium outline-none focus:ring-1 focus:ring-primary"
+              />
+            ) : (
+              <button
+                onClick={() => setActive(t.id)}
+                onDoubleClick={() => {
+                  if (!t.isSystem) startRenaming(t.id, t.label);
+                }}
+                className="px-3 py-1 text-md font-medium transition-colors flex items-center gap-1.5"
+              >
+                {t.label}
+                {t.id === RUN_PANE_ID && (
+                  <RunStatusDot status={runStatus} exitCode={runExitCode} />
+                )}
+              </button>
+            )}
             {!t.isSystem && (
               <button
                 onClick={(e) => {

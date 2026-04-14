@@ -73,6 +73,26 @@ export function closeUserTab(
 }
 
 /**
+ * Rename a user tab. Silent no-op if `tabId` is not found or if `label.trim()`
+ * is empty (the caller should treat the empty case as "revert to previous label").
+ */
+export function renameUserTab(
+  worktreePath: string,
+  tabId: string,
+  label: string,
+): void {
+  const trimmed = label.trim();
+  if (!trimmed) return;
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  if (!nav.userTabs.some((t) => t.id === tabId)) return;
+  const next = nav.userTabs.map((t) =>
+    t.id === tabId ? { ...t, label: trimmed } : t,
+  );
+  uiState.updateWorktreeNavState(worktreePath, { userTabs: next });
+}
+
+/**
  * Return the ordered list of tab IDs currently visible: system tabs first, then user tabs.
  * Pure — no store writes. Used by hotkey handlers for prev/next navigation.
  */
