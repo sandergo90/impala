@@ -16,7 +16,11 @@ import {
 import { toggleRunScript } from "./lib/run-script";
 import { useHotkeysStore } from "./stores/hotkeys";
 import { selectWorktree } from "./hooks/useWorktreeActions";
-import { closeUserTab } from "./lib/tab-actions";
+import {
+  splitUserTabPane,
+  closeUserTabFocusedPane,
+  focusAdjacentUserTabPane,
+} from "./lib/tab-actions";
 import { CLAUDE_PANE_ID, RUN_PANE_ID } from "./lib/pane-ids";
 
 export function RootLayout() {
@@ -71,6 +75,20 @@ export function RootLayout() {
 
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
 
+  const selectedWorktreePath = useUIStore((s) => s.selectedWorktree?.path ?? null);
+  const worktreeActiveTab = useUIStore((s) =>
+    selectedWorktreePath
+      ? s.worktreeNavStates[selectedWorktreePath]?.activeTab ?? null
+      : null,
+  );
+  const worktreeActiveTabIsUser = useUIStore((s) => {
+    if (!selectedWorktreePath) return false;
+    const nav = s.worktreeNavStates[selectedWorktreePath];
+    if (!nav) return false;
+    const activeId = nav.activeTerminalsTab;
+    return nav.userTabs.some((t) => t.id === activeId);
+  });
+
   const handleSplit = (direction: "vertical" | "horizontal") => {
     const uiState = useUIStore.getState();
     if (uiState.generalTerminalActive) {
@@ -79,6 +97,12 @@ export function RootLayout() {
         uiState.setGeneralTerminalSplitTree(result.tree);
         uiState.setGeneralTerminalFocusedPaneId(result.newLeafId);
       }
+      return;
+    }
+
+    if (selectedWorktreePath && worktreeActiveTabIsUser) {
+      const nav = uiState.getWorktreeNavState(selectedWorktreePath);
+      splitUserTabPane(selectedWorktreePath, nav.activeTerminalsTab, direction);
     }
   };
 
@@ -87,20 +111,46 @@ export function RootLayout() {
     if (uiState.generalTerminalActive) {
       const targetId = getAdjacentLeafId(uiState.generalTerminalSplitTree, uiState.generalTerminalFocusedPaneId, direction);
       uiState.setGeneralTerminalFocusedPaneId(targetId);
+      return;
+    }
+
+    if (selectedWorktreePath && worktreeActiveTabIsUser) {
+      const nav = uiState.getWorktreeNavState(selectedWorktreePath);
+      focusAdjacentUserTabPane(selectedWorktreePath, nav.activeTerminalsTab, direction);
     }
   };
 
-  useAppHotkey("SPLIT_VERTICAL", () => handleSplit("vertical"), { enabled: generalTerminalActive }, [generalTerminalActive]);
-  useAppHotkey("SPLIT_HORIZONTAL", () => handleSplit("horizontal"), { enabled: generalTerminalActive }, [generalTerminalActive]);
-  useAppHotkey("NEXT_PANE", () => handleFocusAdjacentPane(1), { enabled: generalTerminalActive }, [generalTerminalActive]);
-  useAppHotkey("PREV_PANE", () => handleFocusAdjacentPane(-1), { enabled: generalTerminalActive }, [generalTerminalActive]);
+  const splitEnabled =
+    generalTerminalActive ||
+    (selectedWorktreePath !== null &&
+      worktreeActiveTab === "terminal" &&
+      worktreeActiveTabIsUser);
 
-  const selectedWorktreePath = useUIStore((s) => s.selectedWorktree?.path ?? null);
-  const worktreeActiveTab = useUIStore((s) =>
-    selectedWorktreePath
-      ? s.worktreeNavStates[selectedWorktreePath]?.activeTab ?? null
-      : null,
+  useAppHotkey(
+    "SPLIT_VERTICAL",
+    () => handleSplit("vertical"),
+    { enabled: splitEnabled },
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
   );
+  useAppHotkey(
+    "SPLIT_HORIZONTAL",
+    () => handleSplit("horizontal"),
+    { enabled: splitEnabled },
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+  );
+  useAppHotkey(
+    "NEXT_PANE",
+    () => handleFocusAdjacentPane(1),
+    { enabled: splitEnabled },
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+  );
+  useAppHotkey(
+    "PREV_PANE",
+    () => handleFocusAdjacentPane(-1),
+    { enabled: splitEnabled },
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+  );
+
   const closePaneEnabled =
     generalTerminalActive ||
     (selectedWorktreePath !== null && worktreeActiveTab === "terminal");
@@ -138,7 +188,7 @@ export function RootLayout() {
         const activeTabId = nav.activeTerminalsTab;
         if (activeTabId === CLAUDE_PANE_ID || activeTabId === RUN_PANE_ID) return;
         if (!nav.userTabs.some((t) => t.id === activeTabId)) return;
-        closeUserTab(selectedWorktreePath, activeTabId, { previousActive: null });
+        closeUserTabFocusedPane(selectedWorktreePath, activeTabId);
       }
     },
     { enabled: closePaneEnabled },
