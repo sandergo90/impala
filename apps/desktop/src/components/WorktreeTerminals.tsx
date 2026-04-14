@@ -1,18 +1,19 @@
-import { memo, useEffect, useState } from "react";
-import { SplitTreeRenderer } from "./SplitTreeRenderer";
-import { useUIStore, useDataStore } from "../store";
-import { getLeaves } from "../lib/split-tree";
+import { useEffect, useState } from "react";
+import { TabbedTerminals } from "./TabbedTerminals";
 
-/** Keeps all visited worktree terminals mounted (hidden when inactive) to avoid remounting */
+/**
+ * Keeps all visited worktree terminals mounted (hidden when inactive) to avoid remounting
+ * — same pattern as before, but each visited worktree now renders a TabbedTerminals.
+ */
 export function WorktreeTerminals({
   activeWorktreePath,
-  onFocusPane,
-  onSessionSpawned,
   claudeOnly = false,
 }: {
   activeWorktreePath: string | null;
-  onFocusPane: (paneId: string) => void;
-  onSessionSpawned: (paneId: string, sessionId: string) => void;
+  /** Unused after the tabs refactor. Retained so MainView's existing call sites keep compiling. */
+  onFocusPane?: (paneId: string) => void;
+  /** Unused after the tabs refactor. Retained so MainView's existing call sites keep compiling. */
+  onSessionSpawned?: (paneId: string, sessionId: string) => void;
   claudeOnly?: boolean;
 }) {
   const [visitedPaths, setVisitedPaths] = useState<Set<string>>(new Set());
@@ -40,11 +41,9 @@ export function WorktreeTerminals({
               pointerEvents: isActive ? "auto" : "none",
             }}
           >
-            <WorktreeTerminalPane
+            <TabbedTerminals
               worktreePath={path}
               isActive={isActive}
-              onFocusPane={onFocusPane}
-              onSessionSpawned={onSessionSpawned}
               claudeOnly={claudeOnly}
             />
           </div>
@@ -53,39 +52,3 @@ export function WorktreeTerminals({
     </div>
   );
 }
-
-const WorktreeTerminalPane = memo(function WorktreeTerminalPane({
-  worktreePath,
-  isActive,
-  onFocusPane,
-  onSessionSpawned,
-  claudeOnly = false,
-}: {
-  worktreePath: string;
-  isActive: boolean;
-  onFocusPane: (paneId: string) => void;
-  onSessionSpawned: (paneId: string, sessionId: string) => void;
-  claudeOnly?: boolean;
-}) {
-  // Subscribe to raw stored state to trigger re-renders when nav state changes
-  useUIStore((s) => s.worktreeNavStates[worktreePath]);
-  const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
-  // Compute merged nav state synchronously (getWorktreeNavState creates new objects, can't use in selector)
-  const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
-
-  const tree = claudeOnly
-    ? getLeaves(nav.splitTree).find((l) => l.paneType === "claude") ??
-      nav.splitTree
-    : nav.splitTree;
-
-  return (
-    <SplitTreeRenderer
-      tree={tree}
-      worktreePath={worktreePath}
-      focusedPaneId={isActive ? nav.focusedPaneId : ""}
-      paneSessions={dataState?.paneSessions ?? {}}
-      onFocusPane={onFocusPane}
-      onSessionSpawned={onSessionSpawned}
-    />
-  );
-});
