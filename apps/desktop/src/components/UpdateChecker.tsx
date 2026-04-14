@@ -1,10 +1,14 @@
 import { useEffect, useRef, useCallback } from "react";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const LAST_SEEN_VERSION_KEY = "impala:lastSeenVersion";
+const RELEASE_URL = "https://github.com/sandergo90/impala/releases/tag/v";
 
 export function UpdateChecker() {
   const checking = useRef(false);
@@ -56,6 +60,20 @@ export function UpdateChecker() {
   }, []);
 
   useEffect(() => {
+    getVersion().then((version) => {
+      const lastSeen = localStorage.getItem(LAST_SEEN_VERSION_KEY);
+      if (lastSeen && lastSeen !== version) {
+        toast(`Updated to v${version}`, {
+          duration: 10000,
+          action: {
+            label: "View changelog",
+            onClick: () => openUrl(`${RELEASE_URL}${version}`),
+          },
+        });
+      }
+      localStorage.setItem(LAST_SEEN_VERSION_KEY, version);
+    });
+
     // Check after a short delay on startup
     const initialTimeout = setTimeout(() => checkForUpdate(false), 5000);
     const interval = setInterval(() => checkForUpdate(false), CHECK_INTERVAL_MS);
