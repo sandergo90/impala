@@ -84,9 +84,10 @@ export function RootLayout() {
   const worktreeActiveTabIsUser = useUIStore((s) => {
     if (!selectedWorktreePath) return false;
     const nav = s.worktreeNavStates[selectedWorktreePath];
-    if (!nav) return false;
+    const userTabs = nav?.userTabs;
+    if (!userTabs || userTabs.length === 0) return false;
     const activeId = nav.activeTerminalsTab;
-    return nav.userTabs.some((t) => t.id === activeId);
+    return userTabs.some((t) => t.id === activeId);
   });
 
   const handleSplit = (direction: "vertical" | "horizontal") => {

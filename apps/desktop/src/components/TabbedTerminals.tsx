@@ -324,7 +324,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           }}
           onBlur={commitRename}
           onFocus={(e) => e.currentTarget.select()}
-          className="mx-3 my-1 w-24 bg-background border border-border rounded px-1 text-md font-medium outline-none focus:ring-1 focus:ring-primary"
+          className="mx-3 my-1.5 w-24 bg-background border border-border rounded px-1 text-[15px] font-medium outline-none focus:ring-1 focus:ring-primary"
         />
       ) : (
         <button
@@ -332,7 +332,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           onDoubleClick={() => {
             if (!t.isSystem) startRenaming(t.id, t.label);
           }}
-          className="px-3 py-1 text-md font-medium transition-colors flex items-center gap-1.5"
+          className="px-3.5 py-2 text-[15px] font-medium transition-colors flex items-center gap-1.5"
         >
           {t.label}
           {t.id === RUN_PANE_ID && (
@@ -375,7 +375,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex shrink-0 items-center gap-0.5 px-2 pt-1 border-b border-border/40">
+      <div className="flex shrink-0 items-center gap-0.5 px-2 pt-1.5 border-b border-border/40">
         {systemTabs.map((t) => (
           <div key={t.id} className={baseTabClass(t)}>
             {renderTabInner(t)}
@@ -644,16 +644,13 @@ function UserTabSplitRenderer({
   paneSessions: Record<string, string>;
   isActive: boolean;
 }) {
-  const tree = getEffectiveUserTabSplitTree(tab);
-  const focusedPaneId = getEffectiveUserTabFocusedPaneId(tab);
-
   return (
     <SplitNodeRenderer
-      node={tree}
-      tab={tab}
+      node={getEffectiveUserTabSplitTree(tab)}
+      tabId={tab.id}
       worktreePath={worktreePath}
       paneSessions={paneSessions}
-      focusedPaneId={focusedPaneId}
+      focusedPaneId={getEffectiveUserTabFocusedPaneId(tab)}
       isActive={isActive}
     />
   );
@@ -661,14 +658,14 @@ function UserTabSplitRenderer({
 
 function SplitNodeRenderer({
   node,
-  tab,
+  tabId,
   worktreePath,
   paneSessions,
   focusedPaneId,
   isActive,
 }: {
   node: SplitNode;
-  tab: UserTab;
+  tabId: string;
   worktreePath: string;
   paneSessions: Record<string, string>;
   focusedPaneId: string;
@@ -685,7 +682,7 @@ function SplitNodeRenderer({
           transition: "opacity 150ms ease",
         }}
         onMouseDownCapture={() => {
-          if (!isFocused) setUserTabFocusedPane(worktreePath, tab.id, node.id);
+          if (!isFocused) setUserTabFocusedPane(worktreePath, tabId, node.id);
         }}
       >
         <TabBody
@@ -700,28 +697,29 @@ function SplitNodeRenderer({
     );
   }
 
+  // SplitNode.orientation is the divider line; ResizablePanelGroup.orientation
+  // is the opposite (stacking axis). horizontal divider → vertical stack.
   const panelOrientation =
     node.orientation === "horizontal" ? "vertical" : "horizontal";
   const firstPercent = Math.round(node.ratio * 100);
-  const secondPercent = 100 - firstPercent;
 
   return (
     <ResizablePanelGroup orientation={panelOrientation} className="h-full w-full">
       <ResizablePanel defaultSize={`${firstPercent}%`} minSize={10}>
         <SplitNodeRenderer
           node={node.first}
-          tab={tab}
+          tabId={tabId}
           worktreePath={worktreePath}
           paneSessions={paneSessions}
           focusedPaneId={focusedPaneId}
           isActive={isActive}
         />
       </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel defaultSize={`${secondPercent}%`} minSize={10}>
+      <ResizableHandle withHandle />
+      <ResizablePanel defaultSize={`${100 - firstPercent}%`} minSize={10}>
         <SplitNodeRenderer
           node={node.second}
-          tab={tab}
+          tabId={tabId}
           worktreePath={worktreePath}
           paneSessions={paneSessions}
           focusedPaneId={focusedPaneId}
