@@ -29,7 +29,13 @@ export async function selectWorktree(wt: Worktree) {
           const match = patch.match(/^diff --git a\/(.*?) b\//);
           if (match) fileDiffs[match[1]] = patch;
         }
-        useDataStore.getState().updateWorktreeDataState(wt.path, { changedFiles: files, fileDiffs });
+        let additions = 0, deletions = 0;
+        for (const line of fullDiff.split("\n")) {
+          if (line.startsWith("+++") || line.startsWith("---")) continue;
+          if (line.startsWith("+")) additions++;
+          else if (line.startsWith("-")) deletions++;
+        }
+        useDataStore.getState().updateWorktreeDataState(wt.path, { changedFiles: files, fileDiffs, uncommittedStats: { additions, deletions } });
       } catch {
         // Non-critical
       }

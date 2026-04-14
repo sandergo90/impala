@@ -48,6 +48,8 @@ const defaultDataState: WorktreeDataState = {
   fileDiffs: {},
   fileDiffHashes: {},
   generatedFiles: [],
+  uncommittedStats: { additions: 0, deletions: 0 },
+  allChangesStats: { additions: 0, deletions: 0 },
   annotations: [],
   plans: [],
   planAnnotations: [],

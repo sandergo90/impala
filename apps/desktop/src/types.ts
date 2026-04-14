@@ -114,6 +114,8 @@ export interface WorktreeDataState {
   fileDiffs: Record<string, string>;
   fileDiffHashes: Record<string, string>;
   generatedFiles: string[];
+  uncommittedStats: { additions: number; deletions: number };
+  allChangesStats: { additions: number; deletions: number };
   annotations: Annotation[];
   plans: Plan[];
   planAnnotations: PlanAnnotation[];

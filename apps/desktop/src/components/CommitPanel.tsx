@@ -11,6 +11,17 @@ const statusColor: Record<string, string> = {
   M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
 };
 
+function countDiffStats(diff: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) additions++;
+    else if (line.startsWith("-")) deletions++;
+  }
+  return { additions, deletions };
+}
+
 function hashPatch(patch: string): string {
   const hunkStart = patch.indexOf("\n@@");
   const body = hunkStart >= 0 ? patch.slice(hunkStart) : patch;
@@ -35,6 +46,8 @@ export function CommitPanel() {
   const changedFiles = dataState?.changedFiles ?? [];
   const selectedFile = navState?.selectedFile ?? null;
   const viewMode = navState?.viewMode ?? 'commit';
+  const uncommittedStats = dataState?.uncommittedStats ?? { additions: 0, deletions: 0 };
+  const allChangesStats = dataState?.allChangesStats ?? { additions: 0, deletions: 0 };
 
   const updateNav = useCallback((updates: Partial<WorktreeNavState>) =>
     useUIStore.getState().updateWorktreeNavState(worktreePath, updates),
@@ -75,7 +88,7 @@ export function CommitPanel() {
         worktreePath,
         files: files.map(f => f.path),
       });
-      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
+      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
@@ -95,7 +108,7 @@ export function CommitPanel() {
         worktreePath,
         files: files.map(f => f.path),
       });
-      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
+      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles, uncommittedStats: countDiffStats(fullDiff) });
     } catch (e) {
       toast.error("Failed to load uncommitted changes");
     }
@@ -176,7 +189,7 @@ export function CommitPanel() {
           worktreePath,
           files: files.map(f => f.path),
         });
-        updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
+        updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles, uncommittedStats: countDiffStats(fullDiff) });
       } catch {
         // Silently fail on auto-refresh
       }
@@ -191,12 +204,17 @@ export function CommitPanel() {
           worktreePath,
           files: files.map(f => f.path),
         });
-        updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
+        updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
       } catch {
         // Silently fail on auto-refresh
       }
     }
   }, [viewMode, worktreePath, baseBranch, splitPatch, updateData]);
+
+  useEffect(() => {
+    if (!worktreePath) return;
+    refreshCurrentView();
+  }, [worktreePath, refreshCurrentView]);
 
   useEffect(() => {
     const safeId = worktreePath.replace(/[^a-zA-Z0-9\-_]/g, "-");
@@ -250,7 +268,16 @@ export function CommitPanel() {
           <div className={`text-sm font-medium ${viewMode === 'uncommitted' ? "text-foreground" : "text-muted-foreground"}`}>
             Uncommitted Changes
           </div>
-          <div className="text-sm text-muted-foreground/90 mt-0.5 font-mono">Working tree</div>
+          <div className="flex items-center gap-1 text-sm text-muted-foreground/90 mt-0.5 font-mono">
+            <span>Working tree</span>
+            {(uncommittedStats.additions > 0 || uncommittedStats.deletions > 0) && (
+              <span className="ml-auto">
+                <span className="text-green-500">+{uncommittedStats.additions}</span>
+                {" "}
+                <span className="text-red-500">-{uncommittedStats.deletions}</span>
+              </span>
+            )}
+          </div>
         </button>
 
         {/* All Changes */}
@@ -265,7 +292,16 @@ export function CommitPanel() {
           <div className={`text-sm font-medium ${viewMode === 'all-changes' ? "text-foreground" : "text-muted-foreground"}`}>
             All Changes
           </div>
-          <div className="text-sm text-muted-foreground/90 mt-0.5 font-mono">vs {baseBranch || "base"}</div>
+          <div className="flex items-center gap-1 text-sm text-muted-foreground/90 mt-0.5 font-mono">
+            <span>vs {baseBranch || "base"}</span>
+            {(allChangesStats.additions > 0 || allChangesStats.deletions > 0) && (
+              <span className="ml-auto">
+                <span className="text-green-500">+{allChangesStats.additions}</span>
+                {" "}
+                <span className="text-red-500">-{allChangesStats.deletions}</span>
+              </span>
+            )}
+          </div>
         </button>
 
         {/* Commits */}
