@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useUIStore, useDataStore } from "../store";
 import { CLAUDE_PANE_ID, RUN_PANE_ID, userTabPaneId } from "./pane-ids";
+import { releaseCachedTerminal } from "../components/XtermTerminal";
 import {
   splitNode,
   removeNode,
@@ -32,6 +33,7 @@ function killPaneSession(worktreePath: string, paneId: string): void {
   const sessionId = dataState.paneSessions[paneId];
   if (!sessionId) return;
   invoke("pty_kill", { sessionId }).catch(() => {});
+  releaseCachedTerminal(sessionId);
   const { [paneId]: _removed, ...remaining } = dataState.paneSessions;
   dataStore.updateWorktreeDataState(worktreePath, { paneSessions: remaining });
 }

@@ -15,7 +15,12 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { XtermTerminal } from "./XtermTerminal";
+import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 import { useUIStore, useDataStore } from "../store";
 import type { SplitNode, UserTab, WorktreeIssue } from "../types";
 import { encodePtyInput } from "../lib/encode-pty";
@@ -602,6 +607,7 @@ function TabBody({
   const handleRestart = useCallback(() => {
     if (!sessionId) return;
     invoke("pty_kill", { sessionId }).catch(() => {});
+    releaseCachedTerminal(sessionId);
     const data = useDataStore.getState().getWorktreeDataState(worktreePath);
     const { [paneId]: _removed, ...remaining } = data.paneSessions;
     useDataStore
@@ -628,49 +634,6 @@ function TabBody({
   );
 }
 
-// Flat list of leaves with absolute-positioned rects computed from the tree.
-// Rendering the leaves as keyed siblings (not nested under ResizablePanelGroup)
-// means a split doesn't force React to unmount the original leaf's subtree —
-// its TabBody and xterm instance survive the tree restructure. Without this,
-// zsh would emit its PROMPT_EOL_MARK ("%") after the SIGWINCH-induced prompt
-// redraw that follows the remount.
-//
-// Tradeoff vs General Terminal's SplitTreeRenderer: no drag-to-resize handles.
-// Splits always stay at 50/50 (SplitNode.ratio defaults to 0.5).
-type LeafRect = {
-  leaf: Extract<SplitNode, { type: "leaf" }>;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-};
-
-function collectLeafRects(
-  node: SplitNode,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  out: LeafRect[],
-): void {
-  if (node.type === "leaf") {
-    out.push({ leaf: node, x, y, w, h });
-    return;
-  }
-  // orientation is the divider line: "horizontal" = horizontal split line =
-  // panes stacked top/bottom; "vertical" = vertical split line = panes
-  // side-by-side.
-  if (node.orientation === "horizontal") {
-    const firstH = h * node.ratio;
-    collectLeafRects(node.first, x, y, w, firstH, out);
-    collectLeafRects(node.second, x, y + firstH, w, h - firstH, out);
-  } else {
-    const firstW = w * node.ratio;
-    collectLeafRects(node.first, x, y, firstW, h, out);
-    collectLeafRects(node.second, x + firstW, y, w - firstW, h, out);
-  }
-}
-
 function UserTabSplitRenderer({
   tab,
   worktreePath,
@@ -682,45 +645,89 @@ function UserTabSplitRenderer({
   paneSessions: Record<string, string>;
   isActive: boolean;
 }) {
-  const tree = getEffectiveUserTabSplitTree(tab);
-  const focusedPaneId = getEffectiveUserTabFocusedPaneId(tab);
-  const rects: LeafRect[] = [];
-  collectLeafRects(tree, 0, 0, 100, 100, rects);
+  return (
+    <SplitNodeRenderer
+      node={getEffectiveUserTabSplitTree(tab)}
+      tabId={tab.id}
+      worktreePath={worktreePath}
+      paneSessions={paneSessions}
+      focusedPaneId={getEffectiveUserTabFocusedPaneId(tab)}
+      isActive={isActive}
+    />
+  );
+}
+
+function SplitNodeRenderer({
+  node,
+  tabId,
+  worktreePath,
+  paneSessions,
+  focusedPaneId,
+  isActive,
+}: {
+  node: SplitNode;
+  tabId: string;
+  worktreePath: string;
+  paneSessions: Record<string, string>;
+  focusedPaneId: string;
+  isActive: boolean;
+}) {
+  if (node.type === "leaf") {
+    const isFocused = node.id === focusedPaneId;
+    const paneKind: TabKind = node.paneType === "claude" ? "claude" : "terminal";
+    return (
+      <div
+        className="h-full w-full relative"
+        style={{
+          opacity: isFocused || !isActive ? 1 : 0.6,
+          transition: "opacity 150ms ease",
+        }}
+        onMouseDownCapture={() => {
+          if (!isFocused) setUserTabFocusedPane(worktreePath, tabId, node.id);
+        }}
+      >
+        <TabBody
+          paneId={node.id}
+          kind={paneKind}
+          useContinueFlag={false}
+          worktreePath={worktreePath}
+          sessionId={paneSessions[node.id] ?? null}
+          isActive={isActive && isFocused}
+        />
+      </div>
+    );
+  }
+
+  // SplitNode.orientation is the divider line; ResizablePanelGroup.orientation
+  // is the opposite (stacking axis). horizontal divider → vertical stack.
+  const panelOrientation =
+    node.orientation === "horizontal" ? "vertical" : "horizontal";
+  const firstPercent = Math.round(node.ratio * 100);
 
   return (
-    <div className="relative h-full w-full">
-      {rects.map(({ leaf, x, y, w, h }) => {
-        const isFocused = leaf.id === focusedPaneId;
-        const paneKind: TabKind =
-          leaf.paneType === "claude" ? "claude" : "terminal";
-        return (
-          <div
-            key={leaf.id}
-            className="absolute"
-            style={{
-              left: `${x}%`,
-              top: `${y}%`,
-              width: `${w}%`,
-              height: `${h}%`,
-              opacity: isFocused || !isActive ? 1 : 0.6,
-              transition: "opacity 150ms ease",
-            }}
-            onMouseDownCapture={() => {
-              if (!isFocused) setUserTabFocusedPane(worktreePath, tab.id, leaf.id);
-            }}
-          >
-            <TabBody
-              paneId={leaf.id}
-              kind={paneKind}
-              useContinueFlag={false}
-              worktreePath={worktreePath}
-              sessionId={paneSessions[leaf.id] ?? null}
-              isActive={isActive && isFocused}
-            />
-          </div>
-        );
-      })}
-    </div>
+    <ResizablePanelGroup orientation={panelOrientation} className="h-full w-full">
+      <ResizablePanel defaultSize={`${firstPercent}%`} minSize={10}>
+        <SplitNodeRenderer
+          node={node.first}
+          tabId={tabId}
+          worktreePath={worktreePath}
+          paneSessions={paneSessions}
+          focusedPaneId={focusedPaneId}
+          isActive={isActive}
+        />
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+      <ResizablePanel defaultSize={`${100 - firstPercent}%`} minSize={10}>
+        <SplitNodeRenderer
+          node={node.second}
+          tabId={tabId}
+          worktreePath={worktreePath}
+          paneSessions={paneSessions}
+          focusedPaneId={focusedPaneId}
+          isActive={isActive}
+        />
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }
 

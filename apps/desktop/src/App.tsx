@@ -22,6 +22,7 @@ import {
   focusAdjacentUserTabPane,
 } from "./lib/tab-actions";
 import { CLAUDE_PANE_ID, RUN_PANE_ID } from "./lib/pane-ids";
+import { releaseCachedTerminal } from "./components/XtermTerminal";
 
 export function RootLayout() {
   const { loading: checking, error: gitError } = useInvoke("check_git");
@@ -173,6 +174,7 @@ export function RootLayout() {
         const sessionId = useDataStore.getState().generalTerminalPaneSessions[focusedId];
         if (sessionId) {
           invoke("pty_kill", { sessionId }).catch(() => {});
+          releaseCachedTerminal(sessionId);
           const { [focusedId]: _, ...remaining } = useDataStore.getState().generalTerminalPaneSessions;
           useDataStore.getState().setGeneralTerminalPaneSessions(remaining);
         }

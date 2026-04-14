@@ -36,7 +36,6 @@ let webglDisabled = false;
  */
 function toXtermFontFamily(custom: string | null): string {
   if (!custom) return DEFAULT_TERMINAL_FONT_FAMILY;
-  // Already looks like a CSS list with fallbacks — use as-is
   if (custom.includes(",")) return custom;
   return `"${custom}", monospace`;
 }
@@ -44,6 +43,274 @@ function toXtermFontFamily(custom: string | null): string {
 function getTerminalTheme() {
   const state = useUIStore.getState();
   return resolveThemeById(state.activeThemeId, state.customThemes).terminal;
+}
+
+// ---------------------------------------------------------------------------
+// Cached xterm instances
+//
+// When the React tree that hosts a TabBody restructures (e.g. splitting a
+// user tab from 1 leaf to 2 inside a ResizablePanelGroup), React unmounts
+// and remounts the TabBody subtree. Without caching, each remount disposes
+// the xterm Terminal and recreates it, which means:
+//  - a fresh pty_resize fires SIGWINCH at the shell, and zsh draws its
+//    PROMPT_EOL_MARK (`%`) before the new prompt;
+//  - the buffer replay flickers;
+//  - a new WebGL context is allocated and may push the other terminals
+//    over the browser cap.
+//
+// Mirrors the superset terminal cache pattern: the wrapper <div> that xterm
+// was opened on is kept alive at module level, parked on document.body when
+// detached, and appendChild'd into the next host container on re-attach.
+// PTY output/exit listeners and the hidden-state focus handling also live in
+// the cache so they survive unmounts.
+// ---------------------------------------------------------------------------
+
+interface CachedTerminal {
+  sessionId: string;
+  terminal: Terminal;
+  fitAddon: FitAddon;
+  searchAddon: SearchAddon;
+  webglAddon: WebglAddon | null;
+  wrapper: HTMLDivElement;
+  linkDisposable: { dispose(): void } | null;
+  onDataDisposable: { dispose(): void } | null;
+  onResizeDisposable: { dispose(): void } | null;
+  unlistenOutput: UnlistenFn | null;
+  unlistenExit: UnlistenFn | null;
+  unlistenDragDrop: UnlistenFn | null;
+  baseDirRef: { current: string | null };
+  exitedRef: { current: boolean };
+  exitCode: number | null;
+  onExitHandler: ((code: number) => void) | null;
+  writeQueue: Uint8Array[];
+  writeScheduled: boolean;
+  isFocusedRef: { current: boolean };
+}
+
+const terminalCache = new Map<string, CachedTerminal>();
+
+function decodeBase64(encoded: string): Uint8Array {
+  const binaryStr = atob(encoded);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function createCachedTerminal(
+  sessionId: string,
+  scrollback: number,
+): Promise<CachedTerminal> {
+  const uiState = useUIStore.getState();
+  const fontFamily = toXtermFontFamily(uiState.terminalFontFamily);
+  const fontSize =
+    uiState.terminalFontSize ?? uiState.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
+
+  const terminal = new Terminal({
+    scrollback,
+    cursorBlink: true,
+    cursorStyle: "bar",
+    fontSize,
+    fontFamily,
+    theme: getTerminalTheme(),
+    allowProposedApi: true,
+  });
+
+  const fitAddon = new FitAddon();
+  const searchAddon = new SearchAddon();
+  terminal.loadAddon(fitAddon);
+  terminal.loadAddon(searchAddon);
+
+  // Detached wrapper — xterm.open() mutates this div, then we appendChild it
+  // into whichever component container currently hosts this session.
+  const wrapper = document.createElement("div");
+  wrapper.className = "h-full w-full";
+  wrapper.style.padding = "4px";
+  terminal.open(wrapper);
+
+  const baseDirRef = { current: null as string | null };
+  const linkDisposable = terminal.registerLinkProvider(
+    createFileLinkProvider(terminal, () => baseDirRef.current),
+  );
+
+  let webglAddon: WebglAddon | null = null;
+  if (!webglDisabled) {
+    try {
+      webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglDisabled = true;
+        webglAddon?.dispose();
+        webglAddon = null;
+      });
+      terminal.loadAddon(webglAddon);
+    } catch {
+      webglDisabled = true;
+      webglAddon = null;
+    }
+  }
+
+  const entry: CachedTerminal = {
+    sessionId,
+    terminal,
+    fitAddon,
+    searchAddon,
+    webglAddon,
+    wrapper,
+    linkDisposable,
+    onDataDisposable: null,
+    onResizeDisposable: null,
+    unlistenOutput: null,
+    unlistenExit: null,
+    unlistenDragDrop: null,
+    baseDirRef,
+    exitedRef: { current: false },
+    exitCode: null,
+    onExitHandler: null,
+    writeQueue: [],
+    writeScheduled: false,
+    isFocusedRef: { current: true },
+  };
+
+  function writeToPty(text: string) {
+    if (entry.exitedRef.current) return;
+    const encoded = encodePtyInput(text);
+    invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
+  }
+
+  entry.onDataDisposable = terminal.onData((data: string) => writeToPty(data));
+  entry.onResizeDisposable = terminal.onResize(({ cols, rows }) => {
+    if (entry.exitedRef.current) return;
+    invoke("pty_resize", { sessionId, rows, cols }).catch(() => {});
+  });
+
+  terminal.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown") return true;
+    if (e.metaKey || e.ctrlKey) {
+      const effectiveMap = useHotkeysStore.getState().getEffectiveMap();
+      for (const keys of Object.values(effectiveMap)) {
+        if (keys && matchesHotkeyEvent(e, keys)) return false;
+      }
+    }
+    if (e.key === "Enter" && e.shiftKey) {
+      writeToPty("\x1b[13;2u");
+      return false;
+    }
+    return true;
+  });
+
+  // Replay the accumulated scrollback. New sessions will return an empty
+  // buffer.
+  try {
+    const buffered = await invoke<string>("pty_get_buffer", { sessionId });
+    if (buffered) {
+      const bytes = decodeBase64(buffered);
+      if (bytes.length > 0) {
+        terminal.clear();
+        terminal.write(bytes);
+      }
+    }
+  } catch {
+    // Buffer may not exist yet for new sessions
+  }
+
+  const safeId = sanitizeEventId(sessionId);
+
+  function flushWriteQueue() {
+    entry.writeScheduled = false;
+    if (entry.writeQueue.length === 0) return;
+    const viewport = wrapper.querySelector(".xterm-viewport") as HTMLElement | null;
+    let wasAtBottom = true;
+    let savedScrollTop = 0;
+    if (viewport) {
+      savedScrollTop = viewport.scrollTop;
+      wasAtBottom =
+        viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 5;
+    }
+    for (const chunk of entry.writeQueue) terminal.write(chunk);
+    entry.writeQueue = [];
+    if (!wasAtBottom && viewport) viewport.scrollTop = savedScrollTop;
+  }
+
+  entry.unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
+    entry.writeQueue.push(decodeBase64(event.payload));
+    if (!entry.writeScheduled) {
+      entry.writeScheduled = true;
+      requestAnimationFrame(flushWriteQueue);
+    }
+  });
+
+  entry.unlistenExit = await listen<number>(`pty-exit-${safeId}`, (event) => {
+    entry.exitedRef.current = true;
+    entry.exitCode = event.payload;
+    entry.onExitHandler?.(event.payload);
+  });
+
+  entry.unlistenDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
+    if (event.payload.type !== "drop" || !entry.isFocusedRef.current) return;
+    if (!wrapper.isConnected) return;
+    const text = event.payload.paths
+      .map((p) => (p.includes(" ") ? `'${p}'` : p))
+      .join(" ");
+    writeToPty(text);
+  });
+
+  return entry;
+}
+
+function disposeCachedTerminal(entry: CachedTerminal) {
+  entry.linkDisposable?.dispose();
+  entry.onDataDisposable?.dispose();
+  entry.onResizeDisposable?.dispose();
+  entry.unlistenOutput?.();
+  entry.unlistenExit?.();
+  entry.unlistenDragDrop?.();
+  entry.webglAddon?.dispose();
+  entry.terminal.dispose();
+  entry.wrapper.remove();
+  terminalCache.delete(entry.sessionId);
+}
+
+/**
+ * Drop a cached terminal for a sessionId that will never be rendered again
+ * (e.g. when the underlying PTY is killed via `pty_kill`). Callers in
+ * tab-actions and elsewhere should call this alongside the kill so the xterm
+ * instance releases its resources. Safe no-op if there is no cache entry.
+ */
+export function releaseCachedTerminal(sessionId: string) {
+  const entry = terminalCache.get(sessionId);
+  if (entry) disposeCachedTerminal(entry);
+}
+
+// Subscribe once at module load so theme/font changes propagate to every
+// cached terminal, not just currently-mounted ones.
+{
+  let prevThemeId = useUIStore.getState().activeThemeId;
+  let prevFontSize =
+    useUIStore.getState().terminalFontSize ?? useUIStore.getState().fontSize;
+  let prevFontFamily = useUIStore.getState().terminalFontFamily;
+  useUIStore.subscribe((state) => {
+    const themeChanged = state.activeThemeId !== prevThemeId;
+    const effectiveSize =
+      state.terminalFontSize ?? state.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
+    const sizeChanged = effectiveSize !== prevFontSize;
+    const familyChanged = state.terminalFontFamily !== prevFontFamily;
+    if (!themeChanged && !sizeChanged && !familyChanged) return;
+    prevThemeId = state.activeThemeId;
+    prevFontSize = effectiveSize;
+    prevFontFamily = state.terminalFontFamily;
+    const theme = getTerminalTheme();
+    const fontFamily = toXtermFontFamily(state.terminalFontFamily);
+    for (const entry of terminalCache.values()) {
+      if (themeChanged) entry.terminal.options.theme = theme;
+      if (sizeChanged) entry.terminal.options.fontSize = effectiveSize;
+      if (familyChanged) entry.terminal.options.fontFamily = fontFamily;
+      if (sizeChanged || familyChanged) {
+        entry.webglAddon?.clearTextureAtlas();
+        entry.fitAddon.fit();
+      }
+    }
+  });
 }
 
 interface XtermTerminalProps {
@@ -55,36 +322,28 @@ interface XtermTerminalProps {
   scrollback?: number;
 }
 
-function decodeBase64(encoded: string): Uint8Array {
-  const binaryStr = atob(encoded);
-  const bytes = new Uint8Array(binaryStr.length);
-  for (let i = 0; i < binaryStr.length; i++) {
-    bytes[i] = binaryStr.charCodeAt(i);
-  }
-  return bytes;
-}
-
-export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, onRestart, scrollback = 10000 }: XtermTerminalProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const webglAddonRef = useRef<WebglAddon | null>(null);
-  const searchAddonRef = useRef<SearchAddon | null>(null);
+export function XtermTerminal({
+  sessionId,
+  baseDir,
+  isFocused = true,
+  onFocus,
+  onRestart,
+  scrollback = 10000,
+}: XtermTerminalProps) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const entryRef = useRef<CachedTerminal | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const isFocusedRef = useRef(isFocused);
-  isFocusedRef.current = isFocused;
-  const exitedRef = useRef(false);
   const [loading, setLoading] = useState(true);
-  const [exited, setExited] = useState<number | null>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [exited, setExited] = useState<number | null>(null);
   const termBg = useUIStore(
-    (s) => resolveThemeById(s.activeThemeId, s.customThemes).terminal.background
+    (s) => resolveThemeById(s.activeThemeId, s.customThemes).terminal.background,
   );
 
   useAppHotkey(
     "CLEAR_TERMINAL",
-    () => { terminalRef.current?.clear(); },
+    () => entryRef.current?.terminal.clear(),
     { enabled: isFocused },
   );
 
@@ -97,45 +356,92 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
     { enabled: isFocused },
   );
 
+  // Attach / detach the cached wrapper to the host container.
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
+    const host = hostRef.current;
+    if (!host) return;
     let cancelled = false;
-    let terminal: Terminal | null = null;
-    let fitAddon: FitAddon | null = null;
-    let webglAddon: WebglAddon | null = null;
     let resizeObserver: ResizeObserver | null = null;
-    let resizeDisposable: { dispose(): void } | null = null;
-    let dataDisposable: { dispose(): void } | null = null;
-    let linkDisposable: { dispose(): void } | null = null;
-    let unlistenOutput: UnlistenFn | null = null;
-    let unlistenExit: UnlistenFn | null = null;
-    let unlistenDragDrop: UnlistenFn | null = null;
+    let attachedEntry: CachedTerminal | null = null;
 
-    function writeToPty(text: string) {
-      if (exitedRef.current) return;
-      const encoded = encodePtyInput(text);
-      invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
-    }
+    const attach = async () => {
+      let entry = terminalCache.get(sessionId);
+      if (!entry) {
+        entry = await createCachedTerminal(sessionId, scrollback);
+        if (cancelled) {
+          disposeCachedTerminal(entry);
+          return;
+        }
+        terminalCache.set(sessionId, entry);
+      }
+      attachedEntry = entry;
+      entryRef.current = entry;
 
-    getCurrentWebview().onDragDropEvent((event) => {
-      if (cancelled) return;
-      if (event.payload.type !== "drop" || !isFocusedRef.current) return;
-      if (!container.checkVisibility()) return;
-      const text = event.payload.paths
-        .map((p) => (p.includes(" ") ? `'${p}'` : p))
-        .join(" ");
-      writeToPty(text);
-    }).then((fn) => {
-      if (cancelled) fn();  // immediately unlisten if effect already cleaned up
-      else unlistenDragDrop = fn;
+      host.appendChild(entry.wrapper);
+      // fit() only emits onResize (which drives pty_resize) when the
+      // dimensions actually change. Same-size re-attaches don't SIGWINCH the
+      // shell, so zsh doesn't redraw its prompt with PROMPT_EOL_MARK.
+      entry.fitAddon.fit();
+      entry.terminal.refresh(0, Math.max(0, entry.terminal.rows - 1));
+
+      let rafPending = false;
+      resizeObserver = new ResizeObserver(() => {
+        if (rafPending) return;
+        rafPending = true;
+        requestAnimationFrame(() => {
+          rafPending = false;
+          entry?.fitAddon.fit();
+        });
+      });
+      resizeObserver.observe(host);
+
+      entry.onExitHandler = (code) => setExited(code);
+      if (entry.exitCode !== null) setExited(entry.exitCode);
+
+      setLoading(false);
+    };
+
+    attach().catch((err) => {
+      console.error("Terminal setup failed:", err);
+      if (!cancelled) setLoading(false);
     });
 
-    const interceptKeys = (e: KeyboardEvent) => {
+    return () => {
+      cancelled = true;
+      resizeObserver?.disconnect();
+      if (attachedEntry) {
+        attachedEntry.onExitHandler = null;
+        // Park the wrapper outside the DOM. Keeping the instance alive is the
+        // whole point of the cache.
+        attachedEntry.wrapper.remove();
+      }
+      entryRef.current = null;
+    };
+  }, [sessionId, scrollback]);
+
+  // Keep the cached baseDir in sync so the link provider can resolve paths
+  // after the prop changes without tearing down the terminal.
+  useEffect(() => {
+    const entry = entryRef.current;
+    if (entry) entry.baseDirRef.current = baseDir ?? null;
+  }, [baseDir, sessionId]);
+
+  // onFocus handler lives on the host container (not the cached wrapper) so
+  // each mount gets its own callback.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !onFocus) return;
+    host.addEventListener("mousedown", onFocus);
+    return () => host.removeEventListener("mousedown", onFocus);
+  }, [onFocus]);
+
+  // Hotkey capture on the host container. Stops bubbling so xterm's internal
+  // listener can't also process a key that matches a registered app hotkey.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const handler = (e: KeyboardEvent) => {
       if (!e.metaKey && !e.ctrlKey) return;
-      // Dynamically check if the event matches any registered hotkey.
-      // This ensures rebinds in settings are respected by the terminal.
       const effectiveMap = useHotkeysStore.getState().getEffectiveMap();
       for (const keys of Object.values(effectiveMap)) {
         if (keys && matchesHotkeyEvent(e, keys)) {
@@ -144,280 +450,29 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
         }
       }
     };
-    container.addEventListener("keydown", interceptKeys, true);
-
-    if (onFocus) {
-      container.addEventListener("mousedown", onFocus);
-    }
-
-    const setup = async () => {
-      if (cancelled) return;
-
-      const uiState = useUIStore.getState();
-      const fontFamily = toXtermFontFamily(uiState.terminalFontFamily);
-
-      terminal = new Terminal({
-        scrollback,
-        cursorBlink: true,
-        cursorStyle: "bar",
-        fontSize: uiState.terminalFontSize ?? uiState.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE,
-        fontFamily,
-        theme: getTerminalTheme(),
-        allowProposedApi: true,
-      });
-
-      terminalRef.current = terminal;
-
-      fitAddon = new FitAddon();
-      fitAddonRef.current = fitAddon;
-      const searchAddon = new SearchAddon();
-      terminal.loadAddon(fitAddon);
-      terminal.loadAddon(searchAddon);
-      searchAddonRef.current = searchAddon;
-      terminal.open(container);
-
-      const baseDirRef = { current: baseDir ?? null };
-      linkDisposable = terminal.registerLinkProvider(
-        createFileLinkProvider(terminal, () => baseDirRef.current),
-      );
-
-      // WebGL must be loaded after open(). Browsers cap active WebGL contexts
-      // (~16); once we lose one or fail to init, skip WebGL for all future
-      // terminals so the DOM renderer takes over silently. Mirrors VS Code /
-      // superset.
-      if (!webglDisabled) {
-        try {
-          webglAddon = new WebglAddon();
-          webglAddon.onContextLoss(() => {
-            webglDisabled = true;
-            webglAddon?.dispose();
-            webglAddon = null;
-            webglAddonRef.current = null;
-          });
-          terminal.loadAddon(webglAddon);
-          webglAddonRef.current = webglAddon;
-        } catch {
-          webglDisabled = true;
-          webglAddon = null;
-        }
-      }
-
-      if (cancelled) {
-        terminal.dispose();
-        return;
-      }
-
-      setLoading(false);
-
-      fitAddon.fit();
-
-      try {
-        const buffered = await invoke<string>("pty_get_buffer", { sessionId });
-        if (buffered && !cancelled) {
-          const bytes = decodeBase64(buffered);
-          if (bytes.length > 0) {
-            terminal.clear();
-            terminal.write(bytes);
-          }
-        }
-      } catch {
-        // Buffer may not exist yet for new sessions
-      }
-
-      if (cancelled) {
-        terminal?.dispose();
-        return;
-      }
-
-      // Resize PTY to match terminal — sends SIGWINCH for TUI app redraw
-      const dims = fitAddon.proposeDimensions();
-      if (dims) {
-        await invoke("pty_resize", {
-          sessionId,
-          rows: dims.rows,
-          cols: dims.cols,
-        });
-      }
-
-      let rafPending = false;
-      resizeObserver = new ResizeObserver(() => {
-        if (!rafPending) {
-          rafPending = true;
-          requestAnimationFrame(() => {
-            rafPending = false;
-            fitAddon?.fit();
-          });
-        }
-      });
-      resizeObserver.observe(container);
-
-      resizeDisposable = terminal.onResize(({ cols, rows }) => {
-        if (exitedRef.current) return;
-        invoke("pty_resize", { sessionId, rows, cols }).catch(() => {});
-      });
-
-      terminal.attachCustomKeyEventHandler((e) => {
-        if (e.type !== "keydown") return true;
-
-        // Never let xterm consume a key that matches an app hotkey — the
-        // window-level useAppHotkey handler takes it. Without this, Cmd+D and
-        // friends leak into the shell (e.g. zsh shows its PROMPT_EOL_MARK).
-        if (e.metaKey || e.ctrlKey) {
-          const effectiveMap = useHotkeysStore.getState().getEffectiveMap();
-          for (const keys of Object.values(effectiveMap)) {
-            if (keys && matchesHotkeyEvent(e, keys)) return false;
-          }
-        }
-
-        if (e.key === "Enter" && e.shiftKey) {
-          // Kitty keyboard protocol sequence for Shift+Enter
-          writeToPty("\x1b[13;2u");
-          return false;
-        }
-        return true;
-      });
-
-      dataDisposable = terminal.onData((data: string) => {
-        writeToPty(data);
-      });
-
-      const safeId = sanitizeEventId(sessionId);
-
-      // .xterm-viewport is xterm's internal scrollable element — fragile across versions
-      const viewport = container.querySelector(".xterm-viewport") as HTMLElement | null;
-
-      let writeQueue: Uint8Array[] = [];
-      let writeScheduled = false;
-
-      function flushWriteQueue() {
-        writeScheduled = false;
-        if (!terminal || cancelled) return;
-
-        let wasAtBottom = true;
-        let savedScrollTop = 0;
-        if (viewport) {
-          savedScrollTop = viewport.scrollTop;
-          wasAtBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 5;
-        }
-
-        for (const chunk of writeQueue) {
-          terminal.write(chunk);
-        }
-        writeQueue = [];
-
-        if (!wasAtBottom && viewport) {
-          viewport.scrollTop = savedScrollTop;
-        }
-      }
-
-      unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
-        if (cancelled || !terminal) return;
-        writeQueue.push(decodeBase64(event.payload));
-        if (!writeScheduled) {
-          writeScheduled = true;
-          requestAnimationFrame(flushWriteQueue);
-        }
-      });
-
-      unlistenExit = await listen<number>(`pty-exit-${safeId}`, (event) => {
-        if (cancelled) return;
-        exitedRef.current = true;
-        setExited(event.payload);
-      });
-
-      if (cancelled) {
-        unlistenOutput();
-        unlistenExit();
-        terminal.dispose();
-        return;
-      }
-
-      if (isFocusedRef.current) {
-        terminal.focus();
-      } else {
-        terminal.write(HIDE_CURSOR);
-        terminal.blur();
-      }
-    };
-
-    setup().catch((err) => {
-      console.error("Terminal setup failed:", err);
-      if (!cancelled) setLoading(false);
-    });
-
-    return () => {
-      cancelled = true;
-      container.removeEventListener("keydown", interceptKeys, true);
-      if (onFocus && container) {
-        container.removeEventListener("mousedown", onFocus);
-      }
-      unlistenDragDrop?.();
-      resizeObserver?.disconnect();
-      resizeDisposable?.dispose();
-      dataDisposable?.dispose();
-      linkDisposable?.dispose();
-      webglAddon?.dispose();
-      unlistenOutput?.();
-      unlistenExit?.();
-      if (terminal) {
-        terminal.dispose();
-        terminal = null;
-      }
-      searchAddonRef.current = null;
-      fitAddonRef.current = null;
-      webglAddonRef.current = null;
-      terminalRef.current = null;
-    };
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!terminalRef.current) return;
-    if (isFocused) {
-      terminalRef.current.write(SHOW_CURSOR);
-      terminalRef.current.focus();
-    } else {
-      terminalRef.current.write(HIDE_CURSOR);
-      terminalRef.current.blur();
-    }
-  }, [isFocused]);
-
-  useEffect(() => {
-    let prevThemeId = useUIStore.getState().activeThemeId;
-    let prevFontSize = useUIStore.getState().terminalFontSize ?? useUIStore.getState().fontSize;
-    let prevFontFamily = useUIStore.getState().terminalFontFamily;
-    const unsubscribe = useUIStore.subscribe((state) => {
-      if (state.activeThemeId !== prevThemeId) {
-        prevThemeId = state.activeThemeId;
-        if (terminalRef.current) {
-          terminalRef.current.options.theme = getTerminalTheme();
-        }
-      }
-      const effectiveSize = state.terminalFontSize ?? state.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
-      if (effectiveSize !== prevFontSize) {
-        prevFontSize = effectiveSize;
-        if (terminalRef.current) {
-          terminalRef.current.options.fontSize = effectiveSize;
-          webglAddonRef.current?.clearTextureAtlas();
-          fitAddonRef.current?.fit();
-        }
-      }
-      if (state.terminalFontFamily !== prevFontFamily) {
-        prevFontFamily = state.terminalFontFamily;
-        if (terminalRef.current) {
-          terminalRef.current.options.fontFamily = toXtermFontFamily(state.terminalFontFamily);
-          webglAddonRef.current?.clearTextureAtlas();
-          fitAddonRef.current?.fit();
-        }
-      }
-    });
-    return unsubscribe;
+    host.addEventListener("keydown", handler, true);
+    return () => host.removeEventListener("keydown", handler, true);
   }, []);
+
+  // Focus/blur propagates to the cached terminal.
+  useEffect(() => {
+    const entry = entryRef.current;
+    if (!entry) return;
+    entry.isFocusedRef.current = isFocused;
+    if (isFocused) {
+      entry.terminal.write(SHOW_CURSOR);
+      entry.terminal.focus();
+    } else {
+      entry.terminal.write(HIDE_CURSOR);
+      entry.terminal.blur();
+    }
+  }, [isFocused, sessionId]);
 
   const closeSearch = () => {
     setSearchVisible(false);
     setSearchQuery("");
-    searchAddonRef.current?.clearDecorations();
-    terminalRef.current?.focus();
+    entryRef.current?.searchAddon.clearDecorations();
+    entryRef.current?.terminal.focus();
   };
 
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
@@ -425,9 +480,9 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
       closeSearch();
     } else if (e.key === "Enter") {
       if (e.shiftKey) {
-        searchAddonRef.current?.findPrevious(searchQuery);
+        entryRef.current?.searchAddon.findPrevious(searchQuery);
       } else {
-        searchAddonRef.current?.findNext(searchQuery);
+        entryRef.current?.searchAddon.findNext(searchQuery);
       }
     }
   };
@@ -442,15 +497,31 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
-              if (e.target.value) searchAddonRef.current?.findNext(e.target.value);
+              if (e.target.value)
+                entryRef.current?.searchAddon.findNext(e.target.value);
             }}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search..."
             className="bg-transparent text-foreground text-md outline-none w-40 placeholder:text-muted-foreground"
           />
-          <button onClick={() => searchAddonRef.current?.findPrevious(searchQuery)} className="text-muted-foreground hover:text-foreground text-md px-1">&#9650;</button>
-          <button onClick={() => searchAddonRef.current?.findNext(searchQuery)} className="text-muted-foreground hover:text-foreground text-md px-1">&#9660;</button>
-          <button onClick={closeSearch} className="text-muted-foreground hover:text-foreground text-md px-1">&times;</button>
+          <button
+            onClick={() => entryRef.current?.searchAddon.findPrevious(searchQuery)}
+            className="text-muted-foreground hover:text-foreground text-md px-1"
+          >
+            &#9650;
+          </button>
+          <button
+            onClick={() => entryRef.current?.searchAddon.findNext(searchQuery)}
+            className="text-muted-foreground hover:text-foreground text-md px-1"
+          >
+            &#9660;
+          </button>
+          <button
+            onClick={closeSearch}
+            className="text-muted-foreground hover:text-foreground text-md px-1"
+          >
+            &times;
+          </button>
         </div>
       )}
       {loading && (
@@ -458,11 +529,7 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
           Loading terminal...
         </div>
       )}
-      <div
-        ref={containerRef}
-        className="h-full w-full"
-        style={{ padding: "4px" }}
-      />
+      <div ref={hostRef} className="h-full w-full" />
       {exited !== null && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-20">
           <div className="text-center text-muted-foreground">

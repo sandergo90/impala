@@ -5,7 +5,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { XtermTerminal } from "./XtermTerminal";
+import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
 import type { SplitNode, WorktreeIssue } from "../types";
 import { paneSessionId } from "../lib/split-tree";
 import { getHookPort } from "../lib/get-hook-port";
@@ -148,6 +148,7 @@ function LeafPane({
   const handleRestart = useCallback(() => {
     if (!sessionId) return;
     invoke("pty_kill", { sessionId }).catch(() => {});
+    releaseCachedTerminal(sessionId);
     if (isGenericTerminal) {
       const { [paneId]: _, ...remaining } = useDataStore.getState().generalTerminalPaneSessions;
       useDataStore.getState().setGeneralTerminalPaneSessions(remaining);

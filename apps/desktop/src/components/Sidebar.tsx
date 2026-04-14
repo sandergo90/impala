@@ -8,6 +8,7 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
 import { useUIStore, useDataStore } from "../store";
+import { releaseCachedTerminal } from "./XtermTerminal";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import {
   selectWorktree as sharedSelectWorktree,
@@ -526,9 +527,10 @@ export function Sidebar() {
       try {
         const dataState = useDataStore.getState().worktreeDataStates[wt.path];
         const ptyKills = dataState?.paneSessions
-          ? Object.values(dataState.paneSessions).map((sessionId) =>
-              invoke("pty_kill", { sessionId }).catch(() => {}),
-            )
+          ? Object.values(dataState.paneSessions).map((sessionId) => {
+              releaseCachedTerminal(sessionId);
+              return invoke("pty_kill", { sessionId }).catch(() => {});
+            })
           : [];
         await Promise.all([
           ...ptyKills,
