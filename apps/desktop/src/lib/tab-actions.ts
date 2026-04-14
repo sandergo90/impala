@@ -97,28 +97,33 @@ export function createUserTab(
   return newTab;
 }
 
-export function closeUserTab(
-  worktreePath: string,
-  tabId: string,
-  { previousActive }: { previousActive: string | null },
-): void {
+export function closeUserTab(worktreePath: string, tabId: string): void {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
-  if (!nav.userTabs.some((t) => t.id === tabId)) return;
+  const closedIndex = nav.userTabs.findIndex((t) => t.id === tabId);
+  if (closedIndex === -1) return;
 
-  const tab = nav.userTabs.find((t) => t.id === tabId)!;
+  const tab = nav.userTabs[closedIndex];
   const tree = getEffectiveUserTabSplitTree(tab);
   for (const leaf of getLeaves(tree)) killPaneSession(worktreePath, leaf.id);
 
   const remainingTabs = nav.userTabs.filter((t) => t.id !== tabId);
 
-  const validIds = new Set<string>([
-    CLAUDE_PANE_ID,
-    RUN_PANE_ID,
-    ...remainingTabs.map((t) => t.id),
-  ]);
-  const nextActive =
-    previousActive && validIds.has(previousActive) ? previousActive : CLAUDE_PANE_ID;
+  // If the closed tab wasn't active, leave the active selection alone.
+  // Otherwise jump to the neighbour immediately before this one in tab
+  // order: previous user tab -> Run (if it exists) -> Claude.
+  let nextActive = nav.activeTerminalsTab;
+  if (nav.activeTerminalsTab === tabId) {
+    const prevUserTab = remainingTabs[closedIndex - 1];
+    if (prevUserTab) {
+      nextActive = prevUserTab.id;
+    } else {
+      const hasRunTab = useDataStore
+        .getState()
+        .getWorktreeDataState(worktreePath).paneSessions[RUN_PANE_ID] !== undefined;
+      nextActive = hasRunTab ? RUN_PANE_ID : CLAUDE_PANE_ID;
+    }
+  }
 
   uiState.updateWorktreeNavState(worktreePath, {
     userTabs: remainingTabs,
@@ -239,7 +244,7 @@ export function closeUserTabFocusedPane(
 
   const tree = getEffectiveUserTabSplitTree(tab);
   if (getLeaves(tree).length <= 1) {
-    closeUserTab(worktreePath, tabId, { previousActive: null });
+    closeUserTab(worktreePath, tabId);
     return;
   }
 

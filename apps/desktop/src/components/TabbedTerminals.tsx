@@ -188,15 +188,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     ? activeTerminalsTab
     : CLAUDE_PANE_ID;
 
-  const previousTabIdRef = useRef<string | null>(null);
-  const lastSeenActiveRef = useRef<string>(activeId);
-  useEffect(() => {
-    if (lastSeenActiveRef.current !== activeId) {
-      previousTabIdRef.current = lastSeenActiveRef.current;
-      lastSeenActiveRef.current = activeId;
-    }
-  }, [activeId]);
-
   const setActive = useCallback(
     (id: string) => {
       if (id === activeTerminalsTab) return;
@@ -208,12 +199,8 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
 
   const handleCloseUserTab = useCallback(
-    (tabId: string) => {
-      const previousActive =
-        tabId === activeId ? previousTabIdRef.current : activeId;
-      closeUserTab(worktreePath, tabId, { previousActive });
-    },
-    [worktreePath, activeId],
+    (tabId: string) => closeUserTab(worktreePath, tabId),
+    [worktreePath],
   );
 
   const [menuOpen, setMenuOpen] = useState(false);
