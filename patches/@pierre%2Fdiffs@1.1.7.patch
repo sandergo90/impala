@@ -1,0 +1,40 @@
+diff --git a/dist/managers/ResizeManager.js b/dist/managers/ResizeManager.js
+index 8aaf4f8120a1e74263c22025e3d76318aa417e0b..34a78145dcca9475acee15f79c62a908a7ff381b 100644
+--- a/dist/managers/ResizeManager.js
++++ b/dist/managers/ResizeManager.js
+@@ -122,28 +122,20 @@ var ResizeManager = class {
+ 	handleResizeObserver = (entries) => {
+ 		for (const entry of entries) {
+ 			const { target, borderBoxSize } = entry;
+-			if (!(target instanceof HTMLElement)) {
+-				console.error("FileDiff.handleResizeObserver: Invalid element for ResizeObserver", entry);
+-				continue;
+-			}
++			// Patched: silence benign races where an observer entry fires for a
++			// node that was already unobserved/unmounted by the time this callback
++			// runs. Upstream logs console.error for each case which spams the
++			// console during rapid view switches. Safe to ignore.
++			if (!(target instanceof HTMLElement)) continue;
+ 			const item = this.observedNodes.get(target);
+-			if (item == null) {
+-				console.error("FileDiff.handleResizeObserver: Not a valid observed node", entry);
+-				continue;
+-			}
++			if (item == null) continue;
+ 			const specs = borderBoxSize[0];
+ 			if (item.type === "annotations") {
+ 				const column = (() => {
+ 					if (target === item.column1.child) return item.column1;
+ 					if (target === item.column2.child) return item.column2;
+ 				})();
+-				if (column == null) {
+-					console.error(`FileDiff.handleResizeObserver: Couldn't find a column for`, {
+-						item,
+-						target
+-					});
+-					continue;
+-				}
++				if (column == null) continue;
+ 				column.childHeight = specs.blockSize;
+ 				const newHeight = Math.max(item.column1.childHeight, item.column2.childHeight);
+ 				this.applyNewHeight(item, newHeight);

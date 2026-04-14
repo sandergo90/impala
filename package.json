@@ -12,5 +12,8 @@
   },
   "devDependencies": {
     "turbo": "2.8.20"
+  },
+  "patchedDependencies": {
+    "@pierre/diffs@1.1.7": "patches/@pierre%2Fdiffs@1.1.7.patch"
   }
 }
