@@ -94,9 +94,15 @@ export function closeUserTab(
   const nextActive =
     previousActive && validIds.has(previousActive) ? previousActive : CLAUDE_PANE_ID;
 
+  // Reset the auto-numbering when the last user tab closes, so the next
+  // created tab starts at "Terminal 1" / "Claude 2" again instead of
+  // climbing forever.
+  const resetCounters = remainingTabs.length === 0;
+
   uiState.updateWorktreeNavState(worktreePath, {
     userTabs: remainingTabs,
     activeTerminalsTab: nextActive,
+    ...(resetCounters ? { tabCounters: { terminal: 1, claude: 2 } } : {}),
   });
 }
 
