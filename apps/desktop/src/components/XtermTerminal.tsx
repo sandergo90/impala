@@ -23,6 +23,10 @@ import {
 const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
 
+// Sticky global fallback: once any terminal loses its WebGL context or fails
+// to init the addon, all future terminals in this session render via DOM.
+let webglDisabled = false;
+
 /**
  * Build a CSS font-family string safe for xterm.js.
  * Custom single-family names (e.g. "JetBrains Mono") must be quoted so that
@@ -177,18 +181,25 @@ export function XtermTerminal({ sessionId, baseDir, isFocused = true, onFocus, o
         createFileLinkProvider(terminal, () => baseDirRef.current),
       );
 
-      // WebGL must be loaded after open()
-      try {
-        webglAddon = new WebglAddon();
-        webglAddon.onContextLoss(() => {
-          webglAddon?.dispose();
+      // WebGL must be loaded after open(). Browsers cap active WebGL contexts
+      // (~16); once we lose one or fail to init, skip WebGL for all future
+      // terminals so the DOM renderer takes over silently. Mirrors VS Code /
+      // superset.
+      if (!webglDisabled) {
+        try {
+          webglAddon = new WebglAddon();
+          webglAddon.onContextLoss(() => {
+            webglDisabled = true;
+            webglAddon?.dispose();
+            webglAddon = null;
+            webglAddonRef.current = null;
+          });
+          terminal.loadAddon(webglAddon);
+          webglAddonRef.current = webglAddon;
+        } catch {
+          webglDisabled = true;
           webglAddon = null;
-          webglAddonRef.current = null;
-        });
-        terminal.loadAddon(webglAddon);
-        webglAddonRef.current = webglAddon;
-      } catch {
-        webglAddon = null;
+        }
       }
 
       if (cancelled) {
