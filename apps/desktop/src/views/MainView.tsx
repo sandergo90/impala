@@ -62,6 +62,9 @@ export function MainView() {
   );
   const isRunning = runStatus === "running";
   const isStopping = runStatus === "stopping";
+  const hasUnreadRunFailure = useUIStore((s) =>
+    wtPath ? s.worktreeNavStates[wtPath]?.hasUnreadRunFailure ?? false : false,
+  );
 
   usePlanNotifications();
 
@@ -262,7 +265,7 @@ export function MainView() {
                 <button
                   key={tab}
                   onClick={() => setTab(tab)}
-                  className={`flex items-center gap-1.5 px-3 py-1 text-md font-medium rounded-[5px] transition-colors ${
+                  className={`relative flex items-center gap-1.5 px-3 py-1 text-md font-medium rounded-[5px] transition-colors ${
                     activeTab === tab
                       ? "text-foreground bg-accent"
                       : "text-muted-foreground hover:text-foreground"
@@ -270,6 +273,9 @@ export function MainView() {
                 >
                   {icon}
                   {label}
+                  {tab === "terminal" && hasUnreadRunFailure && (
+                    <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-red-500" />
+                  )}
                 </button>
               ))}
             </div>

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { XtermTerminal } from "./XtermTerminal";
 import { useUIStore, useDataStore } from "../store";
 import type { WorktreeIssue } from "../types";
@@ -9,6 +10,7 @@ import {
   CLAUDE_PANE_ID,
   RUN_PANE_ID,
   userTabPaneId,
+  runPtySessionId,
 } from "../lib/pane-ids";
 import { createUserTab, closeUserTab } from "../lib/tab-actions";
 
@@ -55,6 +57,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
   const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
   const paneSessions = dataState?.paneSessions ?? {};
+  const runStatus = useUIStore(
+    (s) => s.worktreeNavStates[worktreePath]?.runStatus ?? "idle",
+  );
+  const runExitCode = useUIStore(
+    (s) => s.worktreeNavStates[worktreePath]?.runExitCode ?? null,
+  );
 
   const [config, setConfig] = useState<ProjectConfig | null>(null);
   useEffect(() => {
@@ -69,6 +77,46 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   }, [worktreePath]);
 
   const hasRunTab = Boolean(config?.setup?.trim() || config?.run?.trim());
+
+  useEffect(() => {
+    if (!hasRunTab) return;
+
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+
+    const sessionId = runPtySessionId(worktreePath);
+    listen<number>(`pty-exit-${sessionId}`, (event) => {
+      const code = event.payload;
+      useUIStore.getState().updateWorktreeNavState(worktreePath, {
+        runStatus: "idle",
+        runExitCode: code,
+        hasUnreadRunFailure: code !== 0,
+      });
+    })
+      .then((fn) => {
+        if (cancelled) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, [worktreePath, hasRunTab]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    if (activeTerminalsTab !== RUN_PANE_ID) return;
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    if (!nav.hasUnreadRunFailure) return;
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      hasUnreadRunFailure: false,
+    });
+  }, [worktreePath, isActive, activeTerminalsTab]);
 
   const tabs: TabDescriptor[] = useMemo(() => {
     const out: TabDescriptor[] = [
@@ -198,9 +246,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           >
             <button
               onClick={() => setActive(t.id)}
-              className="px-3 py-1 text-md font-medium transition-colors"
+              className="px-3 py-1 text-md font-medium transition-colors flex items-center gap-1.5"
             >
               {t.label}
+              {t.id === RUN_PANE_ID && (
+                <RunStatusDot status={runStatus} exitCode={runExitCode} />
+              )}
             </button>
             {!t.isSystem && (
               <button
@@ -438,4 +489,30 @@ function TabBody({
       onRestart={handleRestart}
     />
   );
+}
+
+function RunStatusDot({
+  status,
+  exitCode,
+}: {
+  status: "idle" | "running" | "stopping";
+  exitCode: number | null;
+}) {
+  if (status === "running" || status === "stopping") {
+    return (
+      <span
+        className="inline-block w-2 h-2 rounded-full border-[1.5px] border-blue-400 border-t-transparent animate-spin"
+        aria-label="Running"
+      />
+    );
+  }
+  if (exitCode !== null && exitCode !== 0) {
+    return (
+      <span
+        className="inline-block w-2 h-2 rounded-full bg-red-500"
+        aria-label="Failed"
+      />
+    );
+  }
+  return null;
 }

@@ -162,6 +162,16 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
     }),
   );
 
+  const runFailures = useUIStore(
+    useShallow((s) => {
+      const out: Record<string, boolean> = {};
+      for (const [path, nav] of Object.entries(s.worktreeNavStates)) {
+        if (nav.hasUnreadRunFailure) out[path] = true;
+      }
+      return out;
+    }),
+  );
+
   const iconUrl = selectedProject
     ? projectIcons[selectedProject.path]
     : undefined;
@@ -217,6 +227,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
           const hasUnseen = unseenResults[wt.path];
           const isPermission = agentStatuses[wt.path] === "permission";
           const hasPendingPlan = pendingPlans[wt.path];
+          const hasRunFailure = runFailures[wt.path] ?? false;
           return (
             <button
               key={wt.path}
@@ -240,6 +251,9 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
                 </span>
               ) : (
                 <BranchIcon active={isSelected} />
+              )}
+              {hasRunFailure && (
+                <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-red-500 pointer-events-none" />
               )}
             </button>
           );
