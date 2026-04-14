@@ -384,7 +384,7 @@ function VirtualizedCommitView({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
-      <div ref={scrollRef} className="flex-1 overflow-auto">
+      <div ref={scrollRef} className="flex-1 overflow-auto show-scrollbar pr-2">
         <div ref={listRef}>
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
           {items.map((virtualRow) => {
@@ -699,7 +699,7 @@ export function DiffView() {
     expandUnchanged: false,
     expansionLineCount: 10,
     hunkSeparators: "line-info" as const,
-    unsafeCSS: `:host { --diffs-dark-bg: ${activeTheme.terminal.background}; --diffs-light-bg: ${activeTheme.terminal.background}; --diffs-dark: ${activeTheme.terminal.foreground}; --diffs-light: ${activeTheme.terminal.foreground}; --diffs-color: ${activeTheme.terminal.foreground}; } [data-diffs-header] { position: sticky; top: 0; z-index: 10; } [data-diffs-header='custom'] { background-color: var(--diffs-bg); display: flex; align-items: center; min-height: calc(1lh + (var(--diffs-gap-block, var(--diffs-gap-fallback)) * 3)); padding-inline: 16px; font-family: var(--diffs-header-font-family, var(--diffs-header-font-fallback)); } [data-diffs-header='custom'] ::slotted(*) { width: 100%; }`,
+    unsafeCSS: `:host { --diffs-dark-bg: ${activeTheme.terminal.background}; --diffs-light-bg: ${activeTheme.terminal.background}; --diffs-dark: ${activeTheme.terminal.foreground}; --diffs-light: ${activeTheme.terminal.foreground}; --diffs-color: ${activeTheme.terminal.foreground}; } [data-diffs-header] { position: sticky; top: 0; z-index: 10; } [data-diffs-header='custom'] { background-color: var(--diffs-bg); display: flex; align-items: center; min-height: calc(1lh + (var(--diffs-gap-block, var(--diffs-gap-fallback)) * 3)); padding-inline: 16px; font-family: var(--diffs-header-font-family, var(--diffs-header-font-fallback)); } [data-diffs-header='custom'] ::slotted(*) { width: 100%; } [data-code]::-webkit-scrollbar { height: 10px !important; } [data-code]::-webkit-scrollbar-thumb { background-color: var(--diffs-bg-context) !important; border-radius: 5px !important; border: 2px solid transparent !important; background-clip: padding-box !important; } [data-code]::-webkit-scrollbar-thumb:hover { background-color: var(--diffs-fg-number) !important; background-clip: padding-box !important; } [data-code]::-webkit-scrollbar-track { background: transparent !important; }`,
   } satisfies FileDiffOptions<AnnotationMeta>
 
   const toolbar = (
@@ -784,7 +784,7 @@ export function DiffView() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
-      <div className="flex-1 overflow-auto" style={diffViewerStyle}>
+      <div className="flex-1 overflow-auto show-scrollbar pr-2" style={diffViewerStyle}>
         <PatchDiff<AnnotationMeta>
           style={diffViewerStyle}
           patch={diffText!}
