@@ -123,14 +123,17 @@ async function createCachedTerminal(
   terminal.loadAddon(searchAddon);
 
   // Detached wrapper — xterm.open() mutates this div, then we appendChild it
-  // into whichever component container currently hosts this session. Keep it
-  // minimal: only 100% sizing, no padding/background. Padding on the wrapper
-  // shows transient container background during drag resizes, which flashes
-  // against the xterm canvas. The outer component provides the visible bg
-  // and any breathing room.
+  // into whichever component container currently hosts this session. The
+  // wrapper is painted with the theme background so any transient gap
+  // between xterm's canvas and the container edge during drag resizes
+  // shows the same color as the canvas (no flash). `contain: strict`
+  // isolates layout/paint so resize ticks don't cascade through ancestors.
+  const theme = getTerminalTheme();
   const wrapper = document.createElement("div");
   wrapper.style.width = "100%";
   wrapper.style.height = "100%";
+  wrapper.style.background = theme.background ?? "";
+  wrapper.style.contain = "strict";
   terminal.open(wrapper);
 
   const baseDirRef = { current: null as string | null };
@@ -306,7 +309,10 @@ export function releaseCachedTerminal(sessionId: string) {
     const theme = getTerminalTheme();
     const fontFamily = toXtermFontFamily(state.terminalFontFamily);
     for (const entry of terminalCache.values()) {
-      if (themeChanged) entry.terminal.options.theme = theme;
+      if (themeChanged) {
+        entry.terminal.options.theme = theme;
+        entry.wrapper.style.background = theme.background ?? "";
+      }
       if (sizeChanged) entry.terminal.options.fontSize = effectiveSize;
       if (familyChanged) entry.terminal.options.fontFamily = fontFamily;
       if (sizeChanged || familyChanged) {
