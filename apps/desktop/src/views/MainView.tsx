@@ -367,8 +367,12 @@ export function MainView() {
                     </ResizablePanelGroup>
                   ) : (
                     <div className="relative h-full">
+                      {/* Solid bg — xterm's WebGL canvas is on its own GPU
+                          layer and doesn't reliably respect the parent's
+                          `visibility: hidden` under WebKit, so without a
+                          backdrop here it bleeds through the Diff view. */}
                       <div
-                        className={`absolute inset-0 ${activeTab === "diff" ? "z-10" : "z-0 invisible"}`}
+                        className={`absolute inset-0 bg-background ${activeTab === "diff" ? "z-10" : "z-0 invisible"}`}
                       >
                         <DiffView />
                       </div>
