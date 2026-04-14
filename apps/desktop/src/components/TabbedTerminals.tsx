@@ -1,25 +1,43 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { XtermTerminal } from "./XtermTerminal";
 import { useUIStore, useDataStore } from "../store";
-import type { WorktreeIssue } from "../types";
+import type { UserTab, WorktreeIssue } from "../types";
 import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
-import { CLAUDE_PANE_ID, RUN_PANE_ID } from "../lib/pane-ids";
+import {
+  CLAUDE_PANE_ID,
+  RUN_PANE_ID,
+  userTabPaneId,
+} from "../lib/pane-ids";
+import { createUserTab, closeUserTab } from "../lib/tab-actions";
 
-type TabKind = "claude" | "run";
+type TabKind = "terminal" | "claude";
 
 interface ProjectConfig {
   setup?: string | null;
   run?: string | null;
 }
 
+interface TabDescriptor {
+  id: string;
+  label: string;
+  kind: TabKind;
+  useContinueFlag: boolean;
+  paneId: string;
+  isSystem: boolean;
+  userTab: UserTab | null;
+}
+
 /**
  * Tabbed terminals view for a single worktree.
  *
- * Renders a Claude tab (always) and a Run tab (when config.setup or config.run is set).
- * When `claudeOnly` is true, the tab strip is hidden and only the Claude body renders —
- * this is the mode used by the top-level Split tab so the Claude pane sits next to the diff.
+ * System tabs: Claude (always) and Run (when config.setup or config.run is set).
+ * User tabs: from nav.userTabs, created via the plus button.
+ *
+ * When `claudeOnly` is true, the tab strip + plus button are hidden and only
+ * the primary Claude body renders — used by the top-level Split tab so Claude
+ * sits next to the diff.
  */
 export const TabbedTerminals = memo(function TabbedTerminals({
   worktreePath,
@@ -31,7 +49,10 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   claudeOnly?: boolean;
 }) {
   const activeTerminalsTab = useUIStore(
-    (s) => s.worktreeNavStates[worktreePath]?.activeTerminalsTab ?? "claude",
+    (s) => s.worktreeNavStates[worktreePath]?.activeTerminalsTab ?? CLAUDE_PANE_ID,
+  );
+  const userTabs = useUIStore(
+    (s) => s.worktreeNavStates[worktreePath]?.userTabs ?? [],
   );
   const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
   const paneSessions = dataState?.paneSessions ?? {};
@@ -50,32 +71,115 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   const hasRunTab = Boolean(config?.setup?.trim() || config?.run?.trim());
 
-  const tabs: { kind: TabKind; label: string; paneId: string }[] = [
-    { kind: "claude", label: "Claude", paneId: CLAUDE_PANE_ID },
-  ];
-  if (hasRunTab) {
-    tabs.push({ kind: "run", label: "Run", paneId: RUN_PANE_ID });
-  }
+  const tabs: TabDescriptor[] = useMemo(() => {
+    const out: TabDescriptor[] = [
+      {
+        id: CLAUDE_PANE_ID,
+        label: "Claude",
+        kind: "claude",
+        useContinueFlag: true,
+        paneId: CLAUDE_PANE_ID,
+        isSystem: true,
+        userTab: null,
+      },
+    ];
+    if (hasRunTab) {
+      out.push({
+        id: RUN_PANE_ID,
+        label: "Run",
+        kind: "terminal",
+        useContinueFlag: false,
+        paneId: RUN_PANE_ID,
+        isSystem: true,
+        userTab: null,
+      });
+    }
+    for (const t of userTabs) {
+      out.push({
+        id: t.id,
+        label: t.label,
+        kind: t.kind,
+        useContinueFlag: false,
+        paneId: userTabPaneId(t.id),
+        isSystem: false,
+        userTab: t,
+      });
+    }
+    return out;
+  }, [hasRunTab, userTabs]);
 
-  const activeKind: TabKind = tabs.some((t) => t.kind === activeTerminalsTab)
+  const activeId: string = tabs.some((t) => t.id === activeTerminalsTab)
     ? activeTerminalsTab
-    : "claude";
+    : CLAUDE_PANE_ID;
+
+  const previousTabIdRef = useRef<string | null>(null);
+  const lastSeenActiveRef = useRef<string>(activeId);
+  useEffect(() => {
+    if (lastSeenActiveRef.current !== activeId) {
+      previousTabIdRef.current = lastSeenActiveRef.current;
+      lastSeenActiveRef.current = activeId;
+    }
+  }, [activeId]);
 
   const setActive = useCallback(
-    (kind: TabKind) => {
+    (id: string) => {
+      if (id === activeTerminalsTab) return;
       useUIStore
         .getState()
-        .updateWorktreeNavState(worktreePath, { activeTerminalsTab: kind });
+        .updateWorktreeNavState(worktreePath, { activeTerminalsTab: id });
     },
-    [worktreePath],
+    [worktreePath, activeTerminalsTab],
   );
+
+  const handleCloseUserTab = useCallback(
+    (tabId: string) => {
+      const previousActive =
+        tabId === activeId ? previousTabIdRef.current : activeId;
+      closeUserTab(worktreePath, tabId, { previousActive });
+    },
+    [worktreePath, activeId],
+  );
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const caretRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (menuRef.current?.contains(target)) return;
+      if (caretRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  const handleNewTerminal = useCallback(() => {
+    setMenuOpen(false);
+    createUserTab(worktreePath, "terminal");
+  }, [worktreePath]);
+
+  const handleNewClaude = useCallback(() => {
+    setMenuOpen(false);
+    createUserTab(worktreePath, "claude");
+  }, [worktreePath]);
 
   if (claudeOnly) {
     return (
       <div className="relative h-full w-full">
         <TabBody
           paneId={CLAUDE_PANE_ID}
-          paneKind="claude"
+          kind="claude"
+          useContinueFlag
           worktreePath={worktreePath}
           sessionId={paneSessions[CLAUDE_PANE_ID] ?? null}
           isActive={isActive}
@@ -88,26 +192,103 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     <div className="flex flex-col h-full">
       <div className="flex shrink-0 items-center gap-0.5 px-2 pt-1 border-b border-border/40">
         {tabs.map((t) => (
-          <button
-            key={t.kind}
-            onClick={() => setActive(t.kind)}
-            className={`px-3 py-1 text-md font-medium rounded-t transition-colors ${
-              activeKind === t.kind
+          <div
+            key={t.id}
+            className={`group flex items-center ${
+              activeId === t.id
                 ? "text-foreground bg-accent"
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+            } rounded-t`}
           >
-            {t.label}
-          </button>
+            <button
+              onClick={() => setActive(t.id)}
+              className="px-3 py-1 text-md font-medium transition-colors"
+            >
+              {t.label}
+            </button>
+            {!t.isSystem && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCloseUserTab(t.id);
+                }}
+                className="mr-1 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-background/50 transition-opacity"
+                aria-label={`Close ${t.label}`}
+              >
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                  <path
+                    d="M3 3L13 13M13 3L3 13"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
         ))}
+
+        <div className="relative flex items-center ml-1">
+          <button
+            onClick={handleNewTerminal}
+            className="px-1.5 py-1 text-muted-foreground hover:text-foreground rounded-l hover:bg-accent"
+            aria-label="New terminal tab"
+            title="New terminal tab"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 3V13M3 8H13"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            ref={caretRef}
+            onClick={() => setMenuOpen((o) => !o)}
+            className="px-1 py-1 text-muted-foreground hover:text-foreground rounded-r hover:bg-accent"
+            aria-label="New tab menu"
+            aria-expanded={menuOpen}
+          >
+            <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M3 6L8 11L13 6"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          {menuOpen && (
+            <div
+              ref={menuRef}
+              className="absolute top-full left-0 mt-1 z-20 min-w-[160px] rounded border border-border bg-background shadow-lg py-1"
+            >
+              <button
+                onClick={handleNewTerminal}
+                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+              >
+                New terminal tab
+              </button>
+              <button
+                onClick={handleNewClaude}
+                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+              >
+                New Claude tab
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="relative flex-1 min-h-0">
         {tabs.map((t) => {
-          const visible = activeKind === t.kind;
+          const visible = activeId === t.id;
           return (
             <div
-              key={t.kind}
+              key={t.id}
               className="absolute inset-0"
               style={{
                 visibility: visible ? "visible" : "hidden",
@@ -117,7 +298,8 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             >
               <TabBody
                 paneId={t.paneId}
-                paneKind={t.kind}
+                kind={t.kind}
+                useContinueFlag={t.useContinueFlag}
                 worktreePath={worktreePath}
                 sessionId={paneSessions[t.paneId] ?? null}
                 isActive={isActive && visible}
@@ -130,15 +312,22 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
 });
 
+/**
+ * Renders one tab body. Lazy-spawns the PTY on first mount.
+ * Claude tabs additionally write the `claude` command on first spawn.
+ * `useContinueFlag` controls whether the primary Claude tab appends `--continue`.
+ */
 function TabBody({
   paneId,
-  paneKind,
+  kind,
+  useContinueFlag,
   worktreePath,
   sessionId,
   isActive,
 }: {
   paneId: string;
-  paneKind: TabKind;
+  kind: TabKind;
+  useContinueFlag: boolean;
   worktreePath: string;
   sessionId: string | null;
   isActive: boolean;
@@ -149,7 +338,7 @@ function TabBody({
     if (sessionId || spawningRef.current) return;
     spawningRef.current = true;
 
-    if (paneKind === "claude") {
+    if (kind === "claude" && useContinueFlag) {
       const linearApiKey = useUIStore.getState().linearApiKey;
       if (linearApiKey) {
         invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
@@ -184,10 +373,9 @@ function TabBody({
             paneSessions: { ...data.paneSessions, [paneId]: ptyId },
           });
 
-          if (paneKind === "claude" && isNew) {
-            const claudeLaunched = useUIStore
-              .getState()
-              .getWorktreeNavState(worktreePath).claudeLaunched;
+          if (kind === "claude" && isNew) {
+            const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+            const claudeLaunched = nav.claudeLaunched;
 
             const projectPath =
               useUIStore.getState().selectedProject?.path ?? worktreePath;
@@ -205,7 +393,7 @@ function TabBody({
                 const flags = projectFlags ?? globalFlags ?? "";
                 const parts = ["claude"];
                 if (flags.trim()) parts.push(flags.trim());
-                if (claudeLaunched) parts.push("--continue");
+                if (useContinueFlag && claudeLaunched) parts.push("--continue");
                 const encoded = encodePtyInput(parts.join(" ") + "\n");
                 invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(
                   () => {},
@@ -213,7 +401,7 @@ function TabBody({
               })
               .catch(() => {});
 
-            if (!claudeLaunched) {
+            if (useContinueFlag && !claudeLaunched) {
               useUIStore
                 .getState()
                 .updateWorktreeNavState(worktreePath, { claudeLaunched: true });
@@ -225,7 +413,7 @@ function TabBody({
           spawningRef.current = false;
         });
     });
-  }, [paneId, paneKind, worktreePath, sessionId]);
+  }, [paneId, kind, useContinueFlag, worktreePath, sessionId]);
 
   const handleRestart = useCallback(() => {
     if (!sessionId) return;
