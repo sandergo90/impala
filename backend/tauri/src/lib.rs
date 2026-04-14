@@ -555,7 +555,16 @@ fn setup_claude_integration_sync() -> Result<String, String> {
 }
 
 fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
-    // Check PATH first
+    // Bundled sidecar lives next to the main executable (Tauri externalBin).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let sidecar = dir.join("impala-mcp");
+            if sidecar.exists() {
+                return Ok(sidecar.to_string_lossy().to_string());
+            }
+        }
+    }
+
     if let Ok(output) = std::process::Command::new("which").arg("impala-mcp").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -565,31 +574,12 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
         }
     }
 
-    // Check cargo install location
     let cargo_bin = home.join(".cargo").join("bin").join("impala-mcp");
     if cargo_bin.exists() {
         return Ok(cargo_bin.to_string_lossy().to_string());
     }
 
-    // Check local dev build (built by `bun run dev` / `bun run build`)
-    let exe = std::env::current_exe().ok();
-    if let Some(exe_path) = exe {
-        // Tauri binary is in backend/tauri/target/... — MCP binary is in backend/mcp/target/...
-        if let Some(tauri_target) = exe_path.ancestors().find(|p| p.ends_with("target")) {
-            let mcp_debug = tauri_target.parent().unwrap().parent().unwrap()
-                .join("mcp").join("target").join("debug").join("impala-mcp");
-            if mcp_debug.exists() {
-                return Ok(mcp_debug.to_string_lossy().to_string());
-            }
-            let mcp_release = tauri_target.parent().unwrap().parent().unwrap()
-                .join("mcp").join("target").join("release").join("impala-mcp");
-            if mcp_release.exists() {
-                return Ok(mcp_release.to_string_lossy().to_string());
-            }
-        }
-    }
-
-    Err("impala-mcp binary not found. Build it with: cd backend/mcp && cargo install --path .".to_string())
+    Err("impala-mcp binary not found".to_string())
 }
 
 #[tauri::command]

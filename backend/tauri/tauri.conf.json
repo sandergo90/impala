@@ -4,9 +4,9 @@
   "version": "0.3.3",
   "identifier": "be.kodeus.impala",
   "build": {
-    "beforeDevCommand": "cargo build --manifest-path backend/mcp/Cargo.toml && cd apps/desktop && bun run dev",
+    "beforeDevCommand": "bash scripts/build-mcp-sidecar.sh debug && cd apps/desktop && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "cargo build --release --manifest-path backend/mcp/Cargo.toml && cd apps/desktop && bun run build",
+    "beforeBuildCommand": "bash scripts/build-mcp-sidecar.sh release && cd apps/desktop && bun run build",
     "frontendDist": "../../apps/desktop/dist"
   },
   "app": {
@@ -41,6 +41,7 @@
     "resources": {
       "sounds/*": "sounds/"
     },
+    "externalBin": ["binaries/impala-mcp"],
     "createUpdaterArtifacts": true
   },
   "plugins": {
