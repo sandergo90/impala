@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::process::Command;
+use std::time::SystemTime;
 
 #[derive(Debug, Serialize)]
 pub struct Worktree {
@@ -78,7 +79,15 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
     // Filter out temporary Claude Code agent worktrees
     worktrees.retain(|wt| !wt.branch.starts_with("worktree-agent-"));
 
+    // Sort newest-created first; worktrees without a readable creation time sink to the bottom.
+    worktrees.sort_by(|a, b| worktree_created_at(&b.path).cmp(&worktree_created_at(&a.path)));
+
     Ok(worktrees)
+}
+
+fn worktree_created_at(path: &str) -> Option<SystemTime> {
+    let meta = std::fs::metadata(path).ok()?;
+    meta.created().or_else(|_| meta.modified()).ok()
 }
 
 pub fn detect_base_branch(worktree_path: &str) -> Result<String, String> {
