@@ -179,9 +179,25 @@ async function createCachedTerminal(
   }
 
   entry.onDataDisposable = terminal.onData((data: string) => writeToPty(data));
+
+  // Debounce pty_resize so that dragging a split handle doesn't SIGWINCH the
+  // shell on every animation frame. Each SIGWINCH makes zsh redraw its
+  // prompt (clear-line + redraw), which looks like a flash during the drag.
+  // We let xterm's local cells re-flow live, then push the final size to the
+  // PTY once the drag settles.
+  let pendingResize: { cols: number; rows: number } | null = null;
+  let resizeTimer: number | null = null;
   entry.onResizeDisposable = terminal.onResize(({ cols, rows }) => {
     if (entry.exitedRef.current) return;
-    invoke("pty_resize", { sessionId, rows, cols }).catch(() => {});
+    pendingResize = { cols, rows };
+    if (resizeTimer !== null) clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      resizeTimer = null;
+      if (!pendingResize || entry.exitedRef.current) return;
+      const { cols: c, rows: r } = pendingResize;
+      pendingResize = null;
+      invoke("pty_resize", { sessionId, rows: r, cols: c }).catch(() => {});
+    }, 80);
   });
 
   terminal.attachCustomKeyEventHandler((e) => {
@@ -384,14 +400,13 @@ export function XtermTerminal({
       entry.fitAddon.fit();
       entry.terminal.refresh(0, Math.max(0, entry.terminal.rows - 1));
 
-      let rafPending = false;
+      // Fit synchronously in the ResizeObserver callback (no RAF). The RAF
+      // throttle added one frame of lag between CSS-driven container resize
+      // and xterm cell reflow, which shows as a flash during drag — the
+      // WebGL canvas scales with CSS before the cells re-wrap.
       resizeObserver = new ResizeObserver(() => {
-        if (rafPending) return;
-        rafPending = true;
-        requestAnimationFrame(() => {
-          rafPending = false;
-          entry?.fitAddon.fit();
-        });
+        if (host.clientWidth === 0 || host.clientHeight === 0) return;
+        entry?.fitAddon.fit();
       });
       resizeObserver.observe(host);
 
