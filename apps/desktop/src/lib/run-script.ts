@@ -2,12 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { encodePtyInput } from "./encode-pty";
-
-const RUN_PANE_ID = "tab-run";
-
-function runPtySessionId(worktreePath: string): string {
-  return `pty-${RUN_PANE_ID}-${worktreePath}`;
-}
+import { RUN_PANE_ID, runPtySessionId } from "./pane-ids";
 
 /**
  * Ensure the Run tab's PTY session exists. If TabbedTerminals has already lazy-spawned it,
@@ -56,8 +51,9 @@ export async function stopRunScript() {
   const encoded = encodePtyInput("\x03");
   await invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
 
-  // Best-effort: assume the process accepts Ctrl+C and clear back to idle after a short delay.
-  // Real exit detection lands in Phase 3 alongside the status indicators.
+  // Best-effort: Phase 1 does not detect actual process exit. Real exit
+  // detection and proper run-state tracking land in Phase 3 with the
+  // status indicators.
   const worktreePath = wt.path;
   setTimeout(() => {
     const current = useUIStore.getState().getWorktreeNavState(worktreePath);
@@ -91,10 +87,7 @@ export async function triggerRunScript() {
   if (!project || !wt) return;
 
   const nav = useUIStore.getState().getWorktreeNavState(wt.path);
-
-  // Block if setup is still running. setupRanAt is set after setup is dispatched,
-  // and runStatus stays "idle" until the user (or this function) sets it.
-  if (nav.setupRanAt && nav.runStatus === "running") {
+  if (nav.runStatus === "running") {
     toast("A run is already in progress");
     return;
   }
@@ -115,7 +108,6 @@ export async function triggerRunScript() {
   try {
     const sessionId = await ensureRunTabSession(wt.path);
 
-    // Make sure the Run tab is visible and the Terminal top-level tab is active.
     useUIStore.getState().updateWorktreeNavState(wt.path, {
       activeTab: "terminal",
       activeTerminalsTab: "run",

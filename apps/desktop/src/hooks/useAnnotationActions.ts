@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import type { Annotation } from "../types";
+import { claudePtySessionId } from "../lib/pane-ids";
 
 function encodeForPty(text: string): string {
   return btoa(
@@ -97,7 +98,7 @@ export function useAnnotationActions() {
     async (prompt: string) => {
       if (!worktreePath) return;
 
-      const sessionId = `pty-tab-claude-${worktreePath}`;
+      const sessionId = claudePtySessionId(worktreePath);
       await invoke("pty_write", { sessionId, data: encodeForPty(prompt + "\r") });
     },
     [worktreePath]

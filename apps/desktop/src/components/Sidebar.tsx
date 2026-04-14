@@ -33,6 +33,7 @@ import { ContextMenu } from "@/components/ui/context-menu";
 
 import { projectColor } from "../lib/utils";
 import { encodePtyInput } from "../lib/encode-pty";
+import { RUN_PANE_ID, runPtySessionId } from "../lib/pane-ids";
 
 function ProjectBadge({ name, iconUrl }: { name: string; iconUrl?: string }) {
   const [iconError, setIconError] = useState(false);
@@ -1062,7 +1063,6 @@ export function Sidebar() {
               activeTerminalsTab: "run",
             });
 
-            // Run setup script if configured (fire-and-forget).
             if (!selectedProject) return;
             invoke<{ setup?: string; run?: string }>("read_project_config", {
               projectPath: selectedProject.path,
@@ -1070,7 +1070,7 @@ export function Sidebar() {
               .then(async (config) => {
                 if (!config.setup?.trim()) return;
 
-                const ptyId = `pty-tab-run-${worktree.path}`;
+                const ptyId = runPtySessionId(worktree.path);
                 try {
                   await invoke("pty_spawn", {
                     sessionId: ptyId,
@@ -1082,15 +1082,13 @@ export function Sidebar() {
                     },
                   });
 
-                  // Register the session so TabbedTerminals reuses it instead of re-spawning.
                   const data = useDataStore
                     .getState()
                     .getWorktreeDataState(worktree.path);
                   useDataStore.getState().updateWorktreeDataState(worktree.path, {
-                    paneSessions: { ...data.paneSessions, "tab-run": ptyId },
+                    paneSessions: { ...data.paneSessions, [RUN_PANE_ID]: ptyId },
                   });
 
-                  // Write the setup command into the interactive shell.
                   const encoded = encodePtyInput(config.setup + "\n");
                   await invoke("pty_write", { sessionId: ptyId, data: encoded });
 
@@ -1101,9 +1099,7 @@ export function Sidebar() {
                   toast.error(`Failed to run setup script: ${e}`);
                 }
               })
-              .catch(() => {
-                // Silently ignore config read failures.
-              });
+              .catch(() => {});
           }}
           onCancel={() => setShowNewWorktree(false)}
         />

@@ -3,23 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { XtermTerminal } from "./XtermTerminal";
 import { useUIStore, useDataStore } from "../store";
 import type { WorktreeIssue } from "../types";
-
-const CLAUDE_PANE_ID = "tab-claude";
-const RUN_PANE_ID = "tab-run";
+import { encodePtyInput } from "../lib/encode-pty";
+import { getHookPort } from "../lib/get-hook-port";
+import { CLAUDE_PANE_ID, RUN_PANE_ID } from "../lib/pane-ids";
 
 type TabKind = "claude" | "run";
 
 interface ProjectConfig {
   setup?: string | null;
   run?: string | null;
-}
-
-async function getHookPort(): Promise<number> {
-  try {
-    return await invoke<number>("get_hook_port");
-  } catch {
-    return 0;
-  }
 }
 
 /**
@@ -38,13 +30,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   isActive: boolean;
   claudeOnly?: boolean;
 }) {
-  // Subscribe so re-renders fire when nav state or paneSessions change.
-  useUIStore((s) => s.worktreeNavStates[worktreePath]);
+  const activeTerminalsTab = useUIStore(
+    (s) => s.worktreeNavStates[worktreePath]?.activeTerminalsTab ?? "claude",
+  );
   const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
-  const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
   const paneSessions = dataState?.paneSessions ?? {};
 
-  // Read project config once per worktree. The Run tab's existence depends on it.
   const [config, setConfig] = useState<ProjectConfig | null>(null);
   useEffect(() => {
     const projectPath = useUIStore.getState().selectedProject?.path;
@@ -66,9 +57,8 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     tabs.push({ kind: "run", label: "Run", paneId: RUN_PANE_ID });
   }
 
-  // If the active tab no longer exists (e.g. config removed run script), fall back to claude.
-  const activeKind: TabKind = tabs.some((t) => t.kind === nav.activeTerminalsTab)
-    ? nav.activeTerminalsTab
+  const activeKind: TabKind = tabs.some((t) => t.kind === activeTerminalsTab)
+    ? activeTerminalsTab
     : "claude";
 
   const setActive = useCallback(
@@ -80,7 +70,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     [worktreePath],
   );
 
-  // claudeOnly: render just the Claude body, no tab strip. Used by the Split top-tab.
   if (claudeOnly) {
     return (
       <div className="relative h-full w-full">
@@ -89,7 +78,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           paneKind="claude"
           worktreePath={worktreePath}
           sessionId={paneSessions[CLAUDE_PANE_ID] ?? null}
-          isVisible
           isActive={isActive}
         />
       </div>
@@ -98,7 +86,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tab strip */}
       <div className="flex shrink-0 items-center gap-0.5 px-2 pt-1 border-b border-border/40">
         {tabs.map((t) => (
           <button
@@ -115,7 +102,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         ))}
       </div>
 
-      {/* Tab bodies — all mounted, hidden via z-index/visibility */}
       <div className="relative flex-1 min-h-0">
         {tabs.map((t) => {
           const visible = activeKind === t.kind;
@@ -134,7 +120,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                 paneKind={t.kind}
                 worktreePath={worktreePath}
                 sessionId={paneSessions[t.paneId] ?? null}
-                isVisible={visible}
                 isActive={isActive && visible}
               />
             </div>
@@ -145,10 +130,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
 });
 
-/**
- * Renders one tab body. Lazy-spawns the PTY the first time it mounts with no session.
- * For the Claude tab, also runs the Claude auto-launch flow on first spawn.
- */
 function TabBody({
   paneId,
   paneKind,
@@ -160,7 +141,6 @@ function TabBody({
   paneKind: TabKind;
   worktreePath: string;
   sessionId: string | null;
-  isVisible: boolean;
   isActive: boolean;
 }) {
   const spawningRef = useRef(false);
@@ -169,7 +149,6 @@ function TabBody({
     if (sessionId || spawningRef.current) return;
     spawningRef.current = true;
 
-    // Best-effort Linear context refresh for Claude tabs (mirrors SplitTreeRenderer).
     if (paneKind === "claude") {
       const linearApiKey = useUIStore.getState().linearApiKey;
       if (linearApiKey) {
@@ -200,13 +179,11 @@ function TabBody({
         },
       })
         .then((isNew) => {
-          // Register the session in dataStore so future renders see it.
           const data = useDataStore.getState().getWorktreeDataState(worktreePath);
           useDataStore.getState().updateWorktreeDataState(worktreePath, {
             paneSessions: { ...data.paneSessions, [paneId]: ptyId },
           });
 
-          // Claude auto-launch (mirrors SplitTreeRenderer logic).
           if (paneKind === "claude" && isNew) {
             const claudeLaunched = useUIStore
               .getState()
@@ -229,21 +206,18 @@ function TabBody({
                 const parts = ["claude"];
                 if (flags.trim()) parts.push(flags.trim());
                 if (claudeLaunched) parts.push("--continue");
-                const claudeCmd = parts.join(" ") + "\n";
-                const encoded = btoa(
-                  Array.from(new TextEncoder().encode(claudeCmd), (b) =>
-                    String.fromCharCode(b),
-                  ).join(""),
-                );
+                const encoded = encodePtyInput(parts.join(" ") + "\n");
                 invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(
                   () => {},
                 );
               })
               .catch(() => {});
 
-            useUIStore
-              .getState()
-              .updateWorktreeNavState(worktreePath, { claudeLaunched: true });
+            if (!claudeLaunched) {
+              useUIStore
+                .getState()
+                .updateWorktreeNavState(worktreePath, { claudeLaunched: true });
+            }
           }
         })
         .catch((err) => {

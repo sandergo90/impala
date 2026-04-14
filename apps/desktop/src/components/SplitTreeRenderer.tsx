@@ -8,15 +8,8 @@ import {
 import { XtermTerminal } from "./XtermTerminal";
 import type { SplitNode, WorktreeIssue } from "../types";
 import { paneSessionId } from "../lib/split-tree";
+import { getHookPort } from "../lib/get-hook-port";
 import { useUIStore, useDataStore } from "../store";
-
-let cachedHookPort: number | null = null;
-async function getHookPort(): Promise<number> {
-  if (cachedHookPort === null) {
-    cachedHookPort = await invoke<number>("get_hook_port");
-  }
-  return cachedHookPort;
-}
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
