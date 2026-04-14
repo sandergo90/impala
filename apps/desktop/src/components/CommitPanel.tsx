@@ -62,7 +62,11 @@ export function CommitPanel() {
   const splitPatch = useCallback((fullDiff: string): { fileDiffs: Record<string, string>; fileDiffHashes: Record<string, string> } => {
     const fileDiffs: Record<string, string> = {};
     const fileDiffHashes: Record<string, string> = {};
-    const parts = fullDiff.split(/^diff --git /m).filter(Boolean);
+    // Strip `* Unmerged path <file>` lines that git emits for merge-conflicted
+    // files — @pierre/diffs' parser doesn't know what to do with them and
+    // throws. Conflicted files have no textual diff anyway.
+    const cleaned = fullDiff.replace(/^\* Unmerged path .*\n?/gm, "");
+    const parts = cleaned.split(/^diff --git /m).filter(Boolean);
     for (const part of parts) {
       const patch = "diff --git " + part;
       const match = patch.match(/^diff --git a\/(.*?) b\//);
