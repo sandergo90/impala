@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -326,7 +326,7 @@ interface XtermTerminalProps {
   scrollback?: number;
 }
 
-export function XtermTerminal({
+function XtermTerminalInner({
   sessionId,
   baseDir,
   isFocused = true,
@@ -554,3 +554,5 @@ export function XtermTerminal({
     </div>
   );
 }
+
+export const XtermTerminal = memo(XtermTerminalInner);

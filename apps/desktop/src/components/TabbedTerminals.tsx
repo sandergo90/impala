@@ -506,7 +506,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
  * Claude tabs additionally write the `claude` command on first spawn.
  * `useContinueFlag` controls whether the primary Claude tab appends `--continue`.
  */
-function TabBody({
+const TabBody = memo(function TabBody({
   paneId,
   kind,
   useContinueFlag,
@@ -632,7 +632,7 @@ function TabBody({
       onRestart={handleRestart}
     />
   );
-}
+});
 
 function UserTabSplitRenderer({
   tab,
