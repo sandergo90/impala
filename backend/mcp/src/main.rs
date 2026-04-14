@@ -81,6 +81,15 @@ fn ensure_plan_tables(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn param_or_cwd(params: &Value, key: &str) -> Result<String, String> {
+    if let Some(v) = params.get(key).and_then(|v| v.as_str()) {
+        return Ok(v.to_string());
+    }
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| format!("could not determine current directory: {e}"))
+}
+
 fn row_to_annotation(row: &rusqlite::Row) -> rusqlite::Result<Annotation> {
     Ok(Annotation {
         id: row.get(0)?,
@@ -106,10 +115,9 @@ fn tool_list_annotations(conn: &Connection, params: &Value) -> Result<Value, Str
     );
     let mut bind_values: Vec<String> = Vec::new();
 
-    if let Some(v) = params.get("repo_path").and_then(|v| v.as_str()) {
-        sql.push_str(&format!(" AND repo_path = ?{}", bind_values.len() + 1));
-        bind_values.push(v.to_string());
-    }
+    let repo_path = param_or_cwd(params, "repo_path")?;
+    sql.push_str(&format!(" AND repo_path = ?{}", bind_values.len() + 1));
+    bind_values.push(repo_path);
     if let Some(v) = params.get("file_path").and_then(|v| v.as_str()) {
         sql.push_str(&format!(" AND file_path = ?{}", bind_values.len() + 1));
         bind_values.push(v.to_string());
@@ -176,10 +184,9 @@ fn tool_list_files_with_annotations(conn: &Connection, params: &Value) -> Result
     );
     let mut bind_values: Vec<String> = Vec::new();
 
-    if let Some(v) = params.get("repo_path").and_then(|v| v.as_str()) {
-        sql.push_str(&format!(" AND repo_path = ?{}", bind_values.len() + 1));
-        bind_values.push(v.to_string());
-    }
+    let repo_path = param_or_cwd(params, "repo_path")?;
+    sql.push_str(&format!(" AND repo_path = ?{}", bind_values.len() + 1));
+    bind_values.push(repo_path);
     if let Some(v) = params.get("commit_hash").and_then(|v| v.as_str()) {
         sql.push_str(&format!(" AND commit_hash = ?{}", bind_values.len() + 1));
         bind_values.push(v.to_string());
@@ -382,13 +389,13 @@ fn tool_definitions() -> Value {
         "tools": [
             {
                 "name": "list_annotations",
-                "description": "List code review annotations, optionally filtered by repo, file, or commit.",
+                "description": "List unresolved code review annotations for the current worktree. Defaults to the current working directory; pass repo_path to query a different worktree.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "repo_path": {
                             "type": "string",
-                            "description": "Filter by repository path"
+                            "description": "Worktree path to query. Defaults to the current working directory."
                         },
                         "file_path": {
                             "type": "string",
@@ -417,13 +424,13 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "list_files_with_annotations",
-                "description": "List files that have unresolved annotations, with counts.",
+                "description": "List files in the current worktree that have unresolved annotations, with counts. Defaults to the current working directory; pass repo_path to query a different worktree.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "repo_path": {
                             "type": "string",
-                            "description": "Filter by repository path"
+                            "description": "Worktree path to query. Defaults to the current working directory."
                         },
                         "commit_hash": {
                             "type": "string",
