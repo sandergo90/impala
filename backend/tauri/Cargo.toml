@@ -1,3 +1,6 @@
+[workspace]
+members = ["shared", "daemon"]
+
 [package]
 name = "impala"
 version = "0.4.4"
@@ -29,10 +32,13 @@ notify = { version = "8.2.0", features = ["macos_fsevent"] }
 tauri-plugin-fs = "2"
 dirs = "6"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "fs", "macros", "time", "sync"] }
 tiny_http = "0.12"
 urlencoding = "2"
 tauri-plugin-notification = "2"
+impala-daemon-shared = { path = "shared" }
+anyhow = "1"
+libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false }

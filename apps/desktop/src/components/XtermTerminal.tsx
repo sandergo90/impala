@@ -232,20 +232,11 @@ async function createCachedTerminal(
     return true;
   });
 
-  // Replay the accumulated scrollback. New sessions will return an empty
-  // buffer.
-  try {
-    const buffered = await invoke<string>("pty_get_buffer", { sessionId });
-    if (buffered) {
-      const bytes = decodeBase64(buffered);
-      if (bytes.length > 0) {
-        terminal.clear();
-        terminal.write(bytes);
-      }
-    }
-  } catch {
-    // Buffer may not exist yet for new sessions
-  }
+  // Scrollback replay is deferred to `attach()` below: we need the xterm
+  // to be mounted and fit()-ed to real cols/rows first, because the
+  // daemon's vt100 parser formats its snapshot for its current size and
+  // writing wider content into a default-80×24 grid clamps all the
+  // cursor positions — unfixable after the fact.
 
   const safeId = sanitizeEventId(sessionId);
 
@@ -414,28 +405,30 @@ function XtermTerminalInner({
       entryRef.current = entry;
 
       host.appendChild(entry.wrapper);
-      const prevCols = entry.terminal.cols;
-      const prevRows = entry.terminal.rows;
       entry.fitAddon.fit();
       entry.terminal.refresh(0, Math.max(0, entry.terminal.rows - 1));
 
-      // Force a SIGWINCH only when fit() was a no-op. If fit() changed dims,
-      // xterm.onResize already fires → debounced pty_resize → real SIGWINCH;
-      // adding a row-toggle on top would send three SIGWINCHes back-to-back
-      // (toggle up, toggle down, then debounced fit), which can make Claude
-      // CLI clear its conversation scrollback during cascading redraws.
-      if (
-        entry.terminal.cols === prevCols &&
-        entry.terminal.rows === prevRows
-      ) {
-        const cols = entry.terminal.cols;
-        const rows = entry.terminal.rows;
-        (async () => {
-          try {
-            await invoke("pty_resize", { sessionId, cols, rows: rows + 1 });
-            await invoke("pty_resize", { sessionId, cols, rows });
-          } catch {}
-        })();
+      // Now that xterm is sized to the real container, sync the daemon's
+      // vt100 parser to match and replay the scrollback at that size.
+      // Order matters: resize first so the parser rewraps its grid,
+      // then fetch the snapshot, then write — the bytes coming back
+      // describe the screen at exactly the cols/rows xterm is holding.
+      const cols = entry.terminal.cols;
+      const rows = entry.terminal.rows;
+      try {
+        await invoke("pty_resize", { sessionId, cols, rows });
+      } catch {}
+      try {
+        const buffered = await invoke<string>("pty_get_buffer", { sessionId });
+        if (buffered) {
+          const bytes = decodeBase64(buffered);
+          if (bytes.length > 0) {
+            entry.terminal.clear();
+            entry.terminal.write(bytes);
+          }
+        }
+      } catch {
+        // New sessions have no buffer yet — ignore.
       }
 
       // Fit synchronously in the ResizeObserver callback (no RAF). The RAF

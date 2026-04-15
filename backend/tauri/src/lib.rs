@@ -1,5 +1,6 @@
 mod annotations;
 mod config;
+mod daemon_client;
 mod fonts;
 mod git;
 mod hook_server;
@@ -1054,7 +1055,7 @@ pub fn run() {
             }
 
             app.manage(DbState(Mutex::new(conn)));
-            app.manage(pty::PtyState::new());
+            app.manage(daemon_client::DaemonState::new());
             app.manage(watcher::WatcherState::new());
             app.manage(plan_scanner::PlanScanCache::new());
             app.manage(plan_scanner::PlanWatcherState::new());
@@ -1064,6 +1065,34 @@ pub fn run() {
 
             let hook_port = hook_server::start(app.handle().clone());
             app.manage(HookPort(hook_port));
+
+            // Bring up the detached PTY daemon in the background. Until it
+            // lands, pty_* commands return "pty daemon not ready". The
+            // frontend usually calls them in response to a user action, so
+            // a ~100ms async boot is invisible in practice.
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    match daemon_client::DaemonClient::ensure(&app_handle).await {
+                        Ok(client) => {
+                            eprintln!(
+                                "[impala] pty daemon ready: v{} pid={} sock={}",
+                                client.daemon_version,
+                                client.daemon_pid,
+                                client.paths.sock.display()
+                            );
+                            if let Some(state) =
+                                app_handle.try_state::<daemon_client::DaemonState>()
+                            {
+                                let _ = state.0.set(client);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[impala] pty daemon failed to start: {e:#}");
+                        }
+                    }
+                });
+            }
 
             hook_server::install_claude_hooks();
             hook_server::install_impala_review_skill();
