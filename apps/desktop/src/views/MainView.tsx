@@ -12,12 +12,10 @@ import {
 } from "@/components/ui/resizable";
 import { ResizablePanel } from "../components/ResizablePanel";
 
-const DEFAULT_SIDEBAR_WIDTH = 220;
+const DEFAULT_SIDEBAR_WIDTH = 280;
 const MIN_SIDEBAR_WIDTH = 180;
-const MAX_SIDEBAR_WIDTH = 360;
 const DEFAULT_RIGHT_SIDEBAR_WIDTH = 300;
 const MIN_RIGHT_SIDEBAR_WIDTH = 220;
-const MAX_RIGHT_SIDEBAR_WIDTH = 500;
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { OpenInEditorButton } from "../components/OpenInEditorButton";
 import { invoke } from "@tauri-apps/api/core";
@@ -323,7 +321,7 @@ export function MainView() {
               isResizing={isSidebarResizing}
               onResizingChange={setIsSidebarResizing}
               minWidth={MIN_SIDEBAR_WIDTH}
-              maxWidth={MAX_SIDEBAR_WIDTH}
+              maxWidth={window.innerWidth * 0.99}
               handleSide="right"
               onDoubleClickHandle={() =>
                 useUIStore.getState().setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
@@ -395,7 +393,7 @@ export function MainView() {
               isResizing={isRightSidebarResizing}
               onResizingChange={setIsRightSidebarResizing}
               minWidth={MIN_RIGHT_SIDEBAR_WIDTH}
-              maxWidth={MAX_RIGHT_SIDEBAR_WIDTH}
+              maxWidth={window.innerWidth * 0.99}
               handleSide="left"
               onDoubleClickHandle={() =>
                 useUIStore
