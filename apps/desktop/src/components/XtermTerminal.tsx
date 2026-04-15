@@ -221,6 +221,12 @@ async function createCachedTerminal(
     }
     if (e.key === "Enter" && e.shiftKey) {
       writeToPty("\x1b[13;2u");
+      e.preventDefault();
+      return false;
+    }
+    if (e.key === "Enter" && e.metaKey) {
+      writeToPty("\r");
+      e.preventDefault();
       return false;
     }
     return true;
@@ -408,25 +414,29 @@ function XtermTerminalInner({
       entryRef.current = entry;
 
       host.appendChild(entry.wrapper);
-      // fit() only emits onResize (which drives pty_resize) when the
-      // dimensions actually change. Same-size re-attaches don't SIGWINCH the
-      // shell, so zsh doesn't redraw its prompt with PROMPT_EOL_MARK.
+      const prevCols = entry.terminal.cols;
+      const prevRows = entry.terminal.rows;
       entry.fitAddon.fit();
       entry.terminal.refresh(0, Math.max(0, entry.terminal.rows - 1));
-      // Force a SIGWINCH on every reattach. fit() is a no-op when the host
-      // has the same dims xterm already had, so xterm.onResize doesn't fire
-      // and the PTY child never gets a signal — but TUIs in alt-screen
-      // (Claude CLI) don't reflow on their own and need a SIGWINCH to
-      // repaint. Toggle by one row so the kernel actually emits the signal;
-      // Claude only renders the final size since signals coalesce.
-      const cols = entry.terminal.cols;
-      const rows = entry.terminal.rows;
-      (async () => {
-        try {
-          await invoke("pty_resize", { sessionId, cols, rows: rows + 1 });
-          await invoke("pty_resize", { sessionId, cols, rows });
-        } catch {}
-      })();
+
+      // Force a SIGWINCH only when fit() was a no-op. If fit() changed dims,
+      // xterm.onResize already fires → debounced pty_resize → real SIGWINCH;
+      // adding a row-toggle on top would send three SIGWINCHes back-to-back
+      // (toggle up, toggle down, then debounced fit), which can make Claude
+      // CLI clear its conversation scrollback during cascading redraws.
+      if (
+        entry.terminal.cols === prevCols &&
+        entry.terminal.rows === prevRows
+      ) {
+        const cols = entry.terminal.cols;
+        const rows = entry.terminal.rows;
+        (async () => {
+          try {
+            await invoke("pty_resize", { sessionId, cols, rows: rows + 1 });
+            await invoke("pty_resize", { sessionId, cols, rows });
+          } catch {}
+        })();
+      }
 
       // Fit synchronously in the ResizeObserver callback (no RAF). The RAF
       // throttle added one frame of lag between CSS-driven container resize

@@ -461,23 +461,39 @@ export function DiffView() {
   const customThemes = useUIStore((s) => s.customThemes);
 
   const wtPath = useUIStore((s) => s.selectedWorktree?.path);
-  const navState = useUIStore((s) =>
-    wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null
-  );
-  const dataState = useDataStore((s) =>
-    wtPath ? (s.worktreeDataStates[wtPath] ?? null) : null
-  );
 
-  const selectedFile = navState?.selectedFile ?? null;
-  const diffText = dataState?.diffText ?? null;
-  const selectedCommit = navState?.selectedCommit ?? null;
-  const viewMode = navState?.viewMode ?? 'commit';
-  const changedFiles = dataState?.changedFiles ?? emptyArray;
-  const fileDiffs = dataState?.fileDiffs ?? emptyRecord;
-  const fileDiffHashes = dataState?.fileDiffHashes ?? emptyRecord;
-  const generatedFilesRaw = dataState?.generatedFiles ?? emptyArray;
+  // Subscribe to each field individually so unrelated nav/data updates
+  // (e.g. agentStatus toggling while Claude works) don't re-render the
+  // whole diff tree. Selecting the parent object would create a new
+  // reference on every updateWorktreeDataState call and flicker the diff.
+  const selectedFile = useUIStore((s) =>
+    wtPath ? s.worktreeNavStates[wtPath]?.selectedFile ?? null : null
+  );
+  const selectedCommit = useUIStore((s) =>
+    wtPath ? s.worktreeNavStates[wtPath]?.selectedCommit ?? null : null
+  );
+  const viewMode = useUIStore((s) =>
+    wtPath ? s.worktreeNavStates[wtPath]?.viewMode ?? "commit" : "commit"
+  );
+  const diffText = useDataStore((s) =>
+    wtPath ? s.worktreeDataStates[wtPath]?.diffText ?? null : null
+  );
+  const changedFiles = useDataStore((s) =>
+    wtPath ? s.worktreeDataStates[wtPath]?.changedFiles ?? emptyArray : emptyArray
+  );
+  const fileDiffs = useDataStore((s) =>
+    wtPath ? s.worktreeDataStates[wtPath]?.fileDiffs ?? emptyRecord : emptyRecord
+  );
+  const fileDiffHashes = useDataStore((s) =>
+    wtPath ? s.worktreeDataStates[wtPath]?.fileDiffHashes ?? emptyRecord : emptyRecord
+  );
+  const generatedFilesRaw = useDataStore((s) =>
+    wtPath ? s.worktreeDataStates[wtPath]?.generatedFiles ?? emptyArray : emptyArray
+  );
   const generatedFiles = useMemo(() => new Set(generatedFilesRaw), [generatedFilesRaw]);
-  const annotations = dataState?.annotations ?? emptyArray;
+  const annotations = useDataStore((s) =>
+    wtPath ? s.worktreeDataStates[wtPath]?.annotations ?? emptyArray : emptyArray
+  );
 
   const worktreePath = selectedWorktree?.path;
   const updateData = useCallback(
