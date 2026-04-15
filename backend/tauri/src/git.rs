@@ -325,9 +325,15 @@ pub fn create_worktree(
         run_git(repo_path, &["worktree", "add", &wt_path, branch_name])?;
     } else {
         let base = base_branch.unwrap_or_else(|| "HEAD".to_string());
+        let start_point = if base == "HEAD" {
+            base
+        } else {
+            run_git(repo_path, &["fetch", "origin", &base])?;
+            format!("origin/{}", base)
+        };
         run_git(
             repo_path,
-            &["worktree", "add", &wt_path, "-b", branch_name, &base],
+            &["worktree", "add", &wt_path, "-b", branch_name, &start_point],
         )?;
     }
 
