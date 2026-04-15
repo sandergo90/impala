@@ -8,7 +8,7 @@ import { toast } from "sonner";
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const LAST_SEEN_VERSION_KEY = "impala:lastSeenVersion";
-const RELEASE_URL = "https://github.com/sandergo90/impala/releases/tag/v";
+const RELEASE_URL = "https://github.com/sandergo90/impala/releases/tag/desktop-v";
 
 export function UpdateChecker() {
   const checking = useRef(false);
