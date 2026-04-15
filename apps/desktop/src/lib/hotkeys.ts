@@ -91,7 +91,7 @@ export const HOTKEYS = {
   TOGGLE_TERMINAL: {
     label: "Toggle Terminal",
     description: "Switch between the general terminal and the last selected worktree",
-    default: "meta+shift+t",
+    default: "meta+alt+t",
     category: "Terminal",
   },
   CLEAR_TERMINAL: {
@@ -121,7 +121,7 @@ export const HOTKEYS = {
   NEW_CLAUDE_TAB: {
     label: "New Claude Tab",
     description: "Open a new Claude tab in the current worktree",
-    default: "meta+alt+t",
+    default: "meta+shift+t",
     category: "Terminal",
   },
   NEXT_TAB: {

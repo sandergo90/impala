@@ -89,12 +89,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
   const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
   const paneSessions = dataState?.paneSessions ?? {};
-  const runStatus = useUIStore(
-    (s) => s.worktreeNavStates[worktreePath]?.runStatus ?? "idle",
-  );
-  const runExitCode = useUIStore(
-    (s) => s.worktreeNavStates[worktreePath]?.runExitCode ?? null,
-  );
 
   const [config, setConfig] = useState<ProjectConfig | null>(null);
   useEffect(() => {
@@ -126,11 +120,8 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       });
     })
       .then((fn) => {
-        if (cancelled) {
-          fn();
-        } else {
-          unlisten = fn;
-        }
+        if (cancelled) fn();
+        else unlisten = fn;
       })
       .catch(() => {});
 
@@ -151,16 +142,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   }, [worktreePath, isActive, activeTerminalsTab]);
 
   const tabs: TabDescriptor[] = useMemo(() => {
-    const out: TabDescriptor[] = [
-      {
-        id: CLAUDE_PANE_ID,
-        label: "Claude",
-        kind: "claude",
-        useContinueFlag: true,
-        paneId: CLAUDE_PANE_ID,
-        isSystem: true,
-      },
-    ];
+    const out: TabDescriptor[] = [];
     if (hasRunTab) {
       out.push({
         id: RUN_PANE_ID,
@@ -171,6 +153,14 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         isSystem: true,
       });
     }
+    out.push({
+      id: CLAUDE_PANE_ID,
+      label: "Claude",
+      kind: "claude",
+      useContinueFlag: true,
+      paneId: CLAUDE_PANE_ID,
+      isSystem: true,
+    });
     for (const t of userTabs) {
       out.push({
         id: t.id,
@@ -322,9 +312,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           className="px-3.5 py-2 text-[15px] font-medium transition-colors flex items-center gap-1.5"
         >
           {t.label}
-          {t.id === RUN_PANE_ID && (
-            <RunStatusDot status={runStatus} exitCode={runExitCode} />
-          )}
         </button>
       )}
       {!t.isSystem && (
@@ -448,27 +435,27 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       </div>
 
       <div className="relative flex-1 min-h-0">
-        {tabs.map((t) => {
-          const visible = activeId === t.id;
+        {(() => {
+          // Mount only the active tab. Hidden tabs unmount, which detaches
+          // the cached xterm wrapper from the DOM. On reactivation the
+          // XtermTerminal effect re-runs attach() — appendChild + fit() +
+          // refresh() — so xterm picks up any size drift from the hidden
+          // period and TUIs (Claude CLI) get a real SIGWINCH if dims
+          // actually changed. The cached terminal entry survives because it
+          // lives in a module-level Map, not React state.
+          const t = tabs.find((tab) => tab.id === activeId);
+          if (!t) return null;
           const userTab = !t.isSystem
             ? userTabs.find((u) => u.id === t.id) ?? null
             : null;
           return (
-            <div
-              key={t.id}
-              className="absolute inset-0"
-              style={{
-                visibility: visible ? "visible" : "hidden",
-                zIndex: visible ? 1 : 0,
-                pointerEvents: visible ? "auto" : "none",
-              }}
-            >
+            <div key={t.id} className="absolute inset-0">
               {userTab ? (
                 <UserTabSplitRenderer
                   tab={userTab}
                   worktreePath={worktreePath}
                   paneSessions={paneSessions}
-                  isActive={isActive && visible}
+                  isActive={isActive}
                 />
               ) : (
                 <TabBody
@@ -477,12 +464,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                   useContinueFlag={t.useContinueFlag}
                   worktreePath={worktreePath}
                   sessionId={paneSessions[t.paneId] ?? null}
-                  isActive={isActive && visible}
+                  isActive={isActive}
                 />
               )}
             </div>
           );
-        })}
+        })()}
       </div>
     </div>
   );
@@ -750,28 +737,3 @@ function SortableUserTab({
   );
 }
 
-function RunStatusDot({
-  status,
-  exitCode,
-}: {
-  status: "idle" | "running" | "stopping";
-  exitCode: number | null;
-}) {
-  if (status === "running" || status === "stopping") {
-    return (
-      <span
-        className="inline-block w-2 h-2 rounded-full border-[1.5px] border-blue-400 border-t-transparent animate-spin"
-        aria-label="Running"
-      />
-    );
-  }
-  if (exitCode !== null && exitCode !== 0) {
-    return (
-      <span
-        className="inline-block w-2 h-2 rounded-full bg-red-500"
-        aria-label="Failed"
-      />
-    );
-  }
-  return null;
-}

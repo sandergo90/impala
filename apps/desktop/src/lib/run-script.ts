@@ -51,9 +51,9 @@ export async function stopRunScript() {
   const encoded = encodePtyInput("\x03");
   await invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
 
-  // Best-effort: Phase 1 does not detect actual process exit. Real exit
-  // detection and proper run-state tracking land in Phase 3 with the
-  // status indicators.
+  // Best-effort: we can't reliably detect when the foreground process has
+  // actually exited (the interactive shell stays alive), so flip back to
+  // idle after a short timeout.
   const worktreePath = wt.path;
   setTimeout(() => {
     const current = useUIStore.getState().getWorktreeNavState(worktreePath);
@@ -77,9 +77,9 @@ export function toggleRunScript() {
 }
 
 /**
- * Run the configured run script in the Run tab. If the Run tab's PTY doesn't exist yet
- * (e.g. the user hasn't visited the Terminal tab on this worktree), spawn it first.
- * Writes the run command into the existing PTY rather than respawning, so scrollback survives.
+ * Run the configured run script in the Run tab. If the Run tab's PTY doesn't
+ * exist yet, spawn it first. Writes the run command into the existing PTY
+ * rather than respawning, so scrollback survives.
  */
 export async function triggerRunScript() {
   const project = useUIStore.getState().selectedProject;
@@ -110,19 +110,11 @@ export async function triggerRunScript() {
 
     useUIStore.getState().updateWorktreeNavState(wt.path, {
       activeTab: "terminal",
-      activeTerminalsTab: "run",
+      activeTerminalsTab: RUN_PANE_ID,
       runStatus: "running",
-      runExitCode: null,
     });
 
-    // Append an OSC 6969 sentinel that carries the command's exit code.
-    // xterm silently drops unknown OSC codes, so the bytes printf emits
-    // never render — TabbedTerminals scans the raw PTY stream for the
-    // marker and flips runStatus back to idle. The ';printf ...' tail is
-    // visible in the typed command line; that's the tradeoff for not
-    // installing shell integration.
-    const sentinel = String.raw`; printf '\033]6969;%d\007' $?`;
-    const encoded = encodePtyInput(config.run + sentinel + "\n");
+    const encoded = encodePtyInput(config.run + "\n");
     await invoke("pty_write", { sessionId, data: encoded });
   } catch (e) {
     toast.error(`Failed to run script: ${e}`);

@@ -186,9 +186,29 @@ async function createCachedTerminal(
   }
 
   entry.onDataDisposable = terminal.onData((data: string) => writeToPty(data));
+  // Debounce pty_resize so the child process gets exactly one SIGWINCH at
+  // the end of a rapid resize (e.g. dragging the sidebar). Multiple
+  // SIGWINCHes during a drag coalesce in the kernel, but TUIs like the
+  // Claude CLI can read TIOCGWINSZ mid-redraw and miss the final size.
+  // xterm itself still refits on every observer tick so the visible cells
+  // stay in sync — only the PTY notification is throttled.
+  let pendingResizeTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingResize: { cols: number; rows: number } | null = null;
   entry.onResizeDisposable = terminal.onResize(({ cols, rows }) => {
     if (entry.exitedRef.current) return;
-    invoke("pty_resize", { sessionId, rows, cols }).catch(() => {});
+    pendingResize = { cols, rows };
+    if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
+    pendingResizeTimer = setTimeout(() => {
+      pendingResizeTimer = null;
+      const next = pendingResize;
+      pendingResize = null;
+      if (!next || entry.exitedRef.current) return;
+      invoke("pty_resize", {
+        sessionId,
+        rows: next.rows,
+        cols: next.cols,
+      }).catch(() => {});
+    }, 80);
   });
 
   terminal.attachCustomKeyEventHandler((e) => {
@@ -393,6 +413,20 @@ function XtermTerminalInner({
       // shell, so zsh doesn't redraw its prompt with PROMPT_EOL_MARK.
       entry.fitAddon.fit();
       entry.terminal.refresh(0, Math.max(0, entry.terminal.rows - 1));
+      // Force a SIGWINCH on every reattach. fit() is a no-op when the host
+      // has the same dims xterm already had, so xterm.onResize doesn't fire
+      // and the PTY child never gets a signal — but TUIs in alt-screen
+      // (Claude CLI) don't reflow on their own and need a SIGWINCH to
+      // repaint. Toggle by one row so the kernel actually emits the signal;
+      // Claude only renders the final size since signals coalesce.
+      const cols = entry.terminal.cols;
+      const rows = entry.terminal.rows;
+      (async () => {
+        try {
+          await invoke("pty_resize", { sessionId, cols, rows: rows + 1 });
+          await invoke("pty_resize", { sessionId, cols, rows });
+        } catch {}
+      })();
 
       // Fit synchronously in the ResizeObserver callback (no RAF). The RAF
       // throttle added one frame of lag between CSS-driven container resize
