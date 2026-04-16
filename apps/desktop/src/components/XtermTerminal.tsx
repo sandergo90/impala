@@ -113,6 +113,7 @@ async function createCachedTerminal(
     cursorStyle: "bar",
     fontSize,
     fontFamily,
+    fontWeight: "300",
     theme: getTerminalTheme(),
     allowProposedApi: true,
   });
