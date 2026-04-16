@@ -25,6 +25,7 @@ import { useUIStore, useDataStore } from "../store";
 import type { SplitNode, UserTab, WorktreeIssue } from "../types";
 import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
+import { sanitizeEventId } from "../lib/sanitize-event-id";
 import {
   CLAUDE_PANE_ID,
   RUN_PANE_ID,
@@ -110,7 +111,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     let unlisten: UnlistenFn | undefined;
     let cancelled = false;
 
-    const sessionId = runPtySessionId(worktreePath);
+    const sessionId = sanitizeEventId(runPtySessionId(worktreePath));
     listen<number>(`pty-exit-${sessionId}`, (event) => {
       const code = event.payload;
       useUIStore.getState().updateWorktreeNavState(worktreePath, {

@@ -26,10 +26,23 @@ pub struct ChangedFile {
     pub path: String,
 }
 
+pub(crate) fn augmented_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let extras = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+    let mut parts: Vec<&str> = current.split(':').collect();
+    for dir in extras {
+        if !parts.contains(&dir) {
+            parts.push(dir);
+        }
+    }
+    parts.join(":")
+}
+
 fn run_git(worktree_path: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(worktree_path)
+        .env("PATH", augmented_path())
         .args(args)
         .output()
         .map_err(|e| format!("Failed to execute git: {}", e))?;
@@ -423,6 +436,7 @@ pub fn get_head_commit(worktree_path: &str) -> Result<String, String> {
 pub fn get_git_user_name() -> Option<String> {
     let output = Command::new("git")
         .args(["config", "--get", "user.name"])
+        .env("PATH", augmented_path())
         .output()
         .ok()?;
     if output.status.success() {

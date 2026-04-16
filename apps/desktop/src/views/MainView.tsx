@@ -22,7 +22,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
-import { triggerRunScript, stopRunScript } from "../lib/run-script";
+import { toggleRunScript } from "../lib/run-script";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 import { TabPill } from "../components/TabPill";
@@ -238,12 +238,9 @@ export function MainView() {
         {/* Center: run + tabs */}
         {selectedWorktree && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingLeft: "88px" }}>
-            <div className="relative flex items-center gap-1.5 pointer-events-auto">
+            <div className="relative flex items-center gap-1.5 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
               <button
-                onClick={() => {
-                  if (isRunning) stopRunScript();
-                  else triggerRunScript();
-                }}
+                onClick={toggleRunScript}
                 disabled={isStopping}
                 className={`relative p-1.5 rounded disabled:opacity-30 disabled:cursor-not-allowed ${
                   isRunning || isStopping

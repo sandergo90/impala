@@ -39,8 +39,27 @@ export function NewWorktreeDialog({
   const [linearBranchName, setLinearBranchName] = useState("");
   const [linearBaseBranch, setLinearBaseBranch] = useState("develop");
   const [comboboxOpen, setComboboxOpen] = useState(false);
+  const [branchPrefix, setBranchPrefix] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const comboboxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    async function resolvePrefix() {
+      const mode = await invoke<string | null>("get_setting", { key: "branchPrefixMode", scope: "global" });
+      if (!mode || mode === "none") return;
+      if (mode === "custom") {
+        const custom = await invoke<string | null>("get_setting", { key: "branchPrefixCustom", scope: "global" });
+        if (custom) setBranchPrefix(custom + "/");
+      } else if (mode === "author") {
+        const info = await invoke<{ author_name: string | null }>("get_git_info");
+        if (info.author_name) {
+          const sanitized = info.author_name.toLowerCase().replace(/[^a-z0-9-]/g, "");
+          if (sanitized) setBranchPrefix(sanitized + "/");
+        }
+      }
+    }
+    resolvePrefix();
+  }, []);
 
   const { data: branches } = useInvoke<BranchInfo[]>("list_branches", { repoPath }, {
     onSuccess: (result) => {
@@ -219,15 +238,22 @@ export function NewWorktreeDialog({
               <label className="block text-md text-muted-foreground mb-1">
                 Branch name
               </label>
-              <input
-                type="text"
-                value={branchName}
-                onChange={(e) => setBranchName(e.target.value)}
-                placeholder="feature/my-branch"
-                className="w-full px-3 py-1.5 border rounded text-sm bg-background"
-                autoFocus
-                spellCheck={false}
-              />
+              <div className="flex w-full border rounded bg-background overflow-hidden">
+                {branchPrefix && (
+                  <span className="px-3 py-1.5 text-sm text-muted-foreground bg-muted/50 shrink-0 border-r">
+                    {branchPrefix}
+                  </span>
+                )}
+                <input
+                  type="text"
+                  value={branchName}
+                  onChange={(e) => setBranchName(e.target.value)}
+                  placeholder="feature/my-branch"
+                  className="flex-1 px-3 py-1.5 text-sm bg-transparent outline-none"
+                  autoFocus
+                  spellCheck={false}
+                />
+              </div>
             </div>
             <div>
               <label className="block text-md text-muted-foreground mb-1">
@@ -357,14 +383,21 @@ export function NewWorktreeDialog({
                   <label className="block text-md text-muted-foreground mb-1">
                     Branch name
                   </label>
-                  <input
-                    type="text"
-                    value={linearBranchName}
-                    onChange={(e) => setLinearBranchName(e.target.value)}
-                    placeholder="Select an issue to auto-fill"
-                    className="w-full px-3 py-1.5 border rounded text-sm bg-background"
-                    spellCheck={false}
-                  />
+                  <div className="flex w-full border rounded bg-background overflow-hidden">
+                    {branchPrefix && (
+                      <span className="px-3 py-1.5 text-sm text-muted-foreground bg-muted/50 shrink-0 border-r">
+                        {branchPrefix}
+                      </span>
+                    )}
+                    <input
+                      type="text"
+                      value={linearBranchName}
+                      onChange={(e) => setLinearBranchName(e.target.value)}
+                      placeholder="Select an issue to auto-fill"
+                      className="flex-1 px-3 py-1.5 text-sm bg-transparent outline-none"
+                      spellCheck={false}
+                    />
+                  </div>
                 </div>
 
                 <div>
