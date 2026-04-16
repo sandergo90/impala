@@ -3,6 +3,7 @@ import { useDataStore } from "../store";
 
 const navItems = [
   { to: "/settings/appearance" as const, label: "Appearance" },
+  { to: "/settings/git" as const, label: "Git & Worktrees" },
   { to: "/settings/integrations" as const, label: "Integrations" },
   { to: "/settings/notifications" as const, label: "Notifications" },
   { to: "/settings/keyboard" as const, label: "Keyboard Shortcuts" },

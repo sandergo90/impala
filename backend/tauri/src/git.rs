@@ -318,11 +318,10 @@ pub fn create_worktree(
     branch_name: &str,
     base_branch: Option<String>,
     existing: bool,
+    wt_path: &str,
 ) -> Result<Worktree, String> {
-    let wt_path = format!("{}/.worktrees/{}", repo_path, branch_name);
-
     if existing {
-        run_git(repo_path, &["worktree", "add", &wt_path, branch_name])?;
+        run_git(repo_path, &["worktree", "add", wt_path, branch_name])?;
     } else {
         let base = base_branch.unwrap_or_else(|| "HEAD".to_string());
         let start_point = if base == "HEAD" {
@@ -333,15 +332,15 @@ pub fn create_worktree(
         };
         run_git(
             repo_path,
-            &["worktree", "add", &wt_path, "-b", branch_name, &start_point],
+            &["worktree", "add", wt_path, "-b", branch_name, &start_point],
         )?;
     }
 
     // Read back the canonical path from git to avoid symlink mismatches
     // (e.g. /tmp -> /private/tmp on macOS)
-    let canonical_path = std::fs::canonicalize(&wt_path)
+    let canonical_path = std::fs::canonicalize(wt_path)
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or(wt_path);
+        .unwrap_or_else(|_| wt_path.to_string());
 
     let head = run_git(&canonical_path, &["rev-parse", "HEAD"])
         .unwrap_or_default()
@@ -356,12 +355,15 @@ pub fn create_worktree(
     })
 }
 
-pub fn delete_worktree(repo_path: &str, worktree_path: &str, force: bool) -> Result<(), String> {
-    // Resolve the branch before removing the worktree
-    let branch = run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])
-        .ok()
-        .map(|b| b.trim().to_string())
-        .filter(|b| !b.is_empty() && b != "HEAD");
+pub fn delete_worktree(repo_path: &str, worktree_path: &str, force: bool, delete_branch: bool) -> Result<(), String> {
+    let branch = if delete_branch {
+        run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .ok()
+            .map(|b| b.trim().to_string())
+            .filter(|b| !b.is_empty() && b != "HEAD")
+    } else {
+        None
+    };
 
     let mut args = vec!["worktree", "remove", worktree_path];
     if force {
@@ -369,13 +371,13 @@ pub fn delete_worktree(repo_path: &str, worktree_path: &str, force: bool) -> Res
     }
     run_git(repo_path, &args)?;
 
-    // Delete the local branch after the worktree is gone
     if let Some(branch) = branch {
         let _ = run_git(repo_path, &["branch", "-D", &branch]);
     }
 
     Ok(())
 }
+
 
 pub fn list_branches(repo_path: &str) -> Result<Vec<BranchInfo>, String> {
     let output = run_git(repo_path, &["branch", "-a", "--format=%(refname:short)"])?;
@@ -416,6 +418,19 @@ pub fn check_generated_files(worktree_path: &str, files: &[String]) -> Result<Ve
 
 pub fn get_head_commit(worktree_path: &str) -> Result<String, String> {
     run_git(worktree_path, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string())
+}
+
+pub fn get_git_user_name() -> Option<String> {
+    let output = Command::new("git")
+        .args(["config", "--get", "user.name"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if name.is_empty() { None } else { Some(name) }
+    } else {
+        None
+    }
 }
 
 pub fn get_all_changed_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {

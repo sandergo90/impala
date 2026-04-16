@@ -18,9 +18,10 @@ mod watcher;
 mod worktree_issues;
 mod worktrees;
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
@@ -28,6 +29,28 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 pub(crate) struct DbState(pub(crate) Mutex<rusqlite::Connection>);
 struct DiffCache(Mutex<lru::LruCache<String, String>>);
 struct HookPort(u16);
+
+fn default_worktree_base_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".impala")
+        .join("worktrees")
+}
+
+fn sanitize_prefix(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect()
+}
+
+fn resolve_branch_prefix(mode: &str, custom: &str) -> String {
+    match mode {
+        "author" => git::get_git_user_name().map(|n| sanitize_prefix(&n)).unwrap_or_default(),
+        "custom" => custom.to_string(),
+        _ => String::new(),
+    }
+}
 
 #[tauri::command]
 async fn check_git() -> Result<String, String> {
@@ -235,9 +258,41 @@ async fn create_worktree(
     existing: bool,
     initial_title: Option<String>,
 ) -> Result<git::Worktree, String> {
+    let (prefix_mode, prefix_custom, worktree_base_dir) = {
+        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        (
+            settings::get_setting(&conn, "branchPrefixMode", "global")?.unwrap_or_default(),
+            settings::get_setting(&conn, "branchPrefixCustom", "global")?.unwrap_or_default(),
+            settings::get_setting(&conn, "worktreeBaseDir", "global")?,
+        )
+    };
+
+    let repo_for_task = repo_path.clone();
     let branch_for_task = branch_name.clone();
     let mut worktree = tokio::task::spawn_blocking(move || {
-        git::create_worktree(&repo_path, &branch_for_task, base_branch, existing)
+        let prefix = resolve_branch_prefix(&prefix_mode, &prefix_custom);
+        let final_branch = if !existing && !prefix.is_empty() {
+            format!("{}/{}", prefix, branch_for_task)
+        } else {
+            branch_for_task
+        };
+
+        let base_dir = worktree_base_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(default_worktree_base_dir);
+        let project_name = Path::new(&repo_for_task)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let wt_path = base_dir.join(project_name).join(&final_branch);
+
+        git::create_worktree(
+            &repo_for_task,
+            &final_branch,
+            base_branch,
+            existing,
+            &wt_path.to_string_lossy(),
+        )
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))??;
@@ -256,9 +311,21 @@ async fn create_worktree(
 }
 
 #[tauri::command]
-async fn delete_worktree(repo_path: String, worktree_path: String, force: bool) -> Result<(), String> {
+async fn delete_worktree(
+    state: tauri::State<'_, DbState>,
+    repo_path: String,
+    worktree_path: String,
+    force: bool,
+) -> Result<(), String> {
+    let delete_branch = {
+        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        settings::get_setting(&conn, "deleteLocalBranch", "global")?
+            .map(|v| v == "true")
+            .unwrap_or(true)
+    };
+
     tokio::task::spawn_blocking(move || {
-        git::delete_worktree(&repo_path, &worktree_path, force)
+        git::delete_worktree(&repo_path, &worktree_path, force, delete_branch)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -684,6 +751,11 @@ fn get_hook_port(state: tauri::State<'_, HookPort>) -> u16 {
 }
 
 #[tauri::command]
+fn get_agent_statuses(state: tauri::State<'_, Arc<hook_server::AgentStatuses>>) -> HashMap<String, String> {
+    state.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+#[tauri::command]
 async fn check_generated_files(worktree_path: String, files: Vec<String>) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || git::check_generated_files(&worktree_path, &files))
         .await
@@ -800,6 +872,27 @@ fn delete_setting(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
     settings::delete_setting(&conn, &key, &scope)
+}
+
+#[derive(serde::Serialize)]
+struct GitInfo {
+    author_name: Option<String>,
+}
+
+#[tauri::command]
+async fn get_git_info() -> Result<GitInfo, String> {
+    tokio::task::spawn_blocking(|| {
+        Ok(GitInfo {
+            author_name: git::get_git_user_name(),
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+fn get_default_worktree_base_dir() -> String {
+    default_worktree_base_dir().to_string_lossy().to_string()
 }
 
 #[tauri::command]
@@ -1028,6 +1121,8 @@ pub fn run() {
             plan_annotations::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize plan_annotations table: {}", e))?;
 
+            let _ = fs::create_dir_all(default_worktree_base_dir());
+
             // Migrate projects.json → projects table
             {
                 let projects_file = app_dir.join("projects.json");
@@ -1063,8 +1158,10 @@ pub fn run() {
                 std::num::NonZeroUsize::new(50).unwrap(),
             ))));
 
-            let hook_port = hook_server::start(app.handle().clone());
+            let agent_statuses = Arc::new(hook_server::AgentStatuses(Mutex::new(HashMap::new())));
+            let hook_port = hook_server::start(app.handle().clone(), agent_statuses.clone());
             app.manage(HookPort(hook_port));
+            app.manage(agent_statuses);
 
             // Bring up the detached PTY daemon in the background. Until it
             // lands, pty_* commands return "pty daemon not ready". The
@@ -1096,6 +1193,7 @@ pub fn run() {
 
             hook_server::install_claude_hooks();
             hook_server::install_impala_review_skill();
+            hook_server::install_impala_plan_skill();
 
             // Auto-register the Impala MCP server in Claude Code settings
             if let Err(_) = setup_claude_integration_sync() {
@@ -1211,6 +1309,8 @@ pub fn run() {
             get_setting,
             set_setting,
             delete_setting,
+            get_git_info,
+            get_default_worktree_base_dir,
             write_linear_context,
             refresh_linear_context,
             clean_linear_context,
@@ -1226,6 +1326,7 @@ pub fn run() {
             list_plan_files,
             resolve_file_path,
             get_hook_port,
+            get_agent_statuses,
             watcher::watch_worktree,
             watcher::unwatch_worktree,
             config::read_project_config,

@@ -13,6 +13,7 @@ import { IntegrationsRoute } from "./routes/settings/integrations";
 import { ProjectSettingsRoute } from "./routes/settings/project";
 import { NotificationsRoute } from "./routes/settings/notifications";
 import { KeyboardRoute } from "./routes/settings/keyboard";
+import { GitWorktreesRoute } from "./routes/settings/git";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -39,6 +40,12 @@ const settingsAppearanceRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/appearance",
   component: AppearanceRoute,
+});
+
+const settingsGitRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/git",
+  component: GitWorktreesRoute,
 });
 
 const settingsIntegrationsRoute = createRoute({
@@ -69,6 +76,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   settingsRoute.addChildren([
     settingsAppearanceRoute,
+    settingsGitRoute,
     settingsIntegrationsRoute,
     settingsNotificationsRoute,
     settingsKeyboardRoute,

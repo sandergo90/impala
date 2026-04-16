@@ -28,7 +28,7 @@ export function NotificationsPane() {
           }`}
         >
           <span
-            className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+            className={`inline-block h-3.5 w-3.5 rounded-full bg-background transition-transform ${
               !soundMuted ? "translate-x-[18px]" : "translate-x-[3px]"
             }`}
           />
