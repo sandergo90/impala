@@ -83,9 +83,9 @@ jobs:
         id: changelog
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          COMMITS: ${{ steps.commits.outputs.commits }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          COMMITS="${{ steps.commits.outputs.commits }}"
 
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             # Fallback to raw commit list if no API key
