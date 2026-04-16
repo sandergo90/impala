@@ -343,6 +343,19 @@ export function Sidebar() {
     };
   }, []);
 
+  // Restore agent statuses from the backend after reload
+  useEffect(() => {
+    invoke<Record<string, string>>("get_agent_statuses").then((statuses) => {
+      for (const [path, status] of Object.entries(statuses)) {
+        if (status === "working" || status === "idle" || status === "permission") {
+          useDataStore.getState().updateWorktreeDataState(path, {
+            agentStatus: status,
+          });
+        }
+      }
+    });
+  }, []);
+
   // Listen for agent-status events from the backend
   useEffect(() => {
     const unlisten = listen<{ worktree_path: string; status: string }>(

@@ -1,7 +1,10 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Server, Response};
 use serde::Serialize;
+
+pub struct AgentStatuses(pub Mutex<HashMap<String, String>>);
 
 #[derive(Clone, Serialize)]
 pub struct AgentStatusEvent {
@@ -252,8 +255,78 @@ pub fn install_impala_review_skill() {
     let _ = std::fs::write(&skill_path, IMPALA_REVIEW_SKILL);
 }
 
+const IMPALA_PLAN_SKILL: &str = r#"---
+name: impala-plan
+description: Submit an implementation plan to Impala's Plan tab for user review, wait for the decision, and loop on annotations until approved. Use when you have a finished plan file and want the user to approve (or revise) it in the Impala desktop app before execution.
+allowed-tools: mcp__impala__submit_plan_for_review, mcp__impala__get_plan_decision, Bash, Read, Edit, Write
+argument-hint: "<plan-path>"
+---
+
+Run the full plan-review loop with Impala: register the plan, wait for the user's decision in the Plan tab, handle annotations, loop until approved.
+
+Invoke this after a plan file (or plan directory with `overview.md`) has been written. This skill owns review — not writing the plan, and not executing it.
+
+## Phase 1: Register
+
+Call `mcp__impala__submit_plan_for_review` with:
+
+- `plan_path`: absolute path to the plan's `overview.md` (or the single task file for a one-task plan)
+- `title`: the feature name
+- `worktree_path`: absolute path to the current working directory
+
+Capture the returned `signal_path` from the response. It's the file Impala will write when the user decides.
+
+## Phase 2: Wait
+
+Start a background watcher on the signal file using the Bash tool with `run_in_background: true`:
+
+```bash
+until [ -f "<signal_path>" ]; do sleep 2; done; cat "<signal_path>"
+```
+
+Then tell the user:
+
+**"Plan submitted to Impala's Plan tab. Approve it there, or leave annotations and I'll address them when you're done."**
+
+End your turn. You'll be notified in a new turn when the watcher finishes (the signal file appeared). If the user replies in chat before that, treat their message as the decision and stop the watcher.
+
+## Phase 3: Handle the Decision
+
+On wake-up, call `mcp__impala__get_plan_decision` with the same `plan_path` and `worktree_path`. Branch on `plan.status`:
+
+- **`approved`** → report "Plan approved." and stop. If the caller expects execution to follow, hand off to their execution flow (e.g. the `implement-plans` skill).
+- **anything else** (annotations added, changes requested, rejected) →
+  1. Read each annotation's `line_number` and `body`.
+  2. Revise the plan file(s) to address the feedback — edit in place, don't create new plan files.
+  3. Go back to Phase 1: call `submit_plan_for_review` again on the same `plan_path`. It auto-increments `version`, so no IDs or paths need to change. Start a new watcher on the new `signal_path`, end the turn, loop.
+
+## Notes
+
+- Do not execute the plan yourself. This skill is about review, not execution.
+- Do not poll `get_plan_decision` in a tight loop — always wait via the background watcher so your turn ends cleanly and the user can interact.
+- The `plans` table is the source of truth. The signal file is only a wake-up ping.
+"#;
+
+/// Install the /impala-plan skill to ~/.claude/skills/impala-plan/SKILL.md
+pub fn install_impala_plan_skill() {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+
+    let skill_dir = home.join(".claude").join("skills").join("impala-plan");
+    if let Err(_) = std::fs::create_dir_all(&skill_dir) {
+        return;
+    }
+
+    let skill_path = skill_dir.join("SKILL.md");
+    let _ = std::fs::write(&skill_path, IMPALA_PLAN_SKILL);
+}
+
 /// Start the hook HTTP server on a random port. Returns the port number.
-pub fn start(app_handle: AppHandle) -> u16 {
+/// The `statuses` map is updated with every event so the frontend can query
+/// last-known agent status after a hard reload.
+pub fn start(app_handle: AppHandle, statuses: Arc<AgentStatuses>) -> u16 {
     let server = Arc::new(
         Server::http("127.0.0.1:0").expect("Failed to start hook server")
     );
@@ -263,7 +336,7 @@ pub fn start(app_handle: AppHandle) -> u16 {
         for request in server.incoming_requests() {
             let url = request.url().to_string();
 
-            let params: std::collections::HashMap<String, String> = url
+            let params: HashMap<String, String> = url
                 .splitn(2, '?')
                 .nth(1)
                 .unwrap_or("")
@@ -290,6 +363,9 @@ pub fn start(app_handle: AppHandle) -> u16 {
             };
 
             if !status.is_empty() && !worktree_path.is_empty() {
+                if let Ok(mut map) = statuses.0.lock() {
+                    map.insert(worktree_path.clone(), status.to_string());
+                }
                 let _ = app_handle.emit("agent-status", AgentStatusEvent {
                     worktree_path,
                     status: status.to_string(),
