@@ -14,10 +14,13 @@ pub struct AgentStatusEvent {
 
 const IMPALA_HOOK_MARKER: &str = "IMPALA_HOOK_PORT";
 
-/// The hook command for a specific event type. Uses env vars set on the PTY process.
+/// The hook command for a specific event type.
+/// Reads the hook port from ~/.impala/hook-port (written on each app start)
+/// so that persistent PTY sessions always reach the current hook server,
+/// even after an app restart changes the port.
 fn hook_command(event_type: &str) -> String {
     format!(
-        "[ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${{IMPALA_HOOK_PORT}}/hook\" --data-urlencode \"event_type={}\" --data-urlencode \"worktree_path=${{IMPALA_WORKTREE_PATH}}\" --connect-timeout 1 --max-time 2 2>/dev/null || true",
+        "[ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${{IMPALA_HOOK_PORT}}/hook\" --data-urlencode \"event_type={}\" --data-urlencode \"worktree_path=${{IMPALA_WORKTREE_PATH}}\" --connect-timeout 1 --max-time 2 2>/dev/null || true",
         event_type
     )
 }
@@ -331,6 +334,14 @@ pub fn start(app_handle: AppHandle, statuses: Arc<AgentStatuses>) -> u16 {
         Server::http("127.0.0.1:0").expect("Failed to start hook server")
     );
     let port = server.server_addr().to_ip().unwrap().port();
+
+    // Write port to a well-known file so persistent PTY sessions can
+    // discover the current hook server after an app restart.
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".impala");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join("hook-port"), port.to_string());
+    }
 
     std::thread::spawn(move || {
         for request in server.incoming_requests() {
