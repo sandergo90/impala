@@ -1085,7 +1085,7 @@ export function Sidebar() {
           repoPath={selectedProject.path}
           onCreated={async (worktree) => {
             setShowNewWorktree(false);
-            setWorktrees([...useDataStore.getState().worktrees, worktree]);
+            setWorktrees([worktree, ...useDataStore.getState().worktrees]);
             selectWorktree(worktree);
 
             // Force the Terminal top-level tab + Run tab so the user sees setup running.
