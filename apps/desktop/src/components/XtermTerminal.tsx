@@ -13,6 +13,7 @@ import { useAppHotkey } from "../hooks/useAppHotkey";
 import { matchesHotkeyEvent } from "../lib/hotkeys";
 import { useHotkeysStore } from "../stores/hotkeys";
 import { createFileLinkProvider } from "../lib/terminal-link-provider";
+import { createUrlLinkProvider } from "../lib/terminal-url-link-provider";
 import { encodePtyInput } from "../lib/encode-pty";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
 import {
@@ -73,6 +74,7 @@ interface CachedTerminal {
   webglAddon: WebglAddon | null;
   wrapper: HTMLDivElement;
   linkDisposable: { dispose(): void } | null;
+  urlLinkDisposable: { dispose(): void } | null;
   onDataDisposable: { dispose(): void } | null;
   onResizeDisposable: { dispose(): void } | null;
   unlistenOutput: UnlistenFn | null;
@@ -141,6 +143,9 @@ async function createCachedTerminal(
   const linkDisposable = terminal.registerLinkProvider(
     createFileLinkProvider(terminal, () => baseDirRef.current),
   );
+  const urlLinkDisposable = terminal.registerLinkProvider(
+    createUrlLinkProvider(terminal),
+  );
 
   let webglAddon: WebglAddon | null = null;
   if (!webglDisabled) {
@@ -166,6 +171,7 @@ async function createCachedTerminal(
     webglAddon,
     wrapper,
     linkDisposable,
+    urlLinkDisposable,
     onDataDisposable: null,
     onResizeDisposable: null,
     unlistenOutput: null,
@@ -285,6 +291,7 @@ async function createCachedTerminal(
 
 function disposeCachedTerminal(entry: CachedTerminal) {
   entry.linkDisposable?.dispose();
+  entry.urlLinkDisposable?.dispose();
   entry.onDataDisposable?.dispose();
   entry.onResizeDisposable?.dispose();
   entry.unlistenOutput?.();
