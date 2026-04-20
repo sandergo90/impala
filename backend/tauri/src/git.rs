@@ -267,6 +267,28 @@ pub fn get_file_diff_since_commit(
     run_git(worktree_path, &["diff", &range, "--", file_path])
 }
 
+pub fn discard_file_changes(worktree_path: &str, file_path: &str) -> Result<(), String> {
+    let tracked = run_git(
+        worktree_path,
+        &["ls-files", "--error-unmatch", "--", file_path],
+    )
+    .is_ok();
+
+    if tracked {
+        run_git(
+            worktree_path,
+            &["restore", "--source=HEAD", "--staged", "--worktree", "--", file_path],
+        )?;
+    } else {
+        let full_path = std::path::Path::new(worktree_path).join(file_path);
+        if full_path.exists() {
+            std::fs::remove_file(&full_path)
+                .map_err(|e| format!("Failed to remove {}: {}", file_path, e))?;
+        }
+    }
+    Ok(())
+}
+
 pub fn get_uncommitted_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {
     let output = run_git(worktree_path, &["status", "--porcelain", "-uall"])?;
     let files = output

@@ -203,6 +203,13 @@ async fn get_uncommitted_diff(worktree_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn discard_file_changes(worktree_path: String, file_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || git::discard_file_changes(&worktree_path, &file_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
 async fn get_full_branch_diff(
     cache: tauri::State<'_, DiffCache>,
     worktree_path: String,
@@ -1274,6 +1281,7 @@ pub fn run() {
             invalidate_branch_cache,
             get_uncommitted_files,
             get_uncommitted_diff,
+            discard_file_changes,
             create_worktree,
             delete_worktree,
             list_branches,

@@ -10,6 +10,16 @@ import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { DiffLineAnnotation, FileDiffOptions } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
 
@@ -20,6 +30,21 @@ const emptyRecord: Record<string, string> = {};
 type AnnotationMeta =
   | { type: 'comment'; annotation: Annotation }
   | { type: 'form' };
+
+function DiscardButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="text-muted-foreground/60 hover:text-red-500 transition-colors shrink-0"
+      title="Discard changes"
+    >
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 8a5 5 0 0 1 5-5h1a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H5" />
+        <polyline points="5.5 5.5 3 8 5.5 10.5" />
+      </svg>
+    </button>
+  );
+}
 
 function OpenFileButton({ onClick }: { onClick: () => void }) {
   return (
@@ -171,7 +196,7 @@ const FileDiffItem = memo(function FileDiffItem({
   file, patch, isViewed, worktreePath, viewMode, selectedCommitHash,
   collapsedFiles, setCollapsedFiles, generatedFiles, diffOptions, diffViewerStyle,
   annotationsByFile, pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler,
-  toggleViewed, scrollToFile, virtualRow, measureElement, scrollMargin,
+  toggleViewed, onRequestDiscard, scrollToFile, virtualRow, measureElement, scrollMargin,
 }: {
   file: WorktreeDataState["changedFiles"][0];
   patch: string;
@@ -189,6 +214,7 @@ const FileDiffItem = memo(function FileDiffItem({
   renderAnnotation: (annotation: DiffLineAnnotation<AnnotationMeta>) => React.ReactNode;
   makeGutterUtilityClickHandler: (filePath?: string) => (range: { start: number; side?: "deletions" | "additions"; end: number }) => void;
   toggleViewed: (path: string) => void;
+  onRequestDiscard: (filePath: string) => void;
   scrollToFile: (index: number) => void;
   virtualRow: { index: number; start: number };
   measureElement: (el: HTMLElement | null) => void;
@@ -254,6 +280,9 @@ const FileDiffItem = memo(function FileDiffItem({
           </bdi>
         </span>
         <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${file.path}`)} />
+        {viewMode === 'uncommitted' && (
+          <DiscardButton onClick={() => onRequestDiscard(file.path)} />
+        )}
         <div className="flex-1" />
         {isGenerated && (
           <span className="text-md px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
@@ -307,7 +336,7 @@ function VirtualizedCommitView({
   toolbar, changedFiles, fileDiffs, viewedFiles, collapsedFiles, setCollapsedFiles,
   generatedFiles, diffOptions, diffViewerStyle, annotationsByFile,
   pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler, toggleViewed,
-  worktreePath, viewMode, selectedCommitHash,
+  onRequestDiscard, worktreePath, viewMode, selectedCommitHash,
 }: {
   toolbar: React.ReactNode;
   changedFiles: WorktreeDataState["changedFiles"];
@@ -323,6 +352,7 @@ function VirtualizedCommitView({
   renderAnnotation: (annotation: DiffLineAnnotation<AnnotationMeta>) => React.ReactNode;
   makeGutterUtilityClickHandler: (filePath?: string) => (range: { start: number; side?: "deletions" | "additions"; end: number }) => void;
   toggleViewed: (path: string) => void;
+  onRequestDiscard: (filePath: string) => void;
   worktreePath: string;
   viewMode: string;
   selectedCommitHash: string | null;
@@ -411,6 +441,9 @@ function VirtualizedCommitView({
                       <span className="flex-1 truncate">{file.path}</span>
                     )}
                     <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${isRenamed ? newPath : file.path}`)} />
+                    {viewMode === 'uncommitted' && (
+                      <DiscardButton onClick={() => onRequestDiscard(isRenamed ? (newPath ?? file.path) : file.path)} />
+                    )}
                     <span className="text-md px-1.5 py-0.5 rounded bg-muted">
                       {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
                     </span>
@@ -439,6 +472,7 @@ function VirtualizedCommitView({
                 renderAnnotation={renderAnnotation}
                 makeGutterUtilityClickHandler={makeGutterUtilityClickHandler}
                 toggleViewed={toggleViewed}
+                onRequestDiscard={onRequestDiscard}
                 scrollToFile={scrollToFile}
                 virtualRow={virtualRow}
                 measureElement={deferredMeasureElement}
@@ -514,6 +548,23 @@ export function DiffView() {
     lineNumber: number;
     side: 'deletions' | 'additions';
   } | null>(null);
+  const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
+
+  const requestDiscard = useCallback((filePath: string) => {
+    setFileToDiscard(filePath);
+  }, []);
+
+  const confirmDiscard = useCallback(async () => {
+    const filePath = fileToDiscard;
+    if (!filePath || !worktreePath) return;
+    setFileToDiscard(null);
+    try {
+      await invoke("discard_file_changes", { worktreePath, filePath });
+      toast.success(`Discarded changes in ${filePath}`);
+    } catch (e) {
+      toast.error(`Failed to discard ${filePath}: ${e}`);
+    }
+  }, [fileToDiscard, worktreePath]);
   // Determine the commit hash for viewed-files scoping
   const commitHashForViewed =
     viewMode === "commit" && selectedCommit ? selectedCommit.hash
@@ -773,27 +824,60 @@ export function DiffView() {
     </div>
   );
 
+  const discardDialog = (
+    <AlertDialog
+      open={!!fileToDiscard}
+      onOpenChange={(open) => { if (!open) setFileToDiscard(null); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Discard changes</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will discard all uncommitted changes in{" "}
+            <span className="font-mono text-foreground">{fileToDiscard}</span>.
+            This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={confirmDiscard}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Discard
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   // Full commit view: all files stacked with virtualization
   if (showAllFiles) {
-    return <VirtualizedCommitView
-      toolbar={toolbar}
-      changedFiles={changedFiles}
-      fileDiffs={fileDiffs}
-      viewedFiles={viewedFiles}
-      collapsedFiles={collapsedFiles}
-      setCollapsedFiles={setCollapsedFiles}
-      generatedFiles={generatedFiles}
-      diffOptions={diffOptions}
-      diffViewerStyle={diffViewerStyle}
-      annotationsByFile={annotationsByFile}
-      pendingAnnotation={pendingAnnotation}
-      renderAnnotation={renderAnnotation}
-      makeGutterUtilityClickHandler={makeGutterUtilityClickHandler}
-      toggleViewed={toggleViewed}
-      worktreePath={worktreePath ?? ""}
-      viewMode={viewMode}
-      selectedCommitHash={selectedCommit?.hash ?? null}
-    />;
+    return (
+      <>
+        <VirtualizedCommitView
+          toolbar={toolbar}
+          changedFiles={changedFiles}
+          fileDiffs={fileDiffs}
+          viewedFiles={viewedFiles}
+          collapsedFiles={collapsedFiles}
+          setCollapsedFiles={setCollapsedFiles}
+          generatedFiles={generatedFiles}
+          diffOptions={diffOptions}
+          diffViewerStyle={diffViewerStyle}
+          annotationsByFile={annotationsByFile}
+          pendingAnnotation={pendingAnnotation}
+          renderAnnotation={renderAnnotation}
+          makeGutterUtilityClickHandler={makeGutterUtilityClickHandler}
+          toggleViewed={toggleViewed}
+          onRequestDiscard={requestDiscard}
+          worktreePath={worktreePath ?? ""}
+          viewMode={viewMode}
+          selectedCommitHash={selectedCommit?.hash ?? null}
+        />
+        {discardDialog}
+      </>
+    );
   }
 
   // Single file view with annotations
@@ -809,6 +893,7 @@ export function DiffView() {
           options={{ ...diffOptions, onGutterUtilityClick: makeGutterUtilityClickHandler() }}
         />
       </div>
+      {discardDialog}
     </div>
   );
 }
