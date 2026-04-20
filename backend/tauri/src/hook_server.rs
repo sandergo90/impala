@@ -299,7 +299,7 @@ On wake-up, call `mcp__impala__get_plan_decision` with the same `plan_path` and 
 
 - **`approved`** → report "Plan approved." and stop. If the caller expects execution to follow, hand off to their execution flow (e.g. the `implement-plans` skill).
 - **anything else** (annotations added, changes requested, rejected) →
-  1. Read each annotation's `line_number` and `body`.
+  1. Read each annotation's `original_text` and `body` — `original_text` is the exact snippet of the plan the reviewer highlighted.
   2. Revise the plan file(s) to address the feedback — edit in place, don't create new plan files.
   3. Go back to Phase 1: call `submit_plan_for_review` again on the same `plan_path`. It auto-increments `version`, so no IDs or paths need to change. Start a new watcher on the new `signal_path`, end the turn, loop.
 

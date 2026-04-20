@@ -61,7 +61,8 @@ fn ensure_plan_tables(conn: &Connection) -> Result<(), String> {
             id TEXT PRIMARY KEY,
             plan_path TEXT NOT NULL,
             worktree_path TEXT NOT NULL,
-            line_number INTEGER NOT NULL,
+            original_text TEXT NOT NULL,
+            highlight_source TEXT,
             body TEXT NOT NULL,
             resolved INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
@@ -304,10 +305,10 @@ fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, St
     // Fetch annotations
     let mut stmt = conn
         .prepare(
-            "SELECT id, plan_path, worktree_path, line_number, body, resolved, created_at, updated_at
+            "SELECT id, plan_path, worktree_path, original_text, highlight_source, body, resolved, created_at, updated_at
              FROM plan_annotations
              WHERE plan_path = ?1 AND worktree_path = ?2
-             ORDER BY line_number ASC",
+             ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -317,11 +318,12 @@ fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, St
                 "id": row.get::<_, String>(0)?,
                 "plan_path": row.get::<_, String>(1)?,
                 "worktree_path": row.get::<_, String>(2)?,
-                "line_number": row.get::<_, i64>(3)?,
-                "body": row.get::<_, String>(4)?,
-                "resolved": row.get::<_, i64>(5)? != 0,
-                "created_at": row.get::<_, String>(6)?,
-                "updated_at": row.get::<_, String>(7)?,
+                "original_text": row.get::<_, String>(3)?,
+                "highlight_source": row.get::<_, Option<String>>(4)?,
+                "body": row.get::<_, String>(5)?,
+                "resolved": row.get::<_, i64>(6)? != 0,
+                "created_at": row.get::<_, String>(7)?,
+                "updated_at": row.get::<_, String>(8)?,
             }))
         })
         .map_err(|e| e.to_string())?;
