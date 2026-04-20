@@ -1,0 +1,9 @@
+# Ad-hoc codesign dev builds with a stable identifier so macOS TCC grants
+# (Files & Folders, Full Disk Access) survive rebuilds. Without a fixed
+# identity, every rebuild changes the cdhash and TCC re-prompts for every
+# folder Claude touches.
+#
+# Tauri v2 runs cargo from this directory (backend/tauri), so the script
+# path is relative to it.
+[target.'cfg(target_os = "macos")']
+runner = "bash ../../scripts/dev-sign.sh"
