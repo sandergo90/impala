@@ -337,6 +337,7 @@ function VirtualizedCommitView({
   generatedFiles, diffOptions, diffViewerStyle, annotationsByFile,
   pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler, toggleViewed,
   onRequestDiscard, worktreePath, viewMode, selectedCommitHash,
+  totalChangedCount, onShowViewed,
 }: {
   toolbar: React.ReactNode;
   changedFiles: WorktreeDataState["changedFiles"];
@@ -356,6 +357,8 @@ function VirtualizedCommitView({
   worktreePath: string;
   viewMode: string;
   selectedCommitHash: string | null;
+  totalChangedCount: number;
+  onShowViewed: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -414,6 +417,29 @@ function VirtualizedCommitView({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
+      {changedFiles.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex flex-col items-center gap-3 text-center max-w-sm">
+            <div className="w-14 h-14 rounded-full bg-green-500/10 flex items-center justify-center">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-500">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-sm font-medium text-foreground">All caught up</div>
+              <div className="text-md text-muted-foreground">
+                {totalChangedCount} {totalChangedCount === 1 ? "file" : "files"} marked as viewed
+              </div>
+            </div>
+            <button
+              onClick={onShowViewed}
+              className="mt-1 px-3 py-1 text-md rounded border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+            >
+              Show viewed files
+            </button>
+          </div>
+        </div>
+      ) : (
       <div ref={scrollRef} className="flex-1 overflow-auto show-scrollbar pr-2">
         <div ref={listRef}>
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
@@ -483,6 +509,7 @@ function VirtualizedCommitView({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -540,6 +567,7 @@ export function DiffView() {
   const showResolved = useUIStore((s) => s.showResolved);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
+  const [hideViewed, setHideViewed] = useState(false);
   const [pendingAnnotation, setPendingAnnotation] = useState<{
     filePath?: string;
     lineNumber: number;
@@ -748,6 +776,10 @@ export function DiffView() {
   const editorFontFamily = useUIStore((s) => s.editorFontFamily);
 
   const hasFileDiffs = Object.keys(fileDiffs).length > 0;
+  const visibleChangedFiles = useMemo(
+    () => (hideViewed ? changedFiles.filter((f) => !viewedFiles.has(f.path)) : changedFiles),
+    [hideViewed, changedFiles, viewedFiles]
+  );
   const showAllFiles = !selectedFile && hasFileDiffs;
   const showSingleFile = selectedFile && diffText;
 
@@ -778,9 +810,6 @@ export function DiffView() {
 
   const toolbar = (
     <div className="flex items-center gap-3 px-3 py-2 border-b shrink-0">
-      <span className="font-mono font-semibold text-md flex-1 truncate">
-        {selectedFile ? selectedFile.path : selectedCommit?.message ?? "Diff"}
-      </span>
       <div className="flex items-center gap-1 text-md">
         <button
           onClick={() => useUIStore.getState().setDiffStyle("split")}
@@ -813,6 +842,9 @@ export function DiffView() {
         >
           Wrap
         </button>
+      </div>
+      <div className="flex-1" />
+      <div className="flex items-center gap-1 text-md">
         {showAllFiles && changedFiles.length > 0 && (
           <>
             <span className="mx-1 text-border">|</span>
@@ -830,6 +862,16 @@ export function DiffView() {
               className="px-2 py-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
             >
               {viewedFiles.size === changedFiles.length ? "Unmark all" : "Mark all viewed"}
+            </button>
+            <button
+              onClick={() => setHideViewed((v) => !v)}
+              className={`px-2 py-0.5 rounded ${
+                hideViewed
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+              }`}
+            >
+              Hide viewed
             </button>
           </>
         )}
@@ -870,7 +912,7 @@ export function DiffView() {
       <>
         <VirtualizedCommitView
           toolbar={toolbar}
-          changedFiles={changedFiles}
+          changedFiles={visibleChangedFiles}
           fileDiffs={fileDiffs}
           viewedFiles={viewedFiles}
           collapsedFiles={collapsedFiles}
@@ -887,6 +929,8 @@ export function DiffView() {
           worktreePath={worktreePath ?? ""}
           viewMode={viewMode}
           selectedCommitHash={selectedCommit?.hash ?? null}
+          totalChangedCount={changedFiles.length}
+          onShowViewed={() => setHideViewed(false)}
         />
         {discardDialog}
       </>
