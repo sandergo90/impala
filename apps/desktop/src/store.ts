@@ -33,7 +33,6 @@ const defaultDataState: WorktreeDataState = {
   baseBranch: null,
   diffText: null,
   fileDiffs: {},
-  fileDiffHashes: {},
   generatedFiles: [],
   uncommittedStats: { additions: 0, deletions: 0 },
   allChangesStats: { additions: 0, deletions: 0 },

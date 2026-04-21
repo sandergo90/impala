@@ -455,6 +455,51 @@ pub fn get_head_commit(worktree_path: &str) -> Result<String, String> {
     run_git(worktree_path, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string())
 }
 
+/// Blob sha of the worktree copy of `file_path`, computed as git would store
+/// it (`git hash-object <path>`). Used to key "viewed" state by content: two
+/// worktree versions with identical bytes get the same sha.
+pub fn hash_worktree_file(worktree_path: &str, file_path: &str) -> Result<String, String> {
+    run_git(worktree_path, &["hash-object", "--", file_path]).map(|s| s.trim().to_string())
+}
+
+/// Blob sha of `file_path` as recorded in the tree of `git_ref` (a commit sha,
+/// `HEAD`, a branch name, etc). Errors if the file doesn't exist at that ref.
+pub fn blob_sha_at_ref(
+    worktree_path: &str,
+    git_ref: &str,
+    file_path: &str,
+) -> Result<String, String> {
+    let spec = format!("{}:{}", git_ref, file_path);
+    run_git(worktree_path, &["rev-parse", &spec]).map(|s| s.trim().to_string())
+}
+
+/// Map from file_path → blob sha for every file in `git_ref`'s tree.
+/// One git invocation regardless of file count.
+pub fn ls_tree_blobs(
+    worktree_path: &str,
+    git_ref: &str,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let output = run_git(worktree_path, &["ls-tree", "-r", "-z", git_ref])?;
+    let mut map = std::collections::HashMap::new();
+    // `-z` output: <mode> SP <type> SP <sha> TAB <path> NUL ...
+    for entry in output.split('\0') {
+        if entry.is_empty() {
+            continue;
+        }
+        let (meta, path) = match entry.split_once('\t') {
+            Some((m, p)) => (m, p),
+            None => continue,
+        };
+        let mut parts = meta.splitn(3, ' ');
+        let (_mode, _type, sha) = match (parts.next(), parts.next(), parts.next()) {
+            (Some(m), Some(t), Some(s)) => (m, t, s),
+            _ => continue,
+        };
+        map.insert(path.to_string(), sha.to_string());
+    }
+    Ok(map)
+}
+
 pub fn get_git_user_name() -> Option<String> {
     let output = Command::new("git")
         .args(["config", "--get", "user.name"])

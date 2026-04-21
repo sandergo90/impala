@@ -518,9 +518,6 @@ export function DiffView() {
   const fileDiffs = useDataStore((s) =>
     wtPath ? s.worktreeDataStates[wtPath]?.fileDiffs ?? emptyRecord : emptyRecord
   );
-  const fileDiffHashes = useDataStore((s) =>
-    wtPath ? s.worktreeDataStates[wtPath]?.fileDiffHashes ?? emptyRecord : emptyRecord
-  );
   const generatedFilesRaw = useDataStore((s) =>
     wtPath ? s.worktreeDataStates[wtPath]?.generatedFiles ?? emptyArray : emptyArray
   );
@@ -565,63 +562,73 @@ export function DiffView() {
       toast.error(`Failed to discard ${filePath}: ${e}`);
     }
   }, [fileToDiscard, worktreePath]);
-  // Determine the commit hash for viewed-files scoping
-  const commitHashForViewed =
-    viewMode === "commit" && selectedCommit ? selectedCommit.hash
+  const viewKindForViewed: "uncommitted" | "all-changes" | "commit" | null =
+    viewMode === "commit" && selectedCommit ? "commit"
     : viewMode === "all-changes" ? "all-changes"
     : viewMode === "uncommitted" ? "uncommitted"
     : null;
+  const commitHashForViewed =
+    viewKindForViewed === "commit" && selectedCommit ? selectedCommit.hash : null;
 
-  // Load viewed files from SQLite when commit context changes
+  // Viewed state is keyed by content sha: the backend computes the right-side
+  // blob sha for each changed file and checks it against the DB. Re-check on
+  // every data refresh so the UI stays in sync without the frontend needing
+  // to know about blob shas.
   useEffect(() => {
-    if (!worktreePath || !commitHashForViewed) {
+    if (!worktreePath || !viewKindForViewed || changedFiles.length === 0) {
       setViewedFiles(new Set());
       return;
     }
+    const paths = changedFiles.map((f) => f.path);
+    let cancelled = false;
     viewedFilesProvider
-      .list(worktreePath, commitHashForViewed)
-      .then((rows) => {
-        // Filter out stale entries where the patch has changed
-        const valid = new Set<string>();
-        const staleIds: string[] = [];
-        for (const row of rows) {
-          const currentPatch = fileDiffs[row.file_path];
-          const currentHash = fileDiffHashes[row.file_path];
-          if (!currentPatch && row.patch_hash === "new-file") {
-            valid.add(row.file_path);
-          } else if (currentPatch && currentHash === row.patch_hash) {
-            valid.add(row.file_path);
-          } else if (currentPatch) {
-            staleIds.push(row.file_path);
-          }
-        }
-        setViewedFiles(valid);
-        // Lazily clean up stale entries
-        for (const fp of staleIds) {
-          viewedFilesProvider.unset(worktreePath, commitHashForViewed, fp);
-        }
+      .check(worktreePath, viewKindForViewed, commitHashForViewed, paths)
+      .then((viewed) => {
+        if (!cancelled) setViewedFiles(new Set(viewed));
       })
-      .catch(() => setViewedFiles(new Set()));
-  }, [worktreePath, commitHashForViewed, fileDiffHashes]);
+      .catch(() => {
+        if (!cancelled) setViewedFiles(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [worktreePath, viewKindForViewed, commitHashForViewed, changedFiles]);
 
   const toggleViewed = useCallback((path: string) => {
-    if (!worktreePath || !commitHashForViewed) return;
-    const patchHash = fileDiffHashes[path] ?? "new-file";
+    if (!worktreePath || !viewKindForViewed) return;
 
     setViewedFiles((prev) => {
       const isCurrentlyViewed = prev.has(path);
       if (isCurrentlyViewed) {
-        viewedFilesProvider.unset(worktreePath, commitHashForViewed, path);
+        viewedFilesProvider.unset(worktreePath, path);
         const next = new Set(prev);
         next.delete(path);
         return next;
       } else {
-        const headCommit = useUIStore.getState().selectedWorktree?.head_commit;
-        viewedFilesProvider.set(worktreePath, commitHashForViewed, path, patchHash, headCommit);
+        viewedFilesProvider.set(worktreePath, viewKindForViewed, commitHashForViewed, path);
         return new Set(prev).add(path);
       }
     });
-  }, [worktreePath, commitHashForViewed, fileDiffHashes]);
+  }, [worktreePath, viewKindForViewed, commitHashForViewed]);
+
+  const toggleAllViewed = useCallback(() => {
+    if (!worktreePath || !viewKindForViewed || changedFiles.length === 0) return;
+    const paths = changedFiles.map((f) => f.path);
+    const allViewed = paths.every((p) => viewedFiles.has(p));
+    if (allViewed) {
+      setViewedFiles(new Set());
+      viewedFilesProvider.unsetMany(worktreePath, paths).catch(() => {
+        toast.error("Failed to unmark files");
+      });
+    } else {
+      setViewedFiles(new Set(paths));
+      viewedFilesProvider
+        .setMany(worktreePath, viewKindForViewed, commitHashForViewed, paths)
+        .catch(() => {
+          toast.error("Failed to mark all files as viewed");
+        });
+    }
+  }, [worktreePath, viewKindForViewed, commitHashForViewed, changedFiles, viewedFiles]);
 
   // Load all annotations for this worktree
   useEffect(() => {
@@ -818,6 +825,12 @@ export function DiffView() {
                 style={{ width: `${changedFiles.length > 0 ? (viewedFiles.size / changedFiles.length) * 100 : 0}%` }}
               />
             </div>
+            <button
+              onClick={toggleAllViewed}
+              className="px-2 py-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+            >
+              {viewedFiles.size === changedFiles.length ? "Unmark all" : "Mark all viewed"}
+            </button>
           </>
         )}
       </div>

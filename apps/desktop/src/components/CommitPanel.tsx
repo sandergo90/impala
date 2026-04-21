@@ -22,16 +22,6 @@ function countDiffStats(diff: string): { additions: number; deletions: number } 
   return { additions, deletions };
 }
 
-function hashPatch(patch: string): string {
-  const hunkStart = patch.indexOf("\n@@");
-  const body = hunkStart >= 0 ? patch.slice(hunkStart) : patch;
-  let hash = 0;
-  for (let i = 0; i < body.length; i++) {
-    hash = ((hash << 5) - hash + body.charCodeAt(i)) | 0;
-  }
-  return hash.toString(36);
-}
-
 export function CommitPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path;
@@ -59,9 +49,8 @@ export function CommitPanel() {
     [worktreePath]
   );
 
-  const splitPatch = useCallback((fullDiff: string): { fileDiffs: Record<string, string>; fileDiffHashes: Record<string, string> } => {
+  const splitPatch = useCallback((fullDiff: string): Record<string, string> => {
     const fileDiffs: Record<string, string> = {};
-    const fileDiffHashes: Record<string, string> = {};
     // Strip `* Unmerged path <file>` lines that git emits for merge-conflicted
     // files — @pierre/diffs' parser doesn't know what to do with them and
     // throws. Conflicted files have no textual diff anyway.
@@ -72,27 +61,26 @@ export function CommitPanel() {
       const match = patch.match(/^diff --git a\/(.*?) b\//);
       if (match) {
         fileDiffs[match[1]] = patch;
-        fileDiffHashes[match[1]] = hashPatch(patch);
       }
     }
-    return { fileDiffs, fileDiffHashes };
+    return fileDiffs;
   }, []);
 
   const selectAllChanges = async () => {
     const currentTab = navState?.activeTab ?? 'diff';
     updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
         invoke<string>("get_full_branch_diff", { worktreePath }),
       ]);
-      const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+      const fileDiffs = splitPatch(fullDiff);
       const generatedFiles = await invoke<string[]>("check_generated_files", {
         worktreePath,
         files: files.map(f => f.path),
       });
-      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
+      updateData({ changedFiles: files, fileDiffs, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
     } catch (e) {
       toast.error("Failed to load changed files");
     }
@@ -101,18 +89,18 @@ export function CommitPanel() {
   const selectUncommitted = async () => {
     const currentTab = navState?.activeTab ?? 'diff';
     updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
         invoke<string>("get_uncommitted_diff", { worktreePath }),
       ]);
-      const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+      const fileDiffs = splitPatch(fullDiff);
       const generatedFiles = await invoke<string[]>("check_generated_files", {
         worktreePath,
         files: files.map(f => f.path),
       });
-      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles, uncommittedStats: countDiffStats(fullDiff) });
+      updateData({ changedFiles: files, fileDiffs, generatedFiles, uncommittedStats: countDiffStats(fullDiff) });
     } catch (e) {
       toast.error("Failed to load uncommitted changes");
     }
@@ -121,18 +109,18 @@ export function CommitPanel() {
   const selectCommit = async (commit: CommitInfo) => {
     const currentTab = navState?.activeTab ?? 'diff';
     updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
-    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, fileDiffHashes: {}, generatedFiles: [] });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
       const [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_changed_files", { worktreePath, commitHash: commit.hash }),
         invoke<string>("get_full_commit_diff", { worktreePath, commitHash: commit.hash }),
       ]);
-      const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+      const fileDiffs = splitPatch(fullDiff);
       const generatedFiles = await invoke<string[]>("check_generated_files", {
         worktreePath,
         files: files.map(f => f.path),
       });
-      updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles });
+      updateData({ changedFiles: files, fileDiffs, generatedFiles });
     } catch (e) {
       toast.error("Failed to load commit");
     }
@@ -175,9 +163,7 @@ export function CommitPanel() {
       }
     }
 
-    // When viewing a specific commit, the commit's diff is immutable — no
-    // refetch needed. Leaving `fileDiffs`/`fileDiffHashes` untouched also
-    // preserves the per-file "viewed" state in DiffView.
+    // Committed diffs are immutable, so skip the refetch.
     if (viewMode === 'commit') {
       return;
     }
@@ -188,12 +174,12 @@ export function CommitPanel() {
           invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
           invoke<string>("get_uncommitted_diff", { worktreePath }),
         ]);
-        const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+        const fileDiffs = splitPatch(fullDiff);
         const generatedFiles = await invoke<string[]>("check_generated_files", {
           worktreePath,
           files: files.map(f => f.path),
         });
-        updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles, uncommittedStats: countDiffStats(fullDiff) });
+        updateData({ changedFiles: files, fileDiffs, generatedFiles, uncommittedStats: countDiffStats(fullDiff) });
       } catch {
         // Silently fail on auto-refresh
       }
@@ -203,12 +189,12 @@ export function CommitPanel() {
           invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
           invoke<string>("get_full_branch_diff", { worktreePath }),
         ]);
-        const { fileDiffs, fileDiffHashes } = splitPatch(fullDiff);
+        const fileDiffs = splitPatch(fullDiff);
         const generatedFiles = await invoke<string[]>("check_generated_files", {
           worktreePath,
           files: files.map(f => f.path),
         });
-        updateData({ changedFiles: files, fileDiffs, fileDiffHashes, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
+        updateData({ changedFiles: files, fileDiffs, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
       } catch {
         // Silently fail on auto-refresh
       }

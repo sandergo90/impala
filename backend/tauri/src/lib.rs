@@ -543,13 +543,13 @@ async fn list_plan_files(path: String) -> Result<Vec<String>, String> {
 fn set_file_viewed(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
-    commit_hash: String,
+    view_kind: String,
+    commit_hash: Option<String>,
     file_path: String,
-    patch_hash: String,
-    viewed_at_commit: Option<String>,
-) -> Result<viewed_files::ViewedFile, String> {
+) -> Result<(), String> {
+    let view = viewed_files::ViewKind::from_parts(&view_kind, commit_hash.as_deref())?;
     let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    viewed_files::set_viewed(&conn, &worktree_path, &commit_hash, &file_path, &patch_hash, viewed_at_commit.as_deref())
+    viewed_files::set_viewed(&conn, &worktree_path, view, &file_path)
 }
 
 #[tauri::command]
@@ -567,21 +567,46 @@ async fn get_file_diff_since_commit(
 fn unset_file_viewed(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
-    commit_hash: String,
     file_path: String,
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    viewed_files::unset_viewed(&conn, &worktree_path, &commit_hash, &file_path)
+    viewed_files::unset_viewed(&conn, &worktree_path, &file_path)
 }
 
 #[tauri::command]
-fn list_viewed_files(
+fn set_files_viewed(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
-    commit_hash: String,
-) -> Result<Vec<viewed_files::ViewedFile>, String> {
+    view_kind: String,
+    commit_hash: Option<String>,
+    file_paths: Vec<String>,
+) -> Result<(), String> {
+    let view = viewed_files::ViewKind::from_parts(&view_kind, commit_hash.as_deref())?;
+    let mut conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    viewed_files::set_many_viewed(&mut conn, &worktree_path, view, &file_paths)
+}
+
+#[tauri::command]
+fn unset_files_viewed(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+    file_paths: Vec<String>,
+) -> Result<(), String> {
+    let mut conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    viewed_files::unset_many_viewed(&mut conn, &worktree_path, &file_paths)
+}
+
+#[tauri::command]
+fn check_viewed_files(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+    view_kind: String,
+    commit_hash: Option<String>,
+    file_paths: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let view = viewed_files::ViewKind::from_parts(&view_kind, commit_hash.as_deref())?;
     let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    viewed_files::list_viewed(&conn, &worktree_path, &commit_hash)
+    viewed_files::check_viewed(&conn, &worktree_path, view, &file_paths)
 }
 
 #[tauri::command]
@@ -1312,7 +1337,9 @@ pub fn run() {
             set_file_viewed,
             get_file_diff_since_commit,
             unset_file_viewed,
-            list_viewed_files,
+            set_files_viewed,
+            unset_files_viewed,
+            check_viewed_files,
             clear_viewed_files,
             setup_claude_integration,
             get_my_linear_issues,

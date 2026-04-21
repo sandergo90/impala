@@ -155,7 +155,6 @@ export interface WorktreeDataState {
   baseBranch: string | null;
   diffText: string | null;
   fileDiffs: Record<string, string>;
-  fileDiffHashes: Record<string, string>;
   generatedFiles: string[];
   uncommittedStats: { additions: number; deletions: number };
   allChangesStats: { additions: number; deletions: number };
