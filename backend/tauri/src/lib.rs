@@ -412,6 +412,15 @@ fn get_plan(
 }
 
 #[tauri::command]
+fn list_plan_version_files(
+    state: tauri::State<'_, DbState>,
+    plan_id: String,
+) -> Result<Vec<plans::PlanFile>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    plans::list_plan_version_files(&conn, &plan_id)
+}
+
+#[tauri::command]
 fn update_plan(
     state: tauri::State<'_, DbState>,
     id: String,
@@ -1294,6 +1303,7 @@ pub fn run() {
             create_plan,
             list_plans,
             get_plan,
+            list_plan_version_files,
             update_plan,
             create_plan_annotation,
             list_plan_annotations,

@@ -28,6 +28,12 @@ pub struct UpdatePlan {
     pub title: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PlanFile {
+    pub file_name: String,
+    pub content: String,
+}
+
 pub fn init_db(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS plans (
@@ -41,7 +47,13 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_plans_worktree ON plans(worktree_path);",
+        CREATE INDEX IF NOT EXISTS idx_plans_worktree ON plans(worktree_path);
+        CREATE TABLE IF NOT EXISTS plan_files (
+            plan_id TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            PRIMARY KEY (plan_id, file_name)
+        );",
     )
     .map_err(|e| format!("Failed to initialize plans table: {}", e))?;
 
@@ -121,6 +133,31 @@ pub fn list_plans(
         plans.push(row.map_err(|e| format!("Failed to read plan: {}", e))?);
     }
     Ok(plans)
+}
+
+pub fn list_plan_version_files(
+    conn: &Connection,
+    plan_id: &str,
+) -> Result<Vec<PlanFile>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT file_name, content FROM plan_files
+             WHERE plan_id = ?1 ORDER BY file_name",
+        )
+        .map_err(|e| format!("Failed to prepare query: {}", e))?;
+    let rows = stmt
+        .query_map(params![plan_id], |row| {
+            Ok(PlanFile {
+                file_name: row.get(0)?,
+                content: row.get(1)?,
+            })
+        })
+        .map_err(|e| format!("Failed to query plan files: {}", e))?;
+    let mut files = Vec::new();
+    for row in rows {
+        files.push(row.map_err(|e| format!("Failed to read plan file: {}", e))?);
+    }
+    Ok(files)
 }
 
 pub fn get_plan(conn: &Connection, id: &str) -> Result<Plan, String> {

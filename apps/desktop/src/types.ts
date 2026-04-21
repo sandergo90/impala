@@ -63,6 +63,11 @@ export interface Plan {
   updated_at: string;
 }
 
+export interface PlanFile {
+  file_name: string;
+  content: string;
+}
+
 export interface PlanAnnotation {
   id: string;
   plan_path: string;

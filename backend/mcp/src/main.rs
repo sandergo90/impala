@@ -68,7 +68,13 @@ fn ensure_plan_tables(conn: &Connection) -> Result<(), String> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_plan_annotations_scope ON plan_annotations(plan_path, worktree_path);",
+        CREATE INDEX IF NOT EXISTS idx_plan_annotations_scope ON plan_annotations(plan_path, worktree_path);
+        CREATE TABLE IF NOT EXISTS plan_files (
+            plan_id TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            PRIMARY KEY (plan_id, file_name)
+        );",
     )
     .map_err(|e| format!("failed to ensure plan tables: {e}"))?;
 
@@ -253,6 +259,61 @@ fn tool_submit_plan_for_review(conn: &Connection, params: &Value) -> Result<Valu
     )
     .map_err(|e| e.to_string())?;
 
+    // Snapshot every .md file in the plan so each version stays complete,
+    // even when the agent resubmits and overwrites the file(s) on disk.
+    // Multi-file plans are directories containing overview.md; single-file
+    // plans have no overview.md sibling.
+    let path = std::path::Path::new(plan_path);
+    let parent = path.parent();
+    let is_multifile = parent
+        .map(|p| p.join("overview.md").exists())
+        .unwrap_or(false);
+    let files_to_snapshot: Vec<(String, String)> = if is_multifile {
+        let parent = parent.unwrap();
+        std::fs::read_dir(parent)
+            .ok()
+            .map(|rd| {
+                rd.flatten()
+                    .filter(|e| {
+                        e.path().extension().is_some_and(|ext| ext == "md")
+                            && e.path().is_file()
+                    })
+                    .filter_map(|e| {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        let body = std::fs::read_to_string(e.path()).ok()?;
+                        Some((name, body))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "plan.md".to_string());
+        match std::fs::read_to_string(path) {
+            Ok(body) => vec![(name, body)],
+            Err(_) => vec![],
+        }
+    };
+    for (name, body) in &files_to_snapshot {
+        conn.execute(
+            "INSERT INTO plan_files (plan_id, file_name, content) VALUES (?1, ?2, ?3)",
+            rusqlite::params![plan_id, name, body],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Resubmit means the agent has addressed outstanding feedback, so any
+    // open annotations on this plan_path are implicitly resolved. New
+    // annotations on the new version come in with resolved = 0.
+    conn.execute(
+        "UPDATE plan_annotations SET resolved = 1, updated_at = ?1
+         WHERE plan_path = ?2 AND worktree_path = ?3 AND resolved = 0",
+        rusqlite::params![now, plan_path, worktree_path],
+    )
+    .map_err(|e| e.to_string())?;
+
     let signal_path = format!("/tmp/impala-plan-{}.decided", plan_id);
 
     Ok(json!({
@@ -307,7 +368,7 @@ fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, St
         .prepare(
             "SELECT id, plan_path, worktree_path, original_text, highlight_source, body, resolved, created_at, updated_at
              FROM plan_annotations
-             WHERE plan_path = ?1 AND worktree_path = ?2
+             WHERE plan_path = ?1 AND worktree_path = ?2 AND resolved = 0
              ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;

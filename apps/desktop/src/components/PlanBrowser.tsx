@@ -58,15 +58,42 @@ export function PlanBrowser({
   const [contentCache, setContentCache] = useState<Map<string, string>>(new Map());
   const [annotationCounts, setAnnotationCounts] = useState<Map<string, number>>(new Map());
   const [fileCounts, setFileCounts] = useState<Map<string, number>>(new Map());
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+
+  // One row per plan_path for the list — the version picker lives in the preview.
+  const collapsedPlans = useMemo(() => {
+    const byPath = new Map<string, Plan>();
+    for (const p of plans) {
+      const existing = byPath.get(p.plan_path);
+      if (!existing || p.version > existing.version) byPath.set(p.plan_path, p);
+    }
+    return Array.from(byPath.values()).sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }, [plans]);
+
+  // Versions of the currently-previewed plan, newest first.
+  const selectedPlanVersions = useMemo(() => {
+    if (!selectedPlanPath) return [];
+    return plans
+      .filter((p) => p.plan_path === selectedPlanPath)
+      .sort((a, b) => b.version - a.version);
+  }, [plans, selectedPlanPath]);
 
   // Reset selection when worktree changes
   useEffect(() => {
     setSelectedPlanPath(null);
   }, [worktreePath]);
 
-  // Load content for all plans lazily into a cache
+  // Reset picked version whenever the user selects a different plan.
   useEffect(() => {
-    plans.forEach((p) => {
+    setSelectedVersionId(null);
+  }, [selectedPlanPath]);
+
+  // Load content for the latest version of each plan into the cache (list preview).
+  useEffect(() => {
+    collapsedPlans.forEach((p) => {
       if (contentCache.has(p.plan_path)) return;
       if (p.content) {
         setContentCache((prev) => new Map(prev).set(p.plan_path, p.content!));
@@ -78,12 +105,12 @@ export function PlanBrowser({
           .catch(() => {});
       }
     });
-  }, [plans]);
+  }, [collapsedPlans]);
 
-  // Fetch annotation counts for all plans
+  // Fetch annotation counts per plan_path.
   useEffect(() => {
-    plans.forEach((p) => {
-      invoke<any[]>("list_plan_annotations", {
+    collapsedPlans.forEach((p) => {
+      invoke<unknown[]>("list_plan_annotations", {
         planPath: p.plan_path,
         worktreePath: worktreePath || null,
       })
@@ -95,11 +122,11 @@ export function PlanBrowser({
         })
         .catch(() => {});
     });
-  }, [plans, worktreePath]);
+  }, [collapsedPlans, worktreePath]);
 
-  // Fetch file counts for all plans
+  // Fetch file counts per plan_path.
   useEffect(() => {
-    plans.forEach((p) => {
+    collapsedPlans.forEach((p) => {
       invoke<string[]>("list_plan_files", { path: p.plan_path })
         .then((files) => {
           const count = files.length;
@@ -110,25 +137,38 @@ export function PlanBrowser({
         })
         .catch(() => {});
     });
-  }, [plans]);
+  }, [collapsedPlans]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && selectedPlanPath) {
-        const plan = plans.find((p) => p.plan_path === selectedPlanPath);
+        const plan = collapsedPlans.find((p) => p.plan_path === selectedPlanPath);
         if (plan) onSelectPlan(plan.id);
       }
     },
-    [selectedPlanPath, plans, onSelectPlan]
+    [selectedPlanPath, collapsedPlans, onSelectPlan]
   );
 
-  const previewContent = selectedPlanPath ? contentCache.get(selectedPlanPath) : undefined;
+  const previewContent = useMemo(() => {
+    if (selectedVersionId) {
+      const picked = selectedPlanVersions.find((v) => v.id === selectedVersionId);
+      return picked?.content ?? undefined;
+    }
+    return selectedPlanPath ? contentCache.get(selectedPlanPath) : undefined;
+  }, [selectedVersionId, selectedPlanVersions, selectedPlanPath, contentCache]);
+
+  const handleVersionClick = useCallback(
+    (version: Plan, isCurrent: boolean) => {
+      setSelectedVersionId(isCurrent ? null : version.id);
+    },
+    []
+  );
 
   const selectedTitle = useMemo(() => {
     if (!selectedPlanPath) return "";
-    const plan = plans.find((p) => p.plan_path === selectedPlanPath);
+    const plan = collapsedPlans.find((p) => p.plan_path === selectedPlanPath);
     return plan?.title ?? selectedPlanPath.split("/").pop() ?? "";
-  }, [selectedPlanPath, plans]);
+  }, [selectedPlanPath, collapsedPlans]);
 
   return (
     <div className="flex flex-col h-full">
@@ -143,13 +183,13 @@ export function PlanBrowser({
           tabIndex={0}
           onKeyDown={handleKeyDown}
         >
-          {plans.length === 0 ? (
+          {collapsedPlans.length === 0 ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
               No plans submitted for review
             </div>
           ) : (
             <div className="flex flex-col gap-0.5 p-1.5">
-              {plans.map((p) => {
+              {collapsedPlans.map((p) => {
                 const isSelected = selectedPlanPath === p.plan_path;
                 const desc = getFirstLine(contentCache.get(p.plan_path));
                 return (
@@ -222,7 +262,7 @@ export function PlanBrowser({
                 </span>
                 <button
                   onClick={() => {
-                    const plan = plans.find((p) => p.plan_path === selectedPlanPath);
+                    const plan = collapsedPlans.find((p) => p.plan_path === selectedPlanPath);
                     if (plan) onSelectPlan(plan.id);
                   }}
                   className="px-3 py-1 text-sm font-medium rounded-md border border-border text-foreground hover:bg-accent"
@@ -230,6 +270,30 @@ export function PlanBrowser({
                   Open
                 </button>
               </div>
+              {selectedPlanVersions.length > 1 && (
+                <div className="flex items-center gap-1 px-4 py-1.5 border-b border-border shrink-0 overflow-x-auto">
+                  {selectedPlanVersions.map((v, idx) => {
+                    const isCurrent = idx === 0;
+                    const isActive = isCurrent
+                      ? selectedVersionId === null
+                      : selectedVersionId === v.id;
+                    return (
+                      <button
+                        key={v.id}
+                        onClick={() => handleVersionClick(v, isCurrent)}
+                        title={`${v.status.replace("_", " ")} · ${formatRelativeTime(v.created_at)}`}
+                        className={`text-xs px-2 py-0.5 rounded transition-colors ${
+                          isActive
+                            ? "bg-accent text-foreground"
+                            : "text-muted-foreground hover:bg-accent/50"
+                        }`}
+                      >
+                        v{v.version}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <div
                 className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text"
                 style={editorFontFamily ? { "--font-mono": `"${editorFontFamily}", ui-monospace, monospace` } as React.CSSProperties : undefined}

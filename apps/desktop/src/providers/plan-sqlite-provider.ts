@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Plan, PlanAnnotation, NewPlanAnnotation } from "../types";
+import type { Plan, PlanAnnotation, NewPlanAnnotation, PlanFile } from "../types";
 
 export const planSqliteProvider = {
   async listPlans(worktreePath: string): Promise<Plan[]> {
@@ -16,6 +16,10 @@ export const planSqliteProvider = {
 
   async getPlan(id: string): Promise<Plan> {
     return invoke<Plan>("get_plan", { id });
+  },
+
+  async listPlanVersionFiles(planId: string): Promise<PlanFile[]> {
+    return invoke<PlanFile[]>("list_plan_version_files", { planId });
   },
 
   async updatePlan(

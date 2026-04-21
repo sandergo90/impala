@@ -10,6 +10,8 @@ import { PlanToolbar } from "./PlanToolbar";
 import { PlanBrowser } from "./PlanBrowser";
 import { PlanAnnotationForm } from "./PlanAnnotationForm";
 import { markdownComponents } from "./markdownComponents";
+import { planSqliteProvider } from "../providers/plan-sqlite-provider";
+import type { PlanFile } from "../types";
 
 export function PlanView() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -34,10 +36,35 @@ export function PlanView() {
   const [loadError, setLoadError] = useState(false);
   const [directoryFiles, setDirectoryFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [snapshotFiles, setSnapshotFiles] = useState<PlanFile[]>([]);
 
-  // Detect if plan is a directory and list its files
+  // Fetch the snapshot file set for the active plan version.
   useEffect(() => {
     if (!activePlan) {
+      setSnapshotFiles([]);
+      return;
+    }
+    planSqliteProvider
+      .listPlanVersionFiles(activePlan.id)
+      .then(setSnapshotFiles)
+      .catch(() => setSnapshotFiles([]));
+  }, [activePlan?.id]);
+
+  // Populate file tabs — snapshot takes priority; fall back to disk for
+  // legacy plans that have no snapshot rows.
+  useEffect(() => {
+    if (!activePlan) {
+      setDirectoryFiles([]);
+      setActiveFile(null);
+      return;
+    }
+    if (snapshotFiles.length > 1) {
+      const names = snapshotFiles.map((f) => f.file_name);
+      setDirectoryFiles(names);
+      setActiveFile(names[0]);
+      return;
+    }
+    if (snapshotFiles.length === 1) {
       setDirectoryFiles([]);
       setActiveFile(null);
       return;
@@ -56,9 +83,10 @@ export function PlanView() {
         setDirectoryFiles([]);
         setActiveFile(null);
       });
-  }, [activePlan?.id, activePlan?.plan_path]);
+  }, [activePlan, snapshotFiles]);
 
-  // Load the active file content
+  // Resolve markdown content — snapshot first, then activePlan.content
+  // (single-file legacy), then disk read (multi-file legacy).
   useEffect(() => {
     if (!activePlan) {
       setMarkdown(null);
@@ -66,16 +94,38 @@ export function PlanView() {
       return;
     }
     setLoadError(false);
-    if (activePlan.content && !activeFile) {
-      setMarkdown(activePlan.content);
-    } else {
-      setMarkdown(null);
-      const pathToRead = activeFile ?? activePlan.plan_path;
-      invoke<string>("read_plan_file", { path: pathToRead })
-        .then((content) => setMarkdown(content))
-        .catch(() => setLoadError(true));
+
+    if (snapshotFiles.length > 0) {
+      const targetName = activeFile
+        ? (activeFile.split("/").pop() ?? activeFile)
+        : null;
+      const snap = targetName
+        ? snapshotFiles.find((f) => f.file_name === targetName)
+        : (snapshotFiles.find((f) => f.file_name === "overview.md") ??
+          snapshotFiles[0]);
+      if (snap) {
+        setMarkdown(snap.content);
+        return;
+      }
     }
-  }, [activePlan?.id, activePlan?.plan_path, activePlan?.content, activeFile]);
+
+    if (!activeFile && activePlan.content) {
+      setMarkdown(activePlan.content);
+      return;
+    }
+
+    setMarkdown(null);
+    const pathToRead = activeFile ?? activePlan.plan_path;
+    invoke<string>("read_plan_file", { path: pathToRead })
+      .then((content) => setMarkdown(content))
+      .catch(() => setLoadError(true));
+  }, [
+    activePlan?.id,
+    activePlan?.plan_path,
+    activePlan?.content,
+    activeFile,
+    snapshotFiles,
+  ]);
 
   const handleBack = useCallback(() => {
     if (!wtPath) return;
