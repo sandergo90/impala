@@ -414,6 +414,13 @@ pub fn delete_worktree(repo_path: &str, worktree_path: &str, force: bool, delete
 }
 
 
+pub fn fetch_remote(repo_path: &str, remote: &str) -> Result<(), String> {
+    // --prune drops local remote-tracking refs that no longer exist on the
+    // remote, so the branch picker stays in sync with origin.
+    run_git(repo_path, &["fetch", "--prune", remote])?;
+    Ok(())
+}
+
 pub fn list_branches(repo_path: &str) -> Result<Vec<BranchInfo>, String> {
     let output = run_git(repo_path, &["branch", "-a", "--format=%(refname:short)"])?;
     let branches = output

@@ -40,8 +40,11 @@ export function NewWorktreeDialog({
   const [linearBaseBranch, setLinearBaseBranch] = useState("develop");
   const [comboboxOpen, setComboboxOpen] = useState(false);
   const [branchPrefix, setBranchPrefix] = useState("");
+  const [existingQuery, setExistingQuery] = useState("");
+  const [existingComboboxOpen, setExistingComboboxOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const comboboxRef = useRef<HTMLDivElement>(null);
+  const existingComboboxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function resolvePrefix() {
@@ -61,12 +64,30 @@ export function NewWorktreeDialog({
     resolvePrefix();
   }, []);
 
-  const { data: branches } = useInvoke<BranchInfo[]>("list_branches", { repoPath }, {
-    onSuccess: (result) => {
-      if (result.length > 0) setSelectedBranch(result[0].name);
-    },
-    onError: () => toast.error("Failed to load branches"),
-  });
+  const { data: branches, refetch: refetchBranches } = useInvoke<BranchInfo[]>(
+    "list_branches",
+    { repoPath },
+    { onError: () => toast.error("Failed to load branches") },
+  );
+  const [fetchingRemote, setFetchingRemote] = useState(false);
+  const fetchedRef = useRef(false);
+
+  // On first visit to the Existing tab, fetch origin in the background so the
+  // branch list reflects what's actually on the remote. The local list shows
+  // immediately; we refresh it once the fetch completes.
+  useEffect(() => {
+    if (tab !== "existing" || fetchedRef.current) return;
+    fetchedRef.current = true;
+    setFetchingRemote(true);
+    invoke("fetch_remote", { repoPath })
+      .then(() => refetchBranches())
+      .catch(() => toast.error("Failed to fetch remote"))
+      .finally(() => setFetchingRemote(false));
+  }, [tab, repoPath, refetchBranches]);
+
+  const filteredBranches = (branches ?? []).filter((b) =>
+    b.name.toLowerCase().includes(existingQuery.toLowerCase()),
+  );
 
   const { data: myIssues, loading: linearLoading } = useInvoke<LinearIssue[]>(
     "get_my_linear_issues",
@@ -104,11 +125,17 @@ export function NewWorktreeDialog({
     };
   }, []);
 
-  // Close combobox on outside click
+  // Close comboboxes on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (comboboxRef.current && !comboboxRef.current.contains(e.target as Node)) {
         setComboboxOpen(false);
+      }
+      if (
+        existingComboboxRef.current &&
+        !existingComboboxRef.current.contains(e.target as Node)
+      ) {
+        setExistingComboboxOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClick);
@@ -276,18 +303,76 @@ export function NewWorktreeDialog({
             <label className="block text-md text-muted-foreground mb-1">
               Branch
             </label>
-            <select
-              value={selectedBranch}
-              onChange={(e) => setSelectedBranch(e.target.value)}
-              className="w-full px-3 py-1.5 border rounded text-sm bg-background"
-            >
-              {(branches ?? []).map((b) => (
-                <option key={b.name} value={b.name}>
-                  {b.name}
-                  {b.is_remote ? " (remote)" : ""}
-                </option>
-              ))}
-            </select>
+            <div className="relative" ref={existingComboboxRef}>
+              {selectedBranch ? (
+                <div className="flex items-center gap-2 w-full px-3 py-1.5 border rounded text-sm bg-background">
+                  <span className="font-mono truncate flex-1">{selectedBranch}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBranch("")}
+                    className="text-muted-foreground hover:text-foreground text-md shrink-0"
+                  >
+                    &times;
+                  </button>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={existingQuery}
+                  onChange={(e) => setExistingQuery(e.target.value)}
+                  onFocus={() => setExistingComboboxOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && existingComboboxOpen) {
+                      e.preventDefault();
+                      if (filteredBranches.length > 0) {
+                        setSelectedBranch(filteredBranches[0].name);
+                        setExistingComboboxOpen(false);
+                        setExistingQuery("");
+                      }
+                    }
+                  }}
+                  placeholder={
+                    fetchingRemote
+                      ? "Fetching origin..."
+                      : branches
+                        ? "Search branches..."
+                        : "Loading branches..."
+                  }
+                  className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+                  autoFocus
+                  spellCheck={false}
+                />
+              )}
+              {existingComboboxOpen && !selectedBranch && (
+                <div className="absolute z-10 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto border rounded bg-popover shadow-lg">
+                  {filteredBranches.length === 0 ? (
+                    <div className="px-3 py-2 text-md text-muted-foreground">
+                      {branches ? "No matching branches" : "Loading..."}
+                    </div>
+                  ) : (
+                    filteredBranches.map((b) => (
+                      <button
+                        type="button"
+                        key={b.name}
+                        onClick={() => {
+                          setSelectedBranch(b.name);
+                          setExistingComboboxOpen(false);
+                          setExistingQuery("");
+                        }}
+                        className="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2"
+                      >
+                        <span className="font-mono text-md truncate flex-1">{b.name}</span>
+                        {b.is_remote && (
+                          <span className="text-md text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
+                            remote
+                          </span>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

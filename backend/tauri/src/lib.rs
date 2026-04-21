@@ -346,6 +346,14 @@ async fn list_branches(repo_path: String) -> Result<Vec<git::BranchInfo>, String
 }
 
 #[tauri::command]
+async fn fetch_remote(repo_path: String, remote: Option<String>) -> Result<(), String> {
+    let remote = remote.unwrap_or_else(|| "origin".to_string());
+    tokio::task::spawn_blocking(move || git::fetch_remote(&repo_path, &remote))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
 fn create_annotation(
     state: tauri::State<'_, DbState>,
     annotation: annotations::NewAnnotation,
@@ -1319,6 +1327,7 @@ pub fn run() {
             create_worktree,
             delete_worktree,
             list_branches,
+            fetch_remote,
             load_projects,
             save_projects,
             create_annotation,
