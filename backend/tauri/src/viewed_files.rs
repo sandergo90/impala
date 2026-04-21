@@ -16,11 +16,25 @@ pub const DELETED_SENTINEL: &str = "deleted";
 pub fn init_db(conn: &Connection) -> Result<(), String> {
     // The previous schema keyed by (commit_hash, patch_hash) was fragile: the
     // patch hash shifts whenever the merge-base moves or staging changes, so
-    // viewed rows got silently evicted. Drop it and start over keyed by the
+    // viewed rows got silently evicted. We migrate to a schema keyed by the
     // right-hand blob sha of the file itself.
+    //
+    // If the table exists with the old schema (detected by the absence of the
+    // `content_sha` column), drop it so we can rebuild from scratch — old rows
+    // can't be salvaged because we never stored a content sha for them. If the
+    // table is already on the new schema, leave it alone so viewed state
+    // persists across restarts.
+    let has_content_sha = conn
+        .prepare("SELECT 1 FROM pragma_table_info('viewed_files') WHERE name = 'content_sha'")
+        .and_then(|mut stmt| stmt.exists([]))
+        .unwrap_or(false);
+
+    if !has_content_sha {
+        let _ = conn.execute_batch("DROP TABLE IF EXISTS viewed_files;");
+    }
+
     conn.execute_batch(
-        "DROP TABLE IF EXISTS viewed_files;
-         CREATE TABLE viewed_files (
+        "CREATE TABLE IF NOT EXISTS viewed_files (
             worktree_path    TEXT NOT NULL,
             file_path        TEXT NOT NULL,
             content_sha      TEXT NOT NULL,
