@@ -264,20 +264,14 @@ pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
         return Ok(PrStatus::NoPr);
     }
 
-    let search_branch = crate::git::run_git(
-        worktree_path,
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}"],
-    )
-    .ok()
-    .map(|s| s.trim().to_string())
-    .and_then(|tracking| tracking.splitn(2, '/').nth(1).map(|s| s.to_string()))
-    .unwrap_or_else(|| local_branch.clone());
-
+    // Match by local branch name. Resolving via HEAD@{upstream} would mis-match
+    // in the common case where a branch was created from (and thus tracks) a
+    // base branch like origin/develop — we'd end up showing develop's PR.
     let json = run_gh(
         worktree_path,
         &[
             "pr", "list",
-            "--head", &search_branch,
+            "--head", &local_branch,
             "--state", "all",
             "--limit", "1",
             "--json",
