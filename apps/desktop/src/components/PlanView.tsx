@@ -29,6 +29,7 @@ export function PlanView() {
   } = usePlanAnnotationActions();
 
   const articleRef = useRef<HTMLElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useSelectedPlanAnnotation();
   const editorFontFamily = useUIStore((s) => s.editorFontFamily);
 
@@ -152,6 +153,10 @@ export function PlanView() {
   });
 
   useEffect(() => {
+    scrollContainerRef.current?.scrollTo({ top: 0 });
+  }, [activeFile]);
+
+  useEffect(() => {
     if (!activePlan) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
@@ -245,6 +250,7 @@ export function PlanView() {
         </div>
       )}
       <div
+        ref={scrollContainerRef}
         className="plan-markdown flex-1 overflow-y-auto min-h-0 select-text"
         style={editorFontFamily ? { "--font-mono": `"${editorFontFamily}", ui-monospace, monospace` } as React.CSSProperties : undefined}
       >
