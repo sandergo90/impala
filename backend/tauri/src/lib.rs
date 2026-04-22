@@ -3,6 +3,7 @@ mod config;
 mod daemon_client;
 mod fonts;
 mod git;
+mod github;
 mod hook_server;
 mod hotkeys;
 mod linear;
@@ -893,6 +894,15 @@ fn unlink_worktree_title(
 }
 
 #[tauri::command]
+fn get_pr_status(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+) -> Result<Option<github::PrStatus>, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    github::read_status(&conn, &worktree_path)
+}
+
+#[tauri::command]
 fn get_setting(
     state: tauri::State<'_, DbState>,
     key: String,
@@ -1169,6 +1179,8 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize plans table: {}", e))?;
             plan_annotations::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize plan_annotations table: {}", e))?;
+            github::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize github_pr_status table: {}", e))?;
 
             let _ = fs::create_dir_all(default_worktree_base_dir());
 
@@ -1337,6 +1349,7 @@ pub fn run() {
             create_plan,
             list_plans,
             get_plan,
+            get_pr_status,
             list_plan_version_files,
             update_plan,
             create_plan_annotation,
