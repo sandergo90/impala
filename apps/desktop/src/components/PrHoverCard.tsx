@@ -1,11 +1,11 @@
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import type { PrInfo } from "../types";
+import type { ChecksStatus, PrInfo, ReviewDecision } from "../types";
 
 export function PrHoverCard({ pr }: { pr: PrInfo }) {
   const effectiveState = pr.isDraft && pr.state === "open" ? "draft" : pr.state;
 
   return (
-    <div className="w-80 p-3 rounded-md border border-border bg-popover shadow-lg text-sm">
+    <>
       <div className="flex items-center gap-2 mb-1.5">
         <StatePill state={effectiveState} />
         <span className="font-mono text-xs text-muted-foreground truncate">
@@ -16,7 +16,7 @@ export function PrHoverCard({ pr }: { pr: PrInfo }) {
         {pr.title}
       </p>
       <div className="flex flex-col gap-1 text-xs text-muted-foreground mb-3">
-        {pr.checks.status !== null && pr.checks.total > 0 && (
+        {pr.checks.total > 0 && pr.checks.status && (
           <div className="flex items-center gap-1.5">
             <ChecksDot status={pr.checks.status} />
             <span>
@@ -24,7 +24,7 @@ export function PrHoverCard({ pr }: { pr: PrInfo }) {
               {pr.checks.status === "success"
                 ? "passing"
                 : pr.checks.status === "failure"
-                  ? "failed"
+                  ? "failing"
                   : "running"}
             </span>
           </div>
@@ -44,7 +44,7 @@ export function PrHoverCard({ pr }: { pr: PrInfo }) {
       >
         View on GitHub
       </button>
-    </div>
+    </>
   );
 }
 
@@ -69,7 +69,7 @@ function StatePill({
   );
 }
 
-function ChecksDot({ status }: { status: "success" | "failure" | "pending" }) {
+function ChecksDot({ status }: { status: ChecksStatus }) {
   const cls = {
     success: "bg-green-500",
     failure: "bg-red-500",
@@ -78,7 +78,7 @@ function ChecksDot({ status }: { status: "success" | "failure" | "pending" }) {
   return <span className={`w-1.5 h-1.5 rounded-full ${cls}`} />;
 }
 
-function reviewLabel(r: "approved" | "changes_requested" | "review_required") {
+function reviewLabel(r: ReviewDecision) {
   if (r === "approved") return <span className="text-green-400">Approved</span>;
   if (r === "changes_requested")
     return <span className="text-red-400">Changes requested</span>;
