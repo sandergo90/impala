@@ -907,6 +907,7 @@ export function Sidebar() {
                 wt.branch === "develop";
               const isActive = agentStatuses[wt.path] === "working";
               const hasUnseen = unseenResults[wt.path];
+              const prStatus = prStatuses[wt.path];
               const isPermission = agentStatuses[wt.path] === "permission";
               const hasPendingPlan = pendingPlans[wt.path];
 
@@ -1031,10 +1032,10 @@ export function Sidebar() {
                             </span>
                           </>
                         )}
-                        {prStatuses[wt.path]?.kind === "has_pr" && (
+                        {prStatus?.kind === "has_pr" && (
                           <>
                             {" · "}
-                            <PrBadge status={prStatuses[wt.path]!} />
+                            <PrBadge status={prStatus} />
                           </>
                         )}
                       </div>

@@ -42,7 +42,6 @@ const defaultDataState: WorktreeDataState = {
   hasPendingPlan: false,
   agentStatus: "idle" as const,
   hasUnseenResult: false,
-  prStatus: undefined,
 };
 
 interface UIState {

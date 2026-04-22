@@ -244,7 +244,7 @@ fn checks_status_from_str(s: &str) -> ChecksStatus {
 use std::process::Command;
 
 pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
-    let remote_url = match run_git(worktree_path, &["remote", "get-url", "origin"]) {
+    let remote_url = match crate::git::run_git(worktree_path, &["remote", "get-url", "origin"]) {
         Ok(s) => s.trim().to_string(),
         Err(_) => return Ok(PrStatus::Unsupported),
     };
@@ -252,14 +252,14 @@ pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
         return Ok(PrStatus::Unsupported);
     }
 
-    let local_branch = run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])?
+    let local_branch = crate::git::run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])?
         .trim()
         .to_string();
     if local_branch.is_empty() || local_branch == "HEAD" {
         return Ok(PrStatus::NoPr);
     }
 
-    let search_branch = run_git(
+    let search_branch = crate::git::run_git(
         worktree_path,
         &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}"],
     )
@@ -287,21 +287,6 @@ pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
         None => PrStatus::NoPr,
         Some(pr) => PrStatus::HasPr(pr.into_pr_info()),
     })
-}
-
-fn run_git(cwd: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .env("PATH", crate::git::augmented_path())
-        .args(args)
-        .output()
-        .map_err(|e| format!("Failed to execute git: {}", e))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
-    }
 }
 
 fn run_gh(cwd: &str, args: &[&str]) -> Result<String, String> {

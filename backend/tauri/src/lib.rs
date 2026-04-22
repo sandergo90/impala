@@ -925,6 +925,11 @@ async fn refresh_pr_status(
 
     {
         let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        // Skip emit when the status hasn't changed — stops the 60s poll
+        // from re-rendering the sidebar for every worktree every minute.
+        if github::read_status(&conn, &worktree_path)?.as_ref() == Some(&status) {
+            return Ok(());
+        }
         github::upsert_status(&conn, &worktree_path, &status)?;
     }
 

@@ -38,7 +38,7 @@ pub(crate) fn augmented_path() -> String {
     parts.join(":")
 }
 
-fn run_git(worktree_path: &str, args: &[&str]) -> Result<String, String> {
+pub(crate) fn run_git(worktree_path: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(worktree_path)
