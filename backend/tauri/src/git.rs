@@ -355,8 +355,23 @@ pub fn create_worktree(
     existing: bool,
     wt_path: &str,
 ) -> Result<Worktree, String> {
+    // When the picker returns a remote ref (`origin/foo`), create a local
+    // tracking branch so the worktree isn't left in detached-HEAD state.
+    let local_branch = if existing {
+        branch_name.strip_prefix("origin/").unwrap_or(branch_name).to_string()
+    } else {
+        branch_name.to_string()
+    };
+
     if existing {
-        run_git(repo_path, &["worktree", "add", wt_path, branch_name])?;
+        if branch_name.starts_with("origin/") {
+            run_git(
+                repo_path,
+                &["worktree", "add", "--track", "-b", &local_branch, wt_path, branch_name],
+            )?;
+        } else {
+            run_git(repo_path, &["worktree", "add", wt_path, branch_name])?;
+        }
     } else {
         let base = base_branch.unwrap_or_else(|| "HEAD".to_string());
         let start_point = if base == "HEAD" {
@@ -384,7 +399,7 @@ pub fn create_worktree(
 
     Ok(Worktree {
         path: canonical_path,
-        branch: branch_name.to_string(),
+        branch: local_branch,
         head_commit: head,
         title: None,
     })
