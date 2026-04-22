@@ -166,6 +166,8 @@ export interface WorktreeDataState {
   hasPendingPlan: boolean;
   agentStatus: "idle" | "working" | "permission";
   hasUnseenResult: boolean;
+  /** GitHub PR status for this worktree's branch. Undefined until first fetched. */
+  prStatus?: PrStatus;
 }
 
 export interface CommentProvider {
@@ -190,3 +192,34 @@ export interface WorktreeIssue {
   identifier: string;
   created_at: string;
 }
+
+export type PrState = "open" | "closed" | "merged";
+
+export type ReviewDecision = "approved" | "changes_requested" | "review_required";
+
+export type ChecksStatus = "success" | "failure" | "pending";
+
+export interface ChecksRollup {
+  status: ChecksStatus | null;
+  passing: number;
+  total: number;
+}
+
+export interface PrInfo {
+  number: number;
+  title: string;
+  url: string;
+  state: PrState;
+  isDraft: boolean;
+  reviewDecision: ReviewDecision | null;
+  checks: ChecksRollup;
+  additions: number;
+  deletions: number;
+  headBranch: string;
+  headSha: string;
+}
+
+export type PrStatus =
+  | { kind: "unsupported" }
+  | { kind: "no_pr" }
+  | ({ kind: "has_pr" } & PrInfo);

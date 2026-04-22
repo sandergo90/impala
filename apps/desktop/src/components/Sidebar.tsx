@@ -15,8 +15,10 @@ import {
   selectProject as sharedSelectProject,
   activateGeneralTerminal,
 } from "../hooks/useWorktreeActions";
-import type { Worktree, Project, WorktreeIssue, WorktreeDataState } from "../types";
+import type { Worktree, Project, WorktreeIssue, WorktreeDataState, PrStatus } from "../types";
 import { useAgentNotifications } from "../hooks/useAgentNotifications";
+import { usePrStatusSync } from "../hooks/usePrStatusSync";
+import { PrBadge } from "./PrBadge";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { HotkeyDisplay } from "./HotkeyDisplay";
 import { NewWorktreeDialog } from "./NewWorktreeDialog";
@@ -314,6 +316,7 @@ export function Sidebar() {
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
 
   useAgentNotifications();
+  usePrStatusSync(worktrees);
 
   const windowFocusedRef = useRef(true);
 
@@ -475,6 +478,16 @@ export function Sidebar() {
         pending[path] = state.hasPendingPlan ?? false;
       }
       return pending;
+    }),
+  );
+
+  const prStatuses = useDataStore(
+    useShallow((s) => {
+      const map: Record<string, PrStatus | undefined> = {};
+      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
+        map[path] = state.prStatus;
+      }
+      return map;
     }),
   );
 
@@ -1016,6 +1029,12 @@ export function Sidebar() {
                             >
                               {worktreeIssues[wt.path].identifier}
                             </span>
+                          </>
+                        )}
+                        {prStatuses[wt.path]?.kind === "has_pr" && (
+                          <>
+                            {" · "}
+                            <PrBadge status={prStatuses[wt.path]!} />
                           </>
                         )}
                       </div>
