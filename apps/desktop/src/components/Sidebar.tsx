@@ -571,6 +571,7 @@ export function Sidebar() {
           invoke("clean_linear_context", { worktreePath: wt.path }).catch(
             () => {},
           ),
+          invoke("delete_pr_status", { worktreePath: wt.path }).catch(() => {}),
         ]);
 
         await invoke("delete_worktree", {

@@ -155,6 +155,15 @@ pub fn upsert_status(
     Ok(())
 }
 
+pub(crate) fn delete_status(conn: &Connection, worktree_path: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM github_pr_status WHERE worktree_path = ?1",
+        params![worktree_path],
+    )
+    .map_err(|e| format!("Failed to delete status: {}", e))?;
+    Ok(())
+}
+
 // ---- Row mapping ----------------------------------------------------------
 
 fn row_to_status(row: &rusqlite::Row) -> rusqlite::Result<PrStatus> {

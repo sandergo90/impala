@@ -944,6 +944,15 @@ async fn refresh_pr_status(
 }
 
 #[tauri::command]
+fn delete_pr_status(
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    github::delete_status(&conn, &worktree_path)
+}
+
+#[tauri::command]
 async fn get_github_cli_status() -> Result<github::GithubCliStatus, String> {
     tokio::task::spawn_blocking(|| {
         github::invalidate_cli_status_cache();
@@ -1402,6 +1411,7 @@ pub fn run() {
             get_plan,
             get_pr_status,
             refresh_pr_status,
+            delete_pr_status,
             get_github_cli_status,
             list_plan_version_files,
             update_plan,
