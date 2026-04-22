@@ -252,8 +252,6 @@ pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
         return Ok(PrStatus::Unsupported);
     }
 
-    // Skip shelling to `gh` when the CLI is known-broken — the caller
-    // (refresh_pr_status) silently swallows Err and leaves the cache intact.
     let cli = cli_status();
     if !cli.installed || !cli.authenticated {
         return Err("gh unavailable".to_string());
@@ -336,7 +334,7 @@ pub struct GithubCliStatus {
 static CLI_STATUS_CACHE: Mutex<Option<(GithubCliStatus, Instant)>> = Mutex::new(None);
 
 /// Returns the cached CLI status if fresh, otherwise refetches.
-pub fn cli_status() -> GithubCliStatus {
+pub(crate) fn cli_status() -> GithubCliStatus {
     {
         let guard = CLI_STATUS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((status, at)) = guard.as_ref() {
@@ -352,12 +350,11 @@ pub fn cli_status() -> GithubCliStatus {
 }
 
 /// Drops the cached value; the next `cli_status()` call will refetch.
-pub fn invalidate_cli_status_cache() {
+pub(crate) fn invalidate_cli_status_cache() {
     *CLI_STATUS_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 fn fetch_cli_status() -> GithubCliStatus {
-    // `gh --version` runs from cwd = "." because it doesn't need a repo.
     let installed = Command::new("gh")
         .arg("--version")
         .env("PATH", crate::git::augmented_path())
@@ -369,7 +366,6 @@ fn fetch_cli_status() -> GithubCliStatus {
         return GithubCliStatus { installed: false, authenticated: false, username: None };
     }
 
-    // `gh api user --jq .login` returns the username on stdout if authed.
     let output = Command::new("gh")
         .args(["api", "user", "--jq", ".login"])
         .env("PATH", crate::git::augmented_path())

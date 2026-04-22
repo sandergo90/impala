@@ -1,26 +1,11 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { useInvoke } from "../../hooks/useInvoke";
 import type { GithubCliStatus } from "../../types";
 
 export function GithubPane() {
-  const [status, setStatus] = useState<GithubCliStatus | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    invoke<GithubCliStatus>("get_github_cli_status")
-      .then((s) => {
-        if (!cancelled) setStatus(s);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus({ installed: false, authenticated: false, username: null });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: status, loading } = useInvoke<GithubCliStatus>(
+    "get_github_cli_status",
+  );
 
   return (
     <div className="max-w-2xl">
@@ -29,7 +14,7 @@ export function GithubPane() {
         Show pull-request status on your worktrees.
       </p>
       <div className="p-4 rounded-lg border border-border bg-card">
-        {status === null ? (
+        {loading || status === null ? (
           <p className="text-md text-muted-foreground">Checking GitHub CLI…</p>
         ) : (
           <StatusBody status={status} />
