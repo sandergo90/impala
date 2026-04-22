@@ -568,7 +568,8 @@ export function DiffView() {
   const showResolved = useUIStore((s) => s.showResolved);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
-  const [hideViewed, setHideViewed] = useState(false);
+  const hideViewed = useUIStore((s) => s.hideViewed);
+  const setHideViewed = useUIStore((s) => s.setHideViewed);
   const [pendingAnnotation, setPendingAnnotation] = useState<{
     filePath?: string;
     lineNumber: number;
@@ -865,7 +866,7 @@ export function DiffView() {
               {viewedFiles.size === changedFiles.length ? "Unmark all" : "Mark all viewed"}
             </button>
             <button
-              onClick={() => setHideViewed((v) => !v)}
+              onClick={() => setHideViewed(!hideViewed)}
               className={`px-2 py-0.5 rounded ${
                 hideViewed
                   ? "bg-accent text-accent-foreground"

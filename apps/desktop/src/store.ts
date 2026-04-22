@@ -53,6 +53,8 @@ interface UIState {
   setDiffStyle: (style: 'split' | 'unified') => void;
   wrap: boolean;
   setWrap: (wrap: boolean) => void;
+  hideViewed: boolean;
+  setHideViewed: (hide: boolean) => void;
   worktreeNavStates: Record<string, WorktreeNavState>;
   getWorktreeNavState: (path: string) => WorktreeNavState;
   updateWorktreeNavState: (path: string, updates: Partial<WorktreeNavState>) => void;
@@ -107,6 +109,8 @@ export const useUIStore = create<UIState>()(
       setDiffStyle: (style) => set({ diffStyle: style }),
       wrap: false,
       setWrap: (wrap) => set({ wrap }),
+      hideViewed: false,
+      setHideViewed: (hide) => set({ hideViewed: hide }),
       worktreeNavStates: {},
       getWorktreeNavState: (path: string): WorktreeNavState => {
         const stored = get().worktreeNavStates[path];
