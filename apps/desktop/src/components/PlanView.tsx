@@ -62,7 +62,9 @@ export function PlanView() {
     if (snapshotFiles.length > 1) {
       const names = snapshotFiles.map((f) => f.file_name);
       setDirectoryFiles(names);
-      setActiveFile(names[0]);
+      setActiveFile((current) =>
+        current && names.includes(current) ? current : names[0],
+      );
       return;
     }
     if (snapshotFiles.length === 1) {
@@ -74,7 +76,9 @@ export function PlanView() {
       .then((files) => {
         if (files.length > 1) {
           setDirectoryFiles(files);
-          setActiveFile(files[0]);
+          setActiveFile((current) =>
+            current && files.includes(current) ? current : files[0],
+          );
         } else {
           setDirectoryFiles([]);
           setActiveFile(null);
