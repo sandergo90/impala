@@ -1004,6 +1004,11 @@ export function Sidebar() {
                       </div>
                       {!isMain && editingPath !== wt.path && (
                         <div className="mt-1 flex items-center gap-1 flex-wrap">
+                          {isActive && (
+                            <span className="inline-flex items-center gap-1 font-mono text-[10px] bg-amber-500/20 text-amber-400 rounded px-1.5 py-0.5">
+                              ▶ running
+                            </span>
+                          )}
                           <span
                             className="font-mono text-[10px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground truncate max-w-[140px]"
                             title={wt.branch}
