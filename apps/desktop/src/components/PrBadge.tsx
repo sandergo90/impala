@@ -24,9 +24,9 @@ export function PrBadge({ status }: { status: PrStatus }) {
               e.stopPropagation();
               openUrl(status.url);
             }}
-            className={`inline-flex items-center gap-0.5 font-mono cursor-pointer hover:underline ${colorClass}`}
+            className={`inline-flex items-center gap-0.5 font-mono text-[10px] rounded px-1.5 py-0.5 cursor-pointer ${colorClass}`}
           >
-            <Icon size={11} />#{status.number}
+            <Icon size={10} />#{status.number}
           </span>
         }
       />
@@ -43,16 +43,25 @@ export function PrBadge({ status }: { status: PrStatus }) {
 
 function pickVisual(pr: { state: "open" | "closed" | "merged"; isDraft: boolean }) {
   if (pr.state === "merged") {
-    return { Icon: GitMerge, colorClass: "text-purple-400 hover:text-purple-300" };
+    return {
+      Icon: GitMerge,
+      colorClass: "bg-purple-500/15 text-purple-400 hover:text-purple-300",
+    };
   }
   if (pr.state === "closed") {
-    return { Icon: GitPullRequestClosed, colorClass: "text-red-400 hover:text-red-300" };
+    return {
+      Icon: GitPullRequestClosed,
+      colorClass: "bg-red-500/15 text-red-400 hover:text-red-300",
+    };
   }
   if (pr.isDraft) {
     return {
       Icon: GitPullRequestDraft,
-      colorClass: "text-muted-foreground hover:text-foreground",
+      colorClass: "bg-accent/60 text-muted-foreground hover:text-foreground",
     };
   }
-  return { Icon: GitPullRequest, colorClass: "text-green-500 hover:text-green-400" };
+  return {
+    Icon: GitPullRequest,
+    colorClass: "bg-green-500/15 text-green-500 hover:text-green-400",
+  };
 }

@@ -418,16 +418,6 @@ export function Sidebar() {
     }
   }, [selectedWorktreePath]);
 
-  const commitCounts = useDataStore(
-    useShallow((s) => {
-      const counts: Record<string, number> = {};
-      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
-        counts[path] = state.commits?.length ?? 0;
-      }
-      return counts;
-    }),
-  );
-
   // Encode as "additions:deletions" strings so useShallow can compare primitives
   const diffStatsRaw = useDataStore(
     useShallow((s) => {
@@ -900,7 +890,6 @@ export function Sidebar() {
           <div className="flex-1 overflow-y-auto">
             {worktrees.map((wt) => {
               const isSelected = selectedWorktree?.path === wt.path;
-              const aheadCount = commitCounts[wt.path] ?? 0;
               const stats = diffStats[wt.path];
               const isMain =
                 wt.branch === "main" ||
@@ -912,15 +901,23 @@ export function Sidebar() {
               const isPermission = agentStatuses[wt.path] === "permission";
               const hasPendingPlan = pendingPlans[wt.path];
 
+              const cardBorder = isMain
+                ? ""
+                : isActive
+                  ? "border border-amber-500/60 shadow-[0_0_0_1px_rgba(245,158,11,0.15)]"
+                  : isSelected
+                    ? "border border-primary/30"
+                    : "border border-white/5";
+
               const row = (
                 <div className="group relative mx-2 my-0.5">
                   <button
                     onClick={() => selectWorktree(wt)}
-                    className={`flex items-center gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${
+                    className={`flex items-start gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${cardBorder} ${
                       isSelected ? "bg-primary/15" : "hover:bg-accent"
                     }`}
                   >
-                    <div className="relative shrink-0">
+                    <div className="relative shrink-0 mt-0.5">
                       {isActive ? (
                         <span className="w-4 h-4 flex items-center justify-center">
                           <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
@@ -972,14 +969,6 @@ export function Sidebar() {
                             >
                               {wt.title ?? wt.branch}
                             </span>
-                            {wt.title && wt.title !== wt.branch && (
-                              <span
-                                className="font-mono text-[10px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground min-w-0 max-w-[120px] truncate"
-                                title={wt.branch}
-                              >
-                                {wt.branch.split("/").pop() || wt.branch}
-                              </span>
-                            )}
                           </>
                         )}
                         <span className="relative ml-auto shrink-0">
@@ -1013,13 +1002,15 @@ export function Sidebar() {
                           )}
                         </span>
                       </div>
-                      <div
-                        className={`text-sm mt-0.5 ${isSelected ? "text-muted-foreground" : "text-muted-foreground/90"}`}
-                      >
-                        {aheadCount > 0 ? `${aheadCount} ahead` : "up to date"}
-                        {worktreeIssues[wt.path] && (
-                          <>
-                            {" · "}
+                      {!isMain && editingPath !== wt.path && (
+                        <div className="mt-1 flex items-center gap-1 flex-wrap">
+                          <span
+                            className="font-mono text-[10px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground truncate max-w-[140px]"
+                            title={wt.branch}
+                          >
+                            {wt.branch.split("/").pop() || wt.branch}
+                          </span>
+                          {worktreeIssues[wt.path] && (
                             <span
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1027,19 +1018,16 @@ export function Sidebar() {
                                   `https://linear.app/issue/${worktreeIssues[wt.path].identifier}`,
                                 );
                               }}
-                              className="font-mono text-blue-400 hover:text-blue-300 cursor-pointer"
+                              className="font-mono text-[10px] bg-blue-500/15 text-blue-400 hover:text-blue-300 rounded px-1.5 py-0.5 cursor-pointer"
                             >
                               {worktreeIssues[wt.path].identifier}
                             </span>
-                          </>
-                        )}
-                        {prStatus?.kind === "has_pr" && (
-                          <>
-                            {" · "}
+                          )}
+                          {prStatus?.kind === "has_pr" && (
                             <PrBadge status={prStatus} />
-                          </>
-                        )}
-                      </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </button>
                 </div>
