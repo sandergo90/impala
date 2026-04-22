@@ -27,7 +27,7 @@ export function PrBadge({ status }: { status: PrStatus }) {
       />
       <PreviewCard.Portal>
         <PreviewCard.Positioner sideOffset={6}>
-          <PreviewCard.Popup className="w-80 p-3 rounded-md border border-border bg-popover shadow-lg text-sm outline-none">
+          <PreviewCard.Popup className="w-80 p-3 rounded-lg border border-border/80 bg-popover shadow-2xl shadow-black/60 ring-1 ring-white/5 text-sm outline-none">
             <PrHoverCard pr={status} />
           </PreviewCard.Popup>
         </PreviewCard.Positioner>

@@ -910,7 +910,7 @@ export function Sidebar() {
                     : "border border-white/5";
 
               const row = (
-                <div className="group relative mx-2 my-0.5">
+                <div className="group relative mx-2 my-1.5">
                   <button
                     onClick={() => selectWorktree(wt)}
                     className={`flex items-start gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${cardBorder} ${
