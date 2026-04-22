@@ -13,6 +13,13 @@ interface UsePlanHighlighterOptions {
   annotations: PlanAnnotation[];
   selectedAnnotationId: string | null;
   onSelectAnnotation: (id: string | null) => void;
+  // Filename the user is currently viewing (basename, e.g. "task-1.md") or
+  // null for single-file plans. Annotations with a non-matching file_name are
+  // skipped when applying highlights.
+  activeFileName?: string | null;
+  // Any value that changes when the rendered markdown changes; used to
+  // re-run applyAnnotations after React rebuilds the article DOM.
+  contentKey?: unknown;
 }
 
 export function usePlanHighlighter({
@@ -20,6 +27,8 @@ export function usePlanHighlighter({
   annotations,
   selectedAnnotationId,
   onSelectAnnotation,
+  activeFileName,
+  contentKey,
 }: UsePlanHighlighterOptions) {
   const highlighterRef = useRef<Highlighter | null>(null);
   const onSelectAnnotationRef = useRef(onSelectAnnotation);
@@ -43,70 +52,71 @@ export function usePlanHighlighter({
     (searchText: string): Range | null => {
       if (!containerRef.current) return null;
 
-      // Try single text node first
+      // `Selection.toString()` (what web-highlighter captures at annotate
+      // time) inserts "\n" / "\n\n" at block boundaries, while
+      // `Node.textContent` concatenates text nodes with no separators.
+      // Strip all whitespace on both sides and keep a map from stripped
+      // offsets back to the raw textContent positions so we can rebuild a
+      // Range once we find the match.
       const walker = document.createTreeWalker(
         containerRef.current,
         NodeFilter.SHOW_TEXT,
         null
       );
-
+      const textNodes: Text[] = [];
       let node: Text | null;
-      while ((node = walker.nextNode() as Text | null)) {
-        const text = node.textContent || "";
-        const index = text.indexOf(searchText);
-        if (index !== -1) {
-          const range = document.createRange();
-          range.setStart(node, index);
-          range.setEnd(node, index + searchText.length);
-          return range;
+      while ((node = walker.nextNode() as Text | null)) textNodes.push(node);
+      if (textNodes.length === 0) return null;
+
+      let normHaystack = "";
+      // map[i] = index into the raw concatenated textContent for the i-th
+      // char of normHaystack.
+      const map: number[] = [];
+      let rawIndex = 0;
+      for (const t of textNodes) {
+        const text = t.textContent || "";
+        for (let i = 0; i < text.length; i++, rawIndex++) {
+          const ch = text[i];
+          if (/\s/.test(ch)) continue;
+          normHaystack += ch;
+          map.push(rawIndex);
         }
       }
 
-      // Try across multiple text nodes
-      const fullText = containerRef.current.textContent || "";
-      const searchIndex = fullText.indexOf(searchText);
-      if (searchIndex === -1) return null;
+      const normNeedle = searchText.replace(/\s+/g, "");
+      if (!normNeedle) return null;
 
-      const walker2 = document.createTreeWalker(
-        containerRef.current,
-        NodeFilter.SHOW_TEXT,
-        null
-      );
+      const idx = normHaystack.indexOf(normNeedle);
+      if (idx === -1) return null;
+
+      const startRaw = map[idx];
+      const endRaw = map[idx + normNeedle.length - 1] + 1;
+      if (startRaw === undefined || endRaw === undefined) return null;
 
       let charCount = 0;
       let startNode: Text | null = null;
       let startOffset = 0;
       let endNode: Text | null = null;
       let endOffset = 0;
-
-      while ((node = walker2.nextNode() as Text | null)) {
-        const nodeLength = node.textContent?.length || 0;
-
-        if (!startNode && charCount + nodeLength > searchIndex) {
-          startNode = node;
-          startOffset = searchIndex - charCount;
+      for (const t of textNodes) {
+        const len = t.textContent?.length ?? 0;
+        if (!startNode && charCount + len > startRaw) {
+          startNode = t;
+          startOffset = startRaw - charCount;
         }
-
-        if (
-          startNode &&
-          charCount + nodeLength >= searchIndex + searchText.length
-        ) {
-          endNode = node;
-          endOffset = searchIndex + searchText.length - charCount;
+        if (startNode && charCount + len >= endRaw) {
+          endNode = t;
+          endOffset = endRaw - charCount;
           break;
         }
-
-        charCount += nodeLength;
+        charCount += len;
       }
+      if (!startNode || !endNode) return null;
 
-      if (startNode && endNode) {
-        const range = document.createRange();
-        range.setStart(startNode, startOffset);
-        range.setEnd(endNode, endOffset);
-        return range;
-      }
-
-      return null;
+      const range = document.createRange();
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
+      return range;
     },
     [containerRef]
   );
@@ -116,6 +126,12 @@ export function usePlanHighlighter({
       if (!containerRef.current) return;
 
       anns.forEach((ann) => {
+        // Directory plans scope annotations per-file. Skip anything that
+        // doesn't match the file currently on screen. Annotations made
+        // before scoping existed have file_name = null and fall through
+        // (so old data still renders on whichever file the text appears in).
+        if (ann.file_name && ann.file_name !== activeFileName) return;
+
         // Skip if already highlighted
         const existing = containerRef.current?.querySelector(
           `[data-annotation-id="${ann.id}"]`
@@ -178,7 +194,7 @@ export function usePlanHighlighter({
         }
       });
     },
-    [findTextInDOM, containerRef]
+    [findTextInDOM, containerRef, activeFileName]
   );
 
   const removeHighlight = useCallback(
@@ -256,7 +272,7 @@ export function usePlanHighlighter({
     // Small delay to let react-markdown finish rendering before we walk the DOM
     const timer = setTimeout(() => applyAnnotations(annotations), 50);
     return () => clearTimeout(timer);
-  }, [annotations, applyAnnotations, removeHighlight, containerRef]);
+  }, [annotations, applyAnnotations, removeHighlight, containerRef, contentKey]);
 
   useEffect(() => {
     if (!containerRef.current) return;

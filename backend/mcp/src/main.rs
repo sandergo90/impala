@@ -61,6 +61,7 @@ fn ensure_plan_tables(conn: &Connection) -> Result<(), String> {
             id TEXT PRIMARY KEY,
             plan_path TEXT NOT NULL,
             worktree_path TEXT NOT NULL,
+            file_name TEXT,
             original_text TEXT NOT NULL,
             highlight_source TEXT,
             body TEXT NOT NULL,
@@ -83,6 +84,14 @@ fn ensure_plan_tables(conn: &Connection) -> Result<(), String> {
     if !has_content {
         conn.execute_batch("ALTER TABLE plans ADD COLUMN content TEXT;")
             .map_err(|e| format!("failed to add content column: {e}"))?;
+    }
+
+    let has_file_name = conn
+        .prepare("SELECT file_name FROM plan_annotations LIMIT 0")
+        .is_ok();
+    if !has_file_name {
+        conn.execute_batch("ALTER TABLE plan_annotations ADD COLUMN file_name TEXT;")
+            .map_err(|e| format!("failed to add file_name column: {e}"))?;
     }
 
     Ok(())
@@ -366,7 +375,7 @@ fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, St
     // Fetch annotations
     let mut stmt = conn
         .prepare(
-            "SELECT id, plan_path, worktree_path, original_text, highlight_source, body, resolved, created_at, updated_at
+            "SELECT id, plan_path, worktree_path, file_name, original_text, highlight_source, body, resolved, created_at, updated_at
              FROM plan_annotations
              WHERE plan_path = ?1 AND worktree_path = ?2 AND resolved = 0
              ORDER BY created_at ASC",
@@ -379,12 +388,13 @@ fn tool_get_plan_decision(conn: &Connection, params: &Value) -> Result<Value, St
                 "id": row.get::<_, String>(0)?,
                 "plan_path": row.get::<_, String>(1)?,
                 "worktree_path": row.get::<_, String>(2)?,
-                "original_text": row.get::<_, String>(3)?,
-                "highlight_source": row.get::<_, Option<String>>(4)?,
-                "body": row.get::<_, String>(5)?,
-                "resolved": row.get::<_, i64>(6)? != 0,
-                "created_at": row.get::<_, String>(7)?,
-                "updated_at": row.get::<_, String>(8)?,
+                "file_name": row.get::<_, Option<String>>(3)?,
+                "original_text": row.get::<_, String>(4)?,
+                "highlight_source": row.get::<_, Option<String>>(5)?,
+                "body": row.get::<_, String>(6)?,
+                "resolved": row.get::<_, i64>(7)? != 0,
+                "created_at": row.get::<_, String>(8)?,
+                "updated_at": row.get::<_, String>(9)?,
             }))
         })
         .map_err(|e| e.to_string())?;

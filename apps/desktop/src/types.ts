@@ -72,6 +72,7 @@ export interface PlanAnnotation {
   id: string;
   plan_path: string;
   worktree_path: string;
+  file_name: string | null;
   original_text: string;
   highlight_source: string | null;
   body: string;
@@ -83,6 +84,7 @@ export interface PlanAnnotation {
 export interface NewPlanAnnotation {
   plan_path: string;
   worktree_path: string;
+  file_name: string | null;
   original_text: string;
   highlight_source: string | null;
   body: string;

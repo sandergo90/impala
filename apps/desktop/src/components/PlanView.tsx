@@ -134,6 +134,10 @@ export function PlanView() {
     });
   }, [wtPath]);
 
+  const activeFileName = activeFile
+    ? (activeFile.split("/").pop() ?? activeFile)
+    : null;
+
   const {
     commentPopover,
     handleCommentSubmit,
@@ -143,6 +147,8 @@ export function PlanView() {
     annotations: planAnnotations,
     selectedAnnotationId,
     onSelectAnnotation: setSelectedAnnotationId,
+    activeFileName,
+    contentKey: markdown,
   });
 
   useEffect(() => {
@@ -162,10 +168,15 @@ export function PlanView() {
     (body: string) => {
       const result = handleCommentSubmit();
       if (result) {
-        handleCreate(body, result.originalText, result.highlightSource);
+        handleCreate(
+          body,
+          result.originalText,
+          result.highlightSource,
+          activeFileName
+        );
       }
     },
-    [handleCommentSubmit, handleCreate]
+    [handleCommentSubmit, handleCreate, activeFileName]
   );
 
   if (!activePlan) {
