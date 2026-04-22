@@ -264,6 +264,12 @@ pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
         return Ok(PrStatus::NoPr);
     }
 
+    // Base branches (main/master/develop) aren't feature branches with their
+    // own PRs — whatever PR happens to have them as head is incidental.
+    if crate::worktrees::is_main_branch(&local_branch) {
+        return Ok(PrStatus::NoPr);
+    }
+
     // Match by local branch name. Resolving via HEAD@{upstream} would mis-match
     // in the common case where a branch was created from (and thus tracks) a
     // base branch like origin/develop — we'd end up showing develop's PR.
