@@ -223,3 +223,9 @@ export type PrStatus =
   | { kind: "unsupported" }
   | { kind: "no_pr" }
   | ({ kind: "has_pr" } & PrInfo);
+
+export interface GithubCliStatus {
+  installed: boolean;
+  authenticated: boolean;
+  username: string | null;
+}
