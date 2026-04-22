@@ -112,6 +112,12 @@ export const HOTKEYS = {
     default: "meta+shift+r",
     category: "Terminal",
   },
+  RESTART_SESSION: {
+    label: "Restart Session",
+    description: "Kill the focused terminal's PTY session and respawn it",
+    default: "meta+alt+r",
+    category: "Terminal",
+  },
   NEW_TERMINAL_TAB: {
     label: "New Terminal Tab",
     description: "Open a new terminal tab in the current worktree",

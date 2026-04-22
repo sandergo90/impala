@@ -26,6 +26,7 @@ import type { SplitNode, UserTab, WorktreeIssue } from "../types";
 import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
+import { useAppHotkey } from "../hooks/useAppHotkey";
 import {
   CLAUDE_PANE_ID,
   RUN_PANE_ID,
@@ -589,6 +590,8 @@ const TabBody = memo(function TabBody({
       .getState()
       .updateWorktreeDataState(worktreePath, { paneSessions: remaining });
   }, [sessionId, paneId, worktreePath]);
+
+  useAppHotkey("RESTART_SESSION", handleRestart, { enabled: isActive }, [handleRestart]);
 
   if (!sessionId) {
     return (

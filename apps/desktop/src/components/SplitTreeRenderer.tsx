@@ -10,6 +10,7 @@ import type { SplitNode, WorktreeIssue } from "../types";
 import { paneSessionId } from "../lib/split-tree";
 import { getHookPort } from "../lib/get-hook-port";
 import { useUIStore, useDataStore } from "../store";
+import { useAppHotkey } from "../hooks/useAppHotkey";
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -158,6 +159,8 @@ function LeafPane({
       useDataStore.getState().updateWorktreeDataState(worktreePath, { paneSessions: remaining });
     }
   }, [sessionId, paneId, worktreePath, isGenericTerminal]);
+
+  useAppHotkey("RESTART_SESSION", handleRestart, { enabled: isFocused }, [handleRestart]);
 
   // Auto-spawn PTY session when leaf has no session
   const spawningRef = useRef(false);
