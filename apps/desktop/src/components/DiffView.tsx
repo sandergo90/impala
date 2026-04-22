@@ -366,6 +366,7 @@ function VirtualizedCommitView({
   const virtualizer = useVirtualizer({
     count: changedFiles.length,
     getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => changedFiles[index]?.path ?? index,
     estimateSize: (index) => {
       const file = changedFiles[index];
       const patch = fileDiffs[file.path];
