@@ -90,7 +90,6 @@ pub fn read_status(conn: &Connection, worktree_path: &str) -> Result<Option<PrSt
         .map_err(|e| format!("Failed to read pr status: {}", e))
 }
 
-#[allow(dead_code)]
 pub fn upsert_status(
     conn: &Connection,
     worktree_path: &str,
@@ -197,7 +196,6 @@ fn row_to_status(row: &rusqlite::Row) -> rusqlite::Result<PrStatus> {
     }
 }
 
-#[allow(dead_code)]
 fn pr_state_to_str(s: PrState) -> &'static str {
     match s {
         PrState::Open => "open",
@@ -212,7 +210,6 @@ fn pr_state_from_str(s: &str) -> PrState {
         _ => PrState::Open,
     }
 }
-#[allow(dead_code)]
 fn review_decision_to_str(d: ReviewDecision) -> &'static str {
     match d {
         ReviewDecision::Approved => "approved",
@@ -227,7 +224,6 @@ fn review_decision_from_str(s: &str) -> ReviewDecision {
         _ => ReviewDecision::ReviewRequired,
     }
 }
-#[allow(dead_code)]
 fn checks_status_to_str(s: ChecksStatus) -> &'static str {
     match s {
         ChecksStatus::Success => "success",
@@ -240,6 +236,184 @@ fn checks_status_from_str(s: &str) -> ChecksStatus {
         "success" => ChecksStatus::Success,
         "failure" => ChecksStatus::Failure,
         _ => ChecksStatus::Pending,
+    }
+}
+
+// ---- Fetch pipeline -------------------------------------------------------
+
+use std::process::Command;
+
+pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
+    let remote_url = match run_git(worktree_path, &["remote", "get-url", "origin"]) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => return Ok(PrStatus::Unsupported),
+    };
+    if !is_github_remote(&remote_url) {
+        return Ok(PrStatus::Unsupported);
+    }
+
+    let local_branch = run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])?
+        .trim()
+        .to_string();
+    if local_branch.is_empty() || local_branch == "HEAD" {
+        return Ok(PrStatus::NoPr);
+    }
+
+    let search_branch = run_git(
+        worktree_path,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}"],
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+    .and_then(|tracking| tracking.splitn(2, '/').nth(1).map(|s| s.to_string()))
+    .unwrap_or_else(|| local_branch.clone());
+
+    let json = run_gh(
+        worktree_path,
+        &[
+            "pr", "list",
+            "--head", &search_branch,
+            "--state", "all",
+            "--limit", "1",
+            "--json",
+            "number,title,url,state,isDraft,reviewDecision,statusCheckRollup,additions,deletions,headRefName,headRefOid",
+        ],
+    )?;
+
+    let prs: Vec<GhPr> = serde_json::from_str(&json)
+        .map_err(|e| format!("Failed to parse gh output: {}", e))?;
+
+    Ok(match prs.into_iter().next() {
+        None => PrStatus::NoPr,
+        Some(pr) => PrStatus::HasPr(pr.into_pr_info()),
+    })
+}
+
+fn run_git(cwd: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .env("PATH", crate::git::augmented_path())
+        .args(args)
+        .output()
+        .map_err(|e| format!("Failed to execute git: {}", e))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn run_gh(cwd: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("gh")
+        .current_dir(cwd)
+        .env("PATH", crate::git::augmented_path())
+        .args(args)
+        .output()
+        .map_err(|e| format!("Failed to execute gh: {}", e))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn is_github_remote(remote_url: &str) -> bool {
+    let t = remote_url.trim();
+    t.starts_with("https://github.com/")
+        || t.starts_with("http://github.com/")
+        || t.starts_with("git@github.com:")
+        || t.starts_with("ssh://git@github.com/")
+}
+
+// ---- gh JSON deserialization ---------------------------------------------
+
+#[derive(Deserialize)]
+struct GhPr {
+    number: i64,
+    title: String,
+    url: String,
+    state: String,
+    #[serde(rename = "isDraft")]
+    is_draft: bool,
+    #[serde(default, rename = "reviewDecision")]
+    review_decision: String,
+    #[serde(default, rename = "statusCheckRollup")]
+    status_check_rollup: Vec<GhCheck>,
+    #[serde(default)]
+    additions: i32,
+    #[serde(default)]
+    deletions: i32,
+    #[serde(rename = "headRefName")]
+    head_ref_name: String,
+    #[serde(rename = "headRefOid")]
+    head_ref_oid: String,
+}
+
+#[derive(Deserialize)]
+struct GhCheck {
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    conclusion: String,
+}
+
+impl GhPr {
+    fn into_pr_info(self) -> PrInfo {
+        PrInfo {
+            number: self.number,
+            title: self.title,
+            url: self.url,
+            state: match self.state.as_str() {
+                "MERGED" => PrState::Merged,
+                "CLOSED" => PrState::Closed,
+                _ => PrState::Open,
+            },
+            is_draft: self.is_draft,
+            review_decision: match self.review_decision.as_str() {
+                "APPROVED" => Some(ReviewDecision::Approved),
+                "CHANGES_REQUESTED" => Some(ReviewDecision::ChangesRequested),
+                "REVIEW_REQUIRED" => Some(ReviewDecision::ReviewRequired),
+                _ => None,
+            },
+            checks: checks_rollup(&self.status_check_rollup),
+            additions: self.additions,
+            deletions: self.deletions,
+            head_branch: self.head_ref_name,
+            head_sha: self.head_ref_oid,
+        }
+    }
+}
+
+fn checks_rollup(checks: &[GhCheck]) -> ChecksRollup {
+    if checks.is_empty() {
+        return ChecksRollup { status: None, passing: 0, total: 0 };
+    }
+    let mut passing = 0;
+    let mut any_failure = false;
+    let mut any_pending = false;
+    for c in checks {
+        if c.status != "COMPLETED" {
+            any_pending = true;
+            continue;
+        }
+        match c.conclusion.as_str() {
+            "SUCCESS" | "NEUTRAL" | "SKIPPED" => passing += 1,
+            "" => any_pending = true,
+            _ => any_failure = true,
+        }
+    }
+    let status = if any_failure {
+        ChecksStatus::Failure
+    } else if any_pending {
+        ChecksStatus::Pending
+    } else {
+        ChecksStatus::Success
+    };
+    ChecksRollup {
+        status: Some(status),
+        passing,
+        total: checks.len() as i32,
     }
 }
 
@@ -321,5 +495,66 @@ mod tests {
         };
         upsert_status(&c, "/wt/c", &PrStatus::HasPr(info.clone())).unwrap();
         assert_eq!(read_status(&c, "/wt/c").unwrap(), Some(PrStatus::HasPr(info)));
+    }
+
+    #[test]
+    fn is_github_remote_accepts_common_forms() {
+        assert!(is_github_remote("https://github.com/owner/repo.git"));
+        assert!(is_github_remote("git@github.com:owner/repo.git"));
+        assert!(is_github_remote("ssh://git@github.com/owner/repo.git"));
+        assert!(is_github_remote("https://github.com/owner/repo"));
+    }
+
+    #[test]
+    fn is_github_remote_rejects_non_github() {
+        assert!(!is_github_remote("https://gitlab.com/owner/repo.git"));
+        assert!(!is_github_remote("git@bitbucket.org:owner/repo.git"));
+        assert!(!is_github_remote(""));
+        assert!(!is_github_remote("github.com/owner/repo"));
+    }
+
+    fn check(status: &str, conclusion: &str) -> GhCheck {
+        GhCheck { status: status.into(), conclusion: conclusion.into() }
+    }
+
+    #[test]
+    fn rollup_empty() {
+        let r = checks_rollup(&[]);
+        assert_eq!(r.status, None);
+        assert_eq!(r.total, 0);
+    }
+
+    #[test]
+    fn rollup_all_success() {
+        let checks = vec![
+            check("COMPLETED", "SUCCESS"),
+            check("COMPLETED", "NEUTRAL"),
+            check("COMPLETED", "SKIPPED"),
+        ];
+        let r = checks_rollup(&checks);
+        assert_eq!(r.status, Some(ChecksStatus::Success));
+        assert_eq!(r.passing, 3);
+        assert_eq!(r.total, 3);
+    }
+
+    #[test]
+    fn rollup_any_failure_is_failure() {
+        let checks = vec![
+            check("COMPLETED", "SUCCESS"),
+            check("COMPLETED", "FAILURE"),
+            check("IN_PROGRESS", ""),
+        ];
+        let r = checks_rollup(&checks);
+        assert_eq!(r.status, Some(ChecksStatus::Failure));
+    }
+
+    #[test]
+    fn rollup_pending_when_not_all_completed() {
+        let checks = vec![
+            check("COMPLETED", "SUCCESS"),
+            check("IN_PROGRESS", ""),
+        ];
+        let r = checks_rollup(&checks);
+        assert_eq!(r.status, Some(ChecksStatus::Pending));
     }
 }

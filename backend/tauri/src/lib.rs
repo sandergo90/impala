@@ -902,6 +902,42 @@ fn get_pr_status(
     github::read_status(&conn, &worktree_path)
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct PrStatusUpdated {
+    worktree_path: String,
+    status: github::PrStatus,
+}
+
+#[tauri::command]
+async fn refresh_pr_status(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DbState>,
+    worktree_path: String,
+) -> Result<(), String> {
+    let wt_for_task = worktree_path.clone();
+    let fetched = tokio::task::spawn_blocking(move || github::fetch_pr_status(&wt_for_task))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?;
+
+    // Silent failure: leave the cached row as-is.
+    let Ok(status) = fetched else { return Ok(()) };
+
+    {
+        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        github::upsert_status(&conn, &worktree_path, &status)?;
+    }
+
+    let _ = app.emit(
+        "pr-status-updated",
+        PrStatusUpdated {
+            worktree_path,
+            status,
+        },
+    );
+    Ok(())
+}
+
 #[tauri::command]
 fn get_setting(
     state: tauri::State<'_, DbState>,
@@ -1350,6 +1386,7 @@ pub fn run() {
             list_plans,
             get_plan,
             get_pr_status,
+            refresh_pr_status,
             list_plan_version_files,
             update_plan,
             create_plan_annotation,
