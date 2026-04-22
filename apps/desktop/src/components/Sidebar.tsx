@@ -903,11 +903,9 @@ export function Sidebar() {
 
               const cardBorder = isMain
                 ? ""
-                : isActive
-                  ? "border border-amber-500/60 shadow-[0_0_0_1px_rgba(245,158,11,0.15)]"
-                  : isSelected
-                    ? "border border-primary/30"
-                    : "border border-white/5";
+                : isSelected
+                  ? "border border-primary/30"
+                  : "border border-white/5";
 
               const row = (
                 <div className="group relative mx-2 my-1.5">
