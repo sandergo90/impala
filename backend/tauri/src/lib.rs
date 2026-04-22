@@ -944,6 +944,16 @@ async fn refresh_pr_status(
 }
 
 #[tauri::command]
+async fn get_github_cli_status() -> Result<github::GithubCliStatus, String> {
+    tokio::task::spawn_blocking(|| {
+        github::invalidate_cli_status_cache();
+        github::cli_status()
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+}
+
+#[tauri::command]
 fn get_setting(
     state: tauri::State<'_, DbState>,
     key: String,
@@ -1392,6 +1402,7 @@ pub fn run() {
             get_plan,
             get_pr_status,
             refresh_pr_status,
+            get_github_cli_status,
             list_plan_version_files,
             update_plan,
             create_plan_annotation,

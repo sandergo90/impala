@@ -252,6 +252,13 @@ pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
         return Ok(PrStatus::Unsupported);
     }
 
+    // Skip shelling to `gh` when the CLI is known-broken — the caller
+    // (refresh_pr_status) silently swallows Err and leaves the cache intact.
+    let cli = cli_status();
+    if !cli.installed || !cli.authenticated {
+        return Err("gh unavailable".to_string());
+    }
+
     let local_branch = crate::git::run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])?
         .trim()
         .to_string();
@@ -309,6 +316,75 @@ fn is_github_remote(remote_url: &str) -> bool {
         || t.starts_with("http://github.com/")
         || t.starts_with("git@github.com:")
         || t.starts_with("ssh://git@github.com/")
+}
+
+// ---- CLI status -----------------------------------------------------------
+
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+const CLI_STATUS_TTL: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubCliStatus {
+    pub installed: bool,
+    pub authenticated: bool,
+    pub username: Option<String>,
+}
+
+static CLI_STATUS_CACHE: Mutex<Option<(GithubCliStatus, Instant)>> = Mutex::new(None);
+
+/// Returns the cached CLI status if fresh, otherwise refetches.
+pub fn cli_status() -> GithubCliStatus {
+    {
+        let guard = CLI_STATUS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((status, at)) = guard.as_ref() {
+            if at.elapsed() < CLI_STATUS_TTL {
+                return status.clone();
+            }
+        }
+    }
+    let fresh = fetch_cli_status();
+    *CLI_STATUS_CACHE.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((fresh.clone(), Instant::now()));
+    fresh
+}
+
+/// Drops the cached value; the next `cli_status()` call will refetch.
+pub fn invalidate_cli_status_cache() {
+    *CLI_STATUS_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+fn fetch_cli_status() -> GithubCliStatus {
+    // `gh --version` runs from cwd = "." because it doesn't need a repo.
+    let installed = Command::new("gh")
+        .arg("--version")
+        .env("PATH", crate::git::augmented_path())
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !installed {
+        return GithubCliStatus { installed: false, authenticated: false, username: None };
+    }
+
+    // `gh api user --jq .login` returns the username on stdout if authed.
+    let output = Command::new("gh")
+        .args(["api", "user", "--jq", ".login"])
+        .env("PATH", crate::git::augmented_path())
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let username = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if username.is_empty() {
+                GithubCliStatus { installed: true, authenticated: false, username: None }
+            } else {
+                GithubCliStatus { installed: true, authenticated: true, username: Some(username) }
+            }
+        }
+        _ => GithubCliStatus { installed: true, authenticated: false, username: None },
+    }
 }
 
 // ---- gh JSON deserialization ---------------------------------------------
