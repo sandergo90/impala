@@ -1,4 +1,5 @@
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { PreviewCard } from "@base-ui/react/preview-card";
 import {
   GitPullRequest,
   GitPullRequestClosed,
@@ -6,6 +7,7 @@ import {
   GitMerge,
 } from "lucide-react";
 import type { PrStatus } from "../types";
+import { PrHoverCard } from "./PrHoverCard";
 
 export function PrBadge({ status }: { status: PrStatus }) {
   if (status.kind !== "has_pr") return null;
@@ -13,16 +15,29 @@ export function PrBadge({ status }: { status: PrStatus }) {
   const { Icon, colorClass } = pickVisual(status);
 
   return (
-    <span
-      onClick={(e) => {
-        e.stopPropagation();
-        openUrl(status.url);
-      }}
-      className={`inline-flex items-center gap-0.5 font-mono cursor-pointer hover:underline ${colorClass}`}
-      title={status.title}
-    >
-      <Icon size={11} />#{status.number}
-    </span>
+    <PreviewCard.Root>
+      <PreviewCard.Trigger
+        delay={200}
+        render={
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              openUrl(status.url);
+            }}
+            className={`inline-flex items-center gap-0.5 font-mono cursor-pointer hover:underline ${colorClass}`}
+          >
+            <Icon size={11} />#{status.number}
+          </span>
+        }
+      />
+      <PreviewCard.Portal>
+        <PreviewCard.Positioner sideOffset={6}>
+          <PreviewCard.Popup className="outline-none">
+            <PrHoverCard pr={status} />
+          </PreviewCard.Popup>
+        </PreviewCard.Positioner>
+      </PreviewCard.Portal>
+    </PreviewCard.Root>
   );
 }
 
