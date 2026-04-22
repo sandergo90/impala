@@ -261,7 +261,7 @@ pub fn install_impala_review_skill() {
 const IMPALA_PLAN_SKILL: &str = r#"---
 name: impala-plan
 description: Submit an implementation plan to Impala's Plan tab for user review, wait for the decision, and loop on annotations until approved. Use when you have a finished plan file and want the user to approve (or revise) it in the Impala desktop app before execution.
-allowed-tools: mcp__impala__submit_plan_for_review, mcp__impala__get_plan_decision, Bash, Read, Edit, Write
+allowed-tools: mcp__impala__submit_plan_for_review, mcp__impala__get_plan_decision, mcp__impala__resolve_annotation, Bash, Read, Edit, Write
 argument-hint: "<plan-path>"
 ---
 
@@ -301,7 +301,8 @@ On wake-up, call `mcp__impala__get_plan_decision` with the same `plan_path` and 
 - **anything else** (annotations added, changes requested, rejected) →
   1. Read each annotation's `original_text` and `body` — `original_text` is the exact snippet of the plan the reviewer highlighted.
   2. Revise the plan file(s) to address the feedback — edit in place, don't create new plan files.
-  3. Go back to Phase 1: call `submit_plan_for_review` again on the same `plan_path`. It auto-increments `version`, so no IDs or paths need to change. Start a new watcher on the new `signal_path`, end the turn, loop.
+  3. After addressing each annotation, call `mcp__impala__resolve_annotation` with its `id` to mark it resolved. Every annotation gets resolved — no silent skips.
+  4. Go back to Phase 1: call `submit_plan_for_review` again on the same `plan_path`. It auto-increments `version`, so no IDs or paths need to change. Start a new watcher on the new `signal_path`, end the turn, loop.
 
 ## Notes
 
