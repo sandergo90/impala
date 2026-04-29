@@ -6,6 +6,7 @@ import { useUIStore } from "../store";
 import { classifyFile, formatBytes, TEXT_SIZE_CAP_BYTES, type FileKind } from "../lib/file-kind";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { RevealInFinderButton } from "./RevealInFinderButton";
+import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";
 
 function Placeholder({
   tone = "muted",
@@ -35,6 +36,11 @@ export function FileViewer() {
     );
     return tab && tab.kind === "file" ? tab.path ?? null : null;
   });
+  const activeThemeId = useUIStore((s) => s.activeThemeId);
+  const customThemes = useUIStore((s) => s.customThemes);
+  const editorFontSize = useUIStore((s) => s.editorFontSize);
+  const editorFontFamily = useUIStore((s) => s.editorFontFamily);
+  const globalFontSize = useUIStore((s) => s.fontSize);
 
   const fullPath = wtPath && selectedFilePath ? `${wtPath}/${selectedFilePath}` : null;
   const initialKind: FileKind | null = selectedFilePath ? classifyFile(selectedFilePath) : null;
@@ -108,6 +114,28 @@ export function FileViewer() {
     if (!selectedFilePath || contents === null) return null;
     return { name: selectedFilePath, contents };
   }, [selectedFilePath, contents]);
+
+  const activeTheme = useMemo(
+    () => resolveThemeById(activeThemeId, customThemes),
+    [activeThemeId, customThemes],
+  );
+  const fileViewerStyle = useMemo(
+    () =>
+      getDiffViewerStyle(
+        activeTheme,
+        editorFontSize ?? globalFontSize,
+        editorFontFamily,
+      ),
+    [activeTheme, editorFontSize, globalFontSize, editorFontFamily],
+  );
+  const fileViewerOptions = useMemo(
+    () => ({
+      theme: getDiffsTheme(activeTheme),
+      themeType: activeTheme.type as "dark" | "light",
+      disableFileHeader: true,
+    }),
+    [activeTheme],
+  );
 
   if (!selectedFilePath) {
     return <Placeholder>Select a file in the Files tab to view its contents</Placeholder>;
@@ -189,8 +217,8 @@ export function FileViewer() {
           </div>
         </div>
       )}
-      <div className="flex-1 overflow-auto">
-        <File file={file} />
+      <div className="flex-1 overflow-auto" style={fileViewerStyle}>
+        <File file={file} options={fileViewerOptions} />
       </div>
     </div>
   );

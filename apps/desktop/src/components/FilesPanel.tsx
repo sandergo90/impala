@@ -6,6 +6,7 @@ import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
 import { openFileTab } from "../lib/tab-actions";
 import { FileSearchInput } from "./FileSearchInput";
+import { getTreesStyle, resolveThemeById } from "../themes/apply";
 import type { ChangedFile } from "../types";
 
 // Stable reference so the Zustand selector never returns a fresh array,
@@ -23,6 +24,12 @@ export function FilesPanel() {
   const pendingReveal = useUIStore((s) => s.pendingTreeReveal);
   const persistedExpandedDirs = useUIStore((s) =>
     wtPath ? s.worktreeExpandedDirs[wtPath] : undefined,
+  );
+  const activeThemeId = useUIStore((s) => s.activeThemeId);
+  const customThemes = useUIStore((s) => s.customThemes);
+  const treesStyle = useMemo(
+    () => getTreesStyle(resolveThemeById(activeThemeId, customThemes)),
+    [activeThemeId, customThemes],
   );
   const activeFileTabPath = useUIStore((s) => {
     if (!wtPath) return null;
@@ -61,7 +68,7 @@ export function FilesPanel() {
   // useFileTree captures onSelectionChange once at model construction. FilesPanel
   // does not remount on worktree switch, so route through a ref to keep wtPath /
   // expand fresh without rebuilding the model.
-  const handlerRef = useRef<(selected: readonly string[]) => void>(() => {});
+  const handlerRef = useRef<(selected: readonly string[]) => void>(() => { });
   handlerRef.current = (selected) => {
     if (!wtPath || selected.length === 0) return;
     const path = selected[selected.length - 1]!;
@@ -75,7 +82,7 @@ export function FilesPanel() {
   const { model } = useFileTree({
     paths: treePaths,
     initialExpansion: "closed",
-    icons: { set: "standard", colored: true },
+    icons: { set: "complete", colored: true },
     gitStatus: gitStatusEntries,
     fileTreeSearchMode: "expand-matches",
     onSelectionChange: (selected) => handlerRef.current(selected),
@@ -174,7 +181,7 @@ export function FilesPanel() {
         className="flex-1 min-h-0 overflow-hidden"
         onDoubleClick={handleDoubleClick}
       >
-        <FileTree model={model} style={{ height: "100%" }} />
+        <FileTree model={model} style={{ height: "100%", ...treesStyle }} />
       </div>
     </div>
   );

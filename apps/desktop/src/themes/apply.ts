@@ -101,6 +101,35 @@ export function getDiffViewerStyle(theme: Theme, fontSize: number = 14, fontFami
   } as CSSProperties;
 }
 
+/** CSS variable overrides for the @pierre/trees FileTree component. */
+export function getTreesStyle(theme: Theme): CSSProperties {
+  const t = theme.terminal;
+  const ui = theme.ui;
+  const isDark = theme.type === "dark";
+  return {
+    colorScheme: theme.type,
+    "--trees-bg-override": ui.background,
+    "--trees-bg-muted-override": ui.muted ?? ui.background,
+    "--trees-fg-override": ui.foreground,
+    "--trees-fg-muted-override": ui.mutedForeground ?? ui.foreground,
+    "--trees-accent-override": ui.accent,
+    "--trees-border-color-override": ui.border,
+    "--trees-focus-ring-color-override": ui.ring ?? ui.primary,
+    "--trees-search-bg-override": ui.input ?? ui.background,
+    "--trees-search-fg-override": ui.foreground,
+    "--trees-selected-bg-override": ui.accent,
+    "--trees-selected-fg-override": ui.accentForeground ?? ui.foreground,
+    "--trees-status-added-override": isDark ? t.brightGreen : t.green,
+    "--trees-status-modified-override": isDark ? t.brightBlue : t.blue,
+    "--trees-status-deleted-override": isDark ? t.brightRed : t.red,
+    "--trees-status-renamed-override": isDark ? t.brightYellow : t.yellow,
+    "--trees-status-untracked-override": isDark ? t.brightGreen : t.green,
+    "--trees-status-ignored-override": ui.mutedForeground ?? t.brightBlack,
+    backgroundColor: ui.background,
+    color: ui.foreground,
+  } as CSSProperties;
+}
+
 // ---------------------------------------------------------------------------
 // App-wide theme application (CSS variables for Tailwind / app chrome)
 // ---------------------------------------------------------------------------
