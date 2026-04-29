@@ -1,3 +1,5 @@
+mod observability;
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -697,6 +699,15 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
 // ---------------------------------------------------------------------------
 
 fn main() {
+    let _observability = observability::init();
+
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        sentry::integrations::panic::panic_handler(info);
+        tracing::error!(panic = %info, "mcp panicked");
+        prev(info);
+    }));
+
     let conn = open_db().unwrap_or_else(|e| {
         eprintln!("impala-mcp: {}", e);
         std::process::exit(1);
