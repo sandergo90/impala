@@ -123,7 +123,7 @@ export interface UserTab {
 }
 
 export interface WorktreeNavState {
-  activeTab: "terminal" | "diff" | "split" | "plan";
+  activeTab: "terminal" | "diff" | "split" | "plan" | "files";
   agentLaunched: boolean;
   viewMode: "commit" | "all-changes" | "uncommitted";
   selectedCommit: CommitInfo | null;

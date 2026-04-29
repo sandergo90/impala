@@ -3,6 +3,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
 import { RightSidebar } from "../components/RightSidebar";
 import { DiffView } from "../components/DiffView";
+import { FileViewer } from "../components/FileViewer";
 import { PlanView } from "../components/PlanView";
 import { SplitTreeRenderer } from "../components/SplitTreeRenderer";
 import {
@@ -79,7 +80,7 @@ export function MainView() {
   const runScriptTooltip = useHotkeyTooltip("RUN_SCRIPT", isRunning ? "Stop script" : "Run script");
   const openInEditorTooltip = useHotkeyTooltip("OPEN_IN_EDITOR", "Open in editor");
 
-  const setTab = (tab: "diff" | "terminal" | "split" | "plan") => {
+  const setTab = (tab: "diff" | "terminal" | "split" | "plan" | "files") => {
     if (!selectedWorktree) return;
     useUIStore
       .getState()
@@ -265,6 +266,7 @@ export function MainView() {
                 { tab: "diff" as const, label: "Diff", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M3 12h18"/></svg> },
                 { tab: "split" as const, label: "Split", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg> },
                 { tab: "plan" as const, label: "Plan", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
+                { tab: "files" as const, label: "Files", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg> },
               ]).map(({ tab, label, icon }) => (
                 <button
                   key={tab}
@@ -350,6 +352,10 @@ export function MainView() {
             ) : activeTab === "plan" ? (
               <div className="flex-1 min-w-0">
                 <PlanView />
+              </div>
+            ) : activeTab === "files" ? (
+              <div className="flex-1 min-w-0">
+                <FileViewer />
               </div>
             ) : activeTab === "split" ? (
               <ResizablePanelGroup orientation="horizontal">

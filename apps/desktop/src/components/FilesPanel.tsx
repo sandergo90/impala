@@ -24,10 +24,9 @@ export function FilesPanel() {
       void expand(path.slice(0, -1));
       return;
     }
-    // TODO Task 3: re-enable activeTab switch once union is widened.
     useUIStore.getState().updateWorktreeNavState(wtPath, {
       selectedFilePath: path,
-      // activeTab: "files",
+      activeTab: "files",
     });
   };
 
