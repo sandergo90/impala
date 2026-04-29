@@ -15,23 +15,43 @@
     "fs:default",
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "$HOME/**" }]
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/**/.*" },
+        { "path": "$HOME/**/.*/**" }
+      ]
     },
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [{ "path": "$HOME/**" }]
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/**/.*" },
+        { "path": "$HOME/**/.*/**" }
+      ]
     },
     {
       "identifier": "fs:allow-exists",
-      "allow": [{ "path": "$HOME/**" }]
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/**/.*" },
+        { "path": "$HOME/**/.*/**" }
+      ]
     },
     {
       "identifier": "fs:allow-stat",
-      "allow": [{ "path": "$HOME/**" }]
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/**/.*" },
+        { "path": "$HOME/**/.*/**" }
+      ]
     },
     {
       "identifier": "fs:scope",
-      "allow": [{ "path": "$HOME/**" }]
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/**/.*" },
+        { "path": "$HOME/**/.*/**" }
+      ]
     },
     "notification:default",
     "sentry:default",
