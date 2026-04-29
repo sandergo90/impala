@@ -19,14 +19,19 @@ export function useFileTreeData(worktreePath: string | null) {
   const [loading, setLoading] = useState(false);
   const expandedDirsRef = useRef<Set<string>>(new Set());
   const childrenByDirRef = useRef<Map<string, FsEntry[]>>(new Map());
+  // Bumped on every worktree change. Async fetches capture the epoch at start
+  // and discard their result if it changed by the time they resolve.
+  const epochRef = useRef(0);
 
   const fetchDir = useCallback(
     async (relDir: string): Promise<FsEntry[]> => {
       if (!worktreePath) return [];
+      const myEpoch = epochRef.current;
       const entries = await invoke<FsEntry[]>("list_directory", {
         worktreePath,
         relDir,
       });
+      if (myEpoch !== epochRef.current) return [];
       childrenByDirRef.current.set(relDir, entries);
       return entries;
     },
@@ -48,19 +53,22 @@ export function useFileTreeData(worktreePath: string | null) {
 
   const refetchAll = useCallback(async () => {
     if (!worktreePath) return;
+    const myEpoch = epochRef.current;
     setLoading(true);
     try {
       await fetchDir("");
       for (const dir of expandedDirsRef.current) {
         await fetchDir(dir);
       }
+      if (myEpoch !== epochRef.current) return;
       recomputePaths();
     } finally {
-      setLoading(false);
+      if (myEpoch === epochRef.current) setLoading(false);
     }
   }, [worktreePath, fetchDir, recomputePaths]);
 
   useEffect(() => {
+    epochRef.current += 1;
     expandedDirsRef.current = new Set();
     childrenByDirRef.current = new Map();
     setPaths([]);
@@ -86,8 +94,10 @@ export function useFileTreeData(worktreePath: string | null) {
   const expand = useCallback(
     async (relDir: string) => {
       if (expandedDirsRef.current.has(relDir)) return;
+      const myEpoch = epochRef.current;
       expandedDirsRef.current.add(relDir);
       await fetchDir(relDir);
+      if (myEpoch !== epochRef.current) return;
       recomputePaths();
     },
     [fetchDir, recomputePaths],

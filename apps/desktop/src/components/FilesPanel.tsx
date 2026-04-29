@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFileTree, FileTree } from "@pierre/trees/react";
 import { useUIStore } from "../store";
 import { useFileTreeData } from "../hooks/useFileTreeData";
@@ -13,27 +13,28 @@ export function FilesPanel() {
     return paths.map((p) => (dirSet.has(p) ? `${p}/` : p));
   }, [paths, dirSet]);
 
-  const onSelectionChange = useCallback(
-    (selected: readonly string[]) => {
-      if (!wtPath || selected.length === 0) return;
-      const path = selected[selected.length - 1]!;
-      if (path.endsWith("/")) {
-        void expand(path.slice(0, -1));
-        return;
-      }
-      // TODO Task 3: re-enable activeTab switch once union is widened.
-      useUIStore.getState().updateWorktreeNavState(wtPath, {
-        selectedFilePath: path,
-        // activeTab: "files",
-      });
-    },
-    [wtPath, expand],
-  );
+  // useFileTree captures onSelectionChange once at model construction. FilesPanel
+  // does not remount on worktree switch, so route through a ref to keep wtPath /
+  // expand fresh without rebuilding the model.
+  const handlerRef = useRef<(selected: readonly string[]) => void>(() => {});
+  handlerRef.current = (selected) => {
+    if (!wtPath || selected.length === 0) return;
+    const path = selected[selected.length - 1]!;
+    if (path.endsWith("/")) {
+      void expand(path.slice(0, -1));
+      return;
+    }
+    // TODO Task 3: re-enable activeTab switch once union is widened.
+    useUIStore.getState().updateWorktreeNavState(wtPath, {
+      selectedFilePath: path,
+      // activeTab: "files",
+    });
+  };
 
   const { model } = useFileTree({
     paths: treePaths,
     initialExpansion: "closed",
-    onSelectionChange,
+    onSelectionChange: (selected) => handlerRef.current(selected),
   });
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export function FilesPanel() {
 
   if (!wtPath) {
     return (
-      <div className="flex items-center justify-center h-full text-md text-muted-foreground">
+      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
         Select a worktree to browse files
       </div>
     );
