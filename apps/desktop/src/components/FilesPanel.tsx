@@ -139,17 +139,20 @@ export function FilesPanel() {
     );
   }
 
-  // Trees package doesn't expose a per-row double-click prop, but each row
-  // carries `data-item-path`. Delegate dblclick at the container so a
-  // double-click on a file row promotes the preview tab to pinned.
+  // Trees renders inside a shadow root, so `event.target` is retargeted to
+  // the host element by the time it bubbles out. `composedPath()` exposes
+  // the original path including shadow DOM, which is where the row buttons
+  // (with `data-item-path`) actually live.
   const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!wtPath) return;
-    const target = (e.target as HTMLElement | null)?.closest(
-      "[data-item-path]",
-    ) as HTMLElement | null;
-    if (!target) return;
-    if (target.getAttribute("data-item-type") !== "file") return;
-    const path = target.getAttribute("data-item-path");
+    const composed = e.nativeEvent.composedPath() as EventTarget[];
+    const row = composed.find(
+      (el): el is HTMLElement =>
+        el instanceof HTMLElement && el.hasAttribute("data-item-path"),
+    );
+    if (!row) return;
+    if (row.getAttribute("data-item-type") !== "file") return;
+    const path = row.getAttribute("data-item-path");
     if (!path) return;
     openFileTab(wtPath, path, true); // pin
   };
