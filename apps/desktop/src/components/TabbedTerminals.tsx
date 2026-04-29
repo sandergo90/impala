@@ -363,7 +363,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       activeId === t.id
         ? "text-foreground bg-accent"
         : "text-muted-foreground hover:text-foreground"
-    } rounded-t`;
+    }`;
 
   return (
     <div className="flex flex-col h-full">
