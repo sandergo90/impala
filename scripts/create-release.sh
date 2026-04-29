@@ -115,6 +115,27 @@ if git rev-parse "$TAG_NAME" &>/dev/null 2>&1; then
     fi
 fi
 
+# --- Decide whether the daemon needs a version bump ---
+# The Tauri host's build.rs bakes daemon/Cargo.toml's version into
+# BUNDLED_DAEMON_VERSION; the host respawns the daemon iff the running
+# daemon's reported version differs. Bumping daemon/Cargo.toml on every
+# release would force a respawn even when nothing in the daemon changed,
+# which kills any in-flight PTY sessions the daemon has been carrying
+# across GUI quits (the daemon survives quit via setsid). We avoid that
+# by bumping only when the daemon or its dependency `shared` actually
+# changed since the previous release tag.
+BUMP_DAEMON=true
+if [ -n "$LATEST_TAG" ] && git rev-parse "$LATEST_TAG" >/dev/null 2>&1; then
+    if git diff --quiet "$LATEST_TAG" -- backend/tauri/daemon backend/tauri/shared; then
+        BUMP_DAEMON=false
+    fi
+fi
+if [ "$BUMP_DAEMON" = true ]; then
+    info "Daemon or shared crate changed (or no prior tag) — bumping daemon version. Stale daemons on user machines will be retired on first launch after upgrade."
+else
+    info "Daemon and shared crate unchanged since ${LATEST_TAG} — leaving daemon version alone. Long-running PTY sessions on user machines will survive this release."
+fi
+
 # --- Update version in config files ---
 info "Updating version to ${VERSION}..."
 
@@ -126,7 +147,10 @@ sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" backend/tauri/Cargo.to
 
 # Cargo.toml (backend/tauri/daemon) - host's build.rs bakes this into
 # BUNDLED_DAEMON_VERSION so a host upgrade can retire stale daemons.
-sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" backend/tauri/daemon/Cargo.toml
+# Skipped when the daemon hasn't actually changed (see BUMP_DAEMON above).
+if [ "$BUMP_DAEMON" = true ]; then
+    sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" backend/tauri/daemon/Cargo.toml
+fi
 
 # Cargo.toml (backend/mcp)
 sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" backend/mcp/Cargo.toml
@@ -139,7 +163,11 @@ ok "Updated version in all config files"
 # --- Commit and tag ---
 BRANCH=$(git branch --show-current)
 
-git add backend/tauri/tauri.conf.json backend/tauri/Cargo.toml backend/tauri/daemon/Cargo.toml backend/mcp/Cargo.toml apps/desktop/package.json
+ADD_PATHS=(backend/tauri/tauri.conf.json backend/tauri/Cargo.toml backend/mcp/Cargo.toml apps/desktop/package.json)
+if [ "$BUMP_DAEMON" = true ]; then
+    ADD_PATHS+=(backend/tauri/daemon/Cargo.toml)
+fi
+git add "${ADD_PATHS[@]}"
 git commit -m "release: desktop v${VERSION}"
 git tag "$TAG_NAME"
 
