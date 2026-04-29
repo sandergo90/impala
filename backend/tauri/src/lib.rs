@@ -638,6 +638,7 @@ async fn prepare_agent_config(
     let mcp_binary = which_mcp_binary(&home)?;
 
     let env = tokio::task::spawn_blocking(move || -> Result<std::collections::HashMap<String, String>, String> {
+        agent_config::write_shared_commands(&path)?;
         let mut env = std::collections::HashMap::new();
         match agent.as_str() {
             "claude" => {
@@ -1299,9 +1300,6 @@ pub fn run() {
                     }
                 });
             }
-
-            hook_server::install_impala_review_skill();
-            hook_server::install_impala_plan_skill();
 
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.

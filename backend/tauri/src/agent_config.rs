@@ -161,6 +161,155 @@ pub fn write_codex_config(
     Ok(codex_home)
 }
 
+const IMPALA_REVIEW_COMMAND: &str = r#"---
+description: Review and address code review annotations from Impala. Use when asked to review annotations, or when invoked as /impala-review.
+argument-hint: "[annotation-id]"
+---
+
+Review and address code review annotations from Impala using the MCP server tools. These are human-written review comments anchored to specific lines in the code.
+
+ARGUMENTS: If an annotation ID is provided as an argument, address only that annotation. Otherwise, address all unresolved annotations.
+
+## Phase 1: Fetch and Plan
+
+1. Call `mcp__impala__list_files_with_annotations` to get an overview of which files have annotations and how many.
+2. Call `mcp__impala__list_annotations` to fetch unresolved annotations. If an ID argument was given, find that specific annotation.
+3. If zero annotations, report "No unresolved review comments. Nothing to address." and stop.
+4. Group annotations by file — you will work through them file by file so you only need to read each file once.
+
+## Phase 2: Triage Each Annotation
+
+For each unresolved annotation, read the file at the annotated line and evaluate the comment. Classify as ACTIONABLE, DISCUSSION, or ALREADY ADDRESSED.
+
+## Phase 3: Address Each Annotation
+
+Work file by file. After addressing each annotation, immediately call `mcp__impala__resolve_annotation` to mark it done.
+
+ACTIONABLE: Fix the code, then resolve. DISCUSSION: explore codebase first; if still unclear, present options to the user, wait for their answer, apply it, then resolve. ALREADY ADDRESSED: resolve immediately.
+
+## Phase 4: Verify
+
+After all annotations are addressed, run the project's typecheck and lint to make sure nothing is broken.
+
+## Phase 5: Summary
+
+Report fixed / already addressed / discussion resolved counts and a per-file change summary.
+"#;
+
+const IMPALA_PLAN_COMMAND: &str = r#"---
+description: Submit an implementation plan to Impala's Plan tab for user review, wait for the decision, and loop on annotations until approved.
+argument-hint: "<plan-path>"
+---
+
+Run the full plan-review loop with Impala: register the plan, wait for the user's decision, handle annotations, loop until approved.
+
+## Phase 1: Register
+
+Call `mcp__impala__submit_plan_for_review` with `plan_path` (absolute path to overview.md or single task file), `title` (the feature name), and `worktree_path` (current working directory). Capture the returned `signal_path`.
+
+## Phase 2: Wait
+
+Start a background watcher on the signal file:
+
+```bash
+until [ -f "<signal_path>" ]; do sleep 2; done; cat "<signal_path>"
+```
+
+Tell the user the plan is submitted and end your turn. You'll be notified when the watcher fires.
+
+## Phase 3: Handle the Decision
+
+Call `mcp__impala__get_plan_decision`. If `approved`, stop. Otherwise: read each annotation, revise the plan in-place, call `mcp__impala__resolve_annotation` for each, then loop back to Phase 1 (auto-increments version).
+"#;
+
+const SHARED_AGENTS_MD: &str = r#"# AGENTS.md
+
+This project is open in [Impala](https://github.com/kodeus/impala), which exposes its code-review and plan-review tools via MCP server `impala`.
+
+## Available MCP tools
+
+- `mcp__impala__list_annotations` — list unresolved review comments anchored to file lines
+- `mcp__impala__resolve_annotation` — mark an annotation as resolved
+- `mcp__impala__list_files_with_annotations` — files with unresolved comments
+- `mcp__impala__submit_plan_for_review` — submit a plan file for user approval
+- `mcp__impala__get_plan_decision` — fetch the user's decision on a submitted plan
+- `mcp__impala__list_plans` — list plans for this worktree
+
+## Available slash commands
+
+- `/impala-review` — work through unresolved review annotations
+- `/impala-plan` — submit a plan for review and loop on annotations
+
+This file is managed by Impala. Edits are overwritten on each worktree open.
+"#;
+
+/// Write per-worktree shared command files and symlink them into both
+/// .claude/commands and .codex/commands. Idempotent.
+pub fn write_shared_commands(worktree_path: &Path) -> Result<(), String> {
+    let agents_dir = worktree_path.join(".agents").join("commands");
+    fs::create_dir_all(&agents_dir)
+        .map_err(|e| format!("mkdir .agents/commands: {}", e))?;
+
+    fs::write(agents_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
+        .map_err(|e| format!("write impala-review.md: {}", e))?;
+    fs::write(agents_dir.join("impala-plan.md"), IMPALA_PLAN_COMMAND)
+        .map_err(|e| format!("write impala-plan.md: {}", e))?;
+
+    // Symlink .claude/commands -> ../.agents/commands. .claude/ already
+    // exists from write_claude_config, but for Codex-only worktrees we
+    // create it on demand here.
+    let claude_dir = worktree_path.join(".claude");
+    fs::create_dir_all(&claude_dir)
+        .map_err(|e| format!("mkdir .claude: {}", e))?;
+    let claude_link = claude_dir.join("commands");
+    ensure_symlink(&claude_link, Path::new("../.agents/commands"))?;
+
+    // Symlink .codex/commands -> ../.agents/commands.
+    let codex_dir = worktree_path.join(".codex");
+    fs::create_dir_all(&codex_dir)
+        .map_err(|e| format!("mkdir .codex: {}", e))?;
+    let codex_link = codex_dir.join("commands");
+    ensure_symlink(&codex_link, Path::new("../.agents/commands"))?;
+
+    // Write the AGENTS.md shim. Skip if the user already has one — we
+    // don't want to clobber project-authored guidance.
+    let agents_md = worktree_path.join("AGENTS.md");
+    if !agents_md.exists() {
+        fs::write(&agents_md, SHARED_AGENTS_MD)
+            .map_err(|e| format!("write AGENTS.md: {}", e))?;
+    }
+
+    add_git_excludes(worktree_path, &[
+        "# Added by Impala",
+        "/.agents/",
+        "/.codex/",
+        "/AGENTS.md",
+    ])?;
+
+    Ok(())
+}
+
+fn ensure_symlink(link: &Path, target: &Path) -> Result<(), String> {
+    use std::os::unix::fs::symlink;
+    if link.exists() || link.symlink_metadata().is_ok() {
+        if let Ok(meta) = link.symlink_metadata() {
+            if meta.file_type().is_symlink() {
+                if let Ok(existing_target) = fs::read_link(link) {
+                    if existing_target == target {
+                        return Ok(());
+                    }
+                }
+                fs::remove_file(link).map_err(|e| format!("remove old symlink: {}", e))?;
+            } else {
+                // Existing directory or file at the link path — leave it alone.
+                return Ok(());
+            }
+        }
+    }
+    symlink(target, link).map_err(|e| format!("symlink {} -> {}: {}", link.display(), target.display(), e))?;
+    Ok(())
+}
+
 /// Append entries to <worktree>/.git/info/exclude (the per-worktree
 /// gitignore that does not modify the user's tracked .gitignore). No-op
 /// if the worktree is not a git repository or the lines are already
