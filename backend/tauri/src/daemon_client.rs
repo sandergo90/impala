@@ -21,7 +21,9 @@ use tokio::net::UnixStream;
 use tokio::sync::{mpsc, oneshot};
 
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const BUNDLED_DAEMON_VERSION: &str = env!("BUNDLED_DAEMON_VERSION");
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(3);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct DaemonState(pub OnceLock<DaemonClient>);
 
@@ -117,7 +119,18 @@ async fn connect_or_spawn(
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 0..3 {
         match try_hello(paths).await {
-            Ok(t) => return Ok(t),
+            Ok((stream, daemon_version, pid)) => {
+                if daemon_version == BUNDLED_DAEMON_VERSION {
+                    return Ok((stream, daemon_version, pid));
+                }
+                eprintln!(
+                    "[impala] retiring stale pty daemon v{daemon_version} (bundled v{BUNDLED_DAEMON_VERSION}, pid={pid})"
+                );
+                if let Err(e) = request_shutdown(stream).await {
+                    eprintln!("[impala] daemon refused shutdown: {e:#}");
+                }
+                wait_for_socket_gone(&paths.sock, SHUTDOWN_TIMEOUT).await.ok();
+            }
             Err(e) => last_err = Some(e),
         }
         if attempt == 2 {
@@ -165,6 +178,29 @@ async fn try_hello(paths: &DaemonPaths) -> Result<(UnixStream, String, u32)> {
         } => Ok((stream, daemon_version, pid)),
         Response::Error { message } => bail!("handshake rejected: {message}"),
         other => bail!("unexpected handshake response: {other:?}"),
+    }
+}
+
+async fn request_shutdown(mut stream: UnixStream) -> Result<()> {
+    let frame = ClientFrame {
+        id: 1,
+        req: Request::Shutdown,
+    };
+    let (r, mut w) = stream.split();
+    let mut buf = serde_json::to_vec(&frame)?;
+    buf.push(b'\n');
+    w.write_all(&buf).await?;
+    w.flush().await?;
+
+    let mut lines = BufReader::new(r).lines();
+    let line = lines
+        .next_line()
+        .await?
+        .ok_or_else(|| anyhow!("eof before shutdown ack"))?;
+    match parse_response(&line)? {
+        Response::ShutdownAck => Ok(()),
+        Response::Error { message } => bail!("daemon rejected shutdown: {message}"),
+        other => bail!("unexpected shutdown response: {other:?}"),
     }
 }
 
@@ -225,6 +261,21 @@ async fn wait_for_socket(path: &Path, timeout: Duration) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     bail!("socket {} did not appear within {:?}", path.display(), timeout)
+}
+
+async fn wait_for_socket_gone(path: &Path, timeout: Duration) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !path.exists() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    bail!(
+        "socket {} did not disappear within {:?}",
+        path.display(),
+        timeout
+    )
 }
 
 fn resolve_daemon_binary() -> Result<PathBuf> {
