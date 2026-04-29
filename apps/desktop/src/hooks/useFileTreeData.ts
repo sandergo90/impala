@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
+import { useUIStore } from "../store";
 
 export interface FsEntry {
   name: string;
@@ -64,12 +65,34 @@ export function useFileTreeData(worktreePath: string | null) {
       ...Array.from(expandedDirsRef.current).map((d) => fetchDir(d)),
     ]);
     if (myEpoch !== epochRef.current) return;
+
+    const validDirs = new Set<string>();
+    for (const entries of childrenByDirRef.current.values()) {
+      for (const e of entries) {
+        if (e.kind === "directory") validDirs.add(e.relativePath);
+      }
+    }
+    for (const dir of childrenByDirRef.current.keys()) {
+      if (dir !== "") validDirs.add(dir);
+    }
+    const pruned = new Set<string>();
+    for (const dir of expandedDirsRef.current) {
+      if (validDirs.has(dir)) pruned.add(dir);
+    }
+    if (pruned.size !== expandedDirsRef.current.size) {
+      expandedDirsRef.current = pruned;
+      useUIStore
+        .getState()
+        .setWorktreeExpandedDirs(worktreePath, Array.from(pruned));
+    }
+
     recomputePaths();
   }, [worktreePath, fetchDir, recomputePaths]);
 
   useEffect(() => {
     epochRef.current += 1;
-    expandedDirsRef.current = new Set();
+    const persisted = useUIStore.getState().worktreeExpandedDirs[worktreePath ?? ""] ?? [];
+    expandedDirsRef.current = new Set(persisted);
     childrenByDirRef.current = new Map();
     prevPathsKeyRef.current = "";
     setPaths([]);
@@ -100,8 +123,13 @@ export function useFileTreeData(worktreePath: string | null) {
       await fetchDir(relDir);
       if (myEpoch !== epochRef.current) return;
       recomputePaths();
+      if (worktreePath) {
+        useUIStore
+          .getState()
+          .setWorktreeExpandedDirs(worktreePath, Array.from(expandedDirsRef.current));
+      }
     },
-    [fetchDir, recomputePaths],
+    [fetchDir, recomputePaths, worktreePath],
   );
 
   return { paths, entriesByPath, expand };

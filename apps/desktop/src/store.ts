@@ -97,6 +97,8 @@ interface UIState {
   setGeneralTerminalFocusedPaneId: (id: string) => void;
   previousWorktree: Worktree | null;
   setPreviousWorktree: (worktree: Worktree | null) => void;
+  worktreeExpandedDirs: Record<string, string[]>;
+  setWorktreeExpandedDirs: (worktreePath: string, dirs: string[]) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -185,6 +187,14 @@ export const useUIStore = create<UIState>()(
       setGeneralTerminalFocusedPaneId: (id) => set({ generalTerminalFocusedPaneId: id }),
       previousWorktree: null,
       setPreviousWorktree: (worktree) => set({ previousWorktree: worktree }),
+      worktreeExpandedDirs: {},
+      setWorktreeExpandedDirs: (worktreePath, dirs) =>
+        set((state) => ({
+          worktreeExpandedDirs: {
+            ...state.worktreeExpandedDirs,
+            [worktreePath]: dirs,
+          },
+        })),
     }),
     {
       name: "impala-ui-state",
