@@ -41,7 +41,7 @@ export function RightSidebar() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden bg-sidebar">
       <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
         <TabPill label="Files" isActive={activeTab === "files"} onClick={() => setActiveTab("files")} />
         <TabPill label="Changes" isActive={activeTab === "changes"} onClick={() => setActiveTab("changes")} />
