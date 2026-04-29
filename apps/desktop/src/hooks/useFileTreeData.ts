@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { sanitizeEventId } from "../lib/sanitize-event-id";
 
 export interface FsEntry {
   name: string;
@@ -9,19 +10,20 @@ export interface FsEntry {
   ignored: boolean;
 }
 
-function sanitizeEventId(id: string): string {
-  return id.replace(/[^A-Za-z0-9_-]/g, "-");
-}
-
 export function useFileTreeData(worktreePath: string | null) {
   const [paths, setPaths] = useState<string[]>([]);
   const [dirSet, setDirSet] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(false);
+  const [ignoredMap, setIgnoredMap] = useState<Map<string, boolean>>(new Map());
+
   const expandedDirsRef = useRef<Set<string>>(new Set());
   const childrenByDirRef = useRef<Map<string, FsEntry[]>>(new Map());
   // Bumped on every worktree change. Async fetches capture the epoch at start
   // and discard their result if it changed by the time they resolve.
   const epochRef = useRef(0);
+  // Cache key over the last published paths set; lets recomputePaths skip
+  // setState when the union didn't actually change (avoids a downstream
+  // model.resetPaths walk on no-op fs events).
+  const prevPathsKeyRef = useRef<string>("");
 
   const fetchDir = useCallback(
     async (relDir: string): Promise<FsEntry[]> => {
@@ -39,40 +41,44 @@ export function useFileTreeData(worktreePath: string | null) {
   );
 
   const recomputePaths = useCallback(() => {
-    const all = new Set<string>();
+    const all: string[] = [];
     const dirs = new Set<string>();
+    const ignored = new Map<string, boolean>();
     for (const entries of childrenByDirRef.current.values()) {
       for (const e of entries) {
-        all.add(e.relativePath);
+        all.push(e.relativePath);
         if (e.kind === "directory") dirs.add(e.relativePath);
+        ignored.set(e.relativePath, e.ignored);
       }
     }
-    setPaths(Array.from(all));
+    all.sort();
+    const key = all.join("\0");
+    if (key === prevPathsKeyRef.current) return;
+    prevPathsKeyRef.current = key;
+    setPaths(all);
     setDirSet(dirs);
+    setIgnoredMap(ignored);
   }, []);
 
   const refetchAll = useCallback(async () => {
     if (!worktreePath) return;
     const myEpoch = epochRef.current;
-    setLoading(true);
-    try {
-      await fetchDir("");
-      for (const dir of expandedDirsRef.current) {
-        await fetchDir(dir);
-      }
-      if (myEpoch !== epochRef.current) return;
-      recomputePaths();
-    } finally {
-      if (myEpoch === epochRef.current) setLoading(false);
-    }
+    await Promise.all([
+      fetchDir(""),
+      ...Array.from(expandedDirsRef.current).map((d) => fetchDir(d)),
+    ]);
+    if (myEpoch !== epochRef.current) return;
+    recomputePaths();
   }, [worktreePath, fetchDir, recomputePaths]);
 
   useEffect(() => {
     epochRef.current += 1;
     expandedDirsRef.current = new Set();
     childrenByDirRef.current = new Map();
+    prevPathsKeyRef.current = "";
     setPaths([]);
     setDirSet(new Set());
+    setIgnoredMap(new Map());
     if (!worktreePath) return;
     void refetchAll();
   }, [worktreePath, refetchAll]);
@@ -103,17 +109,5 @@ export function useFileTreeData(worktreePath: string | null) {
     [fetchDir, recomputePaths],
   );
 
-  const collapse = useCallback((relDir: string) => {
-    expandedDirsRef.current.delete(relDir);
-  }, []);
-
-  const ignoredMap = useMemo(() => {
-    const m = new Map<string, boolean>();
-    for (const entries of childrenByDirRef.current.values()) {
-      for (const e of entries) m.set(e.relativePath, e.ignored);
-    }
-    return m;
-  }, [paths]);
-
-  return { paths, dirSet, ignoredMap, loading, expand, collapse, refetchAll };
+  return { paths, dirSet, ignoredMap, expand };
 }

@@ -3,11 +3,19 @@ use ignore::WalkBuilder;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FsKind {
+    File,
+    Directory,
+    Symlink,
+}
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct FsEntry {
     pub name: String,
-    pub kind: &'static str,    // "file" | "directory" | "symlink"
+    pub kind: FsKind,
     pub relative_path: String, // POSIX-style, relative to worktree root
     pub ignored: bool,
 }
@@ -70,12 +78,10 @@ pub async fn list_directory(
                 continue;
             }
 
-            let file_type = dent.file_type();
-            let kind: &'static str = match file_type {
-                Some(ft) if ft.is_dir() => "directory",
-                Some(ft) if ft.is_symlink() => "symlink",
-                Some(_) => "file",
-                None => "file",
+            let kind = match dent.file_type() {
+                Some(ft) if ft.is_dir() => FsKind::Directory,
+                Some(ft) if ft.is_symlink() => FsKind::Symlink,
+                _ => FsKind::File,
             };
 
             let relative = path
@@ -84,7 +90,7 @@ pub async fn list_directory(
             let relative_posix = to_posix(relative);
 
             let ignored = gitignore
-                .matched_path_or_any_parents(relative, kind == "directory")
+                .matched_path_or_any_parents(relative, kind == FsKind::Directory)
                 .is_ignore();
 
             entries.push(FsEntry {
@@ -95,9 +101,8 @@ pub async fn list_directory(
             });
         }
 
-        // Directories first, then files; alphabetical within each group.
         entries.sort_by(|a, b| {
-            match (a.kind == "directory", b.kind == "directory") {
+            match (a.kind == FsKind::Directory, b.kind == FsKind::Directory) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
                 _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),

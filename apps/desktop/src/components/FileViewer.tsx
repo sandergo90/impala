@@ -1,7 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { File } from "@pierre/diffs/react";
 import { useUIStore } from "../store";
+
+function Placeholder({
+  tone = "muted",
+  children,
+}: {
+  tone?: "muted" | "error";
+  children: ReactNode;
+}) {
+  const color = tone === "error" ? "text-destructive" : "text-muted-foreground";
+  return (
+    <div className={`flex items-center justify-center h-full text-sm ${color}`}>
+      {children}
+    </div>
+  );
+}
 
 export function FileViewer() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -38,27 +53,15 @@ export function FileViewer() {
   }, [selectedFilePath, contents]);
 
   if (!selectedFilePath) {
-    return (
-      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-        Select a file in the Files tab to view its contents
-      </div>
-    );
+    return <Placeholder>Select a file in the Files tab to view its contents</Placeholder>;
   }
 
   if (error) {
-    return (
-      <div className="flex items-center justify-center h-full text-sm text-destructive">
-        Failed to read {selectedFilePath}: {error}
-      </div>
-    );
+    return <Placeholder tone="error">Failed to read {selectedFilePath}: {error}</Placeholder>;
   }
 
   if (!file) {
-    return (
-      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-        Loading {selectedFilePath}…
-      </div>
-    );
+    return <Placeholder>Loading {selectedFilePath}…</Placeholder>;
   }
 
   return (
