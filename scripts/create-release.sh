@@ -124,6 +124,10 @@ jq --arg v "$VERSION" '.version = $v' backend/tauri/tauri.conf.json > tmp.json &
 # Cargo.toml (backend/tauri)
 sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" backend/tauri/Cargo.toml
 
+# Cargo.toml (backend/tauri/daemon) - host's build.rs bakes this into
+# BUNDLED_DAEMON_VERSION so a host upgrade can retire stale daemons.
+sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" backend/tauri/daemon/Cargo.toml
+
 # Cargo.toml (backend/mcp)
 sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" backend/mcp/Cargo.toml
 
@@ -135,7 +139,7 @@ ok "Updated version in all config files"
 # --- Commit and tag ---
 BRANCH=$(git branch --show-current)
 
-git add backend/tauri/tauri.conf.json backend/tauri/Cargo.toml backend/mcp/Cargo.toml apps/desktop/package.json
+git add backend/tauri/tauri.conf.json backend/tauri/Cargo.toml backend/tauri/daemon/Cargo.toml backend/mcp/Cargo.toml apps/desktop/package.json
 git commit -m "release: desktop v${VERSION}"
 git tag "$TAG_NAME"
 
