@@ -22,6 +22,12 @@ export const HOTKEYS = {
   OPEN_COMMAND_PALETTE: {
     label: "Command Palette",
     description: "Open the command palette to search worktrees, projects, and actions",
+    default: "meta+shift+p",
+    category: "Navigation",
+  },
+  OPEN_FILE_FINDER: {
+    label: "Find File",
+    description: "Open the file finder to fuzzy-search files in the current worktree",
     default: "meta+p",
     category: "Navigation",
   },

@@ -1497,6 +1497,7 @@ pub fn run() {
             watcher::watch_worktree,
             watcher::unwatch_worktree,
             file_tree::list_directory,
+            file_tree::list_all_files,
             config::read_project_config,
             config::write_project_config,
             notifications::send_notification,

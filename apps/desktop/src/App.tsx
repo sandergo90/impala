@@ -4,6 +4,7 @@ import { Outlet, useRouter, useMatchRoute } from "@tanstack/react-router";
 import { useInvoke } from "./hooks/useInvoke";
 import { useAppHotkey } from "./hooks/useAppHotkey";
 import { CommandPalette } from "./components/CommandPalette";
+import { FileFinder } from "./components/FileFinder";
 import { Toaster } from "./components/ui/sonner";
 import { UpdateChecker } from "./components/UpdateChecker";
 import { useUIStore, useDataStore } from "./store";
@@ -27,6 +28,7 @@ import { releaseCachedTerminal } from "./components/XtermTerminal";
 export function RootLayout() {
   const { loading: checking, error: gitError } = useInvoke("check_git");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [fileFinderOpen, setFileFinderOpen] = useState(false);
 
   const router = useRouter();
   const matchRoute = useMatchRoute();
@@ -62,6 +64,10 @@ export function RootLayout() {
 
   useAppHotkey("OPEN_COMMAND_PALETTE", () => {
     setCommandPaletteOpen((prev) => !prev);
+  });
+
+  useAppHotkey("OPEN_FILE_FINDER", () => {
+    setFileFinderOpen((prev) => !prev);
   });
 
   useAppHotkey("RUN_SCRIPT", () => {
@@ -239,6 +245,10 @@ export function RootLayout() {
       <CommandPalette
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
+      />
+      <FileFinder
+        open={fileFinderOpen}
+        onClose={() => setFileFinderOpen(false)}
       />
       <Toaster />
       <UpdateChecker />

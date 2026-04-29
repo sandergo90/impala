@@ -155,3 +155,32 @@ pub async fn list_directory(
     .await
     .map_err(|e| format!("Task join error: {}", e))?
 }
+
+#[tauri::command]
+pub async fn list_all_files(worktree_path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = PathBuf::from(&worktree_path);
+        let mut paths: Vec<String> = Vec::new();
+        let walker = WalkBuilder::new(&root)
+            .standard_filters(false)
+            .hidden(false)
+            .filter_entry(|e| e.file_name().to_string_lossy() != ".git")
+            .build();
+        for dent in walker.filter_map(Result::ok) {
+            match dent.file_type() {
+                Some(ft) if ft.is_file() || ft.is_symlink() => {}
+                _ => continue,
+            }
+            let path = dent.path();
+            let relative = match path.strip_prefix(&root) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            paths.push(to_posix(relative));
+        }
+        paths.sort();
+        Ok(paths)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
