@@ -120,6 +120,26 @@ fn link_codex_auth(codex_home: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve a worktree to its main repo path (the one Codex uses as the
+/// project-trust key). For a regular checkout that's the worktree itself;
+/// for a `git worktree`-linked checkout it's the original repo, derived by
+/// reading the `.git` file's `gitdir:` line. Returns None outside a git
+/// repo, in which case the caller skips the trust block.
+fn main_worktree_root(worktree_path: &Path) -> Option<PathBuf> {
+    let git = worktree_path.join(".git");
+    if git.is_dir() {
+        return Some(worktree_path.to_path_buf());
+    }
+    if git.is_file() {
+        let content = fs::read_to_string(&git).ok()?;
+        let line = content.lines().find(|l| l.starts_with("gitdir:"))?;
+        // gitdir: <main>/.git/worktrees/<name> — walk up twice to get <main>.
+        let gitdir = PathBuf::from(line.trim_start_matches("gitdir:").trim());
+        return gitdir.parent()?.parent().map(|p| p.to_path_buf());
+    }
+    None
+}
+
 /// Write per-worktree Codex config under <worktree>/.impala/codex/config.toml.
 /// Returns the path to use as CODEX_HOME.
 pub fn write_codex_config(
@@ -146,6 +166,17 @@ pub fn write_codex_config(
     toml_out.push_str("[mcp_servers.impala]\n");
     toml_out.push_str(&format!("command = {}\n", toml::Value::String(mcp_binary.to_string())));
     toml_out.push_str("args = []\n\n");
+
+    // Pre-trust the project so Codex doesn't show its directory-trust prompt
+    // on every spawn. Codex resolves a linked worktree to its main repo, so
+    // we key by that path.
+    if let Some(repo_root) = main_worktree_root(worktree_path) {
+        toml_out.push_str(&format!(
+            "[projects.{}]\n",
+            toml::Value::String(repo_root.to_string_lossy().to_string())
+        ));
+        toml_out.push_str("trust_level = \"trusted\"\n\n");
+    }
 
     // Codex hooks schema: top-level [hooks] table keyed by PascalCase
     // event name. Each event holds Vec<MatcherGroup>; each MatcherGroup
