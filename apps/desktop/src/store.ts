@@ -100,6 +100,8 @@ interface UIState {
   setWorktreeExpandedDirs: (worktreePath: string, dirs: string[]) => void;
   pendingTreeReveal: { worktreePath: string; path: string; nonce: number } | null;
   revealFileInTree: (worktreePath: string, path: string) => void;
+  fileFinderOpen: boolean;
+  setFileFinderOpen: (open: boolean) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -199,6 +201,8 @@ export const useUIStore = create<UIState>()(
       pendingTreeReveal: null,
       revealFileInTree: (worktreePath, path) =>
         set({ pendingTreeReveal: { worktreePath, path, nonce: Date.now() } }),
+      fileFinderOpen: false,
+      setFileFinderOpen: (open) => set({ fileFinderOpen: open }),
     }),
     {
       name: "impala-ui-state",
@@ -254,6 +258,7 @@ export const useUIStore = create<UIState>()(
           generalTerminalFocusedPaneId,
           linearApiKey,
           pendingTreeReveal,
+          fileFinderOpen,
           ...rest
         } = state;
         return rest;

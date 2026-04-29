@@ -28,7 +28,8 @@ import { releaseCachedTerminal } from "./components/XtermTerminal";
 export function RootLayout() {
   const { loading: checking, error: gitError } = useInvoke("check_git");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [fileFinderOpen, setFileFinderOpen] = useState(false);
+  const fileFinderOpen = useUIStore((s) => s.fileFinderOpen);
+  const setFileFinderOpen = useUIStore((s) => s.setFileFinderOpen);
 
   const router = useRouter();
   const matchRoute = useMatchRoute();
@@ -67,7 +68,7 @@ export function RootLayout() {
   });
 
   useAppHotkey("OPEN_FILE_FINDER", () => {
-    setFileFinderOpen((prev) => !prev);
+    setFileFinderOpen(!useUIStore.getState().fileFinderOpen);
   });
 
   useAppHotkey("RUN_SCRIPT", () => {

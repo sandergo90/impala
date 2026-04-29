@@ -5,7 +5,6 @@ import { useUIStore, useDataStore } from "../store";
 import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
 import { openFileTab } from "../lib/tab-actions";
-import { FileSearchInput } from "./FileSearchInput";
 import { getTreesStyle, resolveThemeById } from "../themes/apply";
 import type { ChangedFile } from "../types";
 
@@ -176,7 +175,18 @@ export function FilesPanel() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <FileSearchInput model={model} />
+      <button
+        type="button"
+        onClick={() => useUIStore.getState().setFileFinderOpen(true)}
+        className="flex items-center gap-2 mx-3 my-2 px-2 py-1 text-sm bg-input rounded text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.3-4.3" />
+        </svg>
+        <span>Search files…</span>
+        <span className="ml-auto font-mono text-xs opacity-70">⌘P</span>
+      </button>
       <div
         className="flex-1 min-h-0 overflow-hidden"
         onDoubleClick={handleDoubleClick}
