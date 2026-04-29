@@ -5,6 +5,7 @@ import { projectSettingsRoute } from "../../router";
 import { useDataStore } from "../../store";
 import { useDebouncedSetting } from "../../hooks/useDebouncedSetting";
 import { useInvoke } from "../../hooks/useInvoke";
+import type { Agent } from "../../lib/agent";
 
 interface ProjectConfig {
   setup?: string | null;
@@ -36,6 +37,24 @@ export function ProjectSettingsRoute() {
   runRef.current = run;
 
   const [claudeFlags, handleClaudeFlagsChange] = useDebouncedSetting("claudeFlags", projectPath);
+  const [codexFlags, handleCodexFlagsChange] = useDebouncedSetting("codexFlags", projectPath);
+  const [agent, setAgent] = useState<Agent | "">("");
+  useEffect(() => {
+    invoke<string | null>("get_setting", {
+      key: "selectedAgent",
+      scope: projectPath,
+    }).then((v) => {
+      setAgent(v === "claude" || v === "codex" ? v : "");
+    });
+  }, [projectPath]);
+  const handleAgentChange = (next: Agent | "") => {
+    setAgent(next);
+    if (next === "") {
+      invoke("delete_setting", { key: "selectedAgent", scope: projectPath }).catch(console.error);
+    } else {
+      invoke("set_setting", { key: "selectedAgent", scope: projectPath, value: next }).catch(console.error);
+    }
+  };
 
   // Reset loaded flag and clean up timers when projectPath changes
   useEffect(() => {
@@ -147,6 +166,26 @@ export function ProjectSettingsRoute() {
       </div>
 
       <div className="p-4 rounded-lg border border-border bg-card space-y-3">
+        <h3 className="text-sm font-medium">Agent</h3>
+        <p className="text-md text-muted-foreground">
+          Override the default agent for this project. Empty = inherit global default.
+        </p>
+        <div className="flex gap-2">
+          {(["", "claude", "codex"] as const).map((a) => (
+            <button
+              key={a || "default"}
+              onClick={() => handleAgentChange(a)}
+              className={`px-3 py-1 rounded border text-sm ${
+                agent === a ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground"
+              }`}
+            >
+              {a === "" ? "Default" : a === "claude" ? "Claude" : "Codex"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-4 rounded-lg border border-border bg-card space-y-3">
         <h3 className="text-sm font-medium">Claude Flags</h3>
         <p className="text-md text-muted-foreground">
           CLI flags passed to <code className="font-mono text-foreground">claude</code> when
@@ -157,6 +196,20 @@ export function ProjectSettingsRoute() {
           value={claudeFlags}
           onChange={(e) => handleClaudeFlagsChange(e.target.value)}
           placeholder="--dangerously-skip-permissions --remote-control"
+          className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
+        />
+      </div>
+
+      <div className="p-4 rounded-lg border border-border bg-card space-y-3">
+        <h3 className="text-sm font-medium">Codex Flags</h3>
+        <p className="text-md text-muted-foreground">
+          CLI flags passed to <code className="font-mono text-foreground">codex</code> on launch in this project. Leave empty to use the global default.
+        </p>
+        <input
+          type="text"
+          value={codexFlags}
+          onChange={(e) => handleCodexFlagsChange(e.target.value)}
+          placeholder="--sandbox workspace-write"
           className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
         />
       </div>

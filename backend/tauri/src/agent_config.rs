@@ -115,6 +115,52 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+const CODEX_EXCLUDE_LINES: &[&str] = &[
+    "# Added by Impala",
+    "/.impala/",
+];
+
+/// Write per-worktree Codex config under <worktree>/.impala/codex/config.toml.
+/// Returns the path to use as CODEX_HOME.
+pub fn write_codex_config(
+    worktree_path: &Path,
+    mcp_binary: &str,
+) -> Result<PathBuf, String> {
+    let codex_home = worktree_path.join(".impala").join("codex");
+    fs::create_dir_all(&codex_home)
+        .map_err(|e| format!("mkdir .impala/codex: {}", e))?;
+    let config_path = codex_home.join("config.toml");
+
+    // Build TOML manually — the schema is small and stable, and we want
+    // the output to be human-readable for debugging.
+    let hook_cmd = crate::hook_server::hook_command_public("PLACEHOLDER");
+    let mut toml_out = String::new();
+    toml_out.push_str("# Managed by Impala — regenerated on each worktree open.\n\n");
+
+    toml_out.push_str("[mcp_servers.impala]\n");
+    toml_out.push_str(&format!("command = {}\n", toml::Value::String(mcp_binary.to_string())));
+    toml_out.push_str("args = []\n\n");
+
+    let events = [
+        ("user-prompt-submit", "UserPromptSubmit"),
+        ("stop", "Stop"),
+        ("post-tool-use", "PostToolUse"),
+        ("permission-request", "PermissionRequest"),
+    ];
+    for (codex_event, impala_event) in events {
+        let cmd = hook_cmd.replace("PLACEHOLDER", impala_event);
+        toml_out.push_str("[[hooks]]\n");
+        toml_out.push_str(&format!("event = {}\n", toml::Value::String(codex_event.to_string())));
+        toml_out.push_str("command = \"/bin/sh\"\n");
+        toml_out.push_str(&format!("args = [\"-c\", {}]\n\n", toml::Value::String(cmd)));
+    }
+
+    fs::write(&config_path, toml_out)
+        .map_err(|e| format!("write codex config.toml: {}", e))?;
+    add_git_excludes(worktree_path, CODEX_EXCLUDE_LINES)?;
+    Ok(codex_home)
+}
+
 /// Append entries to <worktree>/.git/info/exclude (the per-worktree
 /// gitignore that does not modify the user's tracked .gitignore). No-op
 /// if the worktree is not a git repository or the lines are already

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ResizablePanelGroup,
@@ -11,6 +11,13 @@ import { paneSessionId } from "../lib/split-tree";
 import { getHookPort } from "../lib/get-hook-port";
 import { useUIStore, useDataStore } from "../store";
 import { useAppHotkey } from "../hooks/useAppHotkey";
+import {
+  resolveAgent,
+  resolveFlags,
+  buildLaunchCommand,
+  AGENT_LABELS,
+} from "../lib/agent";
+import type { Agent } from "../lib/agent";
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -206,8 +213,14 @@ function LeafPane({
         });
     } else {
       getHookPort().then(async (hookPort) => {
+        const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
+        const agent = await resolveAgent(worktreePath, projectPath);
+        let extraEnv: Record<string, string> = {};
         try {
-          await invoke("prepare_agent_config", { worktreePath });
+          extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
+            worktreePath,
+            agent,
+          });
         } catch (err) {
           console.warn("Failed to prepare agent config:", err);
         }
@@ -218,34 +231,22 @@ function LeafPane({
           envVars: {
             IMPALA_HOOK_PORT: String(hookPort),
             IMPALA_WORKTREE_PATH: worktreePath,
+            ...extraEnv,
           },
         })
-          .then((isNew) => {
+          .then(async (isNew) => {
             onSessionSpawned(ptyId);
             if (paneType === "claude" && isNew) {
-              const claudeLaunched = useUIStore.getState().getWorktreeNavState(worktreePath).claudeLaunched;
-
-              // Fetch per-project flags, fall back to global
-              const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
-              Promise.all([
-                invoke<string | null>("get_setting", { key: "claudeFlags", scope: projectPath }),
-                invoke<string | null>("get_setting", { key: "claudeFlags", scope: "global" }),
-              ]).then(([projectFlags, globalFlags]) => {
-                const flags = projectFlags ?? globalFlags ?? "";
-                const parts = ["claude"];
-                if (flags.trim()) parts.push(flags.trim());
-                if (claudeLaunched) parts.push("--continue");
-                const claudeCmd = parts.join(" ") + "\n";
-
-                const encoded = btoa(
-                  Array.from(new TextEncoder().encode(claudeCmd), (b) =>
-                    String.fromCharCode(b)
-                  ).join("")
-                );
-                invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
-              }).catch(() => {});
-
-              useUIStore.getState().updateWorktreeNavState(worktreePath, { claudeLaunched: true });
+              const launched = useUIStore.getState().getWorktreeNavState(worktreePath).agentLaunched;
+              const flags = await resolveFlags(agent, projectPath);
+              const cmd = buildLaunchCommand(agent, flags, launched);
+              const encoded = btoa(
+                Array.from(new TextEncoder().encode(cmd), (b) =>
+                  String.fromCharCode(b)
+                ).join("")
+              );
+              invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
+              useUIStore.getState().updateWorktreeNavState(worktreePath, { agentLaunched: true });
             }
           })
           .catch((err) => {
@@ -276,9 +277,7 @@ function LeafPane({
         />
       )}
       {paneType === "claude" && (
-        <div className="absolute top-1 right-2 text-md font-medium text-muted-foreground/40 z-10 pointer-events-none">
-          Claude
-        </div>
+        <AgentLabel worktreePath={worktreePath} />
       )}
       {sessionId ? (
         <XtermTerminal
@@ -294,6 +293,25 @@ function LeafPane({
           Starting terminal...
         </div>
       )}
+    </div>
+  );
+}
+
+function AgentLabel({ worktreePath }: { worktreePath: string }) {
+  const [agent, setAgent] = useState<Agent>("claude");
+  const projectPath = useUIStore((s) => s.selectedProject?.path ?? worktreePath);
+  useEffect(() => {
+    let alive = true;
+    resolveAgent(worktreePath, projectPath).then((a) => {
+      if (alive) setAgent(a);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [worktreePath, projectPath]);
+  return (
+    <div className="absolute top-1 right-2 text-md font-medium text-muted-foreground/40 z-10 pointer-events-none">
+      {AGENT_LABELS[agent]}
     </div>
   );
 }

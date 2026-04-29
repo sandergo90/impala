@@ -9,7 +9,7 @@ import { createLeaf } from "./lib/split-tree";
 function createDefaultNavState(): WorktreeNavState {
   return {
     activeTab: "terminal",
-    claudeLaunched: false,
+    agentLaunched: false,
     viewMode: "commit",
     selectedCommit: null,
     selectedFile: null,
@@ -187,7 +187,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 2,
+      version: 3,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};
@@ -203,6 +203,14 @@ export const useUIStore = create<UIState>()(
           // rightSidebarWidth. Drop the legacy fields and let defaults apply.
           delete persistedState.sidebarSize;
           delete persistedState.rightSidebarSize;
+        }
+        if (fromVersion < 3 && persistedState?.worktreeNavStates) {
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (nav && typeof nav.claudeLaunched === "boolean") {
+              nav.agentLaunched = nav.claudeLaunched;
+              delete nav.claudeLaunched;
+            }
+          }
         }
         return persistedState;
       },

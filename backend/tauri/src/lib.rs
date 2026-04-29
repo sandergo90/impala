@@ -631,19 +631,33 @@ fn clear_viewed_files(
 #[tauri::command]
 async fn prepare_agent_config(
     worktree_path: String,
+    agent: String,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let path = std::path::PathBuf::from(&worktree_path);
-    let home = dirs::home_dir()
-        .ok_or_else(|| "no home dir".to_string())?;
+    let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
     let mcp_binary = which_mcp_binary(&home)?;
 
-    tokio::task::spawn_blocking(move || {
-        agent_config::write_claude_config(&path, &mcp_binary)
+    let env = tokio::task::spawn_blocking(move || -> Result<std::collections::HashMap<String, String>, String> {
+        let mut env = std::collections::HashMap::new();
+        match agent.as_str() {
+            "claude" => {
+                agent_config::write_claude_config(&path, &mcp_binary)?;
+            }
+            "codex" => {
+                let codex_home = agent_config::write_codex_config(&path, &mcp_binary)?;
+                env.insert(
+                    "CODEX_HOME".to_string(),
+                    codex_home.to_string_lossy().to_string(),
+                );
+            }
+            other => return Err(format!("unknown agent: {}", other)),
+        }
+        Ok(env)
     })
     .await
     .map_err(|e| format!("task join: {}", e))??;
 
-    Ok(std::collections::HashMap::new())
+    Ok(env)
 }
 
 fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {

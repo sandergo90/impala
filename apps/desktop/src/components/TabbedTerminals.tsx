@@ -27,6 +27,7 @@ import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { useAppHotkey } from "../hooks/useAppHotkey";
+import { resolveAgent, resolveFlags, buildLaunchCommand } from "../lib/agent";
 import {
   CLAUDE_PANE_ID,
   RUN_PANE_ID,
@@ -523,8 +524,15 @@ const TabBody = memo(function TabBody({
     const ptyId = `pty-${paneId}-${worktreePath}`;
 
     getHookPort().then(async (hookPort) => {
+      const projectPath =
+        useUIStore.getState().selectedProject?.path ?? worktreePath;
+      const agent = await resolveAgent(worktreePath, projectPath);
+      let extraEnv: Record<string, string> = {};
       try {
-        await invoke("prepare_agent_config", { worktreePath });
+        extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
+          worktreePath,
+          agent,
+        });
       } catch (err) {
         console.warn("Failed to prepare agent config:", err);
       }
@@ -535,9 +543,10 @@ const TabBody = memo(function TabBody({
         envVars: {
           IMPALA_HOOK_PORT: String(hookPort),
           IMPALA_WORKTREE_PATH: worktreePath,
+          ...extraEnv,
         },
       })
-        .then((isNew) => {
+        .then(async (isNew) => {
           const data = useDataStore.getState().getWorktreeDataState(worktreePath);
           useDataStore.getState().updateWorktreeDataState(worktreePath, {
             paneSessions: { ...data.paneSessions, [paneId]: ptyId },
@@ -545,36 +554,20 @@ const TabBody = memo(function TabBody({
 
           if (kind === "claude" && isNew) {
             const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
-            const claudeLaunched = nav.claudeLaunched;
+            const agentLaunched = nav.agentLaunched;
 
-            const projectPath =
-              useUIStore.getState().selectedProject?.path ?? worktreePath;
-            Promise.all([
-              invoke<string | null>("get_setting", {
-                key: "claudeFlags",
-                scope: projectPath,
-              }),
-              invoke<string | null>("get_setting", {
-                key: "claudeFlags",
-                scope: "global",
-              }),
-            ])
-              .then(([projectFlags, globalFlags]) => {
-                const flags = projectFlags ?? globalFlags ?? "";
-                const parts = ["claude"];
-                if (flags.trim()) parts.push(flags.trim());
-                if (useContinueFlag && claudeLaunched) parts.push("--continue");
-                const encoded = encodePtyInput(parts.join(" ") + "\n");
-                invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(
-                  () => {},
-                );
-              })
-              .catch(() => {});
+            const flags = await resolveFlags(agent, projectPath);
+            const launched = useContinueFlag && agentLaunched;
+            const cmd = buildLaunchCommand(agent, flags, launched);
+            const encoded = encodePtyInput(cmd);
+            invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(
+              () => {},
+            );
 
-            if (useContinueFlag && !claudeLaunched) {
+            if (useContinueFlag && !agentLaunched) {
               useUIStore
                 .getState()
-                .updateWorktreeNavState(worktreePath, { claudeLaunched: true });
+                .updateWorktreeNavState(worktreePath, { agentLaunched: true });
             }
           }
         })

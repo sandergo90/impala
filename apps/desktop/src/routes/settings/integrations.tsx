@@ -1,11 +1,11 @@
-import { ClaudeIntegrationPane } from "../../components/settings/ClaudeIntegrationPane";
+import { AgentIntegrationPane } from "../../components/settings/AgentIntegrationPane";
 import { GithubPane } from "../../components/settings/GithubPane";
 import { LinearPane } from "../../components/settings/LinearPane";
 
 export function IntegrationsRoute() {
   return (
     <div className="space-y-8">
-      <ClaudeIntegrationPane />
+      <AgentIntegrationPane />
       <GithubPane />
       <LinearPane />
     </div>
