@@ -160,26 +160,46 @@ pub async fn list_directory(
 pub async fn list_all_files(worktree_path: String) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || {
         let root = PathBuf::from(&worktree_path);
-        let mut paths: Vec<String> = Vec::new();
+        // Use the parallel walker with gitignore enabled so the Cmd+P palette
+        // doesn't have to fzf through node_modules / target / dist. Hidden
+        // files stay visible (dotfiles like .agents are real worktree
+        // content), but the .git directory is always skipped.
         let walker = WalkBuilder::new(&root)
-            .standard_filters(false)
+            .standard_filters(true)
             .hidden(false)
             .filter_entry(|e| e.file_name().to_string_lossy() != ".git")
-            .build();
-        for dent in walker.filter_map(Result::ok) {
-            match dent.file_type() {
-                Some(ft) if ft.is_file() || ft.is_symlink() => {}
-                _ => continue,
-            }
-            let path = dent.path();
-            let relative = match path.strip_prefix(&root) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            paths.push(to_posix(relative));
-        }
-        paths.sort();
-        Ok(paths)
+            .build_parallel();
+
+        let paths: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        walker.run(|| {
+            let root = root.clone();
+            let paths = paths.clone();
+            Box::new(move |result| {
+                use ignore::WalkState;
+                let dent = match result {
+                    Ok(d) => d,
+                    Err(_) => return WalkState::Continue,
+                };
+                match dent.file_type() {
+                    Some(ft) if ft.is_file() || ft.is_symlink() => {}
+                    _ => return WalkState::Continue,
+                }
+                if let Ok(rel) = dent.path().strip_prefix(&root) {
+                    if let Ok(mut guard) = paths.lock() {
+                        guard.push(to_posix(rel));
+                    }
+                }
+                WalkState::Continue
+            })
+        });
+
+        let mut out = std::sync::Arc::try_unwrap(paths)
+            .map_err(|_| "outstanding walker references".to_string())?
+            .into_inner()
+            .map_err(|e| e.to_string())?;
+        out.sort();
+        Ok(out)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
