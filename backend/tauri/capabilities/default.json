@@ -20,7 +20,9 @@
       "identifier": "fs:scope",
       "allow": [{ "path": "$HOME/**" }]
     },
+    "log:default",
     "notification:default",
+    "sentry:default",
     "updater:default",
     "process:allow-restart"
   ]

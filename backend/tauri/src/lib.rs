@@ -10,6 +10,7 @@ mod hotkeys;
 mod linear;
 mod linear_context;
 mod notifications;
+mod observability;
 mod plan_annotations;
 mod plan_scanner;
 mod plans;
@@ -1193,7 +1194,25 @@ fn walk_dir_for_suffix(
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    // Init observability FIRST — before any plugin or tauri::Builder
+    // call. The guard must outlive run() itself.
+    let observability_guard = observability::init();
+
+    let mut builder = tauri::Builder::default();
+
+    // The Tauri Sentry plugin needs the same sentry::Client our Rust
+    // SDK was initialised with so events from the webview share Hub
+    // and context. Skip when DSN is missing (contributor builds).
+    if let Some(sentry_client) = observability_guard.sentry.as_ref() {
+        builder = builder.plugin(tauri_plugin_sentry::init(sentry_client));
+    }
+
+    builder
+        .plugin(tauri_plugin_log::Builder::default()
+            .targets([
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+            ])
+            .build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -1325,6 +1344,7 @@ pub fn run() {
                                 client.daemon_pid,
                                 client.paths.sock.display()
                             );
+                            debug_assert!(std::env::var("IMPALA_SESSION_ID").is_ok(), "session_id should be set");
                             if let Some(state) =
                                 app_handle.try_state::<daemon_client::DaemonState>()
                             {
