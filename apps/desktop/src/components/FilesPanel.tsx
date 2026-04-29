@@ -6,14 +6,20 @@ import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
 import { openFileTab } from "../lib/tab-actions";
 import { FileSearchInput } from "./FileSearchInput";
+import type { ChangedFile } from "../types";
+
+// Stable reference so the Zustand selector never returns a fresh array,
+// which would trip useSyncExternalStore's getSnapshot caching check.
+const EMPTY_CHANGED_FILES: ChangedFile[] = [];
 
 export function FilesPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path ?? null;
   const { paths, entriesByPath, expand } = useFileTreeData(wtPath);
-  const changedFiles = useDataStore((s) =>
-    wtPath ? (s.worktreeDataStates[wtPath]?.changedFiles ?? []) : [],
-  );
+  const changedFiles =
+    useDataStore((s) =>
+      wtPath ? s.worktreeDataStates[wtPath]?.changedFiles : undefined,
+    ) ?? EMPTY_CHANGED_FILES;
   const pendingReveal = useUIStore((s) => s.pendingTreeReveal);
   const activeFileTabPath = useUIStore((s) => {
     if (!wtPath) return null;
