@@ -7,10 +7,10 @@ import { TabbedTerminals } from "./TabbedTerminals";
  */
 export function WorktreeTerminals({
   activeWorktreePath,
-  claudeOnly = false,
+  agentOnly = false,
 }: {
   activeWorktreePath: string | null;
-  claudeOnly?: boolean;
+  agentOnly?: boolean;
 }) {
   const [visitedPaths, setVisitedPaths] = useState<Set<string>>(new Set());
 
@@ -40,7 +40,7 @@ export function WorktreeTerminals({
             <TabbedTerminals
               worktreePath={path}
               isActive={isActive}
-              claudeOnly={claudeOnly}
+              agentOnly={agentOnly}
             />
           </div>
         );

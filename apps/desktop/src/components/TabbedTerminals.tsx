@@ -68,21 +68,21 @@ interface TabDescriptor {
 /**
  * Tabbed terminals view for a single worktree.
  *
- * System tabs: Claude (always) and Run (when config.setup or config.run is set).
+ * System tabs: Agent (always) and Run (when config.setup or config.run is set).
  * User tabs: from nav.userTabs, created via the plus button.
  *
- * When `claudeOnly` is true, the tab strip + plus button are hidden and only
- * the primary Claude body renders — used by the top-level Split tab so Claude
- * sits next to the diff.
+ * When `agentOnly` is true, the tab strip + plus button are hidden and only
+ * the primary Agent body renders — used by the top-level Split tab so the
+ * agent sits next to the diff.
  */
 export const TabbedTerminals = memo(function TabbedTerminals({
   worktreePath,
   isActive,
-  claudeOnly = false,
+  agentOnly = false,
 }: {
   worktreePath: string;
   isActive: boolean;
-  claudeOnly?: boolean;
+  agentOnly?: boolean;
 }) {
   const activeTerminalsTab = useUIStore(
     (s) => s.worktreeNavStates[worktreePath]?.activeTerminalsTab ?? AGENT_PANE_ID,
@@ -266,12 +266,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     createUserTab(worktreePath, "terminal");
   }, [worktreePath]);
 
-  const handleNewClaude = useCallback(() => {
+  const handleNewAgent = useCallback(() => {
     setMenuOpen(false);
     createUserTab(worktreePath, "agent");
   }, [worktreePath]);
 
-  if (claudeOnly) {
+  if (agentOnly) {
     return (
       <div className="relative h-full w-full">
         <TabBody
@@ -427,7 +427,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                 New terminal tab
               </button>
               <button
-                onClick={handleNewClaude}
+                onClick={handleNewAgent}
                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
               >
                 New Agent tab
@@ -443,7 +443,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           // the cached xterm wrapper from the DOM. On reactivation the
           // XtermTerminal effect re-runs attach() — appendChild + fit() +
           // refresh() — so xterm picks up any size drift from the hidden
-          // period and TUIs (Claude CLI) get a real SIGWINCH if dims
+          // period and TUIs get a real SIGWINCH if dims
           // actually changed. The cached terminal entry survives because it
           // lives in a module-level Map, not React state.
           const t = tabs.find((tab) => tab.id === activeId);
@@ -480,8 +480,9 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
 /**
  * Renders one tab body. Lazy-spawns the PTY on first mount.
- * Claude tabs additionally write the `claude` command on first spawn.
- * `useContinueFlag` controls whether the primary Claude tab appends `--continue`.
+ * Agent tabs additionally write the agent's launch command on first spawn.
+ * `useContinueFlag` controls whether the primary Agent tab resumes the
+ * prior session.
  */
 const TabBody = memo(function TabBody({
   paneId,

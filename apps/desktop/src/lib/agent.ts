@@ -2,11 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type Agent = "claude" | "codex";
 
-export const AGENT_LABELS: Record<Agent, string> = {
-  claude: "Claude",
-  codex: "Codex",
-};
-
 /**
  * Resolve the agent for a worktree: worktree scope > project scope >
  * global scope > default ("claude").

@@ -45,7 +45,7 @@ function smallestUnused(used: Set<number>, start: number): number {
   return n;
 }
 
-// Parse an auto-generated label like "Terminal 4" or "Claude 7" back to its
+// Parse an auto-generated label like "Terminal 4" or "Agent 7" back to its
 // number. Returns null for renamed tabs so their numeric slot is freed up
 // and can be reused.
 function parseLabelNumber(label: string, prefix: string): number | null {

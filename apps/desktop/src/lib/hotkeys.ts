@@ -124,9 +124,9 @@ export const HOTKEYS = {
     default: "meta+t",
     category: "Terminal",
   },
-  NEW_CLAUDE_TAB: {
-    label: "New Claude Tab",
-    description: "Open a new Claude tab in the current worktree",
+  NEW_AGENT_TAB: {
+    label: "New Agent Tab",
+    description: "Open a new Agent tab in the current worktree",
     default: "meta+shift+t",
     category: "Terminal",
   },

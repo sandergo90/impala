@@ -104,7 +104,7 @@ export function MainView() {
   );
 
   useAppHotkey(
-    "NEW_CLAUDE_TAB",
+    "NEW_AGENT_TAB",
     () => {
       if (wtPath) createUserTab(wtPath, "agent");
     },
@@ -354,7 +354,7 @@ export function MainView() {
             ) : activeTab === "split" ? (
               <ResizablePanelGroup orientation="horizontal">
                 <RrpResizablePanel defaultSize="50%" minSize={200}>
-                  <WorktreeTerminals activeWorktreePath={wtPath!} claudeOnly />
+                  <WorktreeTerminals activeWorktreePath={wtPath!} agentOnly />
                 </RrpResizablePanel>
                 <ResizableHandle withHandle />
                 <RrpResizablePanel defaultSize="50%" minSize={200}>

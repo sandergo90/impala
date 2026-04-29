@@ -525,7 +525,7 @@ export function DiffView() {
   const wtPath = useUIStore((s) => s.selectedWorktree?.path);
 
   // Subscribe to each field individually so unrelated nav/data updates
-  // (e.g. agentStatus toggling while Claude works) don't re-render the
+  // (e.g. agentStatus toggling while the agent works) don't re-render the
   // whole diff tree. Selecting the parent object would create a new
   // reference on every updateWorktreeDataState call and flicker the diff.
   const selectedFile = useUIStore((s) =>

@@ -27,7 +27,7 @@ interface SplitTreeRendererProps {
   onSessionSpawned: (paneId: string, sessionId: string) => void;
   /** Override cwd for PTY spawn (used by generic terminal) */
   cwd?: string;
-  /** When true, skip worktree-specific behavior (Linear context, env vars, Claude auto-launch) */
+  /** When true, skip worktree-specific behavior (Linear context, env vars, agent auto-launch) */
   isGenericTerminal?: boolean;
 }
 
@@ -175,7 +175,7 @@ function LeafPane({
     spawningRef.current = true;
 
     if (!isGenericTerminal) {
-      // Best-effort refresh of Linear context for Claude
+      // Best-effort refresh of Linear context for the agent
       const linearApiKey = useUIStore.getState().linearApiKey;
       if (linearApiKey) {
         invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
@@ -195,7 +195,7 @@ function LeafPane({
     const ptyId = paneSessionId(paneId);
 
     if (isGenericTerminal) {
-      // Generic terminal: no worktree-specific env vars, no Claude auto-launch
+      // Generic terminal: no worktree-specific env vars, no agent auto-launch
       invoke<boolean>("pty_spawn", {
         sessionId: ptyId,
         cwd: spawnCwd,
