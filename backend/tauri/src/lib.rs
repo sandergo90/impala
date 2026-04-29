@@ -2,6 +2,7 @@ mod agent_config;
 mod annotations;
 mod config;
 mod daemon_client;
+mod file_tree;
 mod fonts;
 mod git;
 mod github;
@@ -1494,6 +1495,7 @@ pub fn run() {
             get_agent_statuses,
             watcher::watch_worktree,
             watcher::unwatch_worktree,
+            file_tree::list_directory,
             config::read_project_config,
             config::write_project_config,
             notifications::send_notification,
