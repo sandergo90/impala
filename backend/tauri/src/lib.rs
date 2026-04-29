@@ -1314,6 +1314,7 @@ pub fn run() {
             app.manage(DbState(Mutex::new(conn)));
             app.manage(daemon_client::DaemonState::new());
             app.manage(watcher::WatcherState::new());
+            app.manage(file_tree::GitignoreCache::new());
             app.manage(plan_scanner::PlanScanCache::new());
             app.manage(plan_scanner::PlanWatcherState::new());
             app.manage(DiffCache(Mutex::new(lru::LruCache::new(

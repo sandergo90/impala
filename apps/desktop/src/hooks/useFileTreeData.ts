@@ -11,6 +11,18 @@ export interface FsEntry {
   ignored: boolean;
 }
 
+interface FsEventPayload {
+  kind: "create" | "update" | "delete" | "rename" | "overflow";
+  path: string | null;
+  oldPath: string | null;
+  isDirectory: boolean | null;
+}
+
+function parentDirOf(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? "" : path.slice(0, slash);
+}
+
 export function useFileTreeData(worktreePath: string | null) {
   const [paths, setPaths] = useState<string[]>([]);
   const [entriesByPath, setEntriesByPath] = useState<Map<string, FsEntry>>(new Map());
@@ -89,6 +101,54 @@ export function useFileTreeData(worktreePath: string | null) {
     recomputePaths();
   }, [worktreePath, fetchDir, recomputePaths]);
 
+  const handleFsEvent = useCallback(
+    (ev: FsEventPayload) => {
+      if (ev.kind === "overflow") {
+        void refetchAll();
+        return;
+      }
+
+      // Directory rename retarget: rewrite expanded paths under the old prefix
+      // so they re-anchor under the new prefix.
+      //
+      // NOTE: only fires when the watcher emits a paired `rename` event.
+      // Currently that's Linux-only — macOS FSEvents does not pair the old
+      // and new sides of a rename, so renames there arrive as separate
+      // delete + create events and the retarget never runs. The expanded-
+      // dirs set self-heals on the next refetchAll prune. See
+      // backend/tauri/src/watcher.rs (RenameMode handling) for context.
+      if (ev.kind === "rename" && ev.isDirectory && ev.oldPath && ev.path) {
+        const newSet = new Set<string>();
+        for (const dir of expandedDirsRef.current) {
+          if (dir === ev.oldPath || dir.startsWith(ev.oldPath + "/")) {
+            const tail = dir.slice(ev.oldPath.length);
+            newSet.add(ev.path + tail);
+          } else {
+            newSet.add(dir);
+          }
+        }
+        expandedDirsRef.current = newSet;
+        if (worktreePath) {
+          useUIStore
+            .getState()
+            .setWorktreeExpandedDirs(worktreePath, Array.from(newSet));
+        }
+      }
+
+      const parents = new Set<string>();
+      if (ev.path) parents.add(parentDirOf(ev.path));
+      if (ev.oldPath) parents.add(parentDirOf(ev.oldPath));
+
+      for (const parent of parents) {
+        // Only refetch parents we've already loaded (root or expanded dirs).
+        if (childrenByDirRef.current.has(parent) || parent === "") {
+          void fetchDir(parent).then(() => recomputePaths());
+        }
+      }
+    },
+    [refetchAll, fetchDir, recomputePaths, worktreePath],
+  );
+
   useEffect(() => {
     epochRef.current += 1;
     const persisted = useUIStore.getState().worktreeExpandedDirs[worktreePath ?? ""] ?? [];
@@ -104,16 +164,16 @@ export function useFileTreeData(worktreePath: string | null) {
   useEffect(() => {
     if (!worktreePath) return;
     let unlisten: UnlistenFn | null = null;
-    const eventName = `fs-changed-${sanitizeEventId(worktreePath)}`;
+    const eventName = `fs-event-${sanitizeEventId(worktreePath)}`;
     (async () => {
-      unlisten = await listen(eventName, () => {
-        void refetchAll();
+      unlisten = await listen<FsEventPayload>(eventName, (e) => {
+        handleFsEvent(e.payload);
       });
     })();
     return () => {
       if (unlisten) unlisten();
     };
-  }, [worktreePath, refetchAll]);
+  }, [worktreePath, handleFsEvent]);
 
   const expand = useCallback(
     async (relDir: string) => {

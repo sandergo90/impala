@@ -1,7 +1,10 @@
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -34,13 +37,53 @@ fn build_gitignore(worktree_root: &Path) -> Gitignore {
     builder.build().unwrap_or_else(|_| Gitignore::empty())
 }
 
+/// Per-worktree Gitignore matcher cache, keyed by worktree root path.
+/// Reuses the previously-built `Gitignore` as long as `.gitignore`'s mtime
+/// is unchanged. Avoids rebuilding on every `list_directory` call.
+#[derive(Default)]
+pub struct GitignoreCache {
+    inner: Mutex<HashMap<String, (Gitignore, Option<SystemTime>)>>,
+}
+
+impl GitignoreCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self, worktree_root: &Path) -> Gitignore {
+        let key = worktree_root.to_string_lossy().to_string();
+        let current_mtime = std::fs::metadata(worktree_root.join(".gitignore"))
+            .and_then(|m| m.modified())
+            .ok();
+
+        {
+            let cache = self.inner.lock().expect("gitignore cache poisoned");
+            if let Some((gi, mtime)) = cache.get(&key) {
+                if *mtime == current_mtime {
+                    return gi.clone();
+                }
+            }
+        }
+
+        let gi = build_gitignore(worktree_root);
+        let mut cache = self.inner.lock().expect("gitignore cache poisoned");
+        cache.insert(key, (gi.clone(), current_mtime));
+        gi
+    }
+}
+
 #[tauri::command]
 pub async fn list_directory(
+    state: tauri::State<'_, GitignoreCache>,
     worktree_path: String,
     rel_dir: String,
 ) -> Result<Vec<FsEntry>, String> {
+    // tauri::State guards aren't Send across spawn_blocking, so resolve the
+    // Gitignore matcher up-front and move the clone into the closure.
+    let root = PathBuf::from(&worktree_path);
+    let gitignore = state.get(&root);
+
     tokio::task::spawn_blocking(move || {
-        let root = PathBuf::from(&worktree_path);
         let target = if rel_dir.is_empty() {
             root.clone()
         } else {
@@ -50,8 +93,6 @@ pub async fn list_directory(
         if !target.starts_with(&root) {
             return Err(format!("rel_dir escapes worktree: {}", rel_dir));
         }
-
-        let gitignore = build_gitignore(&root);
 
         let mut entries: Vec<FsEntry> = Vec::new();
         let walker = WalkBuilder::new(&target)
