@@ -12,8 +12,7 @@ export interface FsEntry {
 
 export function useFileTreeData(worktreePath: string | null) {
   const [paths, setPaths] = useState<string[]>([]);
-  const [dirSet, setDirSet] = useState<Set<string>>(new Set());
-  const [ignoredMap, setIgnoredMap] = useState<Map<string, boolean>>(new Map());
+  const [entriesByPath, setEntriesByPath] = useState<Map<string, FsEntry>>(new Map());
 
   const expandedDirsRef = useRef<Set<string>>(new Set());
   const childrenByDirRef = useRef<Map<string, FsEntry[]>>(new Map());
@@ -42,13 +41,11 @@ export function useFileTreeData(worktreePath: string | null) {
 
   const recomputePaths = useCallback(() => {
     const all: string[] = [];
-    const dirs = new Set<string>();
-    const ignored = new Map<string, boolean>();
+    const byPath = new Map<string, FsEntry>();
     for (const entries of childrenByDirRef.current.values()) {
       for (const e of entries) {
         all.push(e.relativePath);
-        if (e.kind === "directory") dirs.add(e.relativePath);
-        ignored.set(e.relativePath, e.ignored);
+        byPath.set(e.relativePath, e);
       }
     }
     all.sort();
@@ -56,8 +53,7 @@ export function useFileTreeData(worktreePath: string | null) {
     if (key === prevPathsKeyRef.current) return;
     prevPathsKeyRef.current = key;
     setPaths(all);
-    setDirSet(dirs);
-    setIgnoredMap(ignored);
+    setEntriesByPath(byPath);
   }, []);
 
   const refetchAll = useCallback(async () => {
@@ -77,8 +73,7 @@ export function useFileTreeData(worktreePath: string | null) {
     childrenByDirRef.current = new Map();
     prevPathsKeyRef.current = "";
     setPaths([]);
-    setDirSet(new Set());
-    setIgnoredMap(new Map());
+    setEntriesByPath(new Map());
     if (!worktreePath) return;
     void refetchAll();
   }, [worktreePath, refetchAll]);
@@ -109,5 +104,5 @@ export function useFileTreeData(worktreePath: string | null) {
     [fetchDir, recomputePaths],
   );
 
-  return { paths, dirSet, ignoredMap, expand };
+  return { paths, entriesByPath, expand };
 }
