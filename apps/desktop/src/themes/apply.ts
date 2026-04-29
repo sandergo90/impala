@@ -125,6 +125,10 @@ export function getTreesStyle(theme: Theme): CSSProperties {
     "--trees-status-renamed-override": isDark ? t.brightYellow : t.yellow,
     "--trees-status-untracked-override": isDark ? t.brightGreen : t.green,
     "--trees-status-ignored-override": resolved.mutedForeground,
+    // Make hover/selected highlights span the full sidebar width by removing
+    // the default inline padding around rows.
+    "--trees-padding-inline-override": "0px",
+    "--trees-item-margin-x-override": "0px",
     backgroundColor: resolved.sidebar,
     color: resolved.sidebarForeground,
   } as CSSProperties;
