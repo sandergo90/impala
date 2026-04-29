@@ -133,9 +133,10 @@ fn main_worktree_root(worktree_path: &Path) -> Option<PathBuf> {
     if git.is_file() {
         let content = fs::read_to_string(&git).ok()?;
         let line = content.lines().find(|l| l.starts_with("gitdir:"))?;
-        // gitdir: <main>/.git/worktrees/<name> — walk up twice to get <main>.
+        // gitdir: <main>/.git/worktrees/<name> — strip <name>, then "worktrees",
+        // then ".git" to land on <main>.
         let gitdir = PathBuf::from(line.trim_start_matches("gitdir:").trim());
-        return gitdir.parent()?.parent().map(|p| p.to_path_buf());
+        return gitdir.parent()?.parent()?.parent().map(|p| p.to_path_buf());
     }
     None
 }
