@@ -4,6 +4,7 @@ import type { GitStatusEntry } from "@pierre/trees";
 import { useUIStore, useDataStore } from "../store";
 import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
+import { openFileTab } from "../lib/tab-actions";
 
 export function FilesPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -49,10 +50,7 @@ export function FilesPanel() {
       void expand(path.slice(0, -1));
       return;
     }
-    useUIStore.getState().updateWorktreeNavState(wtPath, {
-      selectedFilePath: path,
-      activeTab: "files",
-    });
+    openFileTab(wtPath, path, false); // preview
   };
 
   const { model } = useFileTree({
@@ -79,8 +77,23 @@ export function FilesPanel() {
     );
   }
 
+  // Trees package doesn't expose a per-row double-click prop, but each row
+  // carries `data-item-path`. Delegate dblclick at the container so a
+  // double-click on a file row promotes the preview tab to pinned.
+  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!wtPath) return;
+    const target = (e.target as HTMLElement | null)?.closest(
+      "[data-item-path]",
+    ) as HTMLElement | null;
+    if (!target) return;
+    if (target.getAttribute("data-item-type") !== "file") return;
+    const path = target.getAttribute("data-item-path");
+    if (!path) return;
+    openFileTab(wtPath, path, true); // pin
+  };
+
   return (
-    <div className="h-full overflow-hidden">
+    <div className="h-full overflow-hidden" onDoubleClick={handleDoubleClick}>
       <FileTree model={model} style={{ height: "100%" }} />
     </div>
   );

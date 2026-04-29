@@ -23,9 +23,16 @@ function Placeholder({
 export function FileViewer() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path ?? null;
-  const selectedFilePath = useUIStore((s) =>
-    wtPath ? (s.worktreeNavStates[wtPath]?.selectedFilePath ?? null) : null
+  const activeTabId = useUIStore((s) =>
+    wtPath ? s.worktreeNavStates[wtPath]?.activeTerminalsTab ?? null : null,
   );
+  const selectedFilePath = useUIStore((s) => {
+    if (!wtPath || !activeTabId) return null;
+    const tab = s.worktreeNavStates[wtPath]?.userTabs.find(
+      (t) => t.id === activeTabId,
+    );
+    return tab && tab.kind === "file" ? tab.path ?? null : null;
+  });
 
   const fullPath = wtPath && selectedFilePath ? `${wtPath}/${selectedFilePath}` : null;
   const initialKind: FileKind | null = selectedFilePath ? classifyFile(selectedFilePath) : null;

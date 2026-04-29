@@ -9,6 +9,7 @@ import {
   getAdjacentLeafId,
   findLeaf,
 } from "./split-tree";
+import { basename } from "./path-utils";
 import type { SplitNode, UserTab } from "../types";
 
 // Pre-Phase-4 persisted user tabs don't carry `splitTree`; synthesize a
@@ -104,8 +105,10 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
   if (closedIndex === -1) return;
 
   const tab = nav.userTabs[closedIndex];
-  const tree = getEffectiveUserTabSplitTree(tab);
-  for (const leaf of getLeaves(tree)) killPaneSession(worktreePath, leaf.id);
+  if (tab.kind !== "file") {
+    const tree = getEffectiveUserTabSplitTree(tab);
+    for (const leaf of getLeaves(tree)) killPaneSession(worktreePath, leaf.id);
+  }
 
   const remainingTabs = nav.userTabs.filter((t) => t.id !== tabId);
 
@@ -298,4 +301,74 @@ export function setUserTabFocusedPane(
     t.id === tabId ? { ...t, focusedPaneId: paneId } : t,
   );
   uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
+}
+
+/**
+ * Open a file in the dynamic tab bar with VS Code preview/pin semantics.
+ *
+ * - If a pinned tab for this exact path already exists, just activate it.
+ * - Else if a preview tab (kind: "file", pinned: false) exists, retarget
+ *   its path; do not create a new tab. If `pin` is true, the preview is
+ *   promoted to pinned at the same time.
+ * - Otherwise create a fresh tab (preview unless `pin` is true).
+ */
+export function openFileTab(
+  worktreePath: string,
+  path: string,
+  pin: boolean,
+): UserTab {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const label = basename(path);
+
+  // Pinned tab for this path already exists — just activate it.
+  const existingPinned = nav.userTabs.find(
+    (t) => t.kind === "file" && t.pinned && t.path === path,
+  );
+  if (existingPinned) {
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTerminalsTab: existingPinned.id,
+      activeTab: "terminal",
+    });
+    return existingPinned;
+  }
+
+  const previewTab = nav.userTabs.find(
+    (t) => t.kind === "file" && !t.pinned,
+  );
+
+  if (previewTab) {
+    const updated: UserTab = {
+      ...previewTab,
+      path,
+      label,
+      pinned: pin || previewTab.pinned,
+    };
+    const next = nav.userTabs.map((t) =>
+      t.id === previewTab.id ? updated : t,
+    );
+    uiState.updateWorktreeNavState(worktreePath, {
+      userTabs: next,
+      activeTerminalsTab: updated.id,
+      activeTab: "terminal",
+    });
+    return updated;
+  }
+
+  // No preview tab; create one.
+  const tabId = `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const newTab: UserTab = {
+    id: tabId,
+    kind: "file",
+    label,
+    createdAt: Date.now(),
+    path,
+    pinned: pin,
+  };
+  uiState.updateWorktreeNavState(worktreePath, {
+    userTabs: [...nav.userTabs, newTab],
+    activeTerminalsTab: tabId,
+    activeTab: "terminal",
+  });
+  return newTab;
 }

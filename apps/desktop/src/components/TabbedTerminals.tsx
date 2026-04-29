@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
+import { FileViewer } from "./FileViewer";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -44,7 +45,7 @@ import {
   getEffectiveUserTabFocusedPaneId,
 } from "../lib/tab-actions";
 
-type TabKind = "terminal" | "agent";
+type TabKind = "terminal" | "agent" | "file";
 
 // Stable empty array — returning `[]` from the userTabs selector would create
 // a new reference every call, breaking Zustand's useSyncExternalStore snapshot
@@ -176,6 +177,16 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     }
     return out;
   }, [hasRunTab, userTabs]);
+
+  // Map of tab id -> whether it's an unpinned file preview tab. Used to
+  // render preview labels in italic.
+  const isPreviewById = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const t of userTabs) {
+      if (t.kind === "file" && !t.pinned) m.set(t.id, true);
+    }
+    return m;
+  }, [userTabs]);
 
   const activeId: string = tabs.some((t) => t.id === activeTerminalsTab)
     ? activeTerminalsTab
@@ -310,9 +321,13 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         <button
           onClick={() => setActive(t.id)}
           onDoubleClick={() => {
-            if (!t.isSystem) startRenaming(t.id, t.label);
+            // Don't rename file tabs — their label is the file basename and
+            // is auto-managed by openFileTab.
+            if (!t.isSystem && t.kind !== "file") startRenaming(t.id, t.label);
           }}
-          className="px-3.5 py-2 text-[15px] font-medium transition-colors flex items-center gap-1.5"
+          className={`px-3.5 py-2 text-[15px] font-medium transition-colors flex items-center gap-1.5 ${
+            isPreviewById.get(t.id) ? "italic" : ""
+          }`}
         >
           {t.label}
         </button>
@@ -453,7 +468,9 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             : null;
           return (
             <div key={t.id} className="absolute inset-0">
-              {userTab ? (
+              {userTab && userTab.kind === "file" ? (
+                <FileViewer />
+              ) : userTab ? (
                 <UserTabSplitRenderer
                   tab={userTab}
                   worktreePath={worktreePath}
@@ -463,7 +480,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
               ) : (
                 <TabBody
                   paneId={t.paneId}
-                  kind={t.kind}
+                  kind={t.kind === "file" ? "terminal" : t.kind}
                   useContinueFlag={t.useContinueFlag}
                   worktreePath={worktreePath}
                   sessionId={paneSessions[t.paneId] ?? null}

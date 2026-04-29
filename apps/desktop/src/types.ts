@@ -103,33 +103,40 @@ export type SplitNode =
 export interface UserTab {
   /** Stable ID, used as the paneId key (`tab-user-${id}`) in single-leaf mode. Never reused. */
   id: string;
-  /** What to run inside the tab. Terminal = shell; Agent = `claude` command. */
-  kind: "terminal" | "agent";
+  /**
+   * What to run inside the tab. Terminal = shell; Agent = `claude` command;
+   * File = static file viewer (no PTY).
+   */
+  kind: "terminal" | "agent" | "file";
   /** Display label shown on the tab. Auto-numbered at creation time (monotonic). */
   label: string;
   /** Creation timestamp; stable ordering. */
   createdAt: number;
+  /** Worktree-relative POSIX path; only set when kind === "file". */
+  path?: string;
+  /** Preview vs pinned semantics; only meaningful when kind === "file". */
+  pinned?: boolean;
   /**
    * Recursive split tree of panes inside this tab. Optional for backward
    * compatibility with tabs created before Phase 4: when absent, the
-   * renderer synthesizes a single leaf with id `tab-user-${id}`.
+   * renderer synthesizes a single leaf with id `tab-user-${id}`. Never set
+   * for `kind: "file"` (no PTY).
    */
   splitTree?: SplitNode;
   /**
    * Id of the currently focused leaf inside `splitTree`. Optional; the
-   * renderer falls back to the first leaf when absent or stale.
+   * renderer falls back to the first leaf when absent or stale. Never set
+   * for `kind: "file"`.
    */
   focusedPaneId?: string;
 }
 
 export interface WorktreeNavState {
-  activeTab: "terminal" | "diff" | "split" | "plan" | "files";
+  activeTab: "terminal" | "diff" | "split" | "plan";
   agentLaunched: boolean;
   viewMode: "commit" | "all-changes" | "uncommitted";
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
-  /** Path (POSIX, worktree-relative) of the file currently shown in the Files viewer. Null when no file is open. */
-  selectedFilePath: string | null;
   activePlanId: string | null;
   selectedPlanAnnotationId: string | null;
   /**

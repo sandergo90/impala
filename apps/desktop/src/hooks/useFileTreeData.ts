@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
+import { dirname } from "../lib/path-utils";
 import { useUIStore } from "../store";
 
 export interface FsEntry {
@@ -16,11 +17,6 @@ interface FsEventPayload {
   path: string | null;
   oldPath: string | null;
   isDirectory: boolean | null;
-}
-
-function parentDirOf(path: string): string {
-  const slash = path.lastIndexOf("/");
-  return slash === -1 ? "" : path.slice(0, slash);
 }
 
 export function useFileTreeData(worktreePath: string | null) {
@@ -142,8 +138,8 @@ export function useFileTreeData(worktreePath: string | null) {
       }
 
       const parents = new Set<string>();
-      if (ev.path) parents.add(parentDirOf(ev.path));
-      if (ev.oldPath) parents.add(parentDirOf(ev.oldPath));
+      if (ev.path) parents.add(dirname(ev.path));
+      if (ev.oldPath) parents.add(dirname(ev.oldPath));
 
       for (const parent of parents) {
         // Only refetch parents we've already loaded (root or expanded dirs).
