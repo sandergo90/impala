@@ -88,6 +88,38 @@ const CODEX_EXCLUDE_LINES: &[&str] = &[
     "/.impala/",
 ];
 
+/// Make sure <CODEX_HOME>/auth.json is a symlink to ~/.codex/auth.json so
+/// `codex login` only has to happen once per machine. If a real auth.json
+/// already exists in the worktree (user logged in before this code shipped),
+/// migrate it up to ~/.codex first.
+fn link_codex_auth(codex_home: &Path) -> Result<(), String> {
+    use std::os::unix::fs::symlink;
+
+    let user_codex = dirs::home_dir()
+        .ok_or_else(|| "no home dir".to_string())?
+        .join(".codex");
+    fs::create_dir_all(&user_codex)
+        .map_err(|e| format!("mkdir ~/.codex: {}", e))?;
+    let user_auth = user_codex.join("auth.json");
+    let worktree_auth = codex_home.join("auth.json");
+
+    if let Ok(meta) = worktree_auth.symlink_metadata() {
+        if meta.file_type().is_symlink() {
+            if fs::read_link(&worktree_auth).map(|t| t == user_auth).unwrap_or(false) {
+                return Ok(());
+            }
+        } else if !user_auth.exists() {
+            // Real file from a pre-symlink login — preserve it user-globally.
+            fs::rename(&worktree_auth, &user_auth)
+                .map_err(|e| format!("migrate auth.json to ~/.codex: {}", e))?;
+        }
+        let _ = fs::remove_file(&worktree_auth);
+    }
+    symlink(&user_auth, &worktree_auth)
+        .map_err(|e| format!("symlink auth.json: {}", e))?;
+    Ok(())
+}
+
 /// Write per-worktree Codex config under <worktree>/.impala/codex/config.toml.
 /// Returns the path to use as CODEX_HOME.
 pub fn write_codex_config(
@@ -97,6 +129,12 @@ pub fn write_codex_config(
     let codex_home = worktree_path.join(".impala").join("codex");
     fs::create_dir_all(&codex_home)
         .map_err(|e| format!("mkdir .impala/codex: {}", e))?;
+
+    // Symlink auth.json from ~/.codex so login persists across worktrees.
+    // Without this, every worktree has its own CODEX_HOME and Codex would
+    // ask the user to sign in again every time.
+    link_codex_auth(&codex_home)?;
+
     let config_path = codex_home.join("config.toml");
 
     // Build TOML manually — the schema is small and stable, and we want
