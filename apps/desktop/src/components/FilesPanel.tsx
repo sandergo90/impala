@@ -80,29 +80,33 @@ export function FilesPanel() {
     model.setGitStatus(gitStatusEntries);
   }, [model, gitStatusEntries]);
 
-  // Reveal a path in the tree: expand all ancestor dirs, then select only that
-  // file. The model only exposes `getItem(path).select()` — to enforce a
-  // single-selection we deselect everything currently selected first.
+  // Single-select a path in the model: deselect anything else, select target.
+  // The trees model only exposes `getItem(path).select()/.deselect()`.
+  const selectOnly = (path: string) => {
+    for (const p of model.getSelectedPaths()) {
+      if (p !== path) model.getItem(p)?.deselect();
+    }
+    model.getItem(path)?.select();
+  };
+
   useEffect(() => {
     if (!wtPath || !pendingReveal || pendingReveal.worktreePath !== wtPath) return;
     const { path } = pendingReveal;
     let cancelled = false;
     (async () => {
       const segments = path.split("/");
+      const ancestors: string[] = [];
       for (let i = 1; i < segments.length; i++) {
-        const ancestor = segments.slice(0, i).join("/");
-        await expand(ancestor);
-        if (cancelled) return;
+        ancestors.push(segments.slice(0, i).join("/"));
       }
-      // Defer to a microtask so resetPaths from the expand() chain has a
-      // chance to flush into the model before we look up the item.
+      await Promise.all(ancestors.map((a) => expand(a)));
+      if (cancelled) return;
+      // Defer to next frame so resetPaths from the expand() batch flushes
+      // into the model before we look up the item.
       requestAnimationFrame(() => {
         if (cancelled) return;
-        for (const p of model.getSelectedPaths()) {
-          if (p !== path) model.getItem(p)?.deselect();
-        }
-        model.getItem(path)?.select();
         lastSyncedPathRef.current = path;
+        selectOnly(path);
       });
     })();
     return () => {
@@ -117,10 +121,8 @@ export function FilesPanel() {
     if (!activeFileTabPath) return;
     if (lastSyncedPathRef.current === activeFileTabPath) return;
     lastSyncedPathRef.current = activeFileTabPath;
-    for (const p of model.getSelectedPaths()) {
-      if (p !== activeFileTabPath) model.getItem(p)?.deselect();
-    }
-    model.getItem(activeFileTabPath)?.select();
+    selectOnly(activeFileTabPath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFileTabPath, model]);
 
   if (!wtPath) {

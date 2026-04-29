@@ -36,6 +36,11 @@ export function useAllFiles(worktreePath: string | null) {
       if (myEpoch !== epochRef.current) return;
       loadedRef.current = true;
       setPaths(all);
+    } catch (e) {
+      if (myEpoch === epochRef.current) {
+        loadedRef.current = true;
+        console.error("list_all_files failed:", e);
+      }
     } finally {
       if (myEpoch === epochRef.current) setLoading(false);
     }
@@ -55,16 +60,19 @@ export function useAllFiles(worktreePath: string | null) {
   useEffect(() => {
     if (!worktreePath) return;
     let unlisten: UnlistenFn | null = null;
+    let cancelled = false;
     const eventName = `fs-event-${sanitizeEventId(worktreePath)}`;
     (async () => {
-      unlisten = await listen<FsEventPayload>(eventName, (e) => {
-        const ev = e.payload;
+      const fn = await listen<FsEventPayload>(eventName, (e) => {
         // Content updates don't change the inventory.
-        if (ev.kind === "update") return;
+        if (e.payload.kind === "update") return;
         loadedRef.current = false;
       });
+      if (cancelled) fn();
+      else unlisten = fn;
     })();
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
   }, [worktreePath]);

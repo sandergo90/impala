@@ -33,15 +33,16 @@ export function FileFinder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Build the Fzf instance lazily — paths can be large (10k+).
+  // Defer Fzf construction until the user actually types — `new Fzf` runes
+  // every path up front, which is meaningful work on 10k+ inventories.
+  const hasQuery = query.trim().length > 0;
   const fzf = useMemo(() => {
-    if (paths.length === 0) return null;
+    if (!hasQuery || paths.length === 0) return null;
     return new Fzf(paths, { limit: MAX_RESULTS });
-  }, [paths]);
+  }, [paths, hasQuery]);
 
   const results = useMemo<FzfResultItem<string>[]>(() => {
     if (!fzf) return [];
-    if (!query.trim()) return [];
     return fzf.find(query);
   }, [fzf, query]);
 
@@ -88,7 +89,7 @@ export function FileFinder({
     <div className="fixed inset-0 z-50" onClick={onClose}>
       <div className="fixed inset-0 bg-black/40" />
       <div
-        className="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-[640px]"
+        className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-[640px]"
         onClick={(e) => e.stopPropagation()}
       >
         <Command

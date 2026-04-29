@@ -4,10 +4,6 @@ import { Folder } from "lucide-react";
 import { toast } from "sonner";
 import { dirname } from "../lib/path-utils";
 
-/**
- * Opens the file's containing directory in the OS file manager (Finder on
- * macOS). Uses the shell plugin's `open` which delegates to the OS handler.
- */
 export function RevealInFinderButton({
   worktreePath,
   filePath,
@@ -19,8 +15,9 @@ export function RevealInFinderButton({
   const onClick = async () => {
     setBusy(true);
     try {
-      const containingDir = `${worktreePath}/${dirname(filePath)}`;
-      await open(containingDir);
+      const dir = dirname(filePath);
+      const target = dir ? `${worktreePath}/${dir}` : worktreePath;
+      await open(target);
     } catch (e) {
       toast.error(`Failed to reveal: ${e}`);
     } finally {

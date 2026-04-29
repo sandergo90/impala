@@ -6,6 +6,7 @@ import { useUIStore, useDataStore } from "../store";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { useCmdHeld } from "../hooks/useCmdClickCursor";
 import { ChangedFileContextMenu } from "./ChangedFileContextMenu";
+import { basename } from "../lib/path-utils";
 import type { ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
 
 const statusColor: Record<string, string> = {
@@ -360,7 +361,7 @@ export function CommitPanel() {
                 <span className={`text-sm font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
                   {file.status}
                 </span>
-                {file.path.split("/").pop()}
+                {basename(file.path)}
               </button>
             );
             if (!worktreePath) {
