@@ -52,6 +52,7 @@ pub fn init() -> Guard {
                     attach_stacktrace: true,
                     send_default_pii: false,
                     enable_logs: true,
+                    debug: cfg!(debug_assertions),
                     ..Default::default()
                 },
             ))
