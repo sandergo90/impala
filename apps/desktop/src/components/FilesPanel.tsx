@@ -5,6 +5,7 @@ import { useUIStore, useDataStore } from "../store";
 import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
 import { openFileTab } from "../lib/tab-actions";
+import { FileSearchInput } from "./FileSearchInput";
 
 export function FilesPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -58,6 +59,7 @@ export function FilesPanel() {
     initialExpansion: "closed",
     icons: { set: "standard", colored: true },
     gitStatus: gitStatusEntries,
+    fileTreeSearchMode: "expand-matches",
     onSelectionChange: (selected) => handlerRef.current(selected),
   });
 
@@ -93,8 +95,14 @@ export function FilesPanel() {
   };
 
   return (
-    <div className="h-full overflow-hidden" onDoubleClick={handleDoubleClick}>
-      <FileTree model={model} style={{ height: "100%" }} />
+    <div className="h-full flex flex-col overflow-hidden">
+      <FileSearchInput model={model} />
+      <div
+        className="flex-1 min-h-0 overflow-hidden"
+        onDoubleClick={handleDoubleClick}
+      >
+        <FileTree model={model} style={{ height: "100%" }} />
+      </div>
     </div>
   );
 }
