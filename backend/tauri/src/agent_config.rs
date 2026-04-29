@@ -109,18 +109,18 @@ pub fn write_codex_config(
     toml_out.push_str(&format!("command = {}\n", toml::Value::String(mcp_binary.to_string())));
     toml_out.push_str("args = []\n\n");
 
-    let events = [
-        ("user-prompt-submit", "UserPromptSubmit"),
-        ("stop", "Stop"),
-        ("post-tool-use", "PostToolUse"),
-        ("permission-request", "PermissionRequest"),
-    ];
-    for (codex_event, impala_event) in events {
-        let cmd = hook_cmd.replace("PLACEHOLDER", impala_event);
-        toml_out.push_str("[[hooks]]\n");
-        toml_out.push_str(&format!("event = {}\n", toml::Value::String(codex_event.to_string())));
-        toml_out.push_str("command = \"/bin/sh\"\n");
-        toml_out.push_str(&format!("args = [\"-c\", {}]\n\n", toml::Value::String(cmd)));
+    // Codex hooks schema: top-level [hooks] table keyed by PascalCase
+    // event name. Each event holds Vec<MatcherGroup>; each MatcherGroup
+    // holds a Vec<HookHandlerConfig>. Handlers are tagged on `type` and
+    // currently only `command` is useful — a single shell string, no
+    // args array. See codex-rs/config/src/hook_config.rs.
+    let events = ["UserPromptSubmit", "Stop", "PostToolUse", "PermissionRequest"];
+    for event in events {
+        let cmd = hook_cmd.replace("PLACEHOLDER", event);
+        toml_out.push_str(&format!("[[hooks.{}]]\n", event));
+        toml_out.push_str(&format!("[[hooks.{}.hooks]]\n", event));
+        toml_out.push_str("type = \"command\"\n");
+        toml_out.push_str(&format!("command = {}\n\n", toml::Value::String(cmd)));
     }
 
     fs::write(&config_path, toml_out)
