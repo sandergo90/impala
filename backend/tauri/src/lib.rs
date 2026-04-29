@@ -638,11 +638,11 @@ async fn prepare_agent_config(
     let mcp_binary = which_mcp_binary(&home)?;
 
     let env = tokio::task::spawn_blocking(move || -> Result<std::collections::HashMap<String, String>, String> {
-        agent_config::write_shared_commands(&path)?;
         let mut env = std::collections::HashMap::new();
         match agent.as_str() {
             "claude" => {
-                agent_config::write_claude_config(&path, &mcp_binary)?;
+                setup_claude_integration_sync()?;
+                agent_config::write_claude_config(&path)?;
             }
             "codex" => {
                 let codex_home = agent_config::write_codex_config(&path, &mcp_binary)?;
@@ -659,6 +659,43 @@ async fn prepare_agent_config(
     .map_err(|e| format!("task join: {}", e))??;
 
     Ok(env)
+}
+
+fn setup_claude_integration_sync() -> Result<String, String> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| "Could not determine home directory".to_string())?;
+
+    let mcp_binary = which_mcp_binary(&home)?;
+
+    let settings_path = home.join(".claude.json");
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        let contents = fs::read_to_string(&settings_path)
+            .map_err(|e| format!("Failed to read settings: {}", e))?;
+        serde_json::from_str(&contents).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    let mcp_servers = settings
+        .as_object_mut()
+        .ok_or_else(|| "Settings is not a JSON object".to_string())?
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+
+    mcp_servers
+        .as_object_mut()
+        .ok_or_else(|| "mcpServers is not a JSON object".to_string())?
+        .insert("impala".to_string(), serde_json::json!({
+            "command": mcp_binary,
+            "args": []
+        }));
+
+    let formatted = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    fs::write(&settings_path, formatted)
+        .map_err(|e| format!("Failed to write settings: {}", e))?;
+
+    Ok(mcp_binary)
 }
 
 fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
@@ -1300,6 +1337,9 @@ pub fn run() {
                     }
                 });
             }
+
+            hook_server::install_impala_review_skill();
+            hook_server::install_impala_plan_skill();
 
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.

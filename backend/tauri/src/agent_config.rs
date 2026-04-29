@@ -5,65 +5,33 @@ use std::path::{Path, PathBuf};
 /// files don't show up as untracked changes in the user's git status.
 const EXCLUDE_LINES: &[&str] = &[
     "# Added by Impala",
-    "/.claude/",
-    "/.mcp.json",
+    "/.claude/settings.local.json",
 ];
 
-/// Write per-worktree Claude config: <worktree>/.mcp.json registers the
-/// impala MCP server, <worktree>/.claude/settings.json registers Impala
-/// hooks. Both are auto-discovered by Claude Code when cwd is in the
-/// worktree.
-pub fn write_claude_config(
-    worktree_path: &Path,
-    mcp_binary: &str,
-) -> Result<(), String> {
-    write_mcp_json(worktree_path, mcp_binary)?;
+/// Write per-worktree Claude config: <worktree>/.claude/settings.local.json
+/// registers Impala hooks. Claude Code merges settings.local.json (gitignored
+/// personal overrides) over settings.json automatically. The MCP server is
+/// registered in ~/.claude.json by the caller, not here.
+pub fn write_claude_config(worktree_path: &Path) -> Result<(), String> {
     write_claude_settings(worktree_path)?;
     add_git_excludes(worktree_path, EXCLUDE_LINES)?;
-    Ok(())
-}
-
-fn write_mcp_json(worktree_path: &Path, mcp_binary: &str) -> Result<(), String> {
-    let path = worktree_path.join(".mcp.json");
-    let mut value: serde_json::Value = if path.exists() {
-        let s = fs::read_to_string(&path)
-            .map_err(|e| format!("read .mcp.json: {}", e))?;
-        serde_json::from_str(&s).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
-    let servers = value
-        .as_object_mut()
-        .ok_or_else(|| ".mcp.json is not an object".to_string())?
-        .entry("mcpServers")
-        .or_insert_with(|| serde_json::json!({}));
-    servers
-        .as_object_mut()
-        .ok_or_else(|| "mcpServers is not an object".to_string())?
-        .insert(
-            "impala".to_string(),
-            serde_json::json!({ "command": mcp_binary, "args": [] }),
-        );
-    let formatted = serde_json::to_string_pretty(&value)
-        .map_err(|e| format!("serialize .mcp.json: {}", e))?;
-    fs::write(&path, formatted).map_err(|e| format!("write .mcp.json: {}", e))?;
     Ok(())
 }
 
 fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
     let dir = worktree_path.join(".claude");
     fs::create_dir_all(&dir).map_err(|e| format!("mkdir .claude: {}", e))?;
-    let path = dir.join("settings.json");
+    let path = dir.join("settings.local.json");
     let mut value: serde_json::Value = if path.exists() {
         let s = fs::read_to_string(&path)
-            .map_err(|e| format!("read .claude/settings.json: {}", e))?;
+            .map_err(|e| format!("read .claude/settings.local.json: {}", e))?;
         serde_json::from_str(&s).unwrap_or_else(|_| serde_json::json!({}))
     } else {
         serde_json::json!({})
     };
     let hooks = value
         .as_object_mut()
-        .ok_or_else(|| ".claude/settings.json is not an object".to_string())?
+        .ok_or_else(|| ".claude/settings.local.json is not an object".to_string())?
         .entry("hooks")
         .or_insert_with(|| serde_json::json!({}));
 
@@ -109,9 +77,9 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
         defs.push(new_def);
     }
     let formatted = serde_json::to_string_pretty(&value)
-        .map_err(|e| format!("serialize .claude/settings.json: {}", e))?;
+        .map_err(|e| format!("serialize .claude/settings.local.json: {}", e))?;
     fs::write(&path, formatted)
-        .map_err(|e| format!("write .claude/settings.json: {}", e))?;
+        .map_err(|e| format!("write .claude/settings.local.json: {}", e))?;
     Ok(())
 }
 
@@ -157,6 +125,17 @@ pub fn write_codex_config(
 
     fs::write(&config_path, toml_out)
         .map_err(|e| format!("write codex config.toml: {}", e))?;
+
+    // Write Codex slash command files inside CODEX_HOME. Codex reads
+    // slash commands from <CODEX_HOME>/commands/*.md.
+    let commands_dir = codex_home.join("commands");
+    fs::create_dir_all(&commands_dir)
+        .map_err(|e| format!("mkdir codex commands: {}", e))?;
+    fs::write(commands_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
+        .map_err(|e| format!("write codex impala-review.md: {}", e))?;
+    fs::write(commands_dir.join("impala-plan.md"), IMPALA_PLAN_COMMAND)
+        .map_err(|e| format!("write codex impala-plan.md: {}", e))?;
+
     add_git_excludes(worktree_path, CODEX_EXCLUDE_LINES)?;
     Ok(codex_home)
 }
@@ -221,94 +200,6 @@ Tell the user the plan is submitted and end your turn. You'll be notified when t
 
 Call `mcp__impala__get_plan_decision`. If `approved`, stop. Otherwise: read each annotation, revise the plan in-place, call `mcp__impala__resolve_annotation` for each, then loop back to Phase 1 (auto-increments version).
 "#;
-
-const SHARED_AGENTS_MD: &str = r#"# AGENTS.md
-
-This project is open in [Impala](https://github.com/kodeus/impala), which exposes its code-review and plan-review tools via MCP server `impala`.
-
-## Available MCP tools
-
-- `mcp__impala__list_annotations` — list unresolved review comments anchored to file lines
-- `mcp__impala__resolve_annotation` — mark an annotation as resolved
-- `mcp__impala__list_files_with_annotations` — files with unresolved comments
-- `mcp__impala__submit_plan_for_review` — submit a plan file for user approval
-- `mcp__impala__get_plan_decision` — fetch the user's decision on a submitted plan
-- `mcp__impala__list_plans` — list plans for this worktree
-
-## Available slash commands
-
-- `/impala-review` — work through unresolved review annotations
-- `/impala-plan` — submit a plan for review and loop on annotations
-
-This file is managed by Impala. Edits are overwritten on each worktree open.
-"#;
-
-/// Write per-worktree shared command files and symlink them into both
-/// .claude/commands and .codex/commands. Idempotent.
-pub fn write_shared_commands(worktree_path: &Path) -> Result<(), String> {
-    let agents_dir = worktree_path.join(".agents").join("commands");
-    fs::create_dir_all(&agents_dir)
-        .map_err(|e| format!("mkdir .agents/commands: {}", e))?;
-
-    fs::write(agents_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
-        .map_err(|e| format!("write impala-review.md: {}", e))?;
-    fs::write(agents_dir.join("impala-plan.md"), IMPALA_PLAN_COMMAND)
-        .map_err(|e| format!("write impala-plan.md: {}", e))?;
-
-    // Symlink .claude/commands -> ../.agents/commands. .claude/ already
-    // exists from write_claude_config, but for Codex-only worktrees we
-    // create it on demand here.
-    let claude_dir = worktree_path.join(".claude");
-    fs::create_dir_all(&claude_dir)
-        .map_err(|e| format!("mkdir .claude: {}", e))?;
-    let claude_link = claude_dir.join("commands");
-    ensure_symlink(&claude_link, Path::new("../.agents/commands"))?;
-
-    // Symlink .codex/commands -> ../.agents/commands.
-    let codex_dir = worktree_path.join(".codex");
-    fs::create_dir_all(&codex_dir)
-        .map_err(|e| format!("mkdir .codex: {}", e))?;
-    let codex_link = codex_dir.join("commands");
-    ensure_symlink(&codex_link, Path::new("../.agents/commands"))?;
-
-    // Write the AGENTS.md shim. Skip if the user already has one — we
-    // don't want to clobber project-authored guidance.
-    let agents_md = worktree_path.join("AGENTS.md");
-    if !agents_md.exists() {
-        fs::write(&agents_md, SHARED_AGENTS_MD)
-            .map_err(|e| format!("write AGENTS.md: {}", e))?;
-    }
-
-    add_git_excludes(worktree_path, &[
-        "# Added by Impala",
-        "/.agents/",
-        "/.codex/",
-        "/AGENTS.md",
-    ])?;
-
-    Ok(())
-}
-
-fn ensure_symlink(link: &Path, target: &Path) -> Result<(), String> {
-    use std::os::unix::fs::symlink;
-    if link.exists() || link.symlink_metadata().is_ok() {
-        if let Ok(meta) = link.symlink_metadata() {
-            if meta.file_type().is_symlink() {
-                if let Ok(existing_target) = fs::read_link(link) {
-                    if existing_target == target {
-                        return Ok(());
-                    }
-                }
-                fs::remove_file(link).map_err(|e| format!("remove old symlink: {}", e))?;
-            } else {
-                // Existing directory or file at the link path — leave it alone.
-                return Ok(());
-            }
-        }
-    }
-    symlink(target, link).map_err(|e| format!("symlink {} -> {}: {}", link.display(), target.display(), e))?;
-    Ok(())
-}
 
 /// Append entries to <worktree>/.git/info/exclude (the per-worktree
 /// gitignore that does not modify the user's tracked .gitignore). No-op
