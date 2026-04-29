@@ -29,7 +29,7 @@ import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { resolveAgent, resolveFlags, buildLaunchCommand } from "../lib/agent";
 import {
-  CLAUDE_PANE_ID,
+  AGENT_PANE_ID,
   RUN_PANE_ID,
   userTabPaneId,
   runPtySessionId,
@@ -44,7 +44,7 @@ import {
   getEffectiveUserTabFocusedPaneId,
 } from "../lib/tab-actions";
 
-type TabKind = "terminal" | "claude";
+type TabKind = "terminal" | "agent";
 
 // Stable empty array — returning `[]` from the userTabs selector would create
 // a new reference every call, breaking Zustand's useSyncExternalStore snapshot
@@ -85,7 +85,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   claudeOnly?: boolean;
 }) {
   const activeTerminalsTab = useUIStore(
-    (s) => s.worktreeNavStates[worktreePath]?.activeTerminalsTab ?? CLAUDE_PANE_ID,
+    (s) => s.worktreeNavStates[worktreePath]?.activeTerminalsTab ?? AGENT_PANE_ID,
   );
   const userTabs = useUIStore(
     (s) => s.worktreeNavStates[worktreePath]?.userTabs ?? EMPTY_USER_TABS,
@@ -157,11 +157,11 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       });
     }
     out.push({
-      id: CLAUDE_PANE_ID,
+      id: AGENT_PANE_ID,
       label: "Agent",
-      kind: "claude",
+      kind: "agent",
       useContinueFlag: true,
-      paneId: CLAUDE_PANE_ID,
+      paneId: AGENT_PANE_ID,
       isSystem: true,
     });
     for (const t of userTabs) {
@@ -179,7 +179,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   const activeId: string = tabs.some((t) => t.id === activeTerminalsTab)
     ? activeTerminalsTab
-    : CLAUDE_PANE_ID;
+    : AGENT_PANE_ID;
 
   const setActive = useCallback(
     (id: string) => {
@@ -268,18 +268,18 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   const handleNewClaude = useCallback(() => {
     setMenuOpen(false);
-    createUserTab(worktreePath, "claude");
+    createUserTab(worktreePath, "agent");
   }, [worktreePath]);
 
   if (claudeOnly) {
     return (
       <div className="relative h-full w-full">
         <TabBody
-          paneId={CLAUDE_PANE_ID}
-          kind="claude"
+          paneId={AGENT_PANE_ID}
+          kind="agent"
           useContinueFlag
           worktreePath={worktreePath}
-          sessionId={paneSessions[CLAUDE_PANE_ID] ?? null}
+          sessionId={paneSessions[AGENT_PANE_ID] ?? null}
           isActive={isActive}
         />
       </div>
@@ -504,7 +504,7 @@ const TabBody = memo(function TabBody({
     if (sessionId || spawningRef.current) return;
     spawningRef.current = true;
 
-    if (kind === "claude" && useContinueFlag) {
+    if (kind === "agent" && useContinueFlag) {
       const linearApiKey = useUIStore.getState().linearApiKey;
       if (linearApiKey) {
         invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
@@ -552,7 +552,7 @@ const TabBody = memo(function TabBody({
             paneSessions: { ...data.paneSessions, [paneId]: ptyId },
           });
 
-          if (kind === "claude" && isNew) {
+          if (kind === "agent" && isNew) {
             const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
             const agentLaunched = nav.agentLaunched;
 
@@ -650,7 +650,7 @@ function SplitNodeRenderer({
 }) {
   if (node.type === "leaf") {
     const isFocused = node.id === focusedPaneId;
-    const paneKind: TabKind = node.paneType === "claude" ? "claude" : "terminal";
+    const paneKind: TabKind = node.paneType === "agent" ? "agent" : "terminal";
     return (
       <div
         className="h-full w-full relative"

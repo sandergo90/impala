@@ -91,7 +91,7 @@ export interface NewPlanAnnotation {
 }
 
 export type SplitNode =
-  | { type: "leaf"; id: string; paneType: "claude" | "shell" }
+  | { type: "leaf"; id: string; paneType: "agent" | "shell" }
   | {
       type: "split";
       orientation: "horizontal" | "vertical";
@@ -103,8 +103,8 @@ export type SplitNode =
 export interface UserTab {
   /** Stable ID, used as the paneId key (`tab-user-${id}`) in single-leaf mode. Never reused. */
   id: string;
-  /** What to run inside the tab. Terminal = shell; Claude = `claude` command. */
-  kind: "terminal" | "claude";
+  /** What to run inside the tab. Terminal = shell; Agent = `claude` command. */
+  kind: "terminal" | "agent";
   /** Display label shown on the tab. Auto-numbered at creation time (monotonic). */
   label: string;
   /** Creation timestamp; stable ordering. */
@@ -132,10 +132,10 @@ export interface WorktreeNavState {
   selectedPlanAnnotationId: string | null;
   /**
    * ID of the currently active tab inside the terminals pane.
-   * `"tab-claude"` and `"tab-run"` refer to the system tabs. Any other
+   * `"tab-agent"` and `"tab-run"` refer to the system tabs. Any other
    * value is a user-tab ID from `userTabs`. On restore, if the ID no
    * longer resolves to a visible tab, `TabbedTerminals` falls back to
-   * `"tab-claude"`.
+   * `"tab-agent"`.
    */
   activeTerminalsTab: string;
   /** Timestamp (ms) when the setup script was last auto-run; null if never. */

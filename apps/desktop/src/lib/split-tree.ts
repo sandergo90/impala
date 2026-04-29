@@ -8,7 +8,7 @@ export function paneSessionId(paneId: string): string {
 }
 
 /** Create a new leaf node with a unique ID */
-export function createLeaf(paneType: "claude" | "shell" = "shell"): Extract<SplitNode, { type: "leaf" }> {
+export function createLeaf(paneType: "agent" | "shell" = "shell"): Extract<SplitNode, { type: "leaf" }> {
   return { type: "leaf", id: `pane-${Date.now()}-${paneCounter++}`, paneType };
 }
 

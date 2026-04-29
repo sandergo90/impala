@@ -142,7 +142,7 @@ function LeafPane({
   isGenericTerminal,
 }: {
   paneId: string;
-  paneType: "claude" | "shell";
+  paneType: "agent" | "shell";
   worktreePath: string;
   isFocused: boolean;
   sessionId: string | null;
@@ -234,7 +234,7 @@ function LeafPane({
         })
           .then(async (isNew) => {
             onSessionSpawned(ptyId);
-            if (paneType === "claude" && isNew) {
+            if (paneType === "agent" && isNew) {
               const launched = useUIStore.getState().getWorktreeNavState(worktreePath).agentLaunched;
               const flags = await resolveFlags(agent, projectPath);
               const cmd = buildLaunchCommand(agent, flags, launched);
@@ -274,7 +274,7 @@ function LeafPane({
           }}
         />
       )}
-      {paneType === "claude" && (
+      {paneType === "agent" && (
         <div className="absolute top-1 right-2 text-md font-medium text-muted-foreground/40 z-10 pointer-events-none">
           Agent
         </div>

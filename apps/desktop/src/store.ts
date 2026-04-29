@@ -15,7 +15,7 @@ function createDefaultNavState(): WorktreeNavState {
     selectedFile: null,
     activePlanId: null,
     selectedPlanAnnotationId: null,
-    activeTerminalsTab: "tab-claude",
+    activeTerminalsTab: "tab-agent",
     setupRanAt: null,
     runStatus: "idle",
     userTabs: [],
@@ -187,7 +187,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 3,
+      version: 4,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};
@@ -209,6 +209,13 @@ export const useUIStore = create<UIState>()(
             if (nav && typeof nav.claudeLaunched === "boolean") {
               nav.agentLaunched = nav.claudeLaunched;
               delete nav.claudeLaunched;
+            }
+          }
+        }
+        if (fromVersion < 4 && persistedState?.worktreeNavStates) {
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (nav?.activeTerminalsTab === "tab-claude") {
+              nav.activeTerminalsTab = "tab-agent";
             }
           }
         }

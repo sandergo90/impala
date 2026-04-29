@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useUIStore, useDataStore } from "../store";
-import { CLAUDE_PANE_ID, RUN_PANE_ID, userTabPaneId } from "./pane-ids";
+import { AGENT_PANE_ID, RUN_PANE_ID, userTabPaneId } from "./pane-ids";
 import { releaseCachedTerminal } from "../components/XtermTerminal";
 import {
   splitNode,
@@ -16,7 +16,7 @@ import type { SplitNode, UserTab } from "../types";
 // existing PTY sessions still resolve.
 export function getEffectiveUserTabSplitTree(tab: UserTab): SplitNode {
   if (tab.splitTree) return tab.splitTree;
-  const paneType = tab.kind === "claude" ? "claude" : "shell";
+  const paneType = tab.kind === "agent" ? "agent" : "shell";
   return { type: "leaf", id: userTabPaneId(tab.id), paneType };
 }
 
@@ -56,15 +56,15 @@ function parseLabelNumber(label: string, prefix: string): number | null {
 
 export function createUserTab(
   worktreePath: string,
-  kind: "terminal" | "claude",
+  kind: "terminal" | "agent",
 ): UserTab {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
 
   // Slot = smallest positive integer not already in use by another tab of
-  // this kind. Claude starts at 2 because the primary Claude pane is
-  // conceptually "Claude 1". Renamed tabs don't occupy a slot.
-  const prefix = kind === "terminal" ? "Terminal" : "Claude";
+  // this kind. Agent starts at 2 because the primary Agent pane is
+  // conceptually "Agent 1". Renamed tabs don't occupy a slot.
+  const prefix = kind === "terminal" ? "Terminal" : "Agent";
   const startAt = kind === "terminal" ? 1 : 2;
   const used = new Set<number>();
   for (const t of nav.userTabs) {
@@ -78,7 +78,7 @@ export function createUserTab(
   const rootLeaf: SplitNode = {
     type: "leaf",
     id: userTabPaneId(tabId),
-    paneType: kind === "claude" ? "claude" : "shell",
+    paneType: kind === "agent" ? "agent" : "shell",
   };
   const newTab: UserTab = {
     id: tabId,
@@ -111,7 +111,7 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
 
   // If the closed tab wasn't active, leave the active selection alone.
   // Otherwise jump to the neighbour immediately before this one in tab
-  // order: previous user tab -> Run (if it exists) -> Claude.
+  // order: previous user tab -> Run (if it exists) -> Agent.
   let nextActive = nav.activeTerminalsTab;
   if (nav.activeTerminalsTab === tabId) {
     const prevUserTab = remainingTabs[closedIndex - 1];
@@ -121,7 +121,7 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
       const hasRunTab = useDataStore
         .getState()
         .getWorktreeDataState(worktreePath).paneSessions[RUN_PANE_ID] !== undefined;
-      nextActive = hasRunTab ? RUN_PANE_ID : CLAUDE_PANE_ID;
+      nextActive = hasRunTab ? RUN_PANE_ID : AGENT_PANE_ID;
     }
   }
 
@@ -171,7 +171,7 @@ export function reorderUserTabs(
 }
 
 export function getTabOrder(userTabs: UserTab[], hasRunTab: boolean): string[] {
-  const order: string[] = [CLAUDE_PANE_ID];
+  const order: string[] = [AGENT_PANE_ID];
   if (hasRunTab) order.push(RUN_PANE_ID);
   for (const t of userTabs) order.push(t.id);
   return order;
@@ -197,7 +197,7 @@ export function stepActiveTab(worktreePath: string, delta: 1 | -1): void {
 
   const activeId = order.includes(nav.activeTerminalsTab)
     ? nav.activeTerminalsTab
-    : CLAUDE_PANE_ID;
+    : AGENT_PANE_ID;
   const currentIndex = order.indexOf(activeId);
   const nextIndex = (currentIndex + delta + order.length) % order.length;
   const nextId = order[nextIndex];

@@ -1,8 +1,8 @@
-export const CLAUDE_PANE_ID = "tab-claude";
+export const AGENT_PANE_ID = "tab-agent";
 export const RUN_PANE_ID = "tab-run";
 
-export function claudePtySessionId(worktreePath: string): string {
-  return `pty-${CLAUDE_PANE_ID}-${worktreePath}`;
+export function agentPtySessionId(worktreePath: string): string {
+  return `pty-${AGENT_PANE_ID}-${worktreePath}`;
 }
 
 export function runPtySessionId(worktreePath: string): string {

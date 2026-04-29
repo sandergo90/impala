@@ -21,7 +21,7 @@ import {
   closeUserTabFocusedPane,
   focusAdjacentUserTabPane,
 } from "./lib/tab-actions";
-import { CLAUDE_PANE_ID, RUN_PANE_ID } from "./lib/pane-ids";
+import { AGENT_PANE_ID, RUN_PANE_ID } from "./lib/pane-ids";
 import { releaseCachedTerminal } from "./components/XtermTerminal";
 
 export function RootLayout() {
@@ -189,7 +189,7 @@ export function RootLayout() {
       } else if (selectedWorktreePath) {
         const nav = uiState.getWorktreeNavState(selectedWorktreePath);
         const activeTabId = nav.activeTerminalsTab;
-        if (activeTabId === CLAUDE_PANE_ID || activeTabId === RUN_PANE_ID) return;
+        if (activeTabId === AGENT_PANE_ID || activeTabId === RUN_PANE_ID) return;
         if (!nav.userTabs.some((t) => t.id === activeTabId)) return;
         closeUserTabFocusedPane(selectedWorktreePath, activeTabId);
       }

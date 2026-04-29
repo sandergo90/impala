@@ -106,7 +106,7 @@ export function MainView() {
   useAppHotkey(
     "NEW_CLAUDE_TAB",
     () => {
-      if (wtPath) createUserTab(wtPath, "claude");
+      if (wtPath) createUserTab(wtPath, "agent");
     },
     { enabled: isWorktreeTerminalActive },
     [wtPath, isWorktreeTerminalActive],

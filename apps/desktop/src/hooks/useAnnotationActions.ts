@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useUIStore, useDataStore } from "../store";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import type { Annotation } from "../types";
-import { CLAUDE_PANE_ID, claudePtySessionId } from "../lib/pane-ids";
+import { AGENT_PANE_ID, agentPtySessionId } from "../lib/pane-ids";
 
 function encodeForPty(text: string): string {
   return btoa(
@@ -98,11 +98,11 @@ export function useAnnotationActions() {
     async (prompt: string) => {
       if (!worktreePath) return;
 
-      const sessionId = claudePtySessionId(worktreePath);
+      const sessionId = agentPtySessionId(worktreePath);
       await invoke("pty_write", { sessionId, data: encodeForPty(prompt + "\r") });
       const currentTab = useUIStore.getState().getWorktreeNavState(worktreePath).activeTab;
       useUIStore.getState().updateWorktreeNavState(worktreePath, {
-        activeTerminalsTab: CLAUDE_PANE_ID,
+        activeTerminalsTab: AGENT_PANE_ID,
         ...(currentTab === "diff" ? { activeTab: "split" } : {}),
       });
     },
