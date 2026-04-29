@@ -36,6 +36,7 @@ pub fn init() -> Guard {
                     traces_sample_rate: traces_sample_rate(),
                     attach_stacktrace: true,
                     send_default_pii: false,
+                    enable_logs: true,
                     ..Default::default()
                 },
             ))
