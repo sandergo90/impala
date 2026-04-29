@@ -45,7 +45,6 @@ export function FileFinder({
     return fzf.find(query);
   }, [fzf, query]);
 
-  // Recents: pinned file tabs in the current worktree, most recent first.
   const recents = useMemo<string[]>(() => {
     if (!worktreePath) return [];
     const nav = useUIStore.getState().worktreeNavStates[worktreePath];
@@ -53,7 +52,7 @@ export function FileFinder({
     return nav.userTabs
       .filter((t) => t.kind === "file" && t.path)
       .slice()
-      .reverse()
+      .sort((a, b) => b.createdAt - a.createdAt)
       .map((t) => t.path as string)
       .slice(0, 10);
   }, [worktreePath, open]);
