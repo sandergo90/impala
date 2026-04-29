@@ -67,9 +67,9 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
         .entry("hooks")
         .or_insert_with(|| serde_json::json!({}));
 
-    // Same events + matchers as hook_server::install_claude_hooks used to
-    // install globally. The hook command itself reads IMPALA_HOOK_PORT and
-    // IMPALA_WORKTREE_PATH from env, so it's already worktree-aware.
+    // Hook events Claude Code recognizes. The hook command reads
+    // IMPALA_HOOK_PORT and IMPALA_WORKTREE_PATH from env, so it is
+    // already worktree-aware.
     let events: &[(&str, bool)] = &[
         ("UserPromptSubmit", false),
         ("Stop", false),
