@@ -149,16 +149,23 @@ fn spawn_session(
         Err(e) => return Response::Error { message: format!("openpty: {e}") },
     };
 
+    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let mut cmd = match &command {
         Some(args) if !args.is_empty() => {
-            let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
             let mut c = CommandBuilder::new(&shell);
             c.arg("-l");
             c.arg("-c");
             c.arg(args.join(" "));
             c
         }
-        _ => CommandBuilder::new_default_prog(),
+        // Login shell so PATH picks up ~/.zprofile (Homebrew shellenv etc.)
+        // when the bundled .app is launched from Finder with the empty
+        // launchctl PATH.
+        _ => {
+            let mut c = CommandBuilder::new(&shell);
+            c.arg("-l");
+            c
+        }
     };
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
