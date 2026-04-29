@@ -108,6 +108,12 @@ export function useFileTreeData(worktreePath: string | null) {
         return;
       }
 
+      // File-content updates don't change the parent's listing — skip refetch.
+      // Directory updates (mtime bumps, permissions) still flow through.
+      if (ev.kind === "update" && ev.isDirectory === false) {
+        return;
+      }
+
       // Directory rename retarget: rewrite expanded paths under the old prefix
       // so they re-anchor under the new prefix.
       //
@@ -151,13 +157,16 @@ export function useFileTreeData(worktreePath: string | null) {
 
   useEffect(() => {
     epochRef.current += 1;
-    const persisted = useUIStore.getState().worktreeExpandedDirs[worktreePath ?? ""] ?? [];
-    expandedDirsRef.current = new Set(persisted);
     childrenByDirRef.current = new Map();
     prevPathsKeyRef.current = "";
     setPaths([]);
     setEntriesByPath(new Map());
-    if (!worktreePath) return;
+    if (!worktreePath) {
+      expandedDirsRef.current = new Set();
+      return;
+    }
+    const persisted = useUIStore.getState().worktreeExpandedDirs[worktreePath] ?? [];
+    expandedDirsRef.current = new Set(persisted);
     void refetchAll();
   }, [worktreePath, refetchAll]);
 

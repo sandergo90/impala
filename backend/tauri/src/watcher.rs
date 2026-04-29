@@ -1,6 +1,6 @@
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -12,11 +12,20 @@ use tauri::Emitter;
 /// back to a full refetch instead of paying per-path translation cost.
 const OVERFLOW_THRESHOLD: usize = 200;
 
+#[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FsEventKind {
+    Create,
+    Update,
+    Delete,
+    Rename,
+    Overflow,
+}
+
 #[derive(serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct FsEvent {
-    /// "create" | "update" | "delete" | "rename" | "overflow"
-    pub kind: &'static str,
+    pub kind: FsEventKind,
     pub path: Option<String>,
     pub old_path: Option<String>,
     pub is_directory: Option<bool>,
@@ -103,7 +112,7 @@ fn metadata_is_dir(path: &Path) -> Option<bool> {
 fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
     if queue.len() > OVERFLOW_THRESHOLD {
         return vec![FsEvent {
-            kind: "overflow",
+            kind: FsEventKind::Overflow,
             path: None,
             old_path: None,
             is_directory: None,
@@ -111,8 +120,8 @@ fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
     }
 
     let mut out: Vec<FsEvent> = Vec::new();
-    // Pending `From` events keyed by source path, awaiting a matching `To`.
-    let mut pending_from: HashMap<PathBuf, PathBuf> = HashMap::new();
+    // `From` events awaiting a matching `To` (Linux inotify path).
+    let mut pending_from: HashSet<PathBuf> = HashSet::new();
 
     for event in queue {
         match event.kind {
@@ -120,7 +129,7 @@ fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
                 if let Some(p) = event.paths.first() {
                     if let Some(rel) = relativize(worktree_root, p) {
                         out.push(FsEvent {
-                            kind: "create",
+                            kind: FsEventKind::Create,
                             path: Some(rel),
                             old_path: None,
                             is_directory: metadata_is_dir(p),
@@ -132,10 +141,9 @@ fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
                 if let Some(p) = event.paths.first() {
                     if let Some(rel) = relativize(worktree_root, p) {
                         out.push(FsEvent {
-                            kind: "delete",
+                            kind: FsEventKind::Delete,
                             path: Some(rel),
                             old_path: None,
-                            // Path is gone; metadata will fail.
                             is_directory: None,
                         });
                     }
@@ -153,7 +161,7 @@ fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
                                 relativize(worktree_root, new),
                             ) {
                                 out.push(FsEvent {
-                                    kind: "rename",
+                                    kind: FsEventKind::Rename,
                                     path: Some(new_rel),
                                     old_path: Some(old_rel),
                                     is_directory: metadata_is_dir(new),
@@ -164,18 +172,17 @@ fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
                     // Linux: half of a rename. Buffer until the matching To arrives.
                     RenameMode::From => {
                         if let Some(p) = event.paths.first().cloned() {
-                            pending_from.insert(p.clone(), p);
+                            pending_from.insert(p);
                         }
                     }
                     RenameMode::To => {
-                        // We don't know the original path here without a tracker
-                        // lookup, but on Linux the synthesized `Both` event also
-                        // arrives, so we generally never reach this with an
-                        // unmatched From. Fall back: emit as `create`.
+                        // On Linux the synthesized `Both` event also arrives,
+                        // so we generally never reach this with an unmatched
+                        // From. Fall back: emit as `create`.
                         if let Some(p) = event.paths.first() {
                             if let Some(rel) = relativize(worktree_root, p) {
                                 out.push(FsEvent {
-                                    kind: "create",
+                                    kind: FsEventKind::Create,
                                     path: Some(rel),
                                     old_path: None,
                                     is_directory: metadata_is_dir(p),
@@ -192,13 +199,13 @@ fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
                             if let Some(rel) = relativize(worktree_root, p) {
                                 match std::fs::metadata(p) {
                                     Ok(meta) => out.push(FsEvent {
-                                        kind: "create",
+                                        kind: FsEventKind::Create,
                                         path: Some(rel),
                                         old_path: None,
                                         is_directory: Some(meta.is_dir()),
                                     }),
                                     Err(_) => out.push(FsEvent {
-                                        kind: "delete",
+                                        kind: FsEventKind::Delete,
                                         path: Some(rel),
                                         old_path: None,
                                         is_directory: None,
@@ -213,7 +220,7 @@ fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
                 if let Some(p) = event.paths.first() {
                     if let Some(rel) = relativize(worktree_root, p) {
                         out.push(FsEvent {
-                            kind: "update",
+                            kind: FsEventKind::Update,
                             path: Some(rel),
                             old_path: None,
                             is_directory: metadata_is_dir(p),
@@ -227,10 +234,10 @@ fn translate_events(worktree_root: &Path, queue: Vec<Event>) -> Vec<FsEvent> {
     }
 
     // Any unmatched `From` events become deletes.
-    for (_, src) in pending_from.into_iter() {
+    for src in pending_from.into_iter() {
         if let Some(rel) = relativize(worktree_root, &src) {
             out.push(FsEvent {
-                kind: "delete",
+                kind: FsEventKind::Delete,
                 path: Some(rel),
                 old_path: None,
                 is_directory: None,
@@ -302,6 +309,7 @@ pub fn watch_worktree(
                 return;
             }
             *flag = true;
+            drop(flag);
             let last_ref = wt_last.clone();
             let flag_ref = wt_flag.clone();
             let queue_ref = wt_queue.clone();
@@ -373,6 +381,7 @@ pub fn watch_worktree(
                     return;
                 }
                 *flag = true;
+                drop(flag);
                 let last_ref = refs_last.clone();
                 let flag_ref = refs_flag.clone();
                 let app_ref = refs_app.clone();
