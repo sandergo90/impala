@@ -197,5 +197,18 @@ export function useFileTreeData(worktreePath: string | null) {
     [fetchDir, recomputePaths, worktreePath],
   );
 
-  return { paths, entriesByPath, expand };
+  const collapseAll = useCallback(() => {
+    expandedDirsRef.current = new Set();
+    // Drop all loaded child listings except the root so the tree shrinks back
+    // to top-level entries only.
+    const root = childrenByDirRef.current.get("");
+    childrenByDirRef.current = new Map();
+    if (root) childrenByDirRef.current.set("", root);
+    recomputePaths();
+    if (worktreePath) {
+      useUIStore.getState().setWorktreeExpandedDirs(worktreePath, []);
+    }
+  }, [recomputePaths, worktreePath]);
+
+  return { paths, entriesByPath, expand, collapseAll };
 }

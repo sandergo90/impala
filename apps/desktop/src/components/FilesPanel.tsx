@@ -15,7 +15,7 @@ const EMPTY_CHANGED_FILES: ChangedFile[] = [];
 export function FilesPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path ?? null;
-  const { paths, entriesByPath, expand } = useFileTreeData(wtPath);
+  const { paths, entriesByPath, expand, collapseAll } = useFileTreeData(wtPath);
   const changedFiles =
     useDataStore((s) =>
       wtPath ? s.worktreeDataStates[wtPath]?.changedFiles : undefined,
@@ -175,18 +175,33 @@ export function FilesPanel() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <button
-        type="button"
-        onClick={() => useUIStore.getState().setFileFinderOpen(true)}
-        className="flex items-center gap-2 mx-3 my-2 px-2 py-1 text-sm bg-input rounded text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-          <circle cx="11" cy="11" r="8" />
-          <path d="m21 21-4.3-4.3" />
-        </svg>
-        <span>Search files…</span>
-        <span className="ml-auto font-mono text-xs opacity-70">⌘P</span>
-      </button>
+      <div className="flex items-center gap-1 mx-3 my-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => useUIStore.getState().setFileFinderOpen(true)}
+          className="flex flex-1 items-center gap-2 px-2 py-1 text-sm bg-input rounded text-muted-foreground hover:text-foreground cursor-pointer"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <span>Search files…</span>
+          <span className="ml-auto font-mono text-xs opacity-70">⌘P</span>
+        </button>
+        <button
+          type="button"
+          onClick={collapseAll}
+          title="Collapse all folders"
+          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 14 10 14 10 20" />
+            <polyline points="20 10 14 10 14 4" />
+            <line x1="14" y1="10" x2="21" y2="3" />
+            <line x1="3" y1="21" x2="10" y2="14" />
+          </svg>
+        </button>
+      </div>
       <div
         className="flex-1 min-h-0 overflow-hidden"
         onDoubleClick={handleDoubleClick}
