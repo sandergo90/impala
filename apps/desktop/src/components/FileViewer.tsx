@@ -119,7 +119,7 @@ export function FileViewer() {
 
   if (effectiveKind === "image" || effectiveKind === "svg") {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 bg-[repeating-conic-gradient(theme(colors.muted)_0%_25%,transparent_0%_50%)] bg-[length:20px_20px]">
+      <div className="flex flex-col items-center justify-center h-full gap-3 bg-[repeating-conic-gradient(var(--color-muted)_0%_25%,transparent_0%_50%)] bg-[length:20px_20px]">
         <img
           src={convertFileSrc(fullPath!)}
           alt={selectedFilePath}
