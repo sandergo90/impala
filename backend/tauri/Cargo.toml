@@ -43,7 +43,6 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "registry"] }
 tracing-appender = "0.2"
-tauri-plugin-log = { version = "2", features = ["tracing"] }
 sentry = { version = "0.42", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls", "tracing", "logs"] }
 tauri-plugin-sentry = "0.5"
 

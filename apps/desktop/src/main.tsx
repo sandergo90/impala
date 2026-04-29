@@ -1,14 +1,12 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
-import { attachConsole } from "@tauri-apps/plugin-log";
 import { router } from "./router";
 import { initSentry, SentryErrorBoundary } from "./lib/sentry";
 import { preloadSystemFonts } from "./hooks/useSystemFonts";
 import "./index.css";
 
 initSentry(router);
-attachConsole().catch(() => {});
 
 // Start loading system fonts in the background so Settings doesn't freeze on open.
 preloadSystemFonts();
