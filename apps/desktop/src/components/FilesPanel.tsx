@@ -14,6 +14,15 @@ export function FilesPanel() {
   const changedFiles = useDataStore((s) =>
     wtPath ? (s.worktreeDataStates[wtPath]?.changedFiles ?? []) : [],
   );
+  const pendingReveal = useUIStore((s) => s.pendingTreeReveal);
+  const activeFileTabPath = useUIStore((s) => {
+    if (!wtPath) return null;
+    const nav = s.worktreeNavStates[wtPath];
+    if (!nav) return null;
+    const tab = nav.userTabs.find((t) => t.id === nav.activeTerminalsTab);
+    return tab && tab.kind === "file" ? tab.path ?? null : null;
+  });
+  const lastSyncedPathRef = useRef<string | null>(null);
 
   // Trees expects directory paths to end with `/`. File paths must not.
   const treePaths = useMemo(() => {
@@ -70,6 +79,49 @@ export function FilesPanel() {
   useEffect(() => {
     model.setGitStatus(gitStatusEntries);
   }, [model, gitStatusEntries]);
+
+  // Reveal a path in the tree: expand all ancestor dirs, then select only that
+  // file. The model only exposes `getItem(path).select()` — to enforce a
+  // single-selection we deselect everything currently selected first.
+  useEffect(() => {
+    if (!wtPath || !pendingReveal || pendingReveal.worktreePath !== wtPath) return;
+    const { path } = pendingReveal;
+    let cancelled = false;
+    (async () => {
+      const segments = path.split("/");
+      for (let i = 1; i < segments.length; i++) {
+        const ancestor = segments.slice(0, i).join("/");
+        await expand(ancestor);
+        if (cancelled) return;
+      }
+      // Defer to a microtask so resetPaths from the expand() chain has a
+      // chance to flush into the model before we look up the item.
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        for (const p of model.getSelectedPaths()) {
+          if (p !== path) model.getItem(p)?.deselect();
+        }
+        model.getItem(path)?.select();
+        lastSyncedPathRef.current = path;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingReveal?.nonce, wtPath, expand, model]);
+
+  // Active file tab → tree selection. Gated by lastSyncedPathRef so the
+  // selectionChange handler (which calls openFileTab) doesn't loop.
+  useEffect(() => {
+    if (!activeFileTabPath) return;
+    if (lastSyncedPathRef.current === activeFileTabPath) return;
+    lastSyncedPathRef.current = activeFileTabPath;
+    for (const p of model.getSelectedPaths()) {
+      if (p !== activeFileTabPath) model.getItem(p)?.deselect();
+    }
+    model.getItem(activeFileTabPath)?.select();
+  }, [activeFileTabPath, model]);
 
   if (!wtPath) {
     return (

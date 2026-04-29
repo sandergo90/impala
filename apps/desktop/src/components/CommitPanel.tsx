@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { useCmdHeld } from "../hooks/useCmdClickCursor";
+import { ChangedFileContextMenu } from "./ChangedFileContextMenu";
 import type { ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
 
 const statusColor: Record<string, string> = {
@@ -341,9 +342,8 @@ export function CommitPanel() {
         <div className="overflow-y-auto flex-1 min-h-0">
           {changedFiles.map((file) => {
             const isSelected = selectedFile?.path === file.path;
-            return (
+            const button = (
               <button
-                key={file.path}
                 onClick={(e) => {
                   if (e.metaKey && worktreePath) {
                     e.stopPropagation();
@@ -362,6 +362,18 @@ export function CommitPanel() {
                 </span>
                 {file.path.split("/").pop()}
               </button>
+            );
+            if (!worktreePath) {
+              return <div key={file.path}>{button}</div>;
+            }
+            return (
+              <ChangedFileContextMenu
+                key={file.path}
+                worktreePath={worktreePath}
+                filePath={file.path}
+              >
+                {button}
+              </ChangedFileContextMenu>
             );
           })}
         </div>

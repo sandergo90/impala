@@ -17,7 +17,15 @@ const EDITORS = [
   { id: "sublime", label: "Sublime Text", icon: sublimeIcon },
 ] as const;
 
-export function OpenInEditorButton({ worktreePath, tooltip }: { worktreePath: string; tooltip?: string }) {
+export function OpenInEditorButton({
+  worktreePath,
+  filePath,
+  tooltip,
+}: {
+  worktreePath: string;
+  filePath?: string;
+  tooltip?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -40,7 +48,8 @@ export function OpenInEditorButton({ worktreePath, tooltip }: { worktreePath: st
     setLoading(true);
     setOpen(false);
     try {
-      await invoke("open_in_editor", { editor: editorId, path: worktreePath, line: null, col: null });
+      const target = filePath ? `${worktreePath}/${filePath}` : worktreePath;
+      await invoke("open_in_editor", { editor: editorId, path: target, line: null, col: null });
       if (editorId !== preferredEditor) {
         setPreferredEditor(editorId);
       }

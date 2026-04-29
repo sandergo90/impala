@@ -4,6 +4,8 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { File } from "@pierre/diffs/react";
 import { useUIStore } from "../store";
 import { classifyFile, formatBytes, TEXT_SIZE_CAP_BYTES, type FileKind } from "../lib/file-kind";
+import { OpenInEditorButton } from "./OpenInEditorButton";
+import { RevealInFinderButton } from "./RevealInFinderButton";
 
 function Placeholder({
   tone = "muted",
@@ -177,8 +179,19 @@ export function FileViewer() {
   }
 
   return (
-    <div className="h-full overflow-auto">
-      <File file={file} />
+    <div className="h-full flex flex-col overflow-hidden">
+      {wtPath && selectedFilePath && (
+        <div className="flex items-center justify-between px-3 py-1 border-b border-border text-xs shrink-0">
+          <span className="truncate text-muted-foreground font-mono">{selectedFilePath}</span>
+          <div className="flex items-center gap-1 shrink-0 ml-2">
+            <OpenInEditorButton worktreePath={wtPath} filePath={selectedFilePath} />
+            <RevealInFinderButton worktreePath={wtPath} filePath={selectedFilePath} />
+          </div>
+        </div>
+      )}
+      <div className="flex-1 overflow-auto">
+        <File file={file} />
+      </div>
     </div>
   );
 }

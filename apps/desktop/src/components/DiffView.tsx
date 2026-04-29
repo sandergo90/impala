@@ -10,6 +10,7 @@ import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
+import { ChangedFileContextMenu } from "./ChangedFileContextMenu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -263,7 +264,7 @@ const FileDiffItem = memo(function FileDiffItem({
     const nameColor = fileDiff.type === "new" ? "var(--diffs-addition-base, #3fb950)"
       : fileDiff.type === "deleted" ? "var(--diffs-deletion-base, #f85149)"
       : "var(--diffs-color, #e6edf3)";
-    return (
+    const headerInner = (
       <div
         className="flex items-center w-full cursor-pointer"
         style={{ gap: 10 }}
@@ -297,6 +298,12 @@ const FileDiffItem = memo(function FileDiffItem({
         </span>
         <ViewedButton isViewed={isViewed} onClick={(e) => { e.stopPropagation(); toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
       </div>
+    );
+    if (!worktreePath) return headerInner;
+    return (
+      <ChangedFileContextMenu worktreePath={worktreePath} filePath={file.path}>
+        {headerInner}
+      </ChangedFileContextMenu>
     );
   };
 
@@ -452,6 +459,24 @@ function VirtualizedCommitView({
             if (!fileDiffs[file.path]) {
               const isRenamed = file.status.startsWith("R") || file.status.startsWith("C");
               const [oldPath, newPath] = isRenamed ? file.path.split("\t") : [null, file.path];
+              const revealPath = isRenamed ? (newPath ?? file.path) : file.path;
+              const rowInner = (
+                <div className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground">
+                  {isRenamed ? (
+                    <span className="flex-1 truncate">{oldPath} <span className="text-muted-foreground/90">→</span> {newPath}</span>
+                  ) : (
+                    <span className="flex-1 truncate">{file.path}</span>
+                  )}
+                  <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${isRenamed ? newPath : file.path}`)} />
+                  {viewMode === 'uncommitted' && (
+                    <DiscardButton onClick={() => onRequestDiscard(isRenamed ? (newPath ?? file.path) : file.path)} />
+                  )}
+                  <span className="text-md px-1.5 py-0.5 rounded bg-muted">
+                    {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
+                  </span>
+                  <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
+                </div>
+              );
               return (
                 <div
                   key={file.path}
@@ -461,21 +486,13 @@ function VirtualizedCommitView({
                   className={`absolute left-0 w-full border-b border-border ${isViewed ? "opacity-75" : ""}`}
                   style={{ top: virtualRow.start - (virtualizer.options.scrollMargin ?? 0) }}
                 >
-                  <div className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground">
-                    {isRenamed ? (
-                      <span className="flex-1 truncate">{oldPath} <span className="text-muted-foreground/90">→</span> {newPath}</span>
-                    ) : (
-                      <span className="flex-1 truncate">{file.path}</span>
-                    )}
-                    <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${isRenamed ? newPath : file.path}`)} />
-                    {viewMode === 'uncommitted' && (
-                      <DiscardButton onClick={() => onRequestDiscard(isRenamed ? (newPath ?? file.path) : file.path)} />
-                    )}
-                    <span className="text-md px-1.5 py-0.5 rounded bg-muted">
-                      {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
-                    </span>
-                    <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
-                  </div>
+                  {worktreePath ? (
+                    <ChangedFileContextMenu worktreePath={worktreePath} filePath={revealPath}>
+                      {rowInner}
+                    </ChangedFileContextMenu>
+                  ) : (
+                    rowInner
+                  )}
                 </div>
               );
             }

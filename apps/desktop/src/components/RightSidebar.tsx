@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CommitPanel } from "./CommitPanel";
 import { AnnotationsPanel } from "./AnnotationsPanel";
 import { PlanAnnotationsPanel } from "./PlanAnnotationsPanel";
@@ -17,6 +17,15 @@ export function RightSidebar() {
     wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null
   );
   const isInPlanView = navState?.activeTab === "plan";
+
+  // "Reveal in Files" flips this sidebar to the Files tab. Watching the nonce
+  // means re-revealing the same path also forces a switch.
+  const pendingReveal = useUIStore((s) => s.pendingTreeReveal);
+  useEffect(() => {
+    if (!pendingReveal) return;
+    if (wtPath && pendingReveal.worktreePath !== wtPath) return;
+    setActiveTab("files");
+  }, [pendingReveal?.nonce, pendingReveal?.worktreePath, wtPath]);
 
   if (isInPlanView) {
     return (
