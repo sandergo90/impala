@@ -171,7 +171,43 @@ export const oceanicNext: Theme = {
   },
 };
 
-export const builtInThemes: Theme[] = [defaultDark, defaultLight, monokai, oceanicNext];
+export const absolutely: Theme = {
+  id: "absolutely",
+  name: "Absolutely",
+  type: "dark",
+  description: "Warm sienna-on-graphite, inspired by the Codex Absolutely theme",
+  ui: {
+    background: "#2d2d2b",
+    foreground: "#f9f9f7",
+    primary: "#cc7d5e",
+    border: "#3a3a37",
+    accent: "#3a3a37",
+  },
+  terminal: {
+    background: "#2d2d2b",
+    foreground: "#f9f9f7",
+    cursor: "#f9f9f7",
+    selectionBackground: "rgba(204, 125, 94, 0.25)",
+    black: "#3a3a37",
+    red: "#ff5f38",
+    green: "#00c853",
+    yellow: "#e8b864",
+    blue: "#7fa9c7",
+    magenta: "#cc7d5e",
+    cyan: "#88c0a4",
+    white: "#f9f9f7",
+    brightBlack: "#6b6b68",
+    brightRed: "#ff5f38",
+    brightGreen: "#00c853",
+    brightYellow: "#f1c879",
+    brightBlue: "#9bc0d9",
+    brightMagenta: "#d8957b",
+    brightCyan: "#a4d3bd",
+    brightWhite: "#ffffff",
+  },
+};
+
+export const builtInThemes: Theme[] = [defaultDark, defaultLight, monokai, oceanicNext, absolutely];
 
 export function getBuiltInTheme(id: string): Theme | undefined {
   return builtInThemes.find((t) => t.id === id);
