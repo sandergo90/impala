@@ -522,7 +522,12 @@ const TabBody = memo(function TabBody({
 
     const ptyId = `pty-${paneId}-${worktreePath}`;
 
-    getHookPort().then((hookPort) => {
+    getHookPort().then(async (hookPort) => {
+      try {
+        await invoke("prepare_agent_config", { worktreePath });
+      } catch (err) {
+        console.warn("Failed to prepare agent config:", err);
+      }
       invoke<boolean>("pty_spawn", {
         sessionId: ptyId,
         cwd: worktreePath,

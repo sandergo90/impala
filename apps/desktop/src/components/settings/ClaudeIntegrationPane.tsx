@@ -1,30 +1,13 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
 import { useDebouncedSetting } from "../../hooks/useDebouncedSetting";
 
 export function ClaudeIntegrationPane() {
-  const [setting, setSetting] = useState(false);
   const [flags, handleFlagsChange] = useDebouncedSetting("claudeFlags", "global");
-
-  async function handleReconfigure() {
-    setSetting(true);
-    try {
-      const binaryPath = await invoke<string>("setup_claude_integration");
-      toast.success(`Claude integration configured. Binary: ${binaryPath}`);
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setSetting(false);
-    }
-  }
 
   return (
     <div className="max-w-2xl">
       <h2 className="text-lg font-semibold mb-1">Claude Integration</h2>
       <p className="text-sm text-muted-foreground mb-6">
-        The Impala MCP server is automatically configured when the app starts,
-        giving Claude Code access to your code review annotations.
+        Impala writes per-worktree Claude config (settings.json + .mcp.json) when you open a worktree. Your global ~/.claude config is not modified.
       </p>
 
       <div className="space-y-4">
@@ -63,14 +46,6 @@ export function ClaudeIntegrationPane() {
             </li>
           </ul>
         </div>
-
-        <button
-          onClick={handleReconfigure}
-          disabled={setting}
-          className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2"
-        >
-          {setting ? "Reconfiguring..." : "Reconfigure manually"}
-        </button>
       </div>
     </div>
   );

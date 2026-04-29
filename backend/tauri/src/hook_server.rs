@@ -14,6 +14,10 @@ pub struct AgentStatusEvent {
 
 const IMPALA_HOOK_MARKER: &str = "IMPALA_HOOK_PORT";
 
+pub fn hook_command_public(event_type: &str) -> String {
+    hook_command(event_type)
+}
+
 /// The hook command for a specific event type.
 /// Reads the hook port from ~/.impala/hook-port (written on each app start)
 /// so that persistent PTY sessions always reach the current hook server,

@@ -1,3 +1,4 @@
+mod agent_config;
 mod annotations;
 mod config;
 mod daemon_client;
@@ -628,48 +629,21 @@ fn clear_viewed_files(
 }
 
 #[tauri::command]
-async fn setup_claude_integration() -> Result<String, String> {
-    tokio::task::spawn_blocking(setup_claude_integration_sync)
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-}
-
-fn setup_claude_integration_sync() -> Result<String, String> {
+async fn prepare_agent_config(
+    worktree_path: String,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let path = std::path::PathBuf::from(&worktree_path);
     let home = dirs::home_dir()
-        .ok_or_else(|| "Could not determine home directory".to_string())?;
-
+        .ok_or_else(|| "no home dir".to_string())?;
     let mcp_binary = which_mcp_binary(&home)?;
 
-    let settings_path = home.join(".claude.json");
-    let mut settings: serde_json::Value = if settings_path.exists() {
-        let contents = fs::read_to_string(&settings_path)
-            .map_err(|e| format!("Failed to read settings: {}", e))?;
-        serde_json::from_str(&contents)
-            .map_err(|e| format!("Failed to parse settings: {}", e))?
-    } else {
-        serde_json::json!({})
-    };
+    tokio::task::spawn_blocking(move || {
+        agent_config::write_claude_config(&path, &mcp_binary)
+    })
+    .await
+    .map_err(|e| format!("task join: {}", e))??;
 
-    let mcp_servers = settings
-        .as_object_mut()
-        .ok_or_else(|| "Settings is not a JSON object".to_string())?
-        .entry("mcpServers")
-        .or_insert_with(|| serde_json::json!({}));
-
-    mcp_servers
-        .as_object_mut()
-        .ok_or_else(|| "mcpServers is not a JSON object".to_string())?
-        .insert("impala".to_string(), serde_json::json!({
-            "command": mcp_binary,
-            "args": []
-        }));
-
-    let formatted = serde_json::to_string_pretty(&settings)
-        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-    fs::write(&settings_path, formatted)
-        .map_err(|e| format!("Failed to write settings: {}", e))?;
-
-    Ok(mcp_binary)
+    Ok(std::collections::HashMap::new())
 }
 
 fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
@@ -1312,14 +1286,8 @@ pub fn run() {
                 });
             }
 
-            hook_server::install_claude_hooks();
             hook_server::install_impala_review_skill();
             hook_server::install_impala_plan_skill();
-
-            // Auto-register the Impala MCP server in Claude Code settings
-            if let Err(_) = setup_claude_integration_sync() {
-                // Binary may not be installed yet — not fatal
-            }
 
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.
@@ -1426,7 +1394,7 @@ pub fn run() {
             unset_files_viewed,
             check_viewed_files,
             clear_viewed_files,
-            setup_claude_integration,
+            prepare_agent_config,
             get_my_linear_issues,
             search_linear_issues,
             start_linear_issue,
