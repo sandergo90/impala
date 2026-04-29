@@ -128,14 +128,18 @@ export function FileViewer() {
       ),
     [activeTheme, editorFontSize, globalFontSize, editorFontFamily],
   );
-  const fileViewerOptions = useMemo(
-    () => ({
+  const fileViewerOptions = useMemo(() => {
+    const bg = activeTheme.terminal.background;
+    const fg = activeTheme.terminal.foreground;
+    return {
       theme: getDiffsTheme(activeTheme),
       themeType: activeTheme.type as "dark" | "light",
       disableFileHeader: true,
-    }),
-    [activeTheme],
-  );
+      // Push the same vars into :host so they apply inside the shadow root
+      // regardless of host inheritance. Mirrors DiffView's setup.
+      unsafeCSS: `:host { --diffs-dark-bg: ${bg}; --diffs-light-bg: ${bg}; --diffs-dark: ${fg}; --diffs-light: ${fg}; --diffs-color: ${fg}; }`,
+    };
+  }, [activeTheme]);
 
   if (!selectedFilePath) {
     return <Placeholder>Select a file in the Files tab to view its contents</Placeholder>;
