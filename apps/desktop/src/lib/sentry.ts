@@ -1,5 +1,4 @@
 import * as Sentry from "@sentry/react";
-import { tanstackRouterBrowserTracingIntegration } from "@sentry/react";
 import type { router as Router } from "../router";
 
 const DSN = import.meta.env.VITE_SENTRY_DSN;
@@ -19,11 +18,11 @@ export function initSentry(router: typeof Router) {
     environment: ENVIRONMENT,
     sendDefaultPii: false,
     integrations: [
-      tanstackRouterBrowserTracingIntegration(router),
+      Sentry.tanstackRouterBrowserTracingIntegration(router),
       Sentry.consoleLoggingIntegration({ levels: ["info", "warn", "error"] }),
     ],
     tracesSampleRate: import.meta.env.DEV ? 1.0 : 0.1,
-    _experiments: { enableLogs: true },
+    enableLogs: true,
   });
 
   Sentry.setTag("runtime", "react-frontend");

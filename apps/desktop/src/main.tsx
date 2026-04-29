@@ -9,8 +9,12 @@ import "./index.css";
 
 initSentry(router);
 attachConsole().catch(() => {});
+
+// Start loading system fonts in the background so Settings doesn't freeze on open.
 preloadSystemFonts();
 
+// Suppress benign ResizeObserver warning that fires when xterm fit() triggers
+// a layout change within the observer callback.
 const ro = window.ResizeObserver;
 window.ResizeObserver = class extends ro {
   constructor(cb: ResizeObserverCallback) {

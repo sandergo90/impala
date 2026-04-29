@@ -33,8 +33,8 @@ pub fn init() -> Guard {
                 dsn,
                 sentry::ClientOptions {
                     release: Some(RELEASE_NAME.into()),
-                    environment: Some(if cfg!(debug_assertions) { "dev".into() } else { "production".into() }),
-                    traces_sample_rate: if cfg!(debug_assertions) { 1.0 } else { 0.1 },
+                    environment: Some(environment().into()),
+                    traces_sample_rate: traces_sample_rate(),
                     attach_stacktrace: true,
                     send_default_pii: false,
                     ..Default::default()
@@ -102,4 +102,12 @@ fn log_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("be.kodeus.impala").join("logs")
+}
+
+fn environment() -> &'static str {
+    if cfg!(debug_assertions) { "dev" } else { "production" }
+}
+
+fn traces_sample_rate() -> f32 {
+    if cfg!(debug_assertions) { 1.0 } else { 0.1 }
 }
