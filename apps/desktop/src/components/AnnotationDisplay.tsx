@@ -7,14 +7,14 @@ interface AnnotationDisplayProps {
   annotation: Annotation;
   onResolve: (id: string, resolved: boolean) => void;
   onDelete: (id: string) => void;
-  onSendToClaude?: (annotation: Annotation) => void;
+  onSendToAgent?: (annotation: Annotation) => void;
 }
 
 export const AnnotationDisplay = memo(function AnnotationDisplay({
   annotation,
   onResolve,
   onDelete,
-  onSendToClaude,
+  onSendToAgent,
 }: AnnotationDisplayProps) {
   const sideLabel = annotation.side === "left" ? "L" : "R";
   const resolved = annotation.resolved;
@@ -64,13 +64,13 @@ export const AnnotationDisplay = memo(function AnnotationDisplay({
         >
           {resolved ? "Resolved" : "Resolve"}
         </button>
-        {onSendToClaude && (
+        {onSendToAgent && (
           <button
-            onClick={() => onSendToClaude(annotation)}
-            title="Send to Claude"
+            onClick={() => onSendToAgent(annotation)}
+            title="Send to Agent"
             className="px-1.5 py-0.5 rounded text-md text-muted-foreground hover:text-blue-400 hover:bg-blue-900/20"
           >
-            Claude
+            Agent
           </button>
         )}
         <button

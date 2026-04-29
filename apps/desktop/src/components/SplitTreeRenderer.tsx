@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ResizablePanelGroup,
@@ -15,9 +15,7 @@ import {
   resolveAgent,
   resolveFlags,
   buildLaunchCommand,
-  AGENT_LABELS,
 } from "../lib/agent";
-import type { Agent } from "../lib/agent";
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -277,7 +275,9 @@ function LeafPane({
         />
       )}
       {paneType === "claude" && (
-        <AgentLabel worktreePath={worktreePath} />
+        <div className="absolute top-1 right-2 text-md font-medium text-muted-foreground/40 z-10 pointer-events-none">
+          Agent
+        </div>
       )}
       {sessionId ? (
         <XtermTerminal
@@ -297,21 +297,3 @@ function LeafPane({
   );
 }
 
-function AgentLabel({ worktreePath }: { worktreePath: string }) {
-  const [agent, setAgent] = useState<Agent>("claude");
-  const projectPath = useUIStore((s) => s.selectedProject?.path ?? worktreePath);
-  useEffect(() => {
-    let alive = true;
-    resolveAgent(worktreePath, projectPath).then((a) => {
-      if (alive) setAgent(a);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [worktreePath, projectPath]);
-  return (
-    <div className="absolute top-1 right-2 text-md font-medium text-muted-foreground/40 z-10 pointer-events-none">
-      {AGENT_LABELS[agent]}
-    </div>
-  );
-}

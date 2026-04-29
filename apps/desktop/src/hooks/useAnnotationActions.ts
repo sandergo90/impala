@@ -94,7 +94,7 @@ export function useAnnotationActions() {
     [worktreePath, updateData]
   );
 
-  const sendPromptToClaude = useCallback(
+  const sendPromptToAgent = useCallback(
     async (prompt: string) => {
       if (!worktreePath) return;
 
@@ -109,20 +109,20 @@ export function useAnnotationActions() {
     [worktreePath]
   );
 
-  const handleSendToClaude = useCallback(
+  const handleSendToAgent = useCallback(
     async (annotation: Annotation) => {
-      await sendPromptToClaude(`/impala-review ${annotation.id}`);
+      await sendPromptToAgent(`/impala-review ${annotation.id}`);
     },
-    [sendPromptToClaude]
+    [sendPromptToAgent]
   );
 
-  const handleSendAllToClaude = useCallback(
+  const handleSendAllToAgent = useCallback(
     async () => {
       const unresolved = annotations.filter((a) => !a.resolved);
       if (unresolved.length === 0) return;
-      await sendPromptToClaude("/impala-review");
+      await sendPromptToAgent("/impala-review");
     },
-    [sendPromptToClaude, annotations]
+    [sendPromptToAgent, annotations]
   );
 
   return {
@@ -131,7 +131,7 @@ export function useAnnotationActions() {
     handleCreate,
     handleResolve,
     handleDelete,
-    handleSendToClaude,
-    handleSendAllToClaude,
+    handleSendToAgent,
+    handleSendAllToAgent,
   };
 }

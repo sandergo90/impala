@@ -13,8 +13,8 @@ export function AnnotationsPanel() {
     selectedFile,
     handleResolve,
     handleDelete,
-    handleSendToClaude,
-    handleSendAllToClaude,
+    handleSendToAgent,
+    handleSendAllToAgent,
   } = useAnnotationActions();
 
   // Filter, scope, sort, and group in a single pass
@@ -107,10 +107,10 @@ export function AnnotationsPanel() {
         </button>
         {hasUnresolved && (
           <button
-            onClick={handleSendAllToClaude}
+            onClick={handleSendAllToAgent}
             className="px-2 py-0.5 rounded text-sm text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 ml-auto"
           >
-            Send to Claude
+            Send to Agent
           </button>
         )}
       </div>
@@ -130,7 +130,7 @@ export function AnnotationsPanel() {
                   annotation={a}
                   onResolve={handleResolve}
                   onDelete={handleDelete}
-                  onSendToClaude={handleSendToClaude}
+                  onSendToAgent={handleSendToAgent}
                 />
               </div>
             ))}
@@ -150,7 +150,7 @@ export function AnnotationsPanel() {
                         annotation={a}
                         onResolve={handleResolve}
                         onDelete={handleDelete}
-                        onSendToClaude={handleSendToClaude}
+                        onSendToAgent={handleSendToAgent}
                       />
                     </div>
                   ))}

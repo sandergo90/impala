@@ -158,7 +158,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     }
     out.push({
       id: CLAUDE_PANE_ID,
-      label: "Claude",
+      label: "Agent",
       kind: "claude",
       useContinueFlag: true,
       paneId: CLAUDE_PANE_ID,
@@ -430,7 +430,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                 onClick={handleNewClaude}
                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
               >
-                New Claude tab
+                New Agent tab
               </button>
             </div>
           )}
