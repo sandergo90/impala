@@ -1956,7 +1956,7 @@ dependencies = [
 
 [[package]]
 name = "impala"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1986,6 +1986,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tiny_http",
  "tokio",
+ "toml 0.8.2",
  "urlencoding",
  "uuid",
 ]
