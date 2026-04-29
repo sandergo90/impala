@@ -10,7 +10,7 @@ import {
   findLeaf,
 } from "./split-tree";
 import { basename } from "./path-utils";
-import type { SplitNode, UserTab } from "../types";
+import type { SplitNode, UserTab, WorktreeNavState } from "../types";
 
 // Pre-Phase-4 persisted user tabs don't carry `splitTree`; synthesize a
 // single leaf whose id matches the original `tab-user-${id}` convention so
@@ -321,15 +321,22 @@ export function openFileTab(
   const nav = uiState.getWorktreeNavState(worktreePath);
   const label = basename(path);
 
+  // Only force the top-level tab area to "terminal" when the user is on a
+  // mode where TabbedTerminals isn't visible. "terminal" and "split" already
+  // show terminal content; flipping them would collapse the user's layout.
+  const needsTabAreaSwitch =
+    nav.activeTab === "diff" || nav.activeTab === "plan";
+
   // Pinned tab for this path already exists — just activate it.
   const existingPinned = nav.userTabs.find(
     (t) => t.kind === "file" && t.pinned && t.path === path,
   );
   if (existingPinned) {
-    uiState.updateWorktreeNavState(worktreePath, {
+    const updates: Partial<WorktreeNavState> = {
       activeTerminalsTab: existingPinned.id,
-      activeTab: "terminal",
-    });
+    };
+    if (needsTabAreaSwitch) updates.activeTab = "terminal";
+    uiState.updateWorktreeNavState(worktreePath, updates);
     return existingPinned;
   }
 
@@ -347,11 +354,12 @@ export function openFileTab(
     const next = nav.userTabs.map((t) =>
       t.id === previewTab.id ? updated : t,
     );
-    uiState.updateWorktreeNavState(worktreePath, {
+    const updates: Partial<WorktreeNavState> = {
       userTabs: next,
       activeTerminalsTab: updated.id,
-      activeTab: "terminal",
-    });
+    };
+    if (needsTabAreaSwitch) updates.activeTab = "terminal";
+    uiState.updateWorktreeNavState(worktreePath, updates);
     return updated;
   }
 
@@ -365,10 +373,11 @@ export function openFileTab(
     path,
     pinned: pin,
   };
-  uiState.updateWorktreeNavState(worktreePath, {
+  const updates: Partial<WorktreeNavState> = {
     userTabs: [...nav.userTabs, newTab],
     activeTerminalsTab: tabId,
-    activeTab: "terminal",
-  });
+  };
+  if (needsTabAreaSwitch) updates.activeTab = "terminal";
+  uiState.updateWorktreeNavState(worktreePath, updates);
   return newTab;
 }

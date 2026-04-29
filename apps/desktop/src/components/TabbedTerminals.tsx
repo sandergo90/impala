@@ -478,9 +478,13 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                   isActive={isActive}
                 />
               ) : (
+                // System tabs are never `kind: "file"` (see `tabs` memo
+                // above), so narrowing TabBody's prop to terminal|agent is
+                // safe. The userTab.kind === "file" case is handled by the
+                // FileViewer branch above.
                 <TabBody
                   paneId={t.paneId}
-                  kind={t.kind === "file" ? "terminal" : t.kind}
+                  kind={t.kind === "agent" ? "agent" : "terminal"}
                   useContinueFlag={t.useContinueFlag}
                   worktreePath={worktreePath}
                   sessionId={paneSessions[t.paneId] ?? null}
@@ -510,7 +514,7 @@ const TabBody = memo(function TabBody({
   isActive,
 }: {
   paneId: string;
-  kind: TabKind;
+  kind: "terminal" | "agent";
   useContinueFlag: boolean;
   worktreePath: string;
   sessionId: string | null;
@@ -668,7 +672,8 @@ function SplitNodeRenderer({
 }) {
   if (node.type === "leaf") {
     const isFocused = node.id === focusedPaneId;
-    const paneKind: TabKind = node.paneType === "agent" ? "agent" : "terminal";
+    const paneKind: "terminal" | "agent" =
+      node.paneType === "agent" ? "agent" : "terminal";
     return (
       <div
         className="h-full w-full relative"

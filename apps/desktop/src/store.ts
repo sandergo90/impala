@@ -197,7 +197,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 4,
+      version: 5,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};
@@ -227,6 +227,15 @@ export const useUIStore = create<UIState>()(
             if (nav?.activeTerminalsTab === "tab-claude") {
               nav.activeTerminalsTab = "tab-agent";
             }
+          }
+        }
+        if (fromVersion < 5 && persistedState?.worktreeNavStates) {
+          // v4 briefly had `activeTab: "files"` and `selectedFilePath` on nav
+          // states. Both are gone; rewrite "files" -> "terminal" and drop the
+          // stale field so the type stays clean on rehydrate.
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (nav?.activeTab === "files") nav.activeTab = "terminal";
+            if (nav && "selectedFilePath" in nav) delete nav.selectedFilePath;
           }
         }
         return persistedState;
