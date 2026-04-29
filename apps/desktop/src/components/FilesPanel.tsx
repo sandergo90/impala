@@ -21,6 +21,9 @@ export function FilesPanel() {
       wtPath ? s.worktreeDataStates[wtPath]?.changedFiles : undefined,
     ) ?? EMPTY_CHANGED_FILES;
   const pendingReveal = useUIStore((s) => s.pendingTreeReveal);
+  const persistedExpandedDirs = useUIStore((s) =>
+    wtPath ? s.worktreeExpandedDirs[wtPath] : undefined,
+  );
   const activeFileTabPath = useUIStore((s) => {
     if (!wtPath) return null;
     const nav = s.worktreeNavStates[wtPath];
@@ -79,7 +82,14 @@ export function FilesPanel() {
   });
 
   useEffect(() => {
-    model.resetPaths(treePaths);
+    // resetPaths rebuilds the trees store from scratch — pass the known
+    // expanded set so a fresh data fetch doesn't collapse the folder the
+    // user just clicked. Trees expects directory ids with trailing `/`.
+    const initialExpandedPaths = (persistedExpandedDirs ?? []).map(
+      (d) => `${d}/`,
+    );
+    model.resetPaths(treePaths, { initialExpandedPaths });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, treePaths]);
 
   useEffect(() => {
