@@ -16,6 +16,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@fontsource-variable/geist": "5.2.8",
     "@pierre/diffs": "1.1.7",
+    "@pierre/trees": "^1.0.0-beta.3",
     "@plannotator/web-highlighter": "^0.8.1",
     "@sentry/react": "^10.50.0",
     "@tanstack/react-router": "^1.168.10",

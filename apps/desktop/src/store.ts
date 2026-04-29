@@ -13,6 +13,7 @@ function createDefaultNavState(): WorktreeNavState {
     viewMode: "commit",
     selectedCommit: null,
     selectedFile: null,
+    selectedFilePath: null,
     activePlanId: null,
     selectedPlanAnnotationId: null,
     activeTerminalsTab: "tab-agent",

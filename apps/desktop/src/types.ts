@@ -128,6 +128,8 @@ export interface WorktreeNavState {
   viewMode: "commit" | "all-changes" | "uncommitted";
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
+  /** Path (POSIX, worktree-relative) of the file currently shown in the Files viewer. Null when no file is open. */
+  selectedFilePath: string | null;
   activePlanId: string | null;
   selectedPlanAnnotationId: string | null;
   /**
