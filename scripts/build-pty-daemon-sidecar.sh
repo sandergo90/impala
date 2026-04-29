@@ -5,6 +5,15 @@ set -euo pipefail
 # into the .app. Tauri's externalBin requires the file to be named with the
 # host target triple suffix.
 
+# Load .env so SENTRY_DSN is available to option_env! at compile time.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT_DIR/.env"
+  set +a
+fi
+
 PROFILE="${1:-release}"
 TRIPLE=$(rustc -vV | sed -n 's/host: //p')
 

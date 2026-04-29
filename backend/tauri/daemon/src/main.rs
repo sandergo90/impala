@@ -1,3 +1,5 @@
+mod observability;
+
 use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -626,6 +628,15 @@ async fn write_event(w: &mut OwnedWriteHalf, event: Event) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _observability = observability::init();
+
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        sentry::integrations::panic::panic_handler(info);
+        tracing::error!(panic = %info, "pty-daemon panicked");
+        prev(info);
+    }));
+
     let args = parse_args()?;
     let paths = DaemonPaths::under(&args.data_dir);
     fs::create_dir_all(&paths.root).await?;

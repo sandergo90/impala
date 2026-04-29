@@ -2234,11 +2234,17 @@ version = "0.0.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "dirs",
  "impala-daemon-shared",
  "portable-pty",
+ "sentry",
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
  "vt100",
 ]
 
