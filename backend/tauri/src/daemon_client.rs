@@ -182,26 +182,30 @@ async fn try_hello(paths: &DaemonPaths) -> Result<(UnixStream, String, u32)> {
 }
 
 async fn request_shutdown(mut stream: UnixStream) -> Result<()> {
-    let frame = ClientFrame {
-        id: 1,
-        req: Request::Shutdown,
-    };
-    let (r, mut w) = stream.split();
-    let mut buf = serde_json::to_vec(&frame)?;
-    buf.push(b'\n');
-    w.write_all(&buf).await?;
-    w.flush().await?;
+    tokio::time::timeout(SHUTDOWN_TIMEOUT, async move {
+        let frame = ClientFrame {
+            id: 1,
+            req: Request::Shutdown,
+        };
+        let (r, mut w) = stream.split();
+        let mut buf = serde_json::to_vec(&frame)?;
+        buf.push(b'\n');
+        w.write_all(&buf).await?;
+        w.flush().await?;
 
-    let mut lines = BufReader::new(r).lines();
-    let line = lines
-        .next_line()
-        .await?
-        .ok_or_else(|| anyhow!("eof before shutdown ack"))?;
-    match parse_response(&line)? {
-        Response::ShutdownAck => Ok(()),
-        Response::Error { message } => bail!("daemon rejected shutdown: {message}"),
-        other => bail!("unexpected shutdown response: {other:?}"),
-    }
+        let mut lines = BufReader::new(r).lines();
+        let line = lines
+            .next_line()
+            .await?
+            .ok_or_else(|| anyhow!("eof before shutdown ack"))?;
+        match parse_response(&line)? {
+            Response::ShutdownAck => Ok(()),
+            Response::Error { message } => bail!("daemon rejected shutdown: {message}"),
+            other => bail!("unexpected shutdown response: {other:?}"),
+        }
+    })
+    .await
+    .map_err(|_| anyhow!("daemon did not ack shutdown within {SHUTDOWN_TIMEOUT:?}"))?
 }
 
 fn ensure_token(path: &Path) -> Result<()> {
