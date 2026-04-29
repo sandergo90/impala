@@ -29,7 +29,7 @@ export function RightSidebar() {
 
   if (isInPlanView) {
     return (
-      <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col h-full overflow-hidden bg-sidebar">
         <div className="flex items-center gap-1 px-3 py-2 border-b border-border shrink-0">
           <TabPill label="Plan Annotations" isActive onClick={() => {}} />
         </div>

@@ -367,7 +367,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex shrink-0 items-center gap-0.5 px-2 pt-1.5 border-b border-border/40">
+      <div className="flex shrink-0 items-center gap-0.5 px-2 pt-1.5 border-b border-border/40 bg-sidebar">
         {systemTabs.map((t) => (
           <div key={t.id} className={baseTabClass(t)}>
             {renderTabInner(t)}

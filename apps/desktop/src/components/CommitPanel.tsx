@@ -237,7 +237,7 @@ export function CommitPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full text-sm overflow-hidden bg-card">
+    <div className="flex flex-col h-full text-sm overflow-hidden">
       {/* Commits section — top half */}
       <div className="flex flex-col min-h-0 flex-1">
         <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-b border-border">
