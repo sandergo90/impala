@@ -98,6 +98,13 @@ pub enum Event {
         session_id: String,
         message: String,
     },
+    ShellReady {
+        session_id: String,
+        /// "ready" — OSC 133;A marker observed.
+        /// "timed_out" — 15s elapsed without marker (broken wrapper or exotic shell).
+        /// "unsupported" — shell has no marker support (sh/ksh/pwsh); fired immediately.
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,6 +200,26 @@ mod tests {
         let back: EventFrame = serde_json::from_str(&json).unwrap();
         match back.event {
             Event::Output { seq_from, .. } => assert_eq!(seq_from, 9000),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn shell_ready_event_roundtrip() {
+        let frame = EventFrame {
+            kind: KIND_EVENT.into(),
+            event: Event::ShellReady {
+                session_id: "s1".into(),
+                reason: "ready".into(),
+            },
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        let back: EventFrame = serde_json::from_str(&json).unwrap();
+        match back.event {
+            Event::ShellReady { session_id, reason } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(reason, "ready");
+            }
             _ => panic!("wrong variant"),
         }
     }

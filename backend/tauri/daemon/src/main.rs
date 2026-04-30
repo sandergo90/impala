@@ -4,6 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use impala_daemon_shared::paths::DaemonPaths;
+use impala_daemon_shared::shell_ready_scanner::{shell_supports_marker, ShellReadyScanState};
 use impala_daemon_shared::wire::{
     ClientFrame, Event, EventFrame, Request, Response, ResponseFrame, SessionInfo, KIND_EVENT,
     KIND_RESPONSE,
@@ -77,6 +78,13 @@ struct Session {
     writer: Box<dyn IoWrite + Send>,
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     state: Arc<Mutex<SessionState>>,
+    /// Shell readiness scanning. `None` once we've decided the marker is
+    /// no longer relevant (matched, timed out, or unsupported shell).
+    /// Wrapped in Mutex because the read and timeout threads both touch it.
+    /// Owned by the session so future requests (e.g. Kill) can inspect or
+    /// clear it; current threads access it via cloned Arc handles.
+    #[allow(dead_code)]
+    shell_ready_scan: Arc<Mutex<Option<ShellReadyScanState>>>,
 }
 
 struct Registry {
@@ -207,6 +215,21 @@ fn spawn_session(
     let child = Arc::new(Mutex::new(child));
     let master = Arc::new(Mutex::new(pair.master));
 
+    // Decide if this shell supports OSC 133;A. We use the basename of the
+    // path that we actually launched.
+    let shell_basename = std::path::Path::new(&shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("sh")
+        .to_string();
+    let supports_marker = shell_supports_marker(&shell_basename);
+
+    let shell_ready_scan = Arc::new(Mutex::new(if supports_marker {
+        Some(ShellReadyScanState::new())
+    } else {
+        None
+    }));
+
     let session = Session {
         cwd: cwd.clone(),
         started_at: timestamp(),
@@ -214,8 +237,16 @@ fn spawn_session(
         writer,
         child: Arc::clone(&child),
         state: Arc::clone(&state),
+        shell_ready_scan: Arc::clone(&shell_ready_scan),
     };
     registry.sessions.lock().unwrap().insert(session_id.clone(), session);
+
+    if !supports_marker {
+        registry.broadcast(Event::ShellReady {
+            session_id: session_id.clone(),
+            reason: "unsupported".into(),
+        });
+    }
 
     start_pty_io_threads(
         session_id.clone(),
@@ -223,7 +254,35 @@ fn spawn_session(
         state,
         child,
         Arc::clone(registry),
+        Arc::clone(&shell_ready_scan),
     );
+
+    if supports_marker {
+        let registry = Arc::clone(registry);
+        let session_id_for_timeout = session_id.clone();
+        let scan_handle = Arc::clone(&shell_ready_scan);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(15));
+            // If the scanner is already None, the read thread already
+            // observed the marker and broadcast ShellReady — no-op.
+            let mut guard = scan_handle.lock().unwrap();
+            if guard.is_some() {
+                // Drop any partial-match bytes still held by the scanner.
+                // Partial markers are at most 7 bytes (the OSC 133;A
+                // prefix), only present on the timeout path, and never
+                // went through the vt100 parser. Re-injecting them would
+                // require fabricating a seq_from that doesn't match the
+                // parser bookkeeping; the simpler choice is to drop them.
+                let _ = guard.as_mut().unwrap().take_held();
+                *guard = None;
+                drop(guard);
+                registry.broadcast(Event::ShellReady {
+                    session_id: session_id_for_timeout,
+                    reason: "timed_out".into(),
+                });
+            }
+        });
+    }
 
     Response::Spawned {
         session_id,
@@ -239,6 +298,7 @@ fn start_pty_io_threads(
     state: Arc<Mutex<SessionState>>,
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     registry: Arc<Registry>,
+    shell_ready_scan: Arc<Mutex<Option<ShellReadyScanState>>>,
 ) {
     let pending: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let backpressured = Arc::new(AtomicBool::new(false));
@@ -311,7 +371,27 @@ fn start_pty_io_threads(
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        pending.lock().unwrap().extend_from_slice(&buf[..n]);
+                        let mut chunk: Vec<u8> = buf[..n].to_vec();
+                        let mut matched_now = false;
+                        {
+                            let mut guard = shell_ready_scan.lock().unwrap();
+                            if let Some(scanner) = guard.as_mut() {
+                                let result = scanner.scan(&chunk);
+                                chunk = result.output;
+                                matched_now = result.matched;
+                            }
+                        }
+                        if matched_now {
+                            // Scanner is consumed once a marker is observed.
+                            *shell_ready_scan.lock().unwrap() = None;
+                            registry.broadcast(Event::ShellReady {
+                                session_id: session_id_for_thread.clone(),
+                                reason: "ready".into(),
+                            });
+                        }
+                        if !chunk.is_empty() {
+                            pending.lock().unwrap().extend_from_slice(&chunk);
+                        }
                     }
                     Err(_) => break,
                 }

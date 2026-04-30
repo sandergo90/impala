@@ -447,6 +447,13 @@ fn dispatch_event(
             let name = format!("pty-error-{}", sanitize_event_id(&session_id));
             let _ = app.emit(&name, message);
         }
+        Event::ShellReady {
+            session_id,
+            reason,
+        } => {
+            let name = format!("pty-shell-ready-{}", sanitize_event_id(&session_id));
+            let _ = app.emit(&name, reason);
+        }
     }
 }
 
