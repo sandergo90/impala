@@ -6,13 +6,10 @@ import { useUIStore } from "../store";
 import { useEditorDocsStore, type SaveOutcome } from "../stores/editor-docs";
 import { buildDocumentKey, getCurrent, getBaseline } from "../lib/editor-buffer-registry";
 import { classifyFile, formatBytes, TEXT_SIZE_CAP_BYTES, type FileKind } from "../lib/file-kind";
+import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { RevealInFinderButton } from "./RevealInFinderButton";
 import { CodeEditor, detectLanguage } from "./CodeEditor";
-
-function sanitizeEventId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "-");
-}
 
 interface FsEvent {
   kind: "create" | "update" | "delete" | "rename" | "overflow";
@@ -102,7 +99,7 @@ export function FileViewer() {
     if (!shouldLoadText || !wtPath || !selectedFilePath) return;
     if (doc && doc.status === "ready" && doc.loadError === null) return;
     void loadDoc(wtPath, selectedFilePath);
-  }, [shouldLoadText, wtPath, selectedFilePath, doc, loadDoc]);
+  }, [shouldLoadText, wtPath, selectedFilePath, doc?.status, doc?.loadError, loadDoc]);
 
   const setExternalChange = useEditorDocsStore((s) => s.setExternalChange);
 
@@ -115,17 +112,17 @@ export function FileViewer() {
       const payload = event.payload;
       if (payload.kind === "overflow") {
         const docs = useEditorDocsStore.getState().docs;
-        for (const doc of Object.values(docs)) {
-          if (doc.worktreePath === wtPath && doc.dirty) {
-            setExternalChange(doc.key, true);
+        for (const d of Object.values(docs)) {
+          if (d.worktreePath === wtPath && d.dirty) {
+            setExternalChange(d.key, true);
           }
         }
         return;
       }
       if (!payload.path) return;
       const key = buildDocumentKey(wtPath, payload.path);
-      const doc = useEditorDocsStore.getState().docs[key];
-      if (!doc || !doc.dirty) return;
+      const target = useEditorDocsStore.getState().docs[key];
+      if (!target || !target.dirty) return;
       // Don't flag changes we caused ourselves: if the registry's baseline
       // already matches its current (i.e. no draft ahead of disk), skip.
       if (getBaseline(key) === getCurrent(key)) return;

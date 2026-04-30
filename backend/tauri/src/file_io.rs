@@ -1,7 +1,13 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
+
+/// Per-process monotonic counter so concurrent writes to the same path
+/// (e.g. two rapid Cmd+S presses, or two windows saving the same file)
+/// land on distinct temp files instead of clobbering each other.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Opaque revision token: `<mtime_nanos>-<size_bytes>`. Stable enough for an
 /// editor session — if the file is rewritten with the same mtime AND same
@@ -84,11 +90,12 @@ pub fn write_file_with_precondition(
         .parent()
         .ok_or_else(|| "path has no parent directory".to_string())?;
     let tmp_name = format!(
-        ".{}.impala-tmp-{}",
+        ".{}.impala-tmp-{}-{}",
         path.file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "out".to_string()),
-        std::process::id()
+        std::process::id(),
+        TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
     );
     let tmp_path = parent.join(&tmp_name);
 

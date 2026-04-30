@@ -8,6 +8,7 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
 import { useUIStore, useDataStore } from "../store";
+import { useEditorDocsStore } from "../stores/editor-docs";
 import { releaseCachedTerminal } from "./XtermTerminal";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import {
@@ -536,6 +537,14 @@ export function Sidebar() {
     );
     if (selectedWorktree?.path === wt.path) {
       useUIStore.getState().setSelectedWorktree(null);
+    }
+
+    // Drop any open editor docs/buffers for this worktree's file tabs.
+    const editorDocs = useEditorDocsStore.getState();
+    for (const key of Object.keys(editorDocs.docs)) {
+      if (editorDocs.docs[key]?.worktreePath === wt.path) {
+        editorDocs.removeDoc(key);
+      }
     }
 
     // Run actual deletion in background

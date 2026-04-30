@@ -46,18 +46,17 @@ export function createCodeMirrorTheme(
     { dark: isDark },
   );
 
-  const c = isDark ? term : { ...term };
   const highlight = HighlightStyle.define([
-    { tag: [t.keyword, t.controlKeyword, t.operatorKeyword], color: isDark ? c.brightMagenta : c.magenta },
-    { tag: [t.string, t.special(t.string)], color: isDark ? c.brightGreen : c.green },
-    { tag: [t.number, t.bool, t.null], color: isDark ? c.brightYellow : c.yellow },
-    { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: isDark ? c.brightBlack : c.white, fontStyle: "italic" },
-    { tag: [t.function(t.variableName), t.function(t.propertyName)], color: isDark ? c.brightBlue : c.blue },
-    { tag: [t.typeName, t.className, t.namespace], color: isDark ? c.brightCyan : c.cyan },
-    { tag: [t.propertyName, t.attributeName], color: isDark ? c.brightCyan : c.cyan },
-    { tag: [t.tagName], color: isDark ? c.brightRed : c.red },
-    { tag: [t.variableName], color: c.foreground },
-    { tag: [t.invalid], color: isDark ? c.brightRed : c.red },
+    { tag: [t.keyword, t.controlKeyword, t.operatorKeyword], color: isDark ? term.brightMagenta : term.magenta },
+    { tag: [t.string, t.special(t.string)], color: isDark ? term.brightGreen : term.green },
+    { tag: [t.number, t.bool, t.null], color: isDark ? term.brightYellow : term.yellow },
+    { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: isDark ? term.brightBlack : term.white, fontStyle: "italic" },
+    { tag: [t.function(t.variableName), t.function(t.propertyName)], color: isDark ? term.brightBlue : term.blue },
+    { tag: [t.typeName, t.className, t.namespace], color: isDark ? term.brightCyan : term.cyan },
+    { tag: [t.propertyName, t.attributeName], color: isDark ? term.brightCyan : term.cyan },
+    { tag: [t.tagName], color: isDark ? term.brightRed : term.red },
+    { tag: [t.variableName], color: term.foreground },
+    { tag: [t.invalid], color: isDark ? term.brightRed : term.red },
   ]);
 
   return [view, syntaxHighlighting(highlight)];

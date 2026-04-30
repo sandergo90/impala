@@ -120,6 +120,7 @@ export const useEditorDocsStore = create<EditorDocsState>((set, get) => ({
     const doc = get().docs[key];
     if (!doc) return { kind: "error", message: "no doc" };
     if (!isInitialized(key)) return { kind: "error", message: "not loaded" };
+    if (doc.status === "saving") return { kind: "error", message: "save in progress" };
     patch(set, key, { status: "saving" });
     const content = getCurrent(key);
     try {

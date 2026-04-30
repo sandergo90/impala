@@ -46,6 +46,7 @@ import {
   getEffectiveUserTabFocusedPaneId,
 } from "../lib/tab-actions";
 import { useEditorDocsStore } from "../stores/editor-docs";
+import { useShallow } from "zustand/shallow";
 import { buildDocumentKey } from "../lib/editor-buffer-registry";
 
 type TabKind = "terminal" | "agent" | "file";
@@ -192,18 +193,27 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   }, [userTabs]);
 
   // Map of tab id -> whether the file's editor buffer is dirty. Drives the
-  // unsaved-changes dot in the tab label.
-  const editorDocs = useEditorDocsStore((s) => s.docs);
+  // unsaved-changes dot in the tab label. The selector projects only dirty
+  // doc keys for this worktree so unrelated keystrokes don't re-render us.
+  const dirtyDocKeys = useEditorDocsStore(
+    useShallow((s) => {
+      const out: Record<string, true> = {};
+      for (const k in s.docs) {
+        const d = s.docs[k];
+        if (d.worktreePath === worktreePath && d.dirty) out[k] = true;
+      }
+      return out;
+    }),
+  );
   const isDirtyById = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const t of userTabs) {
-      if (t.kind === "file" && t.path) {
-        const doc = editorDocs[buildDocumentKey(worktreePath, t.path)];
-        if (doc?.dirty) m.set(t.id, true);
+      if (t.kind === "file" && t.path && dirtyDocKeys[buildDocumentKey(worktreePath, t.path)]) {
+        m.set(t.id, true);
       }
     }
     return m;
-  }, [userTabs, editorDocs, worktreePath]);
+  }, [userTabs, dirtyDocKeys, worktreePath]);
 
   const activeId: string = tabs.some((t) => t.id === activeTerminalsTab)
     ? activeTerminalsTab
