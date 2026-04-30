@@ -45,6 +45,8 @@ import {
   getEffectiveUserTabSplitTree,
   getEffectiveUserTabFocusedPaneId,
 } from "../lib/tab-actions";
+import { useEditorDocsStore } from "../stores/editor-docs";
+import { buildDocumentKey } from "../lib/editor-buffer-registry";
 
 type TabKind = "terminal" | "agent" | "file";
 
@@ -189,6 +191,20 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     return m;
   }, [userTabs]);
 
+  // Map of tab id -> whether the file's editor buffer is dirty. Drives the
+  // unsaved-changes dot in the tab label.
+  const editorDocs = useEditorDocsStore((s) => s.docs);
+  const isDirtyById = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const t of userTabs) {
+      if (t.kind === "file" && t.path) {
+        const doc = editorDocs[buildDocumentKey(worktreePath, t.path)];
+        if (doc?.dirty) m.set(t.id, true);
+      }
+    }
+    return m;
+  }, [userTabs, editorDocs, worktreePath]);
+
   const activeId: string = tabs.some((t) => t.id === activeTerminalsTab)
     ? activeTerminalsTab
     : AGENT_PANE_ID;
@@ -330,6 +346,9 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             isPreviewById.get(t.id) ? "italic" : ""
           }`}
         >
+          {isDirtyById.get(t.id) && (
+            <span className="text-foreground" aria-label="Unsaved">●</span>
+          )}
           {t.label}
         </button>
       )}

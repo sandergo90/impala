@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { readTextFile, stat } from "@tauri-apps/plugin-fs";
+import { stat } from "@tauri-apps/plugin-fs";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { File } from "@pierre/diffs/react";
 import { useUIStore } from "../store";
+import { useEditorDocsStore, type SaveOutcome } from "../stores/editor-docs";
+import { buildDocumentKey, getCurrent } from "../lib/editor-buffer-registry";
 import { classifyFile, formatBytes, TEXT_SIZE_CAP_BYTES, type FileKind } from "../lib/file-kind";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { RevealInFinderButton } from "./RevealInFinderButton";
-import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";
+import { CodeEditor, detectLanguage } from "./CodeEditor";
 
 function Placeholder({
   tone = "muted",
@@ -31,49 +32,34 @@ export function FileViewer() {
   );
   const selectedFilePath = useUIStore((s) => {
     if (!wtPath || !activeTabId) return null;
-    const tab = s.worktreeNavStates[wtPath]?.userTabs.find(
-      (t) => t.id === activeTabId,
-    );
+    const tab = s.worktreeNavStates[wtPath]?.userTabs.find((t) => t.id === activeTabId);
     return tab && tab.kind === "file" ? tab.path ?? null : null;
   });
-  const activeThemeId = useUIStore((s) => s.activeThemeId);
-  const customThemes = useUIStore((s) => s.customThemes);
-  const editorFontSize = useUIStore((s) => s.editorFontSize);
-  const editorFontFamily = useUIStore((s) => s.editorFontFamily);
-  const globalFontSize = useUIStore((s) => s.fontSize);
 
   const fullPath = wtPath && selectedFilePath ? `${wtPath}/${selectedFilePath}` : null;
   const initialKind: FileKind | null = selectedFilePath ? classifyFile(selectedFilePath) : null;
 
-  // SVG-as-source override — true means render the SVG XML in the code view
-  // instead of as an image. Resets when the path changes.
   const [svgSourceMode, setSvgSourceMode] = useState(false);
-  // Override for "load anyway" on >1MB text files. Resets per-path.
   const [forceLoadLarge, setForceLoadLarge] = useState(false);
-
   useEffect(() => {
     setSvgSourceMode(false);
     setForceLoadLarge(false);
   }, [fullPath]);
 
   const [size, setSize] = useState<number | null>(null);
-  const [contents, setContents] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [statError, setStatError] = useState<string | null>(null);
 
-  // Stat first to learn the size, then decide whether to read.
   useEffect(() => {
     setSize(null);
-    setContents(null);
-    setError(null);
+    setStatError(null);
     if (!fullPath) return;
     let cancelled = false;
     (async () => {
       try {
         const s = await stat(fullPath);
-        if (cancelled) return;
-        setSize(s.size);
+        if (!cancelled) setSize(s.size);
       } catch (e) {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setStatError(String(e));
       }
     })();
     return () => {
@@ -87,77 +73,40 @@ export function FileViewer() {
     return initialKind;
   }, [initialKind, svgSourceMode]);
 
-  // Load text contents only when needed.
   const shouldLoadText =
     fullPath !== null &&
     size !== null &&
     effectiveKind === "text" &&
     (size <= TEXT_SIZE_CAP_BYTES || forceLoadLarge);
 
+  const docKey = wtPath && selectedFilePath ? buildDocumentKey(wtPath, selectedFilePath) : null;
+  const doc = useEditorDocsStore((s) => (docKey ? s.docs[docKey] : undefined));
+  const loadDoc = useEditorDocsStore((s) => s.loadDoc);
+  const updateDraft = useEditorDocsStore((s) => s.updateDraft);
+  const saveDoc = useEditorDocsStore((s) => s.saveDoc);
+  const _reloadFromDisk = useEditorDocsStore((s) => s.reloadFromDisk);
+  void _reloadFromDisk;
+
   useEffect(() => {
-    if (!shouldLoadText || !fullPath) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const text = await readTextFile(fullPath);
-        if (!cancelled) setContents(text);
-      } catch (e) {
-        if (!cancelled) setError(String(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [shouldLoadText, fullPath]);
-
-  const file = useMemo(() => {
-    if (!selectedFilePath || contents === null) return null;
-    return { name: selectedFilePath, contents };
-  }, [selectedFilePath, contents]);
-
-  const activeTheme = useMemo(
-    () => resolveThemeById(activeThemeId, customThemes),
-    [activeThemeId, customThemes],
-  );
-  const fileViewerStyle = useMemo(
-    () =>
-      getDiffViewerStyle(
-        activeTheme,
-        editorFontSize ?? globalFontSize,
-        editorFontFamily,
-      ),
-    [activeTheme, editorFontSize, globalFontSize, editorFontFamily],
-  );
-  const fileViewerOptions = useMemo(() => {
-    const bg = activeTheme.terminal.background;
-    const fg = activeTheme.terminal.foreground;
-    return {
-      theme: getDiffsTheme(activeTheme),
-      themeType: activeTheme.type as "dark" | "light",
-      disableFileHeader: true,
-      // Push the same vars into :host so they apply inside the shadow root
-      // regardless of host inheritance. Mirrors DiffView's setup.
-      unsafeCSS: `:host { --diffs-dark-bg: ${bg}; --diffs-light-bg: ${bg}; --diffs-dark: ${fg}; --diffs-light: ${fg}; --diffs-color: ${fg}; }`,
-    };
-  }, [activeTheme]);
+    if (!shouldLoadText || !wtPath || !selectedFilePath) return;
+    if (doc && doc.status === "ready" && doc.loadError === null) return;
+    void loadDoc(wtPath, selectedFilePath);
+  }, [shouldLoadText, wtPath, selectedFilePath, doc, loadDoc]);
 
   if (!selectedFilePath) {
     return <Placeholder>Select a file in the Files tab to view its contents</Placeholder>;
   }
-
-  if (error) {
+  if (statError) {
     return (
       <Placeholder tone="error">
         <div>Failed to read {selectedFilePath}:</div>
-        <div className="text-xs">{error}</div>
+        <div className="text-xs">{statError}</div>
       </Placeholder>
     );
   }
-
   if (size === null) {
     return <Placeholder>Loading {selectedFilePath}…</Placeholder>;
   }
-
   if (effectiveKind === "image" || effectiveKind === "svg") {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 bg-[repeating-conic-gradient(var(--color-muted)_0%_25%,transparent_0%_50%)] bg-[length:20px_20px]">
@@ -180,7 +129,6 @@ export function FileViewer() {
       </div>
     );
   }
-
   if (effectiveKind === "binary") {
     return (
       <Placeholder>
@@ -189,8 +137,6 @@ export function FileViewer() {
       </Placeholder>
     );
   }
-
-  // Text path
   if (size > TEXT_SIZE_CAP_BYTES && !forceLoadLarge) {
     return (
       <Placeholder>
@@ -206,24 +152,49 @@ export function FileViewer() {
     );
   }
 
-  if (!file) {
+  if (!doc || doc.status === "loading") {
     return <Placeholder>Loading {selectedFilePath}…</Placeholder>;
   }
+  if (doc.loadError) {
+    return (
+      <Placeholder tone="error">
+        <div>Failed to read {selectedFilePath}:</div>
+        <div className="text-xs">{doc.loadError}</div>
+      </Placeholder>
+    );
+  }
+
+  const handleSave = async (): Promise<void> => {
+    if (!docKey) return;
+    const result: SaveOutcome = await saveDoc(docKey);
+    void result;
+  };
+
+  const language = detectLanguage(selectedFilePath);
+  const bufferContent = getCurrent(docKey!);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {wtPath && selectedFilePath && (
         <div className="flex items-center justify-between px-3 py-1 border-b border-border text-xs shrink-0">
-          <span className="truncate text-muted-foreground font-mono">{selectedFilePath}</span>
+          <span className="truncate text-muted-foreground font-mono">
+            {doc.dirty && <span className="text-foreground mr-1" aria-label="Unsaved">●</span>}
+            {selectedFilePath}
+          </span>
           <div className="flex items-center gap-1 shrink-0 ml-2">
             <OpenInEditorButton worktreePath={wtPath} filePath={selectedFilePath} />
             <RevealInFinderButton worktreePath={wtPath} filePath={selectedFilePath} />
           </div>
         </div>
       )}
-      <div className="flex-1 overflow-auto" style={fileViewerStyle}>
-        <File file={file} options={fileViewerOptions} />
-      </div>
+      <CodeEditor
+        key={docKey}
+        value={bufferContent}
+        language={language}
+        onChange={(next) => updateDraft(docKey!, next)}
+        onSave={handleSave}
+        className="flex-1 min-h-0"
+      />
     </div>
   );
 }
