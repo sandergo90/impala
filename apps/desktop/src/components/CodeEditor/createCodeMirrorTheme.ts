@@ -33,7 +33,7 @@ export function createCodeMirrorTheme(
         ? {
             caretColor: term.foreground,
             padding: "1em 1.25em",
-            maxWidth: "76ch",
+            maxWidth: "96ch",
             margin: "0 auto",
           }
         : { caretColor: term.foreground },
