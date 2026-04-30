@@ -19,13 +19,16 @@ export function createCodeMirrorTheme(
   const isMarkdown = language === "markdown";
   const muted = isDark ? term.brightBlack : term.white;
   const codeAccent = isDark ? term.brightBlue : term.blue;
-  // Prose-side accents come from the app's UI palette (same tokens the
+  // Prose-side surfaces come from the app's UI palette (same tokens the
   // sidebar/chrome/banners use) so the markdown editor reads as part of
-  // the app, not a terminal session.
-  const linkColor = ui.primary;
+  // the app. Links stay on the terminal blue because ui.primary equals
+  // ui.foreground in some themes (e.g. default-dark), which would erase
+  // the contrast.
+  const linkColor = codeAccent;
   const codeBg = ui.muted;
   const quoteColor = ui.mutedForeground;
   const ruleColor = ui.border;
+  const accentBg = ui.accent;
 
   const view = EditorView.theme(
     {
@@ -54,9 +57,9 @@ export function createCodeMirrorTheme(
         border: "none",
         ...(isMarkdown ? { display: "none" } : {}),
       },
-      ".cm-activeLine": { backgroundColor: "transparent" },
-      ".cm-activeLineGutter": { backgroundColor: "transparent" },
-      ".cm-selectionMatch": { backgroundColor: term.selectionBackground },
+      ".cm-activeLine": { backgroundColor: accentBg },
+      ".cm-activeLineGutter": { backgroundColor: accentBg },
+      ".cm-selectionMatch": { backgroundColor: accentBg },
       ".cm-searchMatch": {
         backgroundColor: term.selectionBackground,
         outline: `1px solid ${term.foreground}`,
