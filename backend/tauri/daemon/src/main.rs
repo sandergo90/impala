@@ -194,9 +194,21 @@ fn spawn_session(
     // previously saved directory.
     cmd.env_remove("TERM_SESSION_ID");
     cmd.env("TERM_PROGRAM", "Impala");
+    let zdotdir_seen = env_vars
+        .iter()
+        .find(|(k, _)| k == "ZDOTDIR")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| "<unset>".into());
     for (k, v) in env_vars {
         cmd.env(k, v);
     }
+    tracing::info!(
+        session_id = %session_id,
+        shell = %shell,
+        shell_args = ?launch_args,
+        zdotdir = %zdotdir_seen,
+        "spawning pty"
+    );
 
     let child = match pair.slave.spawn_command(cmd) {
         Ok(c) => c,
@@ -286,6 +298,11 @@ fn spawn_session(
                 let _ = guard.as_mut().unwrap().take_held();
                 *guard = None;
                 drop(guard);
+                tracing::warn!(
+                    session_id = %session_id_for_timeout,
+                    reason = "timed_out",
+                    "shell ready (timeout)"
+                );
                 registry.broadcast(Event::ShellReady {
                     session_id: session_id_for_timeout,
                     reason: "timed_out".into(),
@@ -394,6 +411,11 @@ fn start_pty_io_threads(
                         if matched_now {
                             // Scanner is consumed once a marker is observed.
                             *shell_ready_scan.lock().unwrap() = None;
+                            tracing::info!(
+                                session_id = %session_id_for_thread,
+                                reason = "ready",
+                                "shell ready"
+                            );
                             registry.broadcast(Event::ShellReady {
                                 session_id: session_id_for_thread.clone(),
                                 reason: "ready".into(),
