@@ -17,6 +17,7 @@ mod plan_scanner;
 mod plans;
 mod pty;
 mod settings;
+mod shell_wrappers;
 mod viewed_files;
 mod watcher;
 mod worktree_issues;
@@ -1199,6 +1200,20 @@ pub fn run() {
     // call. The guard must outlive run() itself.
     let observability_guard = observability::init();
 
+    let app_data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("be.kodeus.impala");
+    match shell_wrappers::ensure_wrappers(&app_data_dir) {
+        Ok(_) => tracing::info!(
+            "shell wrappers ready at {}",
+            app_data_dir.join("shell-wrappers").display()
+        ),
+        Err(e) => tracing::warn!(
+            error = %e,
+            "failed to write shell wrappers — readiness will rely on timeout"
+        ),
+    }
+
     let mut builder = tauri::Builder::default();
 
     // The Tauri Sentry plugin needs the same sentry::Client our Rust
@@ -1487,6 +1502,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_is_alive,
+            pty::prepare_shell_launch,
             check_generated_files,
             open_in_editor,
             read_plan_file,

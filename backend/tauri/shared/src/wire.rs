@@ -13,6 +13,13 @@ pub enum Request {
         session_id: String,
         cwd: String,
         command: Option<Vec<String>>,
+        /// Override the user's `$SHELL` (e.g. force `/bin/zsh` even if their
+        /// SHELL env var is `/usr/local/bin/fish`). When `None`, the daemon
+        /// uses `$SHELL` and falls back to `/bin/zsh`.
+        shell_path: Option<String>,
+        /// Override the default `["-l"]` shell launch args. Used to inject
+        /// `--rcfile` (bash) or `--init-command` (fish).
+        shell_args: Option<Vec<String>>,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
@@ -232,6 +239,8 @@ mod tests {
                 session_id: "s".into(),
                 cwd: "/tmp".into(),
                 command: Some(vec!["ls".into()]),
+                shell_path: None,
+                shell_args: None,
                 env: vec![],
                 cols: 80,
                 rows: 24,

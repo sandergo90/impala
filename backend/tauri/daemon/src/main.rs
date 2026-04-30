@@ -130,6 +130,8 @@ fn spawn_session(
     session_id: String,
     cwd: String,
     command: Option<Vec<String>>,
+    shell_path: Option<String>,
+    shell_args: Option<Vec<String>>,
     env_vars: Vec<(String, String)>,
     cols: u16,
     rows: u16,
@@ -159,11 +161,17 @@ fn spawn_session(
         Err(e) => return Response::Error { message: format!("openpty: {e}") },
     };
 
-    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let shell = shell_path.unwrap_or_else(||
+        env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
+    );
+    let default_args = ["-l".to_string()];
+    let launch_args: &[String] = shell_args.as_deref().unwrap_or(&default_args);
     let mut cmd = match &command {
         Some(args) if !args.is_empty() => {
             let mut c = CommandBuilder::new(&shell);
-            c.arg("-l");
+            for a in launch_args {
+                c.arg(a);
+            }
             c.arg("-c");
             c.arg(args.join(" "));
             c
@@ -173,7 +181,9 @@ fn spawn_session(
         // launchctl PATH.
         _ => {
             let mut c = CommandBuilder::new(&shell);
-            c.arg("-l");
+            for a in launch_args {
+                c.arg(a);
+            }
             c
         }
     };
@@ -477,10 +487,22 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
             session_id,
             cwd,
             command,
+            shell_path,
+            shell_args,
             env,
             cols,
             rows,
-        } => spawn_session(registry, session_id, cwd, command, env, cols, rows),
+        } => spawn_session(
+            registry,
+            session_id,
+            cwd,
+            command,
+            shell_path,
+            shell_args,
+            env,
+            cols,
+            rows,
+        ),
         Request::Write { session_id, data_b64 } => {
             let data = match STANDARD.decode(&data_b64) {
                 Ok(d) => d,

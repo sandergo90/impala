@@ -558,13 +558,21 @@ const TabBody = memo(function TabBody({
       } catch (err) {
         console.warn("Failed to prepare agent config:", err);
       }
+      const launch = await invoke<{
+        shell_path: string;
+        shell_args: string[];
+        env: Record<string, string>;
+      }>("prepare_shell_launch");
       invoke<boolean>("pty_spawn", {
         sessionId: ptyId,
         cwd: worktreePath,
         command: null,
+        shellPath: launch.shell_path,
+        shellArgs: launch.shell_args,
         envVars: {
           IMPALA_HOOK_PORT: String(hookPort),
           IMPALA_WORKTREE_PATH: worktreePath,
+          ...launch.env,
           ...extraEnv,
         },
       })
