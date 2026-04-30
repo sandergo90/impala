@@ -13,7 +13,7 @@ export default defineConfig(async () => ({
     tailwindcss(),
     sentryVitePlugin({
       org: process.env.SENTRY_ORG,
-      project: "impala-desktop",
+      project: "impala",
       authToken: process.env.SENTRY_AUTH_TOKEN,
       release: { name: `impala@${pkg.version}` },
       disable: !process.env.SENTRY_AUTH_TOKEN,
