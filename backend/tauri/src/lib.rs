@@ -1514,6 +1514,7 @@ pub fn run() {
             watcher::watch_worktree,
             watcher::unwatch_worktree,
             file_io::read_file_with_revision,
+            file_io::stat_file_size,
             file_io::write_file_with_precondition,
             file_tree::list_directory,
             file_tree::list_all_files,

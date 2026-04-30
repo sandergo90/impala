@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { stat } from "@tauri-apps/plugin-fs";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore } from "../store";
 import { useEditorDocsStore, type SaveOutcome } from "../stores/editor-docs";
@@ -65,8 +64,8 @@ export function FileViewer() {
     let cancelled = false;
     (async () => {
       try {
-        const s = await stat(fullPath);
-        if (!cancelled) setSize(s.size);
+        const size = await invoke<number>("stat_file_size", { absolutePath: fullPath });
+        if (!cancelled) setSize(size);
       } catch (e) {
         if (!cancelled) setStatError(String(e));
       }

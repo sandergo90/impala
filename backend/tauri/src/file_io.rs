@@ -40,6 +40,17 @@ pub fn read_file_with_revision(absolute_path: String) -> Result<ReadFileWithRevi
     Ok(ReadFileWithRevision { content, revision })
 }
 
+/// File size in bytes. Used by the file viewer to decide whether to render
+/// a preview or the "load anyway" placeholder for >1 MB text files. Plain
+/// `std::fs::metadata` so we don't go through `@tauri-apps/plugin-fs`'s
+/// scope rules, which trip over nested dotfiles like `.venv/.gitignore`.
+#[tauri::command]
+pub fn stat_file_size(absolute_path: String) -> Result<u64, String> {
+    let meta = fs::metadata(Path::new(&absolute_path))
+        .map_err(|e| format!("stat failed: {e}"))?;
+    Ok(meta.len())
+}
+
 /// Tagged-union wire shape: `{ kind: "ok", revision }` or
 /// `{ kind: "conflict", currentRevision }`. The frontend discriminates on
 /// `result.kind`.
