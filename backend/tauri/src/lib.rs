@@ -2,6 +2,7 @@ mod agent_config;
 mod annotations;
 mod config;
 mod daemon_client;
+mod file_io;
 mod file_tree;
 mod fonts;
 mod git;
@@ -1512,6 +1513,8 @@ pub fn run() {
             get_agent_statuses,
             watcher::watch_worktree,
             watcher::unwatch_worktree,
+            file_io::read_file_with_revision,
+            file_io::write_file_with_precondition,
             file_tree::list_directory,
             file_tree::list_all_files,
             config::read_project_config,
