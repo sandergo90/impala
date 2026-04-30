@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "bunx tauri dev",
     "build": "export $(grep -v '^#' .env | xargs) && bunx tauri build",
+    "build:debug": "export $(grep -v '^#' .env | xargs) && bunx tauri build --features devtools",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {

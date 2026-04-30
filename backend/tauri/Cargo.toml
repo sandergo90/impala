@@ -12,6 +12,10 @@ edition = "2021"
 name = "impala_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
+[features]
+default = []
+devtools = ["tauri/devtools"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 toml = "0.8"
