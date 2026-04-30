@@ -19,12 +19,12 @@ export function createCodeMirrorTheme(
   const isMarkdown = language === "markdown";
   const muted = isDark ? term.brightBlack : term.white;
   const codeAccent = isDark ? term.brightBlue : term.blue;
-  // Prose-side surfaces come from the app's UI palette (same tokens the
-  // sidebar/chrome/banners use) so the markdown editor reads as part of
-  // the app. Links stay on the terminal blue because ui.primary equals
-  // ui.foreground in some themes (e.g. default-dark), which would erase
-  // the contrast.
-  const linkColor = codeAccent;
+  // The "brand" color of a theme — orange in Absolutely, blue in light,
+  // lime in monokai, etc. Some themes (default-dark) use primary === foreground
+  // which would erase contrast on text accents; in that case fall back to
+  // terminal blue so links and h1 are still distinguishable.
+  const brandColor =
+    ui.primary.toLowerCase() === ui.foreground.toLowerCase() ? codeAccent : ui.primary;
   const codeBg = ui.muted;
   const quoteColor = ui.mutedForeground;
   const ruleColor = ui.border;
@@ -82,17 +82,17 @@ export function createCodeMirrorTheme(
     { tag: [t.invalid], color: isDark ? term.brightRed : term.red },
 
     // Markdown — inert on non-markdown languages because these tags never fire there.
-    { tag: t.heading1, fontSize: "1.6em", fontWeight: "700", color: term.foreground },
+    { tag: t.heading1, fontSize: "1.6em", fontWeight: "700", color: brandColor },
     { tag: t.heading2, fontSize: "1.35em", fontWeight: "700", color: term.foreground },
     { tag: t.heading3, fontSize: "1.2em", fontWeight: "700", color: term.foreground },
     { tag: [t.heading4, t.heading5, t.heading6], fontSize: "1.05em", fontWeight: "700", color: term.foreground },
     { tag: t.strong, fontWeight: "700", color: term.foreground },
     { tag: t.emphasis, fontStyle: "italic" },
     { tag: t.strikethrough, textDecoration: "line-through" },
-    { tag: [t.link, t.url], color: linkColor, textDecoration: "underline" },
+    { tag: [t.link, t.url], color: brandColor, textDecoration: "underline" },
     {
       tag: t.monospace,
-      color: term.foreground,
+      color: brandColor,
       backgroundColor: codeBg,
       padding: "1px 4px",
       borderRadius: "4px",
