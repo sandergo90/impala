@@ -3,7 +3,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import type { Extension } from "@codemirror/state";
 import type { Theme } from "../../themes/types";
-import { DEFAULT_DIFF_FONT_FAMILY } from "../../themes/apply";
+import { DEFAULT_DIFF_FONT_FAMILY, resolveTheme } from "../../themes/apply";
 
 export function createCodeMirrorTheme(
   theme: Theme,
@@ -12,12 +12,20 @@ export function createCodeMirrorTheme(
   language?: string,
 ): Extension {
   const term = theme.terminal;
+  const ui = resolveTheme(theme);
   const isDark = theme.type === "dark";
   const family = fontFamily ?? DEFAULT_DIFF_FONT_FAMILY;
   const lineHeight = `${Math.round(fontSize * 1.5)}px`;
   const isMarkdown = language === "markdown";
   const muted = isDark ? term.brightBlack : term.white;
-  const accent = isDark ? term.brightBlue : term.blue;
+  const codeAccent = isDark ? term.brightBlue : term.blue;
+  // Prose-side accents come from the app's UI palette (same tokens the
+  // sidebar/chrome/banners use) so the markdown editor reads as part of
+  // the app, not a terminal session.
+  const linkColor = ui.primary;
+  const codeBg = ui.muted;
+  const quoteColor = ui.mutedForeground;
+  const ruleColor = ui.border;
 
   const view = EditorView.theme(
     {
@@ -63,7 +71,7 @@ export function createCodeMirrorTheme(
     { tag: [t.string, t.special(t.string)], color: isDark ? term.brightGreen : term.green },
     { tag: [t.number, t.bool, t.null], color: isDark ? term.brightYellow : term.yellow },
     { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: muted, fontStyle: "italic" },
-    { tag: [t.function(t.variableName), t.function(t.propertyName)], color: accent },
+    { tag: [t.function(t.variableName), t.function(t.propertyName)], color: codeAccent },
     { tag: [t.typeName, t.className, t.namespace], color: isDark ? term.brightCyan : term.cyan },
     { tag: [t.propertyName, t.attributeName], color: isDark ? term.brightCyan : term.cyan },
     { tag: [t.tagName], color: isDark ? term.brightRed : term.red },
@@ -78,13 +86,19 @@ export function createCodeMirrorTheme(
     { tag: t.strong, fontWeight: "700", color: term.foreground },
     { tag: t.emphasis, fontStyle: "italic" },
     { tag: t.strikethrough, textDecoration: "line-through" },
-    { tag: [t.link, t.url], color: accent, textDecoration: "underline" },
-    { tag: t.monospace, color: isDark ? term.brightCyan : term.cyan },
-    { tag: t.quote, color: muted, fontStyle: "italic" },
-    { tag: t.contentSeparator, color: muted },
+    { tag: [t.link, t.url], color: linkColor, textDecoration: "underline" },
+    {
+      tag: t.monospace,
+      color: term.foreground,
+      backgroundColor: codeBg,
+      padding: "1px 4px",
+      borderRadius: "4px",
+    },
+    { tag: t.quote, color: quoteColor, fontStyle: "italic" },
+    { tag: t.contentSeparator, color: ruleColor },
     // Dim the markdown markers (`#`, `*`, `>`, list bullets, link brackets)
     // so the prose itself reads as the focus.
-    { tag: t.processingInstruction, color: muted },
+    { tag: t.processingInstruction, color: quoteColor },
   ]);
 
   return [view, syntaxHighlighting(highlight)];
