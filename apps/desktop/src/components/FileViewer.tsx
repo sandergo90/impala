@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { stat } from "@tauri-apps/plugin-fs";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useUIStore } from "../store";
 import { useEditorDocsStore, type SaveOutcome } from "../stores/editor-docs";
-import { buildDocumentKey, getCurrent } from "../lib/editor-buffer-registry";
+import { buildDocumentKey, getCurrent, getBaseline } from "../lib/editor-buffer-registry";
 import { classifyFile, formatBytes, TEXT_SIZE_CAP_BYTES, type FileKind } from "../lib/file-kind";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { RevealInFinderButton } from "./RevealInFinderButton";
 import { CodeEditor, detectLanguage } from "./CodeEditor";
+
+function sanitizeEventId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+interface FsEvent {
+  kind: "create" | "update" | "delete" | "rename" | "overflow";
+  path?: string | null;
+  oldPath?: string | null;
+  isDirectory?: boolean | null;
+}
 
 function Placeholder({
   tone = "muted",
@@ -84,14 +96,46 @@ export function FileViewer() {
   const loadDoc = useEditorDocsStore((s) => s.loadDoc);
   const updateDraft = useEditorDocsStore((s) => s.updateDraft);
   const saveDoc = useEditorDocsStore((s) => s.saveDoc);
-  const _reloadFromDisk = useEditorDocsStore((s) => s.reloadFromDisk);
-  void _reloadFromDisk;
+  const reloadFromDisk = useEditorDocsStore((s) => s.reloadFromDisk);
 
   useEffect(() => {
     if (!shouldLoadText || !wtPath || !selectedFilePath) return;
     if (doc && doc.status === "ready" && doc.loadError === null) return;
     void loadDoc(wtPath, selectedFilePath);
   }, [shouldLoadText, wtPath, selectedFilePath, doc, loadDoc]);
+
+  const setExternalChange = useEditorDocsStore((s) => s.setExternalChange);
+
+  useEffect(() => {
+    if (!wtPath) return;
+    let cancelled = false;
+    const eventName = `fs-event-${sanitizeEventId(wtPath)}`;
+    const unlistenPromise = listen<FsEvent>(eventName, (event) => {
+      if (cancelled) return;
+      const payload = event.payload;
+      if (payload.kind === "overflow") {
+        const docs = useEditorDocsStore.getState().docs;
+        for (const doc of Object.values(docs)) {
+          if (doc.worktreePath === wtPath && doc.dirty) {
+            setExternalChange(doc.key, true);
+          }
+        }
+        return;
+      }
+      if (!payload.path) return;
+      const key = buildDocumentKey(wtPath, payload.path);
+      const doc = useEditorDocsStore.getState().docs[key];
+      if (!doc || !doc.dirty) return;
+      // Don't flag changes we caused ourselves: if the registry's baseline
+      // already matches its current (i.e. no draft ahead of disk), skip.
+      if (getBaseline(key) === getCurrent(key)) return;
+      setExternalChange(key, true);
+    });
+    return () => {
+      cancelled = true;
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [wtPath, setExternalChange]);
 
   if (!selectedFilePath) {
     return <Placeholder>Select a file in the Files tab to view its contents</Placeholder>;
@@ -184,6 +228,25 @@ export function FileViewer() {
           <div className="flex items-center gap-1 shrink-0 ml-2">
             <OpenInEditorButton worktreePath={wtPath} filePath={selectedFilePath} />
             <RevealInFinderButton worktreePath={wtPath} filePath={selectedFilePath} />
+          </div>
+        </div>
+      )}
+      {doc.hasExternalDiskChange && (
+        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border bg-accent text-xs">
+          <span>This file changed on disk while you were editing it.</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void reloadFromDisk(docKey!)}
+              className="px-2 py-0.5 rounded border hover:bg-foreground/5"
+            >
+              Reload from disk
+            </button>
+            <button
+              onClick={() => setExternalChange(docKey!, false)}
+              className="px-2 py-0.5 rounded border hover:bg-foreground/5"
+            >
+              Keep my changes
+            </button>
           </div>
         </div>
       )}

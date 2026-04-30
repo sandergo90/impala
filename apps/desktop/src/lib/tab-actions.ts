@@ -10,6 +10,8 @@ import {
   findLeaf,
 } from "./split-tree";
 import { basename } from "./path-utils";
+import { useEditorDocsStore } from "../stores/editor-docs";
+import { buildDocumentKey } from "./editor-buffer-registry";
 import type { SplitNode, UserTab, WorktreeNavState } from "../types";
 
 // Pre-Phase-4 persisted user tabs don't carry `splitTree`; synthesize a
@@ -105,6 +107,16 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
   if (closedIndex === -1) return;
 
   const tab = nav.userTabs[closedIndex];
+  if (tab.kind === "file" && tab.path) {
+    const key = buildDocumentKey(worktreePath, tab.path);
+    const doc = useEditorDocsStore.getState().docs[key];
+    if (doc?.dirty) {
+      const proceed = window.confirm(
+        `${tab.path} has unsaved changes. Discard them?`,
+      );
+      if (!proceed) return;
+    }
+  }
   if (tab.kind !== "file") {
     const tree = getEffectiveUserTabSplitTree(tab);
     for (const leaf of getLeaves(tree)) killPaneSession(worktreePath, leaf.id);
@@ -132,6 +144,12 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
     userTabs: remainingTabs,
     activeTerminalsTab: nextActive,
   });
+
+  if (tab.kind === "file" && tab.path) {
+    useEditorDocsStore
+      .getState()
+      .removeDoc(buildDocumentKey(worktreePath, tab.path));
+  }
 }
 
 // Empty trimmed label is a no-op; callers treat it as "revert to previous".
