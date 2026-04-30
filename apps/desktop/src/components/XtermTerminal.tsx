@@ -120,6 +120,25 @@ async function createCachedTerminal(
     allowProposedApi: true,
   });
 
+  // xterm 6.1.0-beta.207 has a parser bug in `requestMode` that throws
+  // "ReferenceError: Can't find variable: n" on DEC private mode queries
+  // (CSI ? Pn $ p) sent by claude during startup. The throw corrupts the
+  // parser's write-buffer state mid-flushSync, hanging the terminal.
+  //
+  // Pre-empt the default handler by registering ours first — xterm
+  // dispatches CSI handlers in LIFO order, so returning `true` here
+  // stops the dispatch chain before the broken handler runs. Apps that
+  // queried these modes get no response; per the DEC private mode spec
+  // they fall back to defaults after a timeout, which is the safe path.
+  terminal.parser.registerCsiHandler(
+    { prefix: "?", intermediates: "$", final: "p" },
+    () => true,
+  );
+  terminal.parser.registerCsiHandler(
+    { intermediates: "$", final: "p" },
+    () => true,
+  );
+
   const fitAddon = new FitAddon();
   const searchAddon = new SearchAddon();
   terminal.loadAddon(fitAddon);
@@ -443,9 +462,20 @@ function XtermTerminalInner({
       // throttle added one frame of lag between CSS-driven container resize
       // and xterm cell reflow, which shows as a flash during drag — the
       // WebGL canvas scales with CSS before the cells re-wrap.
+      //
+      // Wrapped in try/catch because fitAddon.fit() → terminal.resize() runs
+      // a flushSync over pending writes. A buggy CSI sequence in that buffer
+      // can throw inside the parser (xterm beta.207 still trips on certain
+      // DEC private-mode queries from claude). Letting the throw propagate
+      // tears down the ResizeObserver loop; swallowing it lets the next
+      // resize tick re-fit once the offending bytes have drained.
       resizeObserver = new ResizeObserver(() => {
         if (host.clientWidth === 0 || host.clientHeight === 0) return;
-        entry?.fitAddon.fit();
+        try {
+          entry?.fitAddon.fit();
+        } catch (err) {
+          console.warn("[xterm] fit() threw — terminal may need re-render", err);
+        }
       });
       resizeObserver.observe(host);
 
