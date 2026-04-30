@@ -9,7 +9,10 @@ let initialised = false;
 
 export function initSentry(router: typeof Router) {
   if (initialised) return;
-  if (!DSN) return;
+  if (!DSN) {
+    console.info("[sentry] disabled: VITE_SENTRY_DSN not set at build time");
+    return;
+  }
   initialised = true;
 
   Sentry.init({
@@ -26,6 +29,7 @@ export function initSentry(router: typeof Router) {
   });
 
   Sentry.setTag("runtime", "react-frontend");
+  console.info(`[sentry] enabled (release=${RELEASE}, env=${ENVIRONMENT})`);
 }
 
 export const SentryErrorBoundary = Sentry.ErrorBoundary;

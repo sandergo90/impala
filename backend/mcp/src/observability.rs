@@ -82,6 +82,7 @@ pub fn init() -> Guard {
         release = RELEASE_NAME,
         session_id = %session_id,
         log_dir = %log_dir.display(),
+        sentry_enabled = sentry_guard.is_some(),
         "mcp observability initialised"
     );
 
