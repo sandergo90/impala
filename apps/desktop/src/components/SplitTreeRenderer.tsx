@@ -16,6 +16,7 @@ import {
   resolveFlags,
   buildLaunchCommand,
 } from "../lib/agent";
+import { awaitShellReady, markShellReady } from "../lib/pty-ready";
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -234,6 +235,11 @@ function LeafPane({
         })
           .then(async (isNew) => {
             onSessionSpawned(ptyId);
+            if (!isNew) {
+              // Re-attaching to a PTY that survived restart — its shell is past
+              // prompt-1 by now, so don't wait on a marker that won't arrive.
+              markShellReady(ptyId);
+            }
             if (paneType === "agent" && isNew) {
               const launched = useUIStore.getState().getWorktreeNavState(worktreePath).agentLaunched;
               const flags = await resolveFlags(agent, projectPath);
@@ -243,6 +249,18 @@ function LeafPane({
                   String.fromCharCode(b)
                 ).join("")
               );
+
+              // Wait for the shell to finish sourcing rc files before writing.
+              // In release builds, pty_spawn resolves before zsh is interactive,
+              // and writing immediately would dump raw bytes into the pre-prompt
+              // input buffer.
+              const reason = await awaitShellReady(ptyId);
+              if (reason === "timed_out") {
+                console.warn(
+                  `[pty] shell readiness timed out for ${ptyId}; writing anyway`,
+                );
+              }
+
               invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
               useUIStore.getState().updateWorktreeNavState(worktreePath, { agentLaunched: true });
             }

@@ -29,6 +29,7 @@ import { getHookPort } from "../lib/get-hook-port";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { resolveAgent, resolveFlags, buildLaunchCommand } from "../lib/agent";
+import { awaitShellReady, markShellReady } from "../lib/pty-ready";
 import {
   AGENT_PANE_ID,
   RUN_PANE_ID,
@@ -582,6 +583,12 @@ const TabBody = memo(function TabBody({
             paneSessions: { ...data.paneSessions, [paneId]: ptyId },
           });
 
+          if (!isNew) {
+            // Re-attaching to a PTY that survived restart — its shell is past
+            // prompt-1 by now, so don't wait on a marker that won't arrive.
+            markShellReady(ptyId);
+          }
+
           if (kind === "agent" && isNew) {
             const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
             const agentLaunched = nav.agentLaunched;
@@ -590,6 +597,18 @@ const TabBody = memo(function TabBody({
             const launched = useContinueFlag && agentLaunched;
             const cmd = buildLaunchCommand(agent, flags, launched);
             const encoded = encodePtyInput(cmd);
+
+            // Wait for the shell to finish sourcing rc files before writing.
+            // In release builds, pty_spawn resolves before zsh is interactive,
+            // and writing immediately would dump raw bytes into the pre-prompt
+            // input buffer.
+            const reason = await awaitShellReady(ptyId);
+            if (reason === "timed_out") {
+              console.warn(
+                `[pty] shell readiness timed out for ${ptyId}; writing anyway`,
+              );
+            }
+
             invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(
               () => {},
             );
