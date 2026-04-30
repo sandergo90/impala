@@ -89,7 +89,7 @@ export function CodeEditor({
         ]),
         keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         saveKeymap,
-        themeCompartment.of(createCodeMirrorTheme(activeTheme, fontSize, fontFamily)),
+        themeCompartment.of(createCodeMirrorTheme(activeTheme, fontSize, fontFamily, language)),
         languageCompartment.of([]),
         updateListener,
       ],
@@ -131,10 +131,10 @@ export function CodeEditor({
     if (!view) return;
     view.dispatch({
       effects: themeCompartment.reconfigure(
-        createCodeMirrorTheme(activeTheme, fontSize, fontFamily),
+        createCodeMirrorTheme(activeTheme, fontSize, fontFamily, language),
       ),
     });
-  }, [activeTheme, fontSize, fontFamily, themeCompartment]);
+  }, [activeTheme, fontSize, fontFamily, language, themeCompartment]);
 
   useEffect(() => {
     const view = viewRef.current;

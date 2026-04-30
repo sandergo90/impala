@@ -9,11 +9,15 @@ export function createCodeMirrorTheme(
   theme: Theme,
   fontSize: number,
   fontFamily: string | null,
+  language?: string,
 ): Extension {
   const term = theme.terminal;
   const isDark = theme.type === "dark";
   const family = fontFamily ?? DEFAULT_DIFF_FONT_FAMILY;
   const lineHeight = `${Math.round(fontSize * 1.5)}px`;
+  const isMarkdown = language === "markdown";
+  const muted = isDark ? term.brightBlack : term.white;
+  const accent = isDark ? term.brightBlue : term.blue;
 
   const view = EditorView.theme(
     {
@@ -25,14 +29,22 @@ export function createCodeMirrorTheme(
         fontFamily: family,
       },
       ".cm-scroller": { fontFamily: family, lineHeight, overflow: "auto" },
-      ".cm-content": { caretColor: term.foreground },
+      ".cm-content": isMarkdown
+        ? {
+            caretColor: term.foreground,
+            padding: "1em 1.25em",
+            maxWidth: "76ch",
+            margin: "0 auto",
+          }
+        : { caretColor: term.foreground },
       ".cm-cursor, .cm-dropCursor": { borderLeftColor: term.foreground },
       "&.cm-focused .cm-selectionBackgroundCollapsed, ::selection, .cm-selectionBackground":
         { backgroundColor: term.selectionBackground },
       ".cm-gutters": {
         backgroundColor: term.background,
-        color: isDark ? term.brightBlack : term.white,
+        color: muted,
         border: "none",
+        ...(isMarkdown ? { display: "none" } : {}),
       },
       ".cm-activeLine": { backgroundColor: "transparent" },
       ".cm-activeLineGutter": { backgroundColor: "transparent" },
@@ -50,13 +62,29 @@ export function createCodeMirrorTheme(
     { tag: [t.keyword, t.controlKeyword, t.operatorKeyword], color: isDark ? term.brightMagenta : term.magenta },
     { tag: [t.string, t.special(t.string)], color: isDark ? term.brightGreen : term.green },
     { tag: [t.number, t.bool, t.null], color: isDark ? term.brightYellow : term.yellow },
-    { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: isDark ? term.brightBlack : term.white, fontStyle: "italic" },
-    { tag: [t.function(t.variableName), t.function(t.propertyName)], color: isDark ? term.brightBlue : term.blue },
+    { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: muted, fontStyle: "italic" },
+    { tag: [t.function(t.variableName), t.function(t.propertyName)], color: accent },
     { tag: [t.typeName, t.className, t.namespace], color: isDark ? term.brightCyan : term.cyan },
     { tag: [t.propertyName, t.attributeName], color: isDark ? term.brightCyan : term.cyan },
     { tag: [t.tagName], color: isDark ? term.brightRed : term.red },
     { tag: [t.variableName], color: term.foreground },
     { tag: [t.invalid], color: isDark ? term.brightRed : term.red },
+
+    // Markdown — inert on non-markdown languages because these tags never fire there.
+    { tag: t.heading1, fontSize: "1.6em", fontWeight: "700", color: term.foreground },
+    { tag: t.heading2, fontSize: "1.35em", fontWeight: "700", color: term.foreground },
+    { tag: t.heading3, fontSize: "1.2em", fontWeight: "700", color: term.foreground },
+    { tag: [t.heading4, t.heading5, t.heading6], fontSize: "1.05em", fontWeight: "700", color: term.foreground },
+    { tag: t.strong, fontWeight: "700", color: term.foreground },
+    { tag: t.emphasis, fontStyle: "italic" },
+    { tag: t.strikethrough, textDecoration: "line-through" },
+    { tag: [t.link, t.url], color: accent, textDecoration: "underline" },
+    { tag: t.monospace, color: isDark ? term.brightCyan : term.cyan },
+    { tag: t.quote, color: muted, fontStyle: "italic" },
+    { tag: t.contentSeparator, color: muted },
+    // Dim the markdown markers (`#`, `*`, `>`, list bullets, link brackets)
+    // so the prose itself reads as the focus.
+    { tag: t.processingInstruction, color: muted },
   ]);
 
   return [view, syntaxHighlighting(highlight)];
