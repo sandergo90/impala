@@ -141,6 +141,117 @@ fn main_worktree_root(worktree_path: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Read the user's ~/.codex/config.toml as the seed for a worktree config.
+/// Missing file or parse failure → empty table (we still want to write a
+/// usable per-worktree config; the user just loses their global settings
+/// for this session, with a warning logged).
+fn read_user_codex_config() -> toml::value::Table {
+    let Some(path) = dirs::home_dir().map(|h| h.join(".codex").join("config.toml")) else {
+        return toml::value::Table::new();
+    };
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return toml::value::Table::new();
+    };
+    match toml::from_str::<toml::Value>(&contents) {
+        Ok(toml::Value::Table(t)) => t,
+        Ok(_) => toml::value::Table::new(),
+        Err(e) => {
+            eprintln!("impala: failed to parse ~/.codex/config.toml: {}", e);
+            toml::value::Table::new()
+        }
+    }
+}
+
+/// Build the merged TOML written to <CODEX_HOME>/config.toml. Starts from the
+/// user's ~/.codex/config.toml so settings like `model`, `model_provider`,
+/// `sandbox_mode`, custom MCP servers, etc. carry over. Then layers Impala-
+/// managed sections on top:
+/// - `mcp_servers.impala` — overwritten with the bundled MCP binary
+/// - `projects.<repo_root>.trust_level = "trusted"` — pre-trust the repo
+/// - `hooks.<Event>` — append Impala's hook handler to each event array,
+///    preserving any user-defined hooks. Idempotent on the IMPALA_HOOK_PORT
+///    marker so we never duplicate our own entry across runs.
+fn build_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<String, String> {
+    use toml::Value;
+    let mut root = read_user_codex_config();
+
+    // mcp_servers.impala — preserve siblings, overwrite our key.
+    let mcp_servers = root
+        .entry("mcp_servers".to_string())
+        .or_insert_with(|| Value::Table(toml::value::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| "mcp_servers in ~/.codex/config.toml is not a table".to_string())?;
+    let mut impala_mcp = toml::value::Table::new();
+    impala_mcp.insert("command".into(), Value::String(mcp_binary.to_string()));
+    impala_mcp.insert("args".into(), Value::Array(vec![]));
+    mcp_servers.insert("impala".into(), Value::Table(impala_mcp));
+
+    // projects.<repo_root>.trust_level — keyed by main repo path.
+    if let Some(repo_root) = main_worktree_root(worktree_path) {
+        let projects = root
+            .entry("projects".to_string())
+            .or_insert_with(|| Value::Table(toml::value::Table::new()))
+            .as_table_mut()
+            .ok_or_else(|| "projects in ~/.codex/config.toml is not a table".to_string())?;
+        let mut trust = toml::value::Table::new();
+        trust.insert("trust_level".into(), Value::String("trusted".into()));
+        projects.insert(
+            repo_root.to_string_lossy().to_string(),
+            Value::Table(trust),
+        );
+    }
+
+    // hooks.<event> — append Impala's matcher group to whatever the user has.
+    // Codex hooks schema: top-level [hooks] table keyed by PascalCase event
+    // name. Each event holds Vec<MatcherGroup>; each MatcherGroup holds a
+    // Vec<HookHandlerConfig>. Handlers are tagged on `type`; only `command`
+    // is currently useful. See codex-rs/config/src/hook_config.rs.
+    let hook_cmd = crate::hook_server::hook_command_public("PLACEHOLDER");
+    let hooks = root
+        .entry("hooks".to_string())
+        .or_insert_with(|| Value::Table(toml::value::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| "hooks in ~/.codex/config.toml is not a table".to_string())?;
+    for event in ["UserPromptSubmit", "Stop", "PostToolUse", "PermissionRequest"] {
+        let cmd = hook_cmd.replace("PLACEHOLDER", event);
+        let arr = hooks
+            .entry(event.to_string())
+            .or_insert_with(|| Value::Array(vec![]))
+            .as_array_mut()
+            .ok_or_else(|| format!("hooks.{} is not an array", event))?;
+        let already = arr.iter().any(|g| {
+            g.get("hooks")
+                .and_then(|hs| hs.as_array())
+                .map(|hs| hs.iter().any(|h| {
+                    h.get("command")
+                        .and_then(|c| c.as_str())
+                        .map(|c| c.contains("IMPALA_HOOK_PORT"))
+                        .unwrap_or(false)
+                }))
+                .unwrap_or(false)
+        });
+        if already {
+            continue;
+        }
+        let mut handler = toml::value::Table::new();
+        handler.insert("type".into(), Value::String("command".into()));
+        handler.insert("command".into(), Value::String(cmd));
+        let mut group = toml::value::Table::new();
+        group.insert("hooks".into(), Value::Array(vec![Value::Table(handler)]));
+        arr.push(Value::Table(group));
+    }
+
+    let body = toml::to_string_pretty(&Value::Table(root))
+        .map_err(|e| format!("serialize codex config.toml: {}", e))?;
+    Ok(format!(
+        "# Managed by Impala — regenerated on each worktree open.\n\
+         # Seeded from ~/.codex/config.toml so your global settings carry over.\n\
+         # Impala overrides: mcp_servers.impala, projects.<repo>.trust_level, hooks.*\n\n\
+         {}",
+        body
+    ))
+}
+
 /// Write per-worktree Codex config under <worktree>/.impala/codex/config.toml.
 /// Returns the path to use as CODEX_HOME.
 pub fn write_codex_config(
@@ -157,41 +268,7 @@ pub fn write_codex_config(
     link_codex_auth(&codex_home)?;
 
     let config_path = codex_home.join("config.toml");
-
-    // Build TOML manually — the schema is small and stable, and we want
-    // the output to be human-readable for debugging.
-    let hook_cmd = crate::hook_server::hook_command_public("PLACEHOLDER");
-    let mut toml_out = String::new();
-    toml_out.push_str("# Managed by Impala — regenerated on each worktree open.\n\n");
-
-    toml_out.push_str("[mcp_servers.impala]\n");
-    toml_out.push_str(&format!("command = {}\n", toml::Value::String(mcp_binary.to_string())));
-    toml_out.push_str("args = []\n\n");
-
-    // Pre-trust the project so Codex doesn't show its directory-trust prompt
-    // on every spawn. Codex resolves a linked worktree to its main repo, so
-    // we key by that path.
-    if let Some(repo_root) = main_worktree_root(worktree_path) {
-        toml_out.push_str(&format!(
-            "[projects.{}]\n",
-            toml::Value::String(repo_root.to_string_lossy().to_string())
-        ));
-        toml_out.push_str("trust_level = \"trusted\"\n\n");
-    }
-
-    // Codex hooks schema: top-level [hooks] table keyed by PascalCase
-    // event name. Each event holds Vec<MatcherGroup>; each MatcherGroup
-    // holds a Vec<HookHandlerConfig>. Handlers are tagged on `type` and
-    // currently only `command` is useful — a single shell string, no
-    // args array. See codex-rs/config/src/hook_config.rs.
-    let events = ["UserPromptSubmit", "Stop", "PostToolUse", "PermissionRequest"];
-    for event in events {
-        let cmd = hook_cmd.replace("PLACEHOLDER", event);
-        toml_out.push_str(&format!("[[hooks.{}]]\n", event));
-        toml_out.push_str(&format!("[[hooks.{}.hooks]]\n", event));
-        toml_out.push_str("type = \"command\"\n");
-        toml_out.push_str(&format!("command = {}\n\n", toml::Value::String(cmd)));
-    }
+    let toml_out = build_codex_config(worktree_path, mcp_binary)?;
 
     fs::write(&config_path, toml_out)
         .map_err(|e| format!("write codex config.toml: {}", e))?;
