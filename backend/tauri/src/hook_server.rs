@@ -19,10 +19,13 @@ pub fn hook_command_public(event_type: &str) -> String {
 /// The hook command for a specific event type.
 /// Reads the hook port from ~/.impala/hook-port (written on each app start)
 /// so that persistent PTY sessions always reach the current hook server,
-/// even after an app restart changes the port.
+/// even after an app restart changes the port. Stdout is fully suppressed:
+/// Codex parses hook stdout as JSON and chokes on non-JSON bodies (Claude
+/// Code ignores stdout entirely), so we make sure neither sees the HTTP
+/// response body.
 fn hook_command(event_type: &str) -> String {
     format!(
-        "[ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${{IMPALA_HOOK_PORT}}/hook\" --data-urlencode \"event_type={}\" --data-urlencode \"worktree_path=${{IMPALA_WORKTREE_PATH}}\" --connect-timeout 1 --max-time 2 2>/dev/null || true",
+        "[ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${{IMPALA_HOOK_PORT}}/hook\" --data-urlencode \"event_type={}\" --data-urlencode \"worktree_path=${{IMPALA_WORKTREE_PATH}}\" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 || true",
         event_type
     )
 }
