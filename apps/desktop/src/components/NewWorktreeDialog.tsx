@@ -155,7 +155,11 @@ export function NewWorktreeDialog({
 
   const selectIssue = (issue: LinearIssue) => {
     setSelectedIssue(issue);
-    setLinearBranchName(issue.branch_name);
+    const name =
+      branchPrefix && issue.branch_name.startsWith(branchPrefix)
+        ? issue.branch_name.slice(branchPrefix.length)
+        : issue.branch_name;
+    setLinearBranchName(name);
     setComboboxOpen(false);
     setLinearQuery("");
   };
