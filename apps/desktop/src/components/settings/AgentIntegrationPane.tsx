@@ -37,7 +37,7 @@ export function AgentIntegrationPane() {
           type="text"
           value={codexFlags}
           onChange={(e) => setCodexFlags(e.target.value)}
-          placeholder="--sandbox workspace-write"
+          placeholder="--yolo"
           className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
         />
       </div>

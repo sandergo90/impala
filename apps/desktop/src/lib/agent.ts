@@ -41,7 +41,8 @@ export function buildLaunchCommand(
 }
 
 /**
- * Resolve flags for the given agent: project scope > global scope > "".
+ * Resolve flags for the given agent: project scope > global scope > default.
+ * Codex defaults to `--yolo` when nothing is set; claude defaults to empty.
  */
 export async function resolveFlags(
   agent: Agent,
@@ -52,5 +53,6 @@ export async function resolveFlags(
     invoke<string | null>("get_setting", { key, scope: projectPath }),
     invoke<string | null>("get_setting", { key, scope: "global" }),
   ]);
-  return project ?? global ?? "";
+  const fallback = agent === "codex" ? "--yolo" : "";
+  return project ?? global ?? fallback;
 }
