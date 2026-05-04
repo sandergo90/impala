@@ -15,6 +15,20 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("Failed to initialize settings tables: {}", e))
 }
 
+/// The agent is now a per-worktree, creation-time decision. Drop any
+/// global- or project-scoped `selectedAgent` rows left over from the
+/// previous design. Worktree-scope rows survive because their scope is
+/// a worktree path, not 'global' or a tracked project.
+pub fn drop_legacy_selected_agent(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM settings WHERE key = 'selectedAgent' \
+         AND (scope = 'global' OR scope IN (SELECT path FROM projects))",
+        [],
+    )
+    .map_err(|e| format!("Failed to drop legacy selectedAgent rows: {}", e))?;
+    Ok(())
+}
+
 pub fn get_setting(conn: &Connection, key: &str, scope: &str) -> Result<Option<String>, String> {
     let mut stmt = conn
         .prepare("SELECT value FROM settings WHERE key = ?1 AND scope = ?2")

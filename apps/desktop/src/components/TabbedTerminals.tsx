@@ -578,7 +578,7 @@ const TabBody = memo(function TabBody({
     getHookPort().then(async (hookPort) => {
       const projectPath =
         useUIStore.getState().selectedProject?.path ?? worktreePath;
-      const agent = await resolveAgent(worktreePath, projectPath);
+      const agent = await resolveAgent(worktreePath);
       let extraEnv: Record<string, string> = {};
       try {
         extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {

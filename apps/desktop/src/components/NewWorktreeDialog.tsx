@@ -5,6 +5,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useUIStore } from "../store";
 import { useInvoke } from "../hooks/useInvoke";
 import type { BranchInfo, Worktree, LinearIssue } from "../types";
+import type { Agent } from "../lib/agent";
 
 interface NewWorktreeDialogProps {
   repoPath: string;
@@ -42,9 +43,19 @@ export function NewWorktreeDialog({
   const [branchPrefix, setBranchPrefix] = useState("");
   const [existingQuery, setExistingQuery] = useState("");
   const [existingComboboxOpen, setExistingComboboxOpen] = useState(false);
+  const [agent, setAgent] = useState<Agent>("claude");
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const comboboxRef = useRef<HTMLDivElement>(null);
   const existingComboboxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", {
+      key: "lastAgentForProject",
+      scope: repoPath,
+    }).then((v) => {
+      if (v === "codex") setAgent("codex");
+    });
+  }, [repoPath]);
 
   useEffect(() => {
     async function resolvePrefix() {
@@ -192,6 +203,7 @@ export function NewWorktreeDialog({
         baseBranch: base,
         existing,
         initialTitle: tab === "linear" && selectedIssue ? selectedIssue.title : null,
+        agent,
       });
       // Best-effort: link to Linear issue and move to In Progress (fire-and-forget)
       if (tab === "linear" && selectedIssue) {
@@ -238,6 +250,23 @@ export function NewWorktreeDialog({
         }}
       >
         <h2 className="text-lg font-semibold">New Worktree</h2>
+
+        <div className="flex gap-2">
+          {(["claude", "codex"] as const).map((a) => (
+            <button
+              type="button"
+              key={a}
+              onClick={() => setAgent(a)}
+              className={`flex-1 px-3 py-1.5 rounded border text-sm ${
+                agent === a
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {a === "claude" ? "Claude" : "Codex"}
+            </button>
+          ))}
+        </div>
 
         <div className="flex border-b border-border">
           {tabs.map((t) => (

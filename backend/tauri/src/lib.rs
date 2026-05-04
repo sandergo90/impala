@@ -270,7 +270,12 @@ async fn create_worktree(
     base_branch: Option<String>,
     existing: bool,
     initial_title: Option<String>,
+    agent: String,
 ) -> Result<git::Worktree, String> {
+    if agent != "claude" && agent != "codex" {
+        return Err(format!("Invalid agent: {}", agent));
+    }
+
     let (prefix_mode, prefix_custom, worktree_base_dir) = {
         let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
         (
@@ -310,14 +315,19 @@ async fn create_worktree(
     .await
     .map_err(|e| format!("Task join error: {}", e))??;
 
-    if !worktrees::is_main_branch(&worktree.branch) {
-        let title = match initial_title {
-            Some(t) if !t.trim().is_empty() => t.trim().to_string(),
-            _ => worktrees::default_title_from_branch(&branch_name),
-        };
+    {
         let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
-        worktrees::upsert_title(&conn, &worktree.path, &title)?;
-        worktree.title = Some(title);
+        settings::set_setting(&conn, "selectedAgent", &worktree.path, &agent)?;
+        settings::set_setting(&conn, "lastAgentForProject", &repo_path, &agent)?;
+
+        if !worktrees::is_main_branch(&worktree.branch) {
+            let title = match initial_title {
+                Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+                _ => worktrees::default_title_from_branch(&branch_name),
+            };
+            worktrees::upsert_title(&conn, &worktree.path, &title)?;
+            worktree.title = Some(title);
+        }
     }
 
     Ok(worktree)
@@ -1313,6 +1323,12 @@ pub fn run() {
                     let _ = fs::remove_file(&projects_file);
                 }
             }
+
+            // Drop legacy global/project-scope `selectedAgent` rows. Agent
+            // is now a per-worktree, creation-time decision (see
+            // create_worktree). Runs after the projects.json migration
+            // so the projects table reflects the user's tracked repos.
+            settings::drop_legacy_selected_agent(&conn)?;
 
             // Migrate hotkeys.json → settings table
             {

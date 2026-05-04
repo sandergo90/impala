@@ -3,24 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 export type Agent = "claude" | "codex";
 
 /**
- * Resolve the agent for a worktree: worktree scope > project scope >
- * global scope > default ("claude").
+ * Resolve the agent for a worktree. Agent is chosen at creation time and
+ * stored at worktree scope; nothing else feeds the resolution. Worktrees
+ * created before this design fall back to "claude".
  */
-export async function resolveAgent(
-  worktreePath: string,
-  projectPath: string | null,
-): Promise<Agent> {
-  const candidates = [worktreePath];
-  if (projectPath && projectPath !== worktreePath) candidates.push(projectPath);
-  candidates.push("global");
-  for (const scope of candidates) {
-    const value = await invoke<string | null>("get_setting", {
-      key: "selectedAgent",
-      scope,
-    });
-    if (value === "claude" || value === "codex") return value;
-  }
-  return "claude";
+export async function resolveAgent(worktreePath: string): Promise<Agent> {
+  const value = await invoke<string | null>("get_setting", {
+    key: "selectedAgent",
+    scope: worktreePath,
+  });
+  return value === "codex" ? "codex" : "claude";
 }
 
 /**
