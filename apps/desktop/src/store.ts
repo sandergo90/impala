@@ -206,7 +206,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 5,
+      version: 6,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};
@@ -245,6 +245,14 @@ export const useUIStore = create<UIState>()(
           for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
             if (nav?.activeTab === "files") nav.activeTab = "terminal";
             if (nav && "selectedFilePath" in nav) delete nav.selectedFilePath;
+          }
+        }
+        if (fromVersion < 6 && persistedState?.worktreeNavStates) {
+          // `userTabs` became a required field on WorktreeNavState after v5
+          // shipped without a migration. Old persisted states rehydrate with
+          // userTabs === undefined and crash the first .find/.some/.map on it.
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (nav && !Array.isArray(nav.userTabs)) nav.userTabs = [];
           }
         }
         return persistedState;
