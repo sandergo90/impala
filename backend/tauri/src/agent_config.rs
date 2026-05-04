@@ -83,7 +83,7 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const CODEX_EXCLUDE_LINES: &[&str] = &[
+pub(crate) const CODEX_EXCLUDE_LINES: &[&str] = &[
     "# Added by Impala",
     "/.impala/",
 ];
@@ -283,6 +283,8 @@ pub fn write_codex_config(
     fs::write(commands_dir.join("impala-plan.md"), IMPALA_PLAN_COMMAND)
         .map_err(|e| format!("write codex impala-plan.md: {}", e))?;
 
+    crate::linear_context::ensure_codex_context(worktree_path)?;
+
     add_git_excludes(worktree_path, CODEX_EXCLUDE_LINES)?;
     Ok(codex_home)
 }
@@ -352,11 +354,11 @@ Call `mcp__impala__get_plan_decision`. If `approved`, stop. Otherwise: read each
 /// gitignore that does not modify the user's tracked .gitignore). No-op
 /// if the worktree is not a git repository or the lines are already
 /// present.
-fn add_git_excludes(worktree_path: &Path, lines: &[&str]) -> Result<(), String> {
-    let exclude_path: PathBuf = worktree_path.join(".git").join("info").join("exclude");
-    if !exclude_path.parent().map(|p| p.exists()).unwrap_or(false) {
+pub(crate) fn add_git_excludes(worktree_path: &Path, lines: &[&str]) -> Result<(), String> {
+    let Some(exclude_path) = git_exclude_path(worktree_path) else {
         return Ok(());
-    }
+    };
+
     let existing = fs::read_to_string(&exclude_path).unwrap_or_default();
     let mut to_add: Vec<&str> = Vec::new();
     for line in lines {
@@ -376,4 +378,35 @@ fn add_git_excludes(worktree_path: &Path, lines: &[&str]) -> Result<(), String> 
     fs::write(&exclude_path, new_content)
         .map_err(|e| format!("write .git/info/exclude: {}", e))?;
     Ok(())
+}
+
+fn git_exclude_path(worktree_path: &Path) -> Option<PathBuf> {
+    let git = worktree_path.join(".git");
+    if git.is_dir() {
+        let exclude_path = git.join("info").join("exclude");
+        return exclude_path
+            .parent()
+            .map(|p| p.exists())
+            .unwrap_or(false)
+            .then_some(exclude_path);
+    }
+
+    if git.is_file() {
+        let content = fs::read_to_string(&git).ok()?;
+        let line = content.lines().find(|l| l.starts_with("gitdir:"))?;
+        let raw = PathBuf::from(line.trim_start_matches("gitdir:").trim());
+        let gitdir = if raw.is_absolute() {
+            raw
+        } else {
+            worktree_path.join(raw)
+        };
+        let exclude_path = gitdir.join("info").join("exclude");
+        return exclude_path
+            .parent()
+            .map(|p| p.exists())
+            .unwrap_or(false)
+            .then_some(exclude_path);
+    }
+
+    None
 }

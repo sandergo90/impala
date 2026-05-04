@@ -11,8 +11,92 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
 /// Claude Code walks up the directory tree from CWD and reads CLAUDE.local.md files.
 /// Writing directly into the worktree directory is the simplest approach —
 /// it's gitignored, per-worktree, and automatically discovered by Claude Code.
+fn claude_context_path(worktree_path: &str) -> PathBuf {
+    PathBuf::from(worktree_path).join("CLAUDE.local.md")
+}
+
+/// Resolve the per-worktree Codex AGENTS.md path.
+/// Impala launches Codex with CODEX_HOME=<worktree>/.impala/codex, and Codex
+/// reads AGENTS.md from CODEX_HOME in addition to project AGENTS.md files.
+fn codex_context_path(worktree_path: &str) -> PathBuf {
+    PathBuf::from(worktree_path)
+        .join(".impala")
+        .join("codex")
+        .join("AGENTS.md")
+}
+
+fn user_codex_agents_content() -> String {
+    dirs::home_dir()
+        .map(|home| home.join(".codex").join("AGENTS.md"))
+        .and_then(|path| fs::read_to_string(path).ok())
+        .unwrap_or_default()
+}
+
+fn read_codex_agents_base(path: &std::path::Path) -> String {
+    fs::read_to_string(path).unwrap_or_else(|_| user_codex_agents_content())
+}
+
+/// Ensure the per-worktree Codex AGENTS.md exists, seeded with the user's
+/// global Codex instructions when present. Existing files are left untouched so
+/// Linear context written before Codex launch is preserved.
+pub fn ensure_codex_context(worktree_path: &std::path::Path) -> Result<(), String> {
+    let path = codex_context_path(worktree_path.to_string_lossy().as_ref());
+    if path.exists() {
+        return Ok(());
+    }
+
+    let content = user_codex_agents_content();
+    if content.is_empty() {
+        return Ok(());
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("mkdir codex context dir: {}", e))?;
+    }
+    fs::write(&path, content).map_err(|e| format!("write codex AGENTS.md: {}", e))?;
+    Ok(())
+}
+
+fn write_marked_section(path: PathBuf, existing: String, section: &str) -> Result<(), String> {
+    let content = if existing.is_empty() {
+        format!("{}\n", section)
+    } else {
+        splice_section(&existing, section)
+    };
+
+    if content == existing {
+        return Ok(());
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("mkdir context dir: {}", e))?;
+    }
+    fs::write(&path, content).map_err(|e| format!("Failed to write context file: {}", e))?;
+
+    Ok(())
+}
+
+fn clean_marked_section(path: PathBuf) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let existing =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read context file: {}", e))?;
+
+    let remaining = remove_section(&existing);
+
+    if remaining.trim().is_empty() {
+        fs::remove_file(&path).map_err(|e| format!("Failed to delete context file: {}", e))?;
+    } else {
+        fs::write(&path, remaining).map_err(|e| format!("Failed to write context file: {}", e))?;
+    }
+
+    Ok(())
+}
+
 fn claude_md_path(worktree_path: &str) -> Result<PathBuf, String> {
-    Ok(PathBuf::from(worktree_path).join("CLAUDE.local.md"))
+    Ok(claude_context_path(worktree_path))
 }
 
 /// Format issue detail as a markdown section between markers.
@@ -102,15 +186,21 @@ pub fn write_context(
     worktree_path: &str,
     force: bool,
 ) -> Result<(), String> {
-    let path = claude_md_path(worktree_path)?;
+    let claude_path = claude_md_path(worktree_path)?;
+    let codex_path = codex_context_path(worktree_path);
 
     // Rate-limit: skip if file was recently updated (unless forced)
     if !force {
-        if let Ok(metadata) = fs::metadata(&path) {
-            if let Ok(modified) = metadata.modified() {
-                if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
-                    if elapsed < REFRESH_INTERVAL {
-                        return Ok(());
+        let codex_has_context = fs::read_to_string(&codex_path)
+            .map(|content| content.contains(START_MARKER))
+            .unwrap_or(false);
+        if codex_has_context {
+            if let Ok(metadata) = fs::metadata(&claude_path) {
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
+                        if elapsed < REFRESH_INTERVAL {
+                            return Ok(());
+                        }
                     }
                 }
             }
@@ -120,40 +210,24 @@ pub fn write_context(
     let detail = linear::get_issue_detail(api_key, issue_id)?;
     let section = format_section(&detail);
 
-    let existing = fs::read_to_string(&path).unwrap_or_default();
-    let content = if existing.is_empty() {
-        format!("{}\n", section)
-    } else {
-        splice_section(&existing, &section)
-    };
+    let claude_existing = fs::read_to_string(&claude_path).unwrap_or_default();
+    write_marked_section(claude_path, claude_existing, &section)?;
 
-    if content == existing {
-        return Ok(());
-    }
-
-    fs::write(&path, content).map_err(|e| format!("Failed to write CLAUDE.local.md: {}", e))?;
+    let codex_existing = read_codex_agents_base(&codex_path);
+    crate::agent_config::add_git_excludes(
+        std::path::Path::new(worktree_path),
+        crate::agent_config::CODEX_EXCLUDE_LINES,
+    )?;
+    write_marked_section(codex_path, codex_existing, &section)?;
 
     Ok(())
 }
 
-/// Remove Linear context section from CLAUDE.local.md. Deletes the file if empty.
+/// Remove Linear context from Claude and Codex context files. Deletes files
+/// that become empty after removing the managed section.
 pub fn clean_context(worktree_path: &str) -> Result<(), String> {
-    let path = claude_md_path(worktree_path)?;
-
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let existing =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read CLAUDE.local.md: {}", e))?;
-
-    let remaining = remove_section(&existing);
-
-    if remaining.trim().is_empty() {
-        fs::remove_file(&path).map_err(|e| format!("Failed to delete CLAUDE.local.md: {}", e))?;
-    } else {
-        fs::write(&path, remaining).map_err(|e| format!("Failed to write CLAUDE.local.md: {}", e))?;
-    }
+    clean_marked_section(claude_md_path(worktree_path)?)?;
+    clean_marked_section(codex_context_path(worktree_path))?;
 
     Ok(())
 }
