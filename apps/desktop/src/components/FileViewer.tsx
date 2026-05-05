@@ -11,7 +11,11 @@ import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { RevealInFinderButton } from "./RevealInFinderButton";
 import { CodeEditor, detectLanguage, type CodeEditorHandle } from "./CodeEditor";
-import { MarkdownLinkContext, markdownComponents } from "./markdownComponents";
+import {
+  MarkdownImageContext,
+  MarkdownLinkContext,
+  markdownComponents,
+} from "./markdownComponents";
 import { dirname } from "../lib/path-utils";
 import { openFileTab } from "../lib/tab-actions";
 
@@ -385,13 +389,24 @@ function MarkdownPane({
     openFileTab(worktreePath, resolved, { forceNewTab: true, pin: true });
     return true;
   };
+  const resolveImageSrc = (src: string): string | null => {
+    const pathOnly = src.split(/[?#]/)[0];
+    if (!pathOnly) return null;
+    const resolved = pathOnly.startsWith("/")
+      ? pathOnly.replace(/^\/+/, "")
+      : resolveRelativePath(dirname(filePath), pathOnly);
+    if (!resolved) return null;
+    return convertFileSrc(`${worktreePath}/${resolved}`);
+  };
   return (
     <div className="flex-1 min-h-0 overflow-y-auto select-text">
       <article className="max-w-4xl mx-auto px-8 py-6 plan-markdown">
         <MarkdownLinkContext.Provider value={handleLink}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-            {content}
-          </ReactMarkdown>
+          <MarkdownImageContext.Provider value={resolveImageSrc}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {content}
+            </ReactMarkdown>
+          </MarkdownImageContext.Provider>
         </MarkdownLinkContext.Provider>
       </article>
     </div>

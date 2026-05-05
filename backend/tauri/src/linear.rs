@@ -341,6 +341,38 @@ pub fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Fetch a Linear-hosted attachment (typically `https://uploads.linear.app/...`)
+/// using the user's API key. The browser can't load these directly because the
+/// host requires `Authorization` and a webview `<img>` tag can't send headers.
+/// Returns `(content_type, bytes)`.
+pub fn fetch_attachment(api_key: &str, url: &str) -> Result<(String, Vec<u8>), String> {
+    if !url.starts_with("https://uploads.linear.app/") {
+        return Err("Only uploads.linear.app URLs are allowed".to_string());
+    }
+
+    let response = CLIENT
+        .get(url)
+        .header("Authorization", api_key)
+        .send()
+        .map_err(|e| format!("Linear attachment request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Linear attachment returned status {}", response.status()));
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let bytes = response
+        .bytes()
+        .map_err(|e| format!("Failed to read Linear attachment: {}", e))?
+        .to_vec();
+    Ok((content_type, bytes))
+}
+
 // --- HTTP helper ---
 
 fn make_request(api_key: &str, query: &str, variables: &serde_json::Value) -> Result<String, String> {

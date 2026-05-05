@@ -874,6 +874,17 @@ async fn start_linear_issue(api_key: String, issue_id: String) -> Result<(), Str
 }
 
 #[tauri::command]
+async fn fetch_linear_attachment(api_key: String, url: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let (content_type, bytes) = tokio::task::spawn_blocking(move || {
+        linear::fetch_attachment(&api_key, &url)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
+    Ok(format!("data:{};base64,{}", content_type, STANDARD.encode(bytes)))
+}
+
+#[tauri::command]
 fn link_worktree_issue(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
@@ -1492,6 +1503,7 @@ pub fn run() {
             get_my_linear_issues,
             search_linear_issues,
             start_linear_issue,
+            fetch_linear_attachment,
             link_worktree_issue,
             get_worktree_issue,
             get_all_worktree_issues,

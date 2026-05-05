@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { Components } from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import {
@@ -6,6 +6,7 @@ import {
   oneLight,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Check, Copy } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useUIStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
 
@@ -16,6 +17,15 @@ import { resolveThemeById } from "../themes/apply";
  */
 export const MarkdownLinkContext = createContext<
   ((href: string) => boolean | void) | null
+>(null);
+
+/**
+ * Provider lets a parent rewrite relative `<img src>` values to a URL the
+ * webview can load (e.g. via Tauri's `asset:` protocol). Return the rewritten
+ * src, or `null`/`undefined` to leave it untouched.
+ */
+export const MarkdownImageContext = createContext<
+  ((src: string) => string | null | undefined) | null
 >(null);
 
 function CodeBlock({
@@ -88,6 +98,92 @@ function isExternalHref(href: string): boolean {
     /^[a-z][a-z0-9+.-]*:/i.test(href) ||
     href.startsWith("//") ||
     href.startsWith("#")
+  );
+}
+
+function isLinearAttachment(src: string): boolean {
+  return src.startsWith("https://uploads.linear.app/");
+}
+
+function LinearAttachmentImage({
+  src,
+  alt,
+  title,
+}: {
+  src: string;
+  alt?: string;
+  title?: string;
+}) {
+  const linearApiKey = useUIStore((s) => s.linearApiKey);
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!linearApiKey) {
+      setError("Set your Linear API key in Settings to load this image");
+      return;
+    }
+    let cancelled = false;
+    setError(null);
+    setDataUrl(null);
+    invoke<string>("fetch_linear_attachment", { apiKey: linearApiKey, url: src })
+      .then((url) => {
+        if (!cancelled) setDataUrl(url);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [src, linearApiKey]);
+
+  if (error) {
+    return (
+      <span className="inline-block text-xs text-muted-foreground border border-border rounded px-2 py-1 my-2">
+        {alt || "Image"} — {error}
+      </span>
+    );
+  }
+  if (!dataUrl) {
+    return (
+      <span className="inline-block text-xs text-muted-foreground border border-border rounded px-2 py-1 my-2">
+        Loading {alt || "image"}…
+      </span>
+    );
+  }
+  return (
+    <img
+      src={dataUrl}
+      alt={alt ?? ""}
+      title={title}
+      className="max-w-full h-auto rounded border border-border my-4"
+    />
+  );
+}
+
+function MarkdownImage({
+  src,
+  alt,
+  title,
+}: {
+  src?: string;
+  alt?: string;
+  title?: string;
+}) {
+  const resolveSrc = useContext(MarkdownImageContext);
+  if (src && isLinearAttachment(src)) {
+    return <LinearAttachmentImage src={src} alt={alt} title={title} />;
+  }
+  const resolved =
+    src && resolveSrc && !isExternalHref(src) ? resolveSrc(src) ?? src : src;
+  return (
+    <img
+      src={resolved}
+      alt={alt ?? ""}
+      title={title}
+      className="max-w-full h-auto rounded border border-border my-4"
+    />
   );
 }
 
@@ -171,6 +267,9 @@ export const markdownComponents: Partial<Components> = {
     </blockquote>
   ),
   a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
+  img: ({ src, alt, title }) => (
+    <MarkdownImage src={typeof src === "string" ? src : undefined} alt={alt} title={title} />
+  ),
   hr: () => <hr className="my-8 border-border" />,
   li: ({ children, className }) => {
     const isTaskItem = className?.includes("task-list-item");
