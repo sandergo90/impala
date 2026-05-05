@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useFileTree, FileTree } from "@pierre/trees/react";
 import type { GitStatusEntry } from "@pierre/trees";
 import { useUIStore, useDataStore } from "../store";
@@ -38,7 +38,6 @@ export function FilesPanel() {
     const tab = nav.userTabs.find((t) => t.id === nav.activeTerminalsTab);
     return tab && tab.kind === "file" ? tab.path ?? null : null;
   });
-  const lastSyncedPathRef = useRef<string | null>(null);
 
   // Trees expects directory paths to end with `/`. File paths must not.
   const treePaths = useMemo(() => {
@@ -112,41 +111,62 @@ export function FilesPanel() {
     model.getItem(path)?.select();
   };
 
+  // Expand ancestors, single-select the path, and focus it (which scrolls
+  // the row into view). Callers gate on `getSelectedPaths().includes(path)`
+  // so this is idempotent — re-running just retries the select once tree
+  // data has loaded.
+  const revealPath = useCallback(
+    (path: string, signal: { cancelled: boolean }) => {
+      void (async () => {
+        const segments = path.split("/");
+        const ancestors: string[] = [];
+        for (let i = 1; i < segments.length; i++) {
+          ancestors.push(segments.slice(0, i).join("/"));
+        }
+        await Promise.all(ancestors.map((a) => expand(a)));
+        if (signal.cancelled) return;
+        // Defer to next frame so resetPaths from the expand() batch flushes
+        // into the model before we look up the item.
+        requestAnimationFrame(() => {
+          if (signal.cancelled) return;
+          selectOnly(path);
+          model.focusPath(path);
+        });
+      })();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [expand, model],
+  );
+
   useEffect(() => {
     if (!wtPath || !pendingReveal || pendingReveal.worktreePath !== wtPath) return;
-    const { path } = pendingReveal;
-    let cancelled = false;
-    (async () => {
-      const segments = path.split("/");
-      const ancestors: string[] = [];
-      for (let i = 1; i < segments.length; i++) {
-        ancestors.push(segments.slice(0, i).join("/"));
-      }
-      await Promise.all(ancestors.map((a) => expand(a)));
-      if (cancelled) return;
-      // Defer to next frame so resetPaths from the expand() batch flushes
-      // into the model before we look up the item.
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        lastSyncedPathRef.current = path;
-        selectOnly(path);
-      });
-    })();
+    // Skip if the row is already selected — avoids re-running on every
+    // tree-paths update (fs events trigger frequent recomputations).
+    if (model.getSelectedPaths().includes(pendingReveal.path)) return;
+    const signal = { cancelled: false };
+    revealPath(pendingReveal.path, signal);
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
     };
+    // treePaths is in the deps so the reveal retries once async data lands —
+    // on FilesPanel's first mount, paths are empty and selectOnly is a no-op.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingReveal?.nonce, wtPath, expand, model]);
+  }, [pendingReveal?.nonce, wtPath, revealPath, treePaths]);
 
-  // Active file tab → tree selection. Gated by lastSyncedPathRef so the
-  // selectionChange handler (which calls openFileTab) doesn't loop.
+  // Active file tab → tree reveal (expand ancestors, select, scroll into view).
+  // Covers tab switches and worktree changes — openFileTab calls also dispatch
+  // pendingTreeReveal, which the effect above handles.
   useEffect(() => {
     if (!activeFileTabPath) return;
-    if (lastSyncedPathRef.current === activeFileTabPath) return;
-    lastSyncedPathRef.current = activeFileTabPath;
-    selectOnly(activeFileTabPath);
+    if (model.getSelectedPaths().includes(activeFileTabPath)) return;
+    const signal = { cancelled: false };
+    revealPath(activeFileTabPath, signal);
+    return () => {
+      signal.cancelled = true;
+    };
+    // treePaths in deps so the effect retries on initial data load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFileTabPath, model]);
+  }, [activeFileTabPath, revealPath, treePaths]);
 
   if (!wtPath) {
     return (
