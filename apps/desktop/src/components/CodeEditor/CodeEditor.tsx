@@ -18,6 +18,7 @@ export interface CodeEditorHandle {
   focus(): void;
   getValue(): string;
   openFind(): void;
+  goto(line: number, col?: number): void;
 }
 
 interface CodeEditorProps {
@@ -103,6 +104,21 @@ export function CodeEditor({
         focus: () => view.focus(),
         getValue: () => view.state.doc.toString(),
         openFind: () => openSearchPanel(view),
+        goto: (line, col) => {
+          const lineCount = view.state.doc.lines;
+          const safeLine = Math.max(1, Math.min(line, lineCount));
+          const lineInfo = view.state.doc.line(safeLine);
+          const safeCol =
+            col !== undefined
+              ? Math.max(0, Math.min(col, lineInfo.length))
+              : 0;
+          const pos = lineInfo.from + safeCol;
+          view.dispatch({
+            selection: { anchor: pos, head: pos },
+            effects: EditorView.scrollIntoView(pos, { y: "center" }),
+          });
+          view.focus();
+        },
       };
     }
 

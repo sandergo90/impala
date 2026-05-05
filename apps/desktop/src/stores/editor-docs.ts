@@ -32,6 +32,7 @@ export type SaveOutcome =
 
 interface EditorDocsState {
   docs: Record<string, EditorDoc>;
+  pendingTargets: Record<string, { line: number; col?: number }>;
   ensureDoc: (worktreePath: string, filePath: string) => EditorDoc;
   loadDoc: (worktreePath: string, filePath: string) => Promise<void>;
   updateDraft: (key: string, content: string) => void;
@@ -40,6 +41,8 @@ interface EditorDocsState {
   setExternalChange: (key: string, value: boolean) => void;
   reloadFromDisk: (key: string) => Promise<void>;
   removeDoc: (key: string) => void;
+  setPendingTarget: (key: string, target: { line: number; col?: number }) => void;
+  clearPendingTarget: (key: string) => void;
 }
 
 interface ReadFileResult {
@@ -68,6 +71,7 @@ function patch(set: SetState, key: string, updates: Partial<EditorDoc>): void {
 
 export const useEditorDocsStore = create<EditorDocsState>((set, get) => ({
   docs: {},
+  pendingTargets: {},
 
   ensureDoc(worktreePath, filePath) {
     const key = buildDocumentKey(worktreePath, filePath);
@@ -192,7 +196,19 @@ export const useEditorDocsStore = create<EditorDocsState>((set, get) => ({
     deleteBuffer(key);
     set((s) => {
       const { [key]: _drop, ...rest } = s.docs;
-      return { docs: rest };
+      const { [key]: _droppedTarget, ...restTargets } = s.pendingTargets;
+      return { docs: rest, pendingTargets: restTargets };
+    });
+  },
+
+  setPendingTarget(key, target) {
+    set((s) => ({ pendingTargets: { ...s.pendingTargets, [key]: target } }));
+  },
+
+  clearPendingTarget(key) {
+    set((s) => {
+      const { [key]: _removed, ...rest } = s.pendingTargets;
+      return { pendingTargets: rest };
     });
   },
 }));

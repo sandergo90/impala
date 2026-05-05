@@ -75,7 +75,7 @@ export function FilesPanel() {
       void expand(path.slice(0, -1));
       return;
     }
-    openFileTab(wtPath, path, false); // preview
+    openFileTab(wtPath, path); // preview
   };
 
   const { model } = useFileTree({
@@ -170,7 +170,7 @@ export function FilesPanel() {
     if (row.getAttribute("data-item-type") !== "file") return;
     const path = row.getAttribute("data-item-path");
     if (!path) return;
-    openFileTab(wtPath, path, true); // pin
+    openFileTab(wtPath, path, { pin: true }); // pin
   };
 
   return (

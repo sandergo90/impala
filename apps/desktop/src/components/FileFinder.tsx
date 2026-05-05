@@ -62,7 +62,7 @@ export function FileFinder({
 
   const openPath = (path: string, pin: boolean) => {
     if (!worktreePath) return;
-    openFileTab(worktreePath, path, pin);
+    openFileTab(worktreePath, path, { pin });
     onClose();
   };
 

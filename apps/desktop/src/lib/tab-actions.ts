@@ -321,6 +321,12 @@ export function setUserTabFocusedPane(
   uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
 }
 
+export interface OpenFileTabOptions {
+  pin?: boolean;
+  line?: number;
+  col?: number;
+}
+
 /**
  * Open a file in the dynamic tab bar with VS Code preview/pin semantics.
  *
@@ -329,12 +335,16 @@ export function setUserTabFocusedPane(
  *   its path; do not create a new tab. If `pin` is true, the preview is
  *   promoted to pinned at the same time.
  * - Otherwise create a fresh tab (preview unless `pin` is true).
+ *
+ * If `line` is provided, the line-jump target is parked on the editor-docs
+ * store and consumed by FileViewer once the editor mounts.
  */
 export function openFileTab(
   worktreePath: string,
   path: string,
-  pin: boolean,
+  opts: OpenFileTabOptions = {},
 ): UserTab {
+  const { pin = false, line, col } = opts;
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
   const label = basename(path);
@@ -344,6 +354,13 @@ export function openFileTab(
   // show terminal content; flipping them would collapse the user's layout.
   const needsTabAreaSwitch =
     nav.activeTab === "diff" || nav.activeTab === "plan";
+
+  const parkPendingTarget = (): void => {
+    if (line === undefined) return;
+    useEditorDocsStore
+      .getState()
+      .setPendingTarget(buildDocumentKey(worktreePath, path), { line, col });
+  };
 
   // Pinned tab for this path already exists — just activate it.
   const existingPinned = nav.userTabs.find(
@@ -355,6 +372,7 @@ export function openFileTab(
     };
     if (needsTabAreaSwitch) updates.activeTab = "terminal";
     uiState.updateWorktreeNavState(worktreePath, updates);
+    parkPendingTarget();
     return existingPinned;
   }
 
@@ -378,6 +396,7 @@ export function openFileTab(
     };
     if (needsTabAreaSwitch) updates.activeTab = "terminal";
     uiState.updateWorktreeNavState(worktreePath, updates);
+    parkPendingTarget();
     return updated;
   }
 
@@ -397,5 +416,6 @@ export function openFileTab(
   };
   if (needsTabAreaSwitch) updates.activeTab = "terminal";
   uiState.updateWorktreeNavState(worktreePath, updates);
+  parkPendingTarget();
   return newTab;
 }

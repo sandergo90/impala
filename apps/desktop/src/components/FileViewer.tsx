@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore } from "../store";
@@ -8,7 +8,7 @@ import { classifyFile, formatBytes, TEXT_SIZE_CAP_BYTES, type FileKind } from ".
 import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { RevealInFinderButton } from "./RevealInFinderButton";
-import { CodeEditor, detectLanguage } from "./CodeEditor";
+import { CodeEditor, detectLanguage, type CodeEditorHandle } from "./CodeEditor";
 
 interface FsEvent {
   kind: "create" | "update" | "delete" | "rename" | "overflow";
@@ -93,6 +93,23 @@ export function FileViewer() {
   const updateDraft = useEditorDocsStore((s) => s.updateDraft);
   const saveDoc = useEditorDocsStore((s) => s.saveDoc);
   const reloadFromDisk = useEditorDocsStore((s) => s.reloadFromDisk);
+  const pendingTarget = useEditorDocsStore((s) =>
+    docKey ? s.pendingTargets[docKey] : undefined,
+  );
+  const clearPendingTarget = useEditorDocsStore((s) => s.clearPendingTarget);
+
+  const editorRef = useRef<CodeEditorHandle | null>(null);
+
+  useEffect(() => {
+    if (!docKey || !pendingTarget) return;
+    // Defer to next frame so a freshly-mounted CodeEditor has had a chance
+    // to attach its handle.
+    const id = requestAnimationFrame(() => {
+      editorRef.current?.goto(pendingTarget.line, pendingTarget.col);
+      clearPendingTarget(docKey);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [docKey, pendingTarget, clearPendingTarget]);
 
   useEffect(() => {
     if (!shouldLoadText || !wtPath || !selectedFilePath) return;
@@ -248,6 +265,7 @@ export function FileViewer() {
       )}
       <CodeEditor
         key={docKey}
+        editorRef={editorRef}
         value={bufferContent}
         language={language}
         onChange={(next) => updateDraft(docKey!, next)}
