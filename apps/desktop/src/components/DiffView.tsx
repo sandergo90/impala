@@ -10,6 +10,7 @@ import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
+import { openFileTab } from "../lib/tab-actions";
 import { ChangedFileContextMenu } from "./ChangedFileContextMenu";
 import {
   AlertDialog,
@@ -47,12 +48,12 @@ function DiscardButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function OpenFileButton({ onClick }: { onClick: () => void }) {
+function OpenFileButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onClick={(e) => { e.stopPropagation(); onClick(e); }}
       className="text-muted-foreground/60 hover:text-foreground transition-colors shrink-0"
-      title="Open in editor"
+      title="Click to open in Impala. Cmd+click to open in your IDE."
     >
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M10 2h4v4" />
@@ -280,7 +281,16 @@ const FileDiffItem = memo(function FileDiffItem({
             <span style={{ color: nameColor, fontWeight: 500 }}>{basename}</span>
           </bdi>
         </span>
-        <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${file.path}`)} />
+        <OpenFileButton
+          onClick={(e) => {
+            if (!worktreePath) return;
+            if (e.metaKey || e.ctrlKey) {
+              openFileInEditor(`${worktreePath}/${file.path}`);
+            } else {
+              openFileTab(worktreePath, file.path);
+            }
+          }}
+        />
         {viewMode === 'uncommitted' && (
           <DiscardButton onClick={() => onRequestDiscard(file.path)} />
         )}
@@ -467,7 +477,17 @@ function VirtualizedCommitView({
                   ) : (
                     <span className="flex-1 truncate">{file.path}</span>
                   )}
-                  <OpenFileButton onClick={() => worktreePath && openFileInEditor(`${worktreePath}/${isRenamed ? newPath : file.path}`)} />
+                  <OpenFileButton
+                    onClick={(e) => {
+                      if (!worktreePath) return;
+                      const path = isRenamed ? (newPath ?? file.path) : file.path;
+                      if (e.metaKey || e.ctrlKey) {
+                        openFileInEditor(`${worktreePath}/${path}`);
+                      } else {
+                        openFileTab(worktreePath, path);
+                      }
+                    }}
+                  />
                   {viewMode === 'uncommitted' && (
                     <DiscardButton onClick={() => onRequestDiscard(isRenamed ? (newPath ?? file.path) : file.path)} />
                   )}

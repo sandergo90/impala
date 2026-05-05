@@ -5,6 +5,7 @@ import { useUIStore, useDataStore } from "../store";
 import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
 import { openFileTab } from "../lib/tab-actions";
+import { openFileInEditor } from "../lib/open-file-in-editor";
 import { getTreesStyle, resolveThemeById } from "../themes/apply";
 import type { ChangedFile } from "../types";
 
@@ -173,6 +174,23 @@ export function FilesPanel() {
     openFileTab(wtPath, path, { pin: true }); // pin
   };
 
+  const handleClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!wtPath) return;
+    if (!e.metaKey && !e.ctrlKey) return;
+    const composed = e.nativeEvent.composedPath() as EventTarget[];
+    const row = composed.find(
+      (el): el is HTMLElement =>
+        el instanceof HTMLElement && el.hasAttribute("data-item-path"),
+    );
+    if (!row) return;
+    if (row.getAttribute("data-item-type") !== "file") return;
+    const path = row.getAttribute("data-item-path");
+    if (!path) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openFileInEditor(`${wtPath}/${path}`);
+  };
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center gap-1 mx-3 my-2 shrink-0">
@@ -205,6 +223,7 @@ export function FilesPanel() {
       <div
         className="flex-1 min-h-0 overflow-hidden"
         onDoubleClick={handleDoubleClick}
+        onClickCapture={handleClickCapture}
       >
         <FileTree model={model} style={{ height: "100%", ...treesStyle }} />
       </div>

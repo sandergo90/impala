@@ -4,6 +4,7 @@ import { Fzf, type FzfResultItem } from "fzf";
 import { useUIStore } from "../store";
 import { useAllFiles } from "../hooks/useAllFiles";
 import { openFileTab } from "../lib/tab-actions";
+import { openFileInEditor } from "../lib/open-file-in-editor";
 import { basename, dirname } from "../lib/path-utils";
 
 const MAX_RESULTS = 50;
@@ -152,6 +153,11 @@ export function FileFinder({
                     key={`recent-${path}`}
                     path={path}
                     onSelect={() => openPath(path, false)}
+                    onCmdClick={() => {
+                      if (!worktreePath) return;
+                      openFileInEditor(`${worktreePath}/${path}`);
+                      onClose();
+                    }}
                   />
                 ))}
               </Command.Group>
@@ -167,6 +173,11 @@ export function FileFinder({
                     key={r.item}
                     path={r.item}
                     onSelect={() => openPath(r.item, false)}
+                    onCmdClick={() => {
+                      if (!worktreePath) return;
+                      openFileInEditor(`${worktreePath}/${r.item}`);
+                      onClose();
+                    }}
                   />
                 ))}
               </Command.Group>
@@ -178,6 +189,9 @@ export function FileFinder({
             </span>
             <span>
               <kbd className="font-mono">⌘↵</kbd> pin
+            </span>
+            <span>
+              <kbd className="font-mono">⌘click</kbd> IDE
             </span>
             <span>
               <kbd className="font-mono">esc</kbd> close
@@ -192,9 +206,11 @@ export function FileFinder({
 function FileItem({
   path,
   onSelect,
+  onCmdClick,
 }: {
   path: string;
   onSelect: () => void;
+  onCmdClick: () => void;
 }) {
   const name = basename(path);
   const dir = dirname(path);
@@ -202,6 +218,13 @@ function FileItem({
     <Command.Item
       value={path}
       onSelect={onSelect}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          onCmdClick();
+        }
+      }}
       data-path={path}
       className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md cursor-pointer data-[selected=true]:bg-accent"
     >

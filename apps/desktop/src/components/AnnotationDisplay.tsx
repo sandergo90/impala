@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { openFileInEditor } from "../lib/open-file-in-editor";
+import { openFileTab } from "../lib/tab-actions";
 import type { Annotation } from "../types";
 import { formatRelativeTime } from "../lib/utils";
 
@@ -35,12 +36,16 @@ export const AnnotationDisplay = memo(function AnnotationDisplay({
         <div className="flex items-center gap-2 text-muted-foreground">
           <span
             className="font-mono hover:underline cursor-pointer"
-            title="Cmd+click to open in editor"
+            title="Click to open in Impala. Cmd+click to open in your IDE."
             onClick={(e) => {
-              if (e.metaKey) {
-                e.stopPropagation();
+              e.stopPropagation();
+              if (e.metaKey || e.ctrlKey) {
                 const fullPath = `${annotation.repo_path}/${annotation.file_path}`;
                 openFileInEditor(fullPath, annotation.line_number);
+              } else {
+                openFileTab(annotation.repo_path, annotation.file_path, {
+                  line: annotation.line_number,
+                });
               }
             }}
           >

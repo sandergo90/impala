@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Terminal, ILinkProvider, ILink } from "@xterm/xterm";
 import { parseFileLinks } from "./file-link-parser";
 import { openFileInEditor } from "./open-file-in-editor";
+import { openFileTab } from "./tab-actions";
 
 const existsCache = new Map<string, { exists: boolean; absPath: string; ts: number }>();
 const CACHE_TTL_MS = 10_000;
@@ -70,8 +71,23 @@ export function createFileLinkProvider(
               end: { x: fl.endIndex + 1, y: bufferLineNumber },
             },
             text: text.slice(fl.startIndex, fl.endIndex),
-            activate(_event: MouseEvent, _text: string) {
-              openFileInEditor(absPath, fl.line, fl.col);
+            activate(event: MouseEvent, _text: string) {
+              if (event.metaKey || event.ctrlKey) {
+                openFileInEditor(absPath, fl.line, fl.col);
+                return;
+              }
+              // baseDir is the worktree path. resolve_file_path returns absPath
+              // rooted at baseDir, so the relative path is everything after
+              // `${baseDir}/`. If absPath resolved outside the worktree, fall
+              // back to the external editor.
+              const relPath = absPath.startsWith(`${baseDir}/`)
+                ? absPath.slice(baseDir.length + 1)
+                : absPath;
+              if (relPath === absPath) {
+                openFileInEditor(absPath, fl.line, fl.col);
+                return;
+              }
+              openFileTab(baseDir, relPath, { line: fl.line, col: fl.col });
             },
           };
           return link;
