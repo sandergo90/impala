@@ -102,6 +102,8 @@ interface UIState {
   revealFileInTree: (worktreePath: string, path: string) => void;
   fileFinderOpen: boolean;
   setFileFinderOpen: (open: boolean) => void;
+  markdownViewMode: 'rendered' | 'raw';
+  setMarkdownViewMode: (mode: 'rendered' | 'raw') => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -203,6 +205,8 @@ export const useUIStore = create<UIState>()(
         set({ pendingTreeReveal: { worktreePath, path, nonce: Date.now() } }),
       fileFinderOpen: false,
       setFileFinderOpen: (open) => set({ fileFinderOpen: open }),
+      markdownViewMode: 'rendered',
+      setMarkdownViewMode: (mode) => set({ markdownViewMode: mode }),
     }),
     {
       name: "impala-ui-state",

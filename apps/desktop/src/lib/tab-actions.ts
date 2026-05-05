@@ -323,6 +323,13 @@ export function setUserTabFocusedPane(
 
 export interface OpenFileTabOptions {
   pin?: boolean;
+  /**
+   * When true, skip the preview-retarget branch and always create a fresh
+   * tab (unless a tab for this exact path already exists, in which case the
+   * existing tab is activated). Useful for actions that should never
+   * clobber the current preview, e.g. clicking a markdown link.
+   */
+  forceNewTab?: boolean;
   line?: number;
   col?: number;
 }
@@ -330,10 +337,12 @@ export interface OpenFileTabOptions {
 /**
  * Open a file in the dynamic tab bar with VS Code preview/pin semantics.
  *
- * - If a pinned tab for this exact path already exists, just activate it.
- * - Else if a preview tab (kind: "file", pinned: false) exists, retarget
- *   its path; do not create a new tab. If `pin` is true, the preview is
- *   promoted to pinned at the same time.
+ * - If a tab for this exact path already exists, just activate it (matches
+ *   pinned tabs always; matches the preview tab only when `forceNewTab` is set
+ *   so we don't open a duplicate of what's already showing).
+ * - Else if `forceNewTab` is false and a preview tab exists, retarget its
+ *   path; do not create a new tab. If `pin` is true, the preview is promoted
+ *   to pinned at the same time.
  * - Otherwise create a fresh tab (preview unless `pin` is true).
  *
  * If `line` is provided, the line-jump target is parked on the editor-docs
@@ -344,7 +353,7 @@ export function openFileTab(
   path: string,
   opts: OpenFileTabOptions = {},
 ): UserTab {
-  const { pin = false, line, col } = opts;
+  const { pin = false, forceNewTab = false, line, col } = opts;
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
   const label = basename(path);
@@ -362,23 +371,29 @@ export function openFileTab(
       .setPendingTarget(buildDocumentKey(worktreePath, path), { line, col });
   };
 
-  // Pinned tab for this path already exists — just activate it.
-  const existingPinned = nav.userTabs.find(
-    (t) => t.kind === "file" && t.pinned && t.path === path,
+  // Tab for this exact path already exists — just activate it. Pinned tabs
+  // always match; the unpinned preview only matches when forceNewTab is set
+  // (so a regular FilesPanel click can still retarget the preview to itself).
+  const existing = nav.userTabs.find(
+    (t) =>
+      t.kind === "file" &&
+      t.path === path &&
+      (t.pinned || forceNewTab),
   );
-  if (existingPinned) {
+  if (existing) {
     const updates: Partial<WorktreeNavState> = {
-      activeTerminalsTab: existingPinned.id,
+      activeTerminalsTab: existing.id,
     };
     if (needsTabAreaSwitch) updates.activeTab = "terminal";
     uiState.updateWorktreeNavState(worktreePath, updates);
     parkPendingTarget();
-    return existingPinned;
+    uiState.revealFileInTree(worktreePath, path);
+    return existing;
   }
 
-  const previewTab = nav.userTabs.find(
-    (t) => t.kind === "file" && !t.pinned,
-  );
+  const previewTab = !forceNewTab
+    ? nav.userTabs.find((t) => t.kind === "file" && !t.pinned)
+    : undefined;
 
   if (previewTab) {
     const updated: UserTab = {
@@ -397,6 +412,7 @@ export function openFileTab(
     if (needsTabAreaSwitch) updates.activeTab = "terminal";
     uiState.updateWorktreeNavState(worktreePath, updates);
     parkPendingTarget();
+    uiState.revealFileInTree(worktreePath, path);
     return updated;
   }
 
@@ -417,5 +433,6 @@ export function openFileTab(
   if (needsTabAreaSwitch) updates.activeTab = "terminal";
   uiState.updateWorktreeNavState(worktreePath, updates);
   parkPendingTarget();
+  uiState.revealFileInTree(worktreePath, path);
   return newTab;
 }

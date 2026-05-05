@@ -1,26 +1,153 @@
+import { createContext, useContext, useState } from "react";
 import type { Components } from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import {
+  oneDark,
+  oneLight,
+} from "react-syntax-highlighter/dist/esm/styles/prism";
+import { Check, Copy } from "lucide-react";
+import { useUIStore } from "../store";
+import { resolveThemeById } from "../themes/apply";
+
+/**
+ * Provider lets a parent intercept relative-link clicks (e.g. open the linked
+ * file in a new tab). Return `true` to mark the click handled; otherwise the
+ * link falls through to the default external-link behavior.
+ */
+export const MarkdownLinkContext = createContext<
+  ((href: string) => boolean | void) | null
+>(null);
+
+function CodeBlock({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  const activeThemeId = useUIStore((s) => s.activeThemeId);
+  const customThemes = useUIStore((s) => s.customThemes);
+  const isDark = resolveThemeById(activeThemeId, customThemes).type === "dark";
+
+  const match = /language-(\w+)/.exec(className || "");
+  const language = match ? match[1] : "text";
+  const code = String(children).replace(/\n$/, "");
+
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div className="relative group my-4">
+      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {language !== "text" && (
+          <span className="text-xs px-1.5 py-0.5 rounded bg-background/80 text-muted-foreground border border-border backdrop-blur">
+            {language}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={handleCopy}
+          aria-label={copied ? "Copied" : "Copy code"}
+          title={copied ? "Copied" : "Copy code"}
+          className="h-6 w-6 flex items-center justify-center rounded border border-border bg-background/80 hover:bg-accent text-muted-foreground backdrop-blur"
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5 text-green-500" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+      <SyntaxHighlighter
+        language={language}
+        style={(isDark ? oneDark : oneLight) as Record<string, React.CSSProperties>}
+        PreTag="div"
+        customStyle={{
+          margin: 0,
+          borderRadius: "0.375rem",
+          padding: "1rem",
+          fontSize: "0.875rem",
+        }}
+      >
+        {code}
+      </SyntaxHighlighter>
+    </div>
+  );
+}
+
+function isExternalHref(href: string): boolean {
+  return (
+    /^[a-z][a-z0-9+.-]*:/i.test(href) ||
+    href.startsWith("//") ||
+    href.startsWith("#")
+  );
+}
+
+function MarkdownLink({
+  href,
+  children,
+}: {
+  href?: string;
+  children?: React.ReactNode;
+}) {
+  const onLinkClick = useContext(MarkdownLinkContext);
+  const className =
+    "text-primary underline underline-offset-2 hover:text-primary/80";
+
+  // Internal/relative link with an active interceptor — render without
+  // target="_blank" and always preventDefault so the webview never navigates.
+  if (href && onLinkClick && !isExternalHref(href)) {
+    return (
+      <a
+        href={href}
+        className={className}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onLinkClick(href);
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      className={className}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {children}
+    </a>
+  );
+}
 
 export const markdownComponents: Partial<Components> = {
-  code: ({ className, children }) => {
+  code: ({ className, children, ...rest }) => {
     const isBlock = className?.startsWith("language-");
     if (isBlock) {
-      return (
-        <code className={className}>
-          {children}
-        </code>
-      );
+      return <CodeBlock className={className}>{children}</CodeBlock>;
     }
     return (
-      <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono">
+      <code
+        className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono"
+        {...rest}
+      >
         {children}
       </code>
     );
   },
-  pre: ({ children }) => (
-    <pre className="bg-muted/50 border border-border rounded-md p-4 overflow-x-auto my-4 text-sm font-mono">
-      {children}
-    </pre>
-  ),
+  pre: ({ children }) => <>{children}</>,
   table: ({ children }) => (
     <div className="overflow-x-auto my-4">
       <table className="w-max min-w-full divide-y divide-border">
@@ -43,16 +170,7 @@ export const markdownComponents: Partial<Components> = {
       {children}
     </blockquote>
   ),
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      className="text-primary underline underline-offset-2 hover:text-primary/80"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
   hr: () => <hr className="my-8 border-border" />,
   li: ({ children, className }) => {
     const isTaskItem = className?.includes("task-list-item");
