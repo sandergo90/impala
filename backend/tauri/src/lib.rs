@@ -1068,13 +1068,6 @@ async fn refresh_linear_context(api_key: String, issue_id: String, worktree_path
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
-#[tauri::command]
-async fn clean_linear_context(worktree_path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || linear_context::clean_context(&worktree_path))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-}
-
 /// Exact paths to check first (top-level, highest priority).
 const FAVICON_EXACT: &[&str] = &[
     "favicon.ico",
@@ -1512,7 +1505,6 @@ pub fn run() {
             get_default_worktree_base_dir,
             write_linear_context,
             refresh_linear_context,
-            clean_linear_context,
             pty::pty_spawn,
             pty::pty_get_buffer,
             pty::pty_write,

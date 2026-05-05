@@ -556,22 +556,31 @@ const TabBody = memo(function TabBody({
     if (sessionId || spawningRef.current) return;
     spawningRef.current = true;
 
-    if (kind === "agent" && useContinueFlag) {
+    // Look up the linked Linear issue in parallel with pty_spawn. Its
+    // identifier feeds the agent's initial prompt on a fresh launch, and
+    // its issue_id feeds the context-file refresh.
+    const issuePromise: Promise<WorktreeIssue | null> =
+      kind === "agent" && useContinueFlag
+        ? invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath }).catch(
+            () => null,
+          )
+        : Promise.resolve(null);
+
+    // Kick off the linear context refresh in parallel. 5-min rate-limited
+    // backend-side, so usually a no-op. We await it later before building
+    // the launch command so the file is current when the agent reads it.
+    const refreshPromise: Promise<void> = (async () => {
+      if (kind !== "agent" || !useContinueFlag) return;
       const linearApiKey = useUIStore.getState().linearApiKey;
-      if (linearApiKey) {
-        invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
-          .then((issue) => {
-            if (issue) {
-              invoke("refresh_linear_context", {
-                apiKey: linearApiKey,
-                issueId: issue.issue_id,
-                worktreePath,
-              }).catch(() => {});
-            }
-          })
-          .catch(() => {});
-      }
-    }
+      if (!linearApiKey) return;
+      const issue = await issuePromise;
+      if (!issue) return;
+      await invoke("refresh_linear_context", {
+        apiKey: linearApiKey,
+        issueId: issue.issue_id,
+        worktreePath,
+      }).catch(() => {});
+    })();
 
     const ptyId = `pty-${paneId}-${worktreePath}`;
 
@@ -624,7 +633,18 @@ const TabBody = memo(function TabBody({
 
             const flags = await resolveFlags(agent, projectPath);
             const launched = useContinueFlag && agentLaunched;
-            const cmd = buildLaunchCommand(agent, flags, launched);
+
+            // On a fresh launch with a linked Linear issue, point the agent
+            // at the issue context file via its initial prompt so it reads
+            // the issue body on demand instead of relying on autoloaded
+            // CLAUDE.local.md / AGENTS.md.
+            await refreshPromise;
+            const issue = !launched ? await issuePromise : null;
+            const initialPrompt = issue
+              ? `Read the linear issue from @docs/issues/${issue.identifier}.md`
+              : undefined;
+
+            const cmd = buildLaunchCommand(agent, flags, launched, initialPrompt);
             const encoded = encodePtyInput(cmd);
 
             // Wait for the shell to finish sourcing rc files before writing.

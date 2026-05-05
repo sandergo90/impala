@@ -567,9 +567,6 @@ export function Sidebar() {
           invoke("unlink_worktree_title", { worktreePath: wt.path }).catch(
             () => {},
           ),
-          invoke("clean_linear_context", { worktreePath: wt.path }).catch(
-            () => {},
-          ),
           invoke("delete_pr_status", { worktreePath: wt.path }).catch(() => {}),
         ]);
 
