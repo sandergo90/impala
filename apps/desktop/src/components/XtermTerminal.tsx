@@ -14,6 +14,10 @@ import { matchesHotkeyEvent } from "../lib/hotkeys";
 import { useHotkeysStore } from "../stores/hotkeys";
 import { createFileLinkProvider } from "../lib/terminal-link-provider";
 import { createUrlLinkProvider } from "../lib/terminal-url-link-provider";
+import {
+  createUrlUnderlineManager,
+  type UrlUnderlineManager,
+} from "../lib/terminal-url-underline";
 import { encodePtyInput } from "../lib/encode-pty";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
 import {
@@ -46,6 +50,11 @@ function getTerminalTheme() {
   return resolveThemeById(state.activeThemeId, state.customThemes).terminal;
 }
 
+function getUrlUnderlineColor(): string {
+  const state = useUIStore.getState();
+  return resolveThemeById(state.activeThemeId, state.customThemes).ui.primary;
+}
+
 // ---------------------------------------------------------------------------
 // Cached xterm instances
 //
@@ -75,6 +84,7 @@ interface CachedTerminal {
   wrapper: HTMLDivElement;
   linkDisposable: { dispose(): void } | null;
   urlLinkDisposable: { dispose(): void } | null;
+  urlUnderlineManager: UrlUnderlineManager | null;
   onDataDisposable: { dispose(): void } | null;
   onResizeDisposable: { dispose(): void } | null;
   unlistenOutput: UnlistenFn | null;
@@ -165,6 +175,10 @@ async function createCachedTerminal(
   const urlLinkDisposable = terminal.registerLinkProvider(
     createUrlLinkProvider(terminal),
   );
+  const urlUnderlineManager = createUrlUnderlineManager(
+    terminal,
+    getUrlUnderlineColor,
+  );
 
   let webglAddon: WebglAddon | null = null;
   if (!webglDisabled) {
@@ -191,6 +205,7 @@ async function createCachedTerminal(
     wrapper,
     linkDisposable,
     urlLinkDisposable,
+    urlUnderlineManager,
     onDataDisposable: null,
     onResizeDisposable: null,
     unlistenOutput: null,
@@ -280,6 +295,7 @@ async function createCachedTerminal(
     for (const chunk of entry.writeQueue) terminal.write(chunk);
     entry.writeQueue = [];
     if (!wasAtBottom && viewport) viewport.scrollTop = savedScrollTop;
+    entry.urlUnderlineManager?.scheduleScan();
   }
 
   entry.unlistenOutput = await listen<string>(`pty-output-${safeId}`, (event) => {
@@ -311,6 +327,7 @@ async function createCachedTerminal(
 function disposeCachedTerminal(entry: CachedTerminal) {
   entry.linkDisposable?.dispose();
   entry.urlLinkDisposable?.dispose();
+  entry.urlUnderlineManager?.dispose();
   entry.onDataDisposable?.dispose();
   entry.onResizeDisposable?.dispose();
   entry.unlistenOutput?.();
@@ -356,6 +373,7 @@ export function releaseCachedTerminal(sessionId: string) {
       if (themeChanged) {
         entry.terminal.options.theme = theme;
         entry.wrapper.style.background = theme.background ?? "";
+        entry.urlUnderlineManager?.refreshColor();
       }
       if (sizeChanged) entry.terminal.options.fontSize = effectiveSize;
       if (familyChanged) entry.terminal.options.fontFamily = fontFamily;
@@ -457,6 +475,7 @@ function XtermTerminalInner({
       } catch {
         // New sessions have no buffer yet — ignore.
       }
+      entry.urlUnderlineManager?.scheduleScan();
 
       // Fit synchronously in the ResizeObserver callback (no RAF). The RAF
       // throttle added one frame of lag between CSS-driven container resize
