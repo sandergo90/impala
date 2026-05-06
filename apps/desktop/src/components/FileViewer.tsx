@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useUIStore } from "../store";
 import { useEditorDocsStore, type SaveOutcome } from "../stores/editor-docs";
 import { buildDocumentKey, getCurrent, getBaseline } from "../lib/editor-buffer-registry";
@@ -11,30 +9,10 @@ import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { RevealInFinderButton } from "./RevealInFinderButton";
 import { CodeEditor, detectLanguage, type CodeEditorHandle } from "./CodeEditor";
-import {
-  MarkdownImageContext,
-  MarkdownLinkContext,
-  markdownComponents,
-} from "./markdownComponents";
-import { dirname } from "../lib/path-utils";
-import { openFileTab } from "../lib/tab-actions";
+import { ProseMarkEditor } from "./markdown-editor";
 
 function isMarkdownPath(path: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(path);
-}
-
-/** Joins a worktree-relative dir with a relative href, resolving `.` and `..`. */
-function resolveRelativePath(baseDir: string, rel: string): string {
-  const segs = baseDir ? baseDir.split("/").filter(Boolean) : [];
-  for (const seg of rel.split("/")) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") {
-      if (segs.length > 0) segs.pop();
-      continue;
-    }
-    segs.push(seg);
-  }
-  return segs.join("/");
 }
 
 interface FsEvent {
@@ -267,7 +245,6 @@ export function FileViewer() {
             {selectedFilePath}
           </span>
           <div className="flex items-center gap-1 shrink-0 ml-2">
-            {isMarkdown && <MarkdownViewModeToggle />}
             <OpenInEditorButton worktreePath={wtPath} filePath={selectedFilePath} />
             <RevealInFinderButton worktreePath={wtPath} filePath={selectedFilePath} />
           </div>
@@ -297,7 +274,6 @@ export function FileViewer() {
           content={bufferContent}
           docKey={docKey!}
           editorRef={editorRef}
-          language={language}
           onSave={handleSave}
           updateDraft={updateDraft}
           worktreePath={wtPath!}
@@ -318,34 +294,9 @@ export function FileViewer() {
   );
 }
 
-function MarkdownViewModeToggle() {
-  const mode = useUIStore((s) => s.markdownViewMode);
-  const setMode = useUIStore((s) => s.setMarkdownViewMode);
-  return (
-    <div className="flex items-center gap-0.5 mr-1">
-      <button
-        type="button"
-        onClick={() => setMode("rendered")}
-        className={`px-1.5 py-0.5 rounded ${mode === "rendered" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-      >
-        Rendered
-      </button>
-      <button
-        type="button"
-        onClick={() => setMode("raw")}
-        className={`px-1.5 py-0.5 rounded ${mode === "raw" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-      >
-        Raw
-      </button>
-    </div>
-  );
-}
-
 function MarkdownPane({
   content,
   docKey,
-  editorRef,
-  language,
   onSave,
   updateDraft,
   worktreePath,
@@ -354,61 +305,21 @@ function MarkdownPane({
   content: string;
   docKey: string;
   editorRef: React.MutableRefObject<CodeEditorHandle | null>;
-  language: string;
   onSave: () => Promise<void>;
   updateDraft: (key: string, next: string) => void;
   worktreePath: string;
   filePath: string;
 }) {
-  const mode = useUIStore((s) => s.markdownViewMode);
-  if (mode === "raw") {
-    return (
-      <CodeEditor
-        key={docKey}
-        editorRef={editorRef}
-        value={content}
-        language={language}
-        onChange={(next) => updateDraft(docKey, next)}
-        onSave={onSave}
-        className="flex-1 min-h-0"
-      />
-    );
-  }
-  const handleLink = (href: string): boolean => {
-    // Skip absolute URLs (mailto:, tel:, http(s)://, file://, etc) and fragments.
-    if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#") || href.startsWith("//")) {
-      return false;
-    }
-    // Strip query/fragment; keep only the path.
-    const pathOnly = href.split(/[?#]/)[0];
-    if (!pathOnly) return false;
-    const resolved = pathOnly.startsWith("/")
-      ? pathOnly.replace(/^\/+/, "")
-      : resolveRelativePath(dirname(filePath), pathOnly);
-    if (!resolved) return false;
-    openFileTab(worktreePath, resolved, { forceNewTab: true, pin: true });
-    return true;
-  };
-  const resolveImageSrc = (src: string): string | null => {
-    const pathOnly = src.split(/[?#]/)[0];
-    if (!pathOnly) return null;
-    const resolved = pathOnly.startsWith("/")
-      ? pathOnly.replace(/^\/+/, "")
-      : resolveRelativePath(dirname(filePath), pathOnly);
-    if (!resolved) return null;
-    return convertFileSrc(`${worktreePath}/${resolved}`);
-  };
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto select-text">
-      <article className="max-w-4xl mx-auto px-8 py-6 plan-markdown">
-        <MarkdownLinkContext.Provider value={handleLink}>
-          <MarkdownImageContext.Provider value={resolveImageSrc}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-              {content}
-            </ReactMarkdown>
-          </MarkdownImageContext.Provider>
-        </MarkdownLinkContext.Provider>
-      </article>
-    </div>
+    <ProseMarkEditor
+      key={docKey}
+      value={content}
+      onChange={(next) => updateDraft(docKey, next)}
+      onSave={() => void onSave()}
+      filePath={filePath}
+      worktreePath={worktreePath}
+      autoFocus
+      className="flex-1 min-h-0 overflow-auto"
+    />
   );
 }

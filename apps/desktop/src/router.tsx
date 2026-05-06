@@ -14,7 +14,6 @@ import { ProjectSettingsRoute } from "./routes/settings/project";
 import { NotificationsRoute } from "./routes/settings/notifications";
 import { KeyboardRoute } from "./routes/settings/keyboard";
 import { GitWorktreesRoute } from "./routes/settings/git";
-import { DevProsemarkRoute } from "./routes/_dev-prosemark";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -24,13 +23,6 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: MainView,
-});
-
-// Dev-only preview for the ProseMark walking skeleton. Deleted by Task 5.
-const devProsemarkRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/_dev-prosemark",
-  component: DevProsemarkRoute,
 });
 
 const settingsRoute = createRoute({
@@ -82,7 +74,6 @@ export const projectSettingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  devProsemarkRoute,
   settingsRoute.addChildren([
     settingsAppearanceRoute,
     settingsGitRoute,
