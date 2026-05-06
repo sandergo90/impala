@@ -157,7 +157,10 @@ export function FilesPanel() {
   // Covers tab switches and worktree changes — openFileTab calls also dispatch
   // pendingTreeReveal, which the effect above handles.
   useEffect(() => {
-    if (!activeFileTabPath) return;
+    if (!activeFileTabPath) {
+      for (const p of model.getSelectedPaths()) model.getItem(p)?.deselect();
+      return;
+    }
     if (model.getSelectedPaths().includes(activeFileTabPath)) return;
     const signal = { cancelled: false };
     revealPath(activeFileTabPath, signal);

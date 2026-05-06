@@ -149,6 +149,17 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
     useEditorDocsStore
       .getState()
       .removeDoc(buildDocumentKey(worktreePath, tab.path));
+    // Clear a stale tree-reveal pointing at the just-closed file. Otherwise
+    // the FilesPanel reveal effect re-fires on the next worktree switch
+    // (treePaths change) and re-opens the tab via onSelectionChange.
+    const reveal = useUIStore.getState().pendingTreeReveal;
+    if (
+      reveal &&
+      reveal.worktreePath === worktreePath &&
+      reveal.path === tab.path
+    ) {
+      useUIStore.setState({ pendingTreeReveal: null });
+    }
   }
 }
 
