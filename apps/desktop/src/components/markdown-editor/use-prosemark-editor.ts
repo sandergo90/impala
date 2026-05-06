@@ -14,11 +14,17 @@ import {
 import { tableDecorations } from "./table-decorations";
 import { mermaidDecorations } from "./mermaid-decorations";
 import { htmlBlockDecorations, htmlBlockParserExtension } from "./html-block-decorations";
+import { imageSrcResolver } from "./image-src-resolver";
+import { linearAttachmentWidget } from "./linear-attachment-widget";
+import { linkNavigation } from "./link-navigation";
+import { formattingKeymap } from "./markdown-formatting";
 
 interface UseProsemarkEditorOptions {
   value: string;
   onChange: (next: string) => void;
   onSave: () => void;
+  filePath: string;
+  worktreePath: string;
   getScrollContainer?: () => HTMLElement | null;
   autoFocus?: boolean;
 }
@@ -27,6 +33,8 @@ export function useProsemarkEditor({
   value,
   onChange,
   onSave,
+  filePath,
+  worktreePath,
   autoFocus = false,
 }: UseProsemarkEditorOptions): RefCallback<HTMLDivElement> {
   const viewRef = useRef<EditorView | null>(null);
@@ -34,10 +42,16 @@ export function useProsemarkEditor({
   const onSaveRef = useRef(onSave);
   const isExternalUpdateRef = useRef(false);
   const autoFocusRef = useRef(autoFocus);
+  // Refs for path props so the extensions read the *current* values without
+  // forcing the EditorView to be torn down and rebuilt when the props change.
+  const filePathRef = useRef(filePath);
+  const worktreePathRef = useRef(worktreePath);
 
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
   autoFocusRef.current = autoFocus;
+  filePathRef.current = filePath;
+  worktreePathRef.current = worktreePath;
 
   // Stable ref callback — only handles mount/unmount.
   const mountRef = useCallback<RefCallback<HTMLDivElement>>((el) => {
@@ -96,6 +110,19 @@ export function useProsemarkEditor({
         tableDecorations(),
         mermaidDecorations(),
         htmlBlockDecorations(),
+        // Order matters: imageSrcResolver runs first so http(s) URLs (incl.
+        // Linear) pass through unchanged, then linearAttachmentWidget catches
+        // the Linear ones and replaces them with placeholders + fetched data.
+        imageSrcResolver({
+          getFilePath: () => filePathRef.current,
+          getWorktreePath: () => worktreePathRef.current,
+        }),
+        linearAttachmentWidget(),
+        linkNavigation({
+          getFilePath: () => filePathRef.current,
+          getWorktreePath: () => worktreePathRef.current,
+        }),
+        keymap.of(formattingKeymap),
         saveKeymap,
         updateListener,
       ],

@@ -6,6 +6,7 @@ interface ProseMarkEditorProps {
   onChange: (next: string) => void;
   onSave: () => void;
   filePath: string;
+  worktreePath: string;
   getScrollContainer?: () => HTMLElement | null;
   autoFocus?: boolean;
   className?: string;
@@ -15,6 +16,8 @@ export function ProseMarkEditor({
   value,
   onChange,
   onSave,
+  filePath,
+  worktreePath,
   getScrollContainer,
   autoFocus,
   className,
@@ -23,6 +26,8 @@ export function ProseMarkEditor({
     value,
     onChange,
     onSave,
+    filePath,
+    worktreePath,
     getScrollContainer,
     autoFocus,
   });

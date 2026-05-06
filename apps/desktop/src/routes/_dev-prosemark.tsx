@@ -27,6 +27,12 @@ Hidden content.
 \`\`\`ts
 const x: number = 1;
 \`\`\`
+
+![relative](./fixtures/test.png)
+![linear](https://uploads.linear.app/abc/test.png)
+[internal link](./other.md)
+[external link](https://example.com)
+[pdf](./doc.pdf)
 `,
   );
   return (
@@ -37,6 +43,7 @@ const x: number = 1;
         onChange={setValue}
         onSave={() => console.log("save:", value)}
         filePath="dev.md"
+        worktreePath="/tmp"
         autoFocus
         className="flex-1 overflow-auto"
       />
