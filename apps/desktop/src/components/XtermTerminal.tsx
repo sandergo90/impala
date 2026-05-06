@@ -449,6 +449,12 @@ function XtermTerminalInner({
       }
       attachedEntry = entry;
       entryRef.current = entry;
+      // Set baseDir before any link-provider activity. The separate baseDir
+      // useEffect runs synchronously after this effect, but for fresh entries
+      // `entryRef.current` is still null at that point (createCachedTerminal
+      // awaits), so without this line baseDirRef stays null until the next
+      // remount — file paths in the terminal aren't clickable on first mount.
+      entry.baseDirRef.current = baseDir ?? null;
 
       host.appendChild(entry.wrapper);
       entry.fitAddon.fit();
@@ -523,6 +529,9 @@ function XtermTerminalInner({
       }
       entryRef.current = null;
     };
+    // baseDir is read inside attach() for the initial sync; later changes are
+    // handled by the dedicated baseDir effect below, so it's not in the deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, scrollback]);
 
   // Keep the cached baseDir in sync so the link provider can resolve paths
