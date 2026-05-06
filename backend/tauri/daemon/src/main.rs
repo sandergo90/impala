@@ -507,6 +507,52 @@ fn start_pty_io_threads(
     }
 }
 
+/// Walk the descendant tree of `root_pid` (inclusive) using `pgrep -P`.
+/// Hardcode the absolute path: when the daemon is launched as a Tauri
+/// sidecar from a bundled .app, PATH is the launchctl default and
+/// doesn't include /usr/bin reliably. Linux ships pgrep at /usr/bin too.
+fn collect_descendants(root_pid: i32) -> Vec<i32> {
+    let mut all = Vec::new();
+    let mut frontier = vec![root_pid];
+    while let Some(pid) = frontier.pop() {
+        all.push(pid);
+        if let Ok(out) = std::process::Command::new("/usr/bin/pgrep")
+            .args(["-P", &pid.to_string()])
+            .output()
+        {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                if let Ok(child) = line.trim().parse::<i32>() {
+                    frontier.push(child);
+                }
+            }
+        }
+    }
+    all
+}
+
+/// SIGTERM the whole subtree of `root_pid`, give it 2s to exit cleanly,
+/// then SIGKILL whatever survived. Codex's TUI catches SIGHUP — which is
+/// what portable-pty's `Child::kill()` sends — so SIGTERM/SIGKILL is the
+/// only reliable teardown.
+///
+/// We union the initial walk with a second walk before SIGKILL: if the
+/// root (zsh) died from SIGTERM, surviving descendants get reparented to
+/// init and a fresh `pgrep -P root` no longer sees them; meanwhile any
+/// subprocess spawned by a survivor during the 2s window would be missed
+/// by the initial walk.
+fn kill_session_tree(root_pid: i32) {
+    let initial = collect_descendants(root_pid);
+    for &pid in &initial {
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    std::thread::sleep(Duration::from_millis(2000));
+    let mut to_kill: std::collections::HashSet<i32> = initial.into_iter().collect();
+    to_kill.extend(collect_descendants(root_pid));
+    for pid in to_kill {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+}
+
 fn timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -616,9 +662,20 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
         Request::Kill { session_id } => {
             let session = registry.sessions.lock().unwrap().remove(&session_id);
             if let Some(s) = session {
+                let shell_pid = s
+                    .child
+                    .lock()
+                    .ok()
+                    .and_then(|c| c.process_id())
+                    .map(|p| p as i32);
                 std::thread::spawn(move || {
-                    if let Ok(mut c) = s.child.lock() {
-                        let _ = c.kill();
+                    match shell_pid {
+                        Some(pid) => kill_session_tree(pid),
+                        None => {
+                            if let Ok(mut c) = s.child.lock() {
+                                let _ = c.kill();
+                            }
+                        }
                     }
                     drop(s);
                 });
@@ -855,6 +912,34 @@ async fn main() -> Result<()> {
     }
 
     eprintln!("[impala-pty-daemon] shutting down");
+
+    // Tear down every live session before we exit, so codex/claude/etc.
+    // don't outlive the daemon. Without this, the kernel's SIGHUP-on-
+    // session-leader-exit only reaches processes that don't trap it,
+    // and codex's TUI does.
+    let live: Vec<(i32, Session)> = {
+        let mut sessions = registry.sessions.lock().unwrap();
+        sessions
+            .drain()
+            .filter_map(|(_, s)| {
+                let pid = s.child.lock().ok().and_then(|c| c.process_id())?;
+                Some((pid as i32, s))
+            })
+            .collect()
+    };
+    let teardown_handles: Vec<_> = live
+        .into_iter()
+        .map(|(pid, s)| {
+            std::thread::spawn(move || {
+                kill_session_tree(pid);
+                drop(s);
+            })
+        })
+        .collect();
+    for h in teardown_handles {
+        let _ = h.join();
+    }
+
     let _ = fs::remove_file(&paths.sock).await;
     let _ = fs::remove_file(&paths.pid).await;
     Ok(())

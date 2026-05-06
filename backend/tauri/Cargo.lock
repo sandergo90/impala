@@ -2117,7 +2117,7 @@ dependencies = [
 
 [[package]]
 name = "impala"
-version = "0.10.7"
+version = "0.10.8"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2175,6 +2175,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs",
  "impala-daemon-shared",
+ "libc",
  "portable-pty",
  "sentry",
  "serde",
