@@ -5,6 +5,7 @@ import { useUIStore, useDataStore } from "../store";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import type { Annotation } from "../types";
 import { AGENT_PANE_ID, agentPtySessionId } from "../lib/pane-ids";
+import { resolveAgent } from "../lib/agent";
 
 function encodeForPty(text: string): string {
   return btoa(
@@ -111,18 +112,24 @@ export function useAnnotationActions() {
 
   const handleSendToAgent = useCallback(
     async (annotation: Annotation) => {
-      await sendPromptToAgent(`/impala-review ${annotation.id}`);
+      if (!worktreePath) return;
+      const agent = await resolveAgent(worktreePath);
+      const prefix = agent === "codex" ? "$" : "/";
+      await sendPromptToAgent(`${prefix}impala-review ${annotation.id}`);
     },
-    [sendPromptToAgent]
+    [sendPromptToAgent, worktreePath]
   );
 
   const handleSendAllToAgent = useCallback(
     async () => {
+      if (!worktreePath) return;
       const unresolved = annotations.filter((a) => !a.resolved);
       if (unresolved.length === 0) return;
-      await sendPromptToAgent("/impala-review");
+      const agent = await resolveAgent(worktreePath);
+      const prefix = agent === "codex" ? "$" : "/";
+      await sendPromptToAgent(`${prefix}impala-review`);
     },
-    [sendPromptToAgent, annotations]
+    [sendPromptToAgent, annotations, worktreePath]
   );
 
   return {
