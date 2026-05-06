@@ -39,10 +39,20 @@ pub(crate) fn augmented_path() -> String {
 }
 
 pub(crate) fn run_git(worktree_path: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree_path)
-        .env("PATH", augmented_path())
+    run_git_with_env(worktree_path, &[], args)
+}
+
+pub(crate) fn run_git_with_env(
+    worktree_path: &str,
+    extra_env: &[(&str, &str)],
+    args: &[&str],
+) -> Result<String, String> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(worktree_path).env("PATH", augmented_path());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let output = cmd
         .args(args)
         .output()
         .map_err(|e| format!("Failed to execute git: {}", e))?;
@@ -534,6 +544,122 @@ pub fn get_git_user_name() -> Option<String> {
     } else {
         None
     }
+}
+
+/// Build a tree object capturing the worktree's current state — tracked files,
+/// uncommitted edits, and non-ignored untracked files. Returns the tree sha,
+/// which lives in git's object store until `git gc` runs (~2 weeks).
+///
+/// Used as a baseline for the "last turn" diff: we snapshot on
+/// UserPromptSubmit, then later diff the worktree against that tree to show
+/// everything the agent touched during its turn.
+pub fn snapshot_worktree(worktree_path: &str) -> Result<String, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_index = std::env::temp_dir().join(format!(
+        "impala-snap-{}-{}",
+        std::process::id(),
+        nanos
+    ));
+    let temp_index_str = temp_index.to_string_lossy().to_string();
+
+    let result = (|| -> Result<String, String> {
+        run_git_with_env(
+            worktree_path,
+            &[("GIT_INDEX_FILE", temp_index_str.as_str())],
+            &["add", "-A"],
+        )?;
+        let tree = run_git_with_env(
+            worktree_path,
+            &[("GIT_INDEX_FILE", temp_index_str.as_str())],
+            &["write-tree"],
+        )?;
+        Ok(tree.trim().to_string())
+    })();
+
+    let _ = std::fs::remove_file(&temp_index);
+    result
+}
+
+pub fn get_last_turn_files(
+    worktree_path: &str,
+    snapshot: &str,
+) -> Result<Vec<ChangedFile>, String> {
+    let output = run_git(worktree_path, &["diff", "--name-status", snapshot])?;
+    let mut files: Vec<ChangedFile> = output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let mut parts = line.splitn(2, '\t');
+            let status = parts.next().unwrap_or("?").to_string();
+            let path = parts.next().unwrap_or("").to_string();
+            ChangedFile { status, path }
+        })
+        .collect();
+
+    // Files created during the turn are still untracked in the worktree and
+    // absent from the snapshot tree — git diff misses them, so add manually.
+    let snapshot_files = ls_tree_blobs(worktree_path, snapshot)?;
+    let status = run_git(worktree_path, &["status", "--porcelain", "-uall"]).unwrap_or_default();
+    for line in status.lines() {
+        if line.starts_with("??") {
+            let path = &line[3..];
+            if !snapshot_files.contains_key(path) {
+                files.push(ChangedFile {
+                    status: "A".to_string(),
+                    path: path.to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+pub fn get_last_turn_diff(worktree_path: &str, snapshot: &str) -> Result<String, String> {
+    let tracked = run_git(worktree_path, &["diff", snapshot]).unwrap_or_default();
+
+    let snapshot_files = ls_tree_blobs(worktree_path, snapshot)?;
+    let status = run_git(worktree_path, &["status", "--porcelain", "-uall"]).unwrap_or_default();
+    let mut untracked_diffs = String::new();
+    for line in status.lines() {
+        if !line.starts_with("??") {
+            continue;
+        }
+        let file_path = &line[3..];
+        if snapshot_files.contains_key(file_path) {
+            continue;
+        }
+        let full_path = std::path::Path::new(worktree_path).join(file_path);
+        match std::fs::read_to_string(&full_path) {
+            Ok(content) => {
+                let line_count = content.lines().count().max(1);
+                untracked_diffs.push_str(&format!(
+                    "diff --git a/{f} b/{f}\nnew file mode 100644\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1,{line_count} @@\n",
+                    f = file_path
+                ));
+                for content_line in content.lines() {
+                    untracked_diffs.push('+');
+                    untracked_diffs.push_str(content_line);
+                    untracked_diffs.push('\n');
+                }
+                if content.is_empty() {
+                    untracked_diffs.push_str("+\n");
+                }
+            }
+            Err(_) => {
+                untracked_diffs.push_str(&format!(
+                    "diff --git a/{f} b/{f}\nnew file mode 100644\nBinary files /dev/null and b/{f} differ\n",
+                    f = file_path
+                ));
+            }
+        }
+    }
+
+    Ok(format!("{}{}", tracked, untracked_diffs))
 }
 
 pub fn get_all_changed_files(worktree_path: &str) -> Result<Vec<ChangedFile>, String> {

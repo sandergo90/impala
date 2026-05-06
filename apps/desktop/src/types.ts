@@ -134,7 +134,7 @@ export interface UserTab {
 export interface WorktreeNavState {
   activeTab: "terminal" | "diff" | "split" | "plan";
   agentLaunched: boolean;
-  viewMode: "commit" | "all-changes" | "uncommitted";
+  viewMode: "commit" | "all-changes" | "uncommitted" | "last-turn";
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
   activePlanId: string | null;
@@ -169,6 +169,8 @@ export interface WorktreeDataState {
   generatedFiles: string[];
   uncommittedStats: { additions: number; deletions: number };
   allChangesStats: { additions: number; deletions: number };
+  lastTurnStats: { additions: number; deletions: number };
+  hasLastTurnSnapshot: boolean;
   annotations: Annotation[];
   plans: Plan[];
   planAnnotations: PlanAnnotation[];

@@ -263,6 +263,52 @@ async fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::Changed
 }
 
 #[tauri::command]
+async fn get_last_turn_files(
+    snapshots: tauri::State<'_, Arc<hook_server::LastTurnSnapshots>>,
+    worktree_path: String,
+) -> Result<Vec<git::ChangedFile>, String> {
+    let snapshot = snapshots
+        .0
+        .lock()
+        .map_err(|e| format!("Snapshot lock error: {}", e))?
+        .get(&worktree_path)
+        .cloned();
+    let Some(snap) = snapshot else { return Ok(vec![]) };
+    tokio::task::spawn_blocking(move || git::get_last_turn_files(&worktree_path, &snap))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+async fn get_last_turn_diff(
+    snapshots: tauri::State<'_, Arc<hook_server::LastTurnSnapshots>>,
+    worktree_path: String,
+) -> Result<String, String> {
+    let snapshot = snapshots
+        .0
+        .lock()
+        .map_err(|e| format!("Snapshot lock error: {}", e))?
+        .get(&worktree_path)
+        .cloned();
+    let Some(snap) = snapshot else { return Ok(String::new()) };
+    tokio::task::spawn_blocking(move || git::get_last_turn_diff(&worktree_path, &snap))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+fn has_last_turn_snapshot(
+    snapshots: tauri::State<'_, Arc<hook_server::LastTurnSnapshots>>,
+    worktree_path: String,
+) -> Result<bool, String> {
+    Ok(snapshots
+        .0
+        .lock()
+        .map_err(|e| format!("Snapshot lock error: {}", e))?
+        .contains_key(&worktree_path))
+}
+
+#[tauri::command]
 async fn create_worktree(
     state: tauri::State<'_, DbState>,
     repo_path: String,
@@ -1358,9 +1404,15 @@ pub fn run() {
             ))));
 
             let agent_statuses = Arc::new(hook_server::AgentStatuses(Mutex::new(HashMap::new())));
-            let hook_port = hook_server::start(app.handle().clone(), agent_statuses.clone());
+            let last_turn_snapshots = Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
+            let hook_port = hook_server::start(
+                app.handle().clone(),
+                agent_statuses.clone(),
+                last_turn_snapshots.clone(),
+            );
             app.manage(HookPort(hook_port));
             app.manage(agent_statuses);
+            app.manage(last_turn_snapshots);
 
             // Bring up the detached PTY daemon in the background. Until it
             // lands, pty_* commands return "pty daemon not ready". The
@@ -1465,6 +1517,9 @@ pub fn run() {
             get_full_branch_diff,
             get_head_commit,
             get_all_changed_files,
+            get_last_turn_files,
+            get_last_turn_diff,
+            has_last_turn_snapshot,
             invalidate_branch_cache,
             get_uncommitted_files,
             get_uncommitted_diff,

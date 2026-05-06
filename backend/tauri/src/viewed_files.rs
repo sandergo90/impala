@@ -51,6 +51,7 @@ pub enum ViewKind<'a> {
     Uncommitted,
     AllChanges,
     Commit(&'a str),
+    LastTurn,
 }
 
 impl<'a> ViewKind<'a> {
@@ -58,6 +59,7 @@ impl<'a> ViewKind<'a> {
         match kind {
             "uncommitted" => Ok(ViewKind::Uncommitted),
             "all-changes" => Ok(ViewKind::AllChanges),
+            "last-turn" => Ok(ViewKind::LastTurn),
             "commit" => commit_hash
                 .map(ViewKind::Commit)
                 .ok_or_else(|| "commit view requires commit_hash".to_string()),
@@ -68,8 +70,13 @@ impl<'a> ViewKind<'a> {
 
 fn content_sha_for_file(worktree_path: &str, view: ViewKind, file_path: &str) -> String {
     match view {
-        ViewKind::Uncommitted => git::hash_worktree_file(worktree_path, file_path)
-            .unwrap_or_else(|_| DELETED_SENTINEL.to_string()),
+        // LastTurn shares Uncommitted's right-hand side: the worktree file. The
+        // baseline (snapshot tree) differs but doesn't affect the viewed-state
+        // sha, which keys off the right-hand blob only.
+        ViewKind::Uncommitted | ViewKind::LastTurn => {
+            git::hash_worktree_file(worktree_path, file_path)
+                .unwrap_or_else(|_| DELETED_SENTINEL.to_string())
+        }
         ViewKind::AllChanges => git::blob_sha_at_ref(worktree_path, "HEAD", file_path)
             .unwrap_or_else(|_| DELETED_SENTINEL.to_string()),
         ViewKind::Commit(sha) => git::blob_sha_at_ref(worktree_path, sha, file_path)
@@ -83,7 +90,7 @@ fn content_shas_for_files(
     file_paths: &[String],
 ) -> HashMap<String, String> {
     match view {
-        ViewKind::Uncommitted => file_paths
+        ViewKind::Uncommitted | ViewKind::LastTurn => file_paths
             .iter()
             .map(|p| {
                 let sha = git::hash_worktree_file(worktree_path, p)

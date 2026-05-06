@@ -40,6 +40,8 @@ export function CommitPanel() {
   const viewMode = navState?.viewMode ?? 'commit';
   const uncommittedStats = dataState?.uncommittedStats ?? { additions: 0, deletions: 0 };
   const allChangesStats = dataState?.allChangesStats ?? { additions: 0, deletions: 0 };
+  const lastTurnStats = dataState?.lastTurnStats ?? { additions: 0, deletions: 0 };
+  const hasLastTurnSnapshot = dataState?.hasLastTurnSnapshot ?? false;
 
   const updateNav = useCallback((updates: Partial<WorktreeNavState>) =>
     useUIStore.getState().updateWorktreeNavState(worktreePath, updates),
@@ -85,6 +87,26 @@ export function CommitPanel() {
       updateData({ changedFiles: files, fileDiffs, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
     } catch (e) {
       toast.error("Failed to load changed files");
+    }
+  };
+
+  const selectLastTurn = async () => {
+    const currentTab = navState?.activeTab ?? 'diff';
+    updateNav({ viewMode: 'last-turn', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
+    try {
+      const [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_last_turn_files", { worktreePath }),
+        invoke<string>("get_last_turn_diff", { worktreePath }),
+      ]);
+      const fileDiffs = splitPatch(fullDiff);
+      const generatedFiles = await invoke<string[]>("check_generated_files", {
+        worktreePath,
+        files: files.map(f => f.path),
+      });
+      updateData({ changedFiles: files, fileDiffs, generatedFiles, lastTurnStats: countDiffStats(fullDiff) });
+    } catch (e) {
+      toast.error("Failed to load last turn changes");
     }
   };
 
@@ -185,6 +207,21 @@ export function CommitPanel() {
       } catch {
         // Silently fail on auto-refresh
       }
+    } else if (viewMode === 'last-turn') {
+      try {
+        const [files, fullDiff] = await Promise.all([
+          invoke<ChangedFile[]>("get_last_turn_files", { worktreePath }),
+          invoke<string>("get_last_turn_diff", { worktreePath }),
+        ]);
+        const fileDiffs = splitPatch(fullDiff);
+        const generatedFiles = await invoke<string[]>("check_generated_files", {
+          worktreePath,
+          files: files.map(f => f.path),
+        });
+        updateData({ changedFiles: files, fileDiffs, generatedFiles, lastTurnStats: countDiffStats(fullDiff) });
+      } catch {
+        // Silently fail on auto-refresh
+      }
     } else if (viewMode === 'all-changes') {
       try {
         const [files, fullDiff] = await Promise.all([
@@ -206,7 +243,10 @@ export function CommitPanel() {
   useEffect(() => {
     if (!worktreePath) return;
     refreshCurrentView();
-  }, [worktreePath, refreshCurrentView]);
+    invoke<boolean>("has_last_turn_snapshot", { worktreePath })
+      .then((has) => updateData({ hasLastTurnSnapshot: has }))
+      .catch(() => { /* ignore */ });
+  }, [worktreePath, refreshCurrentView, updateData]);
 
   useEffect(() => {
     const safeId = worktreePath.replace(/[^a-zA-Z0-9\-_]/g, "-");
@@ -228,6 +268,20 @@ export function CommitPanel() {
     };
   }, [worktreePath, refreshCurrentView]);
 
+  useEffect(() => {
+    if (!worktreePath) return;
+    let unlisten: (() => void) | null = null;
+    listen<{ worktree_path: string }>("last-turn-snapshot-changed", (e) => {
+      if (e.payload.worktree_path !== worktreePath) return;
+      updateData({ hasLastTurnSnapshot: true });
+      const currentMode = useUIStore.getState().getWorktreeNavState(worktreePath).viewMode;
+      if (currentMode === 'last-turn') {
+        refreshCurrentView();
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [worktreePath, refreshCurrentView, updateData]);
+
   if (!selectedWorktree || (!navState && !dataState)) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -248,6 +302,32 @@ export function CommitPanel() {
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0">
+        {/* Last Turn — only shown once an agent turn has happened */}
+        {hasLastTurnSnapshot && (
+          <button
+            onClick={selectLastTurn}
+            className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
+              viewMode === 'last-turn'
+                ? "bg-primary/12"
+                : "hover:bg-accent"
+            }`}
+          >
+            <div className={`text-sm font-medium ${viewMode === 'last-turn' ? "text-foreground" : "text-muted-foreground"}`}>
+              Last Turn
+            </div>
+            <div className="flex items-center gap-1 text-sm text-muted-foreground/90 mt-0.5 font-mono">
+              <span>Since last prompt</span>
+              {(lastTurnStats.additions > 0 || lastTurnStats.deletions > 0) && (
+                <span className="ml-auto">
+                  <span className="text-green-500">+{lastTurnStats.additions}</span>
+                  {" "}
+                  <span className="text-red-500">-{lastTurnStats.deletions}</span>
+                </span>
+              )}
+            </div>
+          </button>
+        )}
+
         {/* Uncommitted Changes */}
         <button
           onClick={selectUncommitted}
