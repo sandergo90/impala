@@ -438,6 +438,7 @@ function XtermTerminalInner({
 
     const attach = async () => {
       let entry = terminalCache.get(sessionId);
+      const isFreshEntry = !entry;
       if (!entry) {
         entry = await createCachedTerminal(sessionId, scrollback);
         if (cancelled) {
@@ -453,27 +454,29 @@ function XtermTerminalInner({
       entry.fitAddon.fit();
       entry.terminal.refresh(0, Math.max(0, entry.terminal.rows - 1));
 
-      // Now that xterm is sized to the real container, sync the daemon's
-      // vt100 parser to match and replay the scrollback at that size.
-      // Order matters: resize first so the parser rewraps its grid,
-      // then fetch the snapshot, then write — the bytes coming back
-      // describe the screen at exactly the cols/rows xterm is holding.
       const cols = entry.terminal.cols;
       const rows = entry.terminal.rows;
       try {
         await invoke("pty_resize", { sessionId, cols, rows });
       } catch {}
-      try {
-        const buffered = await invoke<string>("pty_get_buffer", { sessionId });
-        if (buffered) {
-          const bytes = decodeBase64(buffered);
-          if (bytes.length > 0) {
-            entry.terminal.clear();
-            entry.terminal.write(bytes);
+      // Replay the daemon's snapshot only when creating a fresh xterm.
+      // Cached instances already hold the full scrollback in memory;
+      // re-running clear()+write() on every remount would wipe it,
+      // because the daemon's vt100 parser keeps no scrollback of its
+      // own (only the current screen).
+      if (isFreshEntry) {
+        try {
+          const buffered = await invoke<string>("pty_get_buffer", { sessionId });
+          if (buffered) {
+            const bytes = decodeBase64(buffered);
+            if (bytes.length > 0) {
+              entry.terminal.clear();
+              entry.terminal.write(bytes);
+            }
           }
+        } catch {
+          // New sessions have no buffer yet — ignore.
         }
-      } catch {
-        // New sessions have no buffer yet — ignore.
       }
       entry.urlUnderlineManager?.scheduleScan();
 

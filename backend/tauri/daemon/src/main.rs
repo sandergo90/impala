@@ -33,6 +33,41 @@ const FLUSH_CHUNK: usize = 128 * 1024;
 const FLUSH_INTERVAL_MS: u64 = 16;
 const BACKPRESSURE_HIGH: usize = 1024 * 1024;
 const BACKPRESSURE_LOW: usize = 256 * 1024;
+/// Per-session ring buffer of raw PTY bytes used for replay on reattach.
+/// Capped to bound memory; we keep the *last* N bytes since the most
+/// recent output is what users want to scroll through after a reload.
+const MAX_OUTPUT_BUFFER: usize = 5 * 1024 * 1024;
+/// CSI 3 J — "Erase Saved Lines" / clear scrollback. Emitted by the
+/// `clear` command and Cmd+K in most terminals. When the daemon sees
+/// this in the byte stream, drop everything before the last occurrence
+/// so post-reload replay matches the user's mental model.
+const ED3_SEQUENCE: &[u8] = b"\x1b[3J";
+
+fn find_last_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).rposition(|w| w == needle)
+}
+
+fn append_output_buffer(buf: &mut Vec<u8>, chunk: &[u8]) {
+    if let Some(last) = find_last_subslice(chunk, ED3_SEQUENCE) {
+        buf.clear();
+        buf.extend_from_slice(&chunk[last + ED3_SEQUENCE.len()..]);
+    } else {
+        buf.extend_from_slice(chunk);
+    }
+    if buf.len() > MAX_OUTPUT_BUFFER {
+        let drop = buf.len() - MAX_OUTPUT_BUFFER;
+        // Advance past UTF-8 continuation bytes (10xxxxxx) so we don't
+        // slice mid-codepoint.
+        let mut start = drop;
+        while start < buf.len() && (buf[start] & 0b1100_0000) == 0b1000_0000 {
+            start += 1;
+        }
+        buf.drain(..start);
+    }
+}
 
 struct Args {
     data_dir: PathBuf,
@@ -59,16 +94,21 @@ fn parse_args() -> Result<Args> {
 /// Per-session state owned by the flush thread and the request handlers.
 /// All PTY output is fed through `parser` as it flows past — the parser
 /// maintains an in-memory terminal grid (cursor position, cell attributes,
-/// alt-screen state). On reattach we ask the parser to serialize its
-/// current screen as a replay-safe byte stream via `contents_formatted`,
-/// which is what lets the frontend paint a clean picture regardless of
-/// whatever cursor-positioning escape sequences the TUI emitted to get
-/// to that state.
+/// alt-screen state) and lets us answer questions about the current
+/// screen if we ever need them. The actual replay payload sent on
+/// reattach is `output_buffer`, the raw byte ring; xterm's own VT
+/// parser reconstructs the visual state from it, including scrollback
+/// the daemon's `vt100` parser doesn't retain.
 struct SessionState {
     parser: vt100::Parser,
     /// Total bytes ever processed for this session. Monotonic, drives
     /// the per-client `seq_from`/`seq_upto` watermark.
     total_bytes: u64,
+    /// Last `MAX_OUTPUT_BUFFER` bytes of raw PTY output, used for replay
+    /// on reattach. The vt100 parser only retains the visible screen;
+    /// this is what lets users scroll back through earlier output (e.g.
+    /// a long Claude/Codex conversation) after the app reloads.
+    output_buffer: Vec<u8>,
 }
 
 struct Session {
@@ -140,11 +180,10 @@ fn spawn_session(
         let sessions = registry.sessions.lock().unwrap();
         if let Some(existing) = sessions.get(&session_id) {
             let state = existing.state.lock().unwrap();
-            let screen_bytes = state.parser.screen().contents_formatted();
             return Response::Spawned {
                 session_id: session_id.clone(),
                 already_existed: true,
-                scrollback_b64: STANDARD.encode(&screen_bytes),
+                scrollback_b64: STANDARD.encode(&state.output_buffer),
                 seq_upto: state.total_bytes,
             };
         }
@@ -233,6 +272,7 @@ fn spawn_session(
     let state: Arc<Mutex<SessionState>> = Arc::new(Mutex::new(SessionState {
         parser: vt100::Parser::new(rows, cols, 0),
         total_bytes: 0,
+        output_buffer: Vec::new(),
     }));
     let child = Arc::new(Mutex::new(child));
     let master = Arc::new(Mutex::new(pair.master));
@@ -368,6 +408,7 @@ fn start_pty_io_threads(
                     let seq_from = st.total_bytes;
                     st.parser.process(&chunk);
                     st.total_bytes += chunk.len() as u64;
+                    append_output_buffer(&mut st.output_buffer, &chunk);
                     seq_from
                 };
                 registry.broadcast(Event::Output {
@@ -437,6 +478,7 @@ fn start_pty_io_threads(
                     let seq_from = st.total_bytes;
                     st.parser.process(&tail);
                     st.total_bytes += tail.len() as u64;
+                    append_output_buffer(&mut st.output_buffer, &tail);
                     seq_from
                 };
                 registry.broadcast(Event::Output {
@@ -603,7 +645,7 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
                     let state = s.state.lock().unwrap();
                     Response::Buffer {
                         session_id: session_id.clone(),
-                        data_b64: STANDARD.encode(&state.parser.screen().contents_formatted()),
+                        data_b64: STANDARD.encode(&state.output_buffer),
                         seq_upto: state.total_bytes,
                     }
                 }
