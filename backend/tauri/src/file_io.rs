@@ -125,3 +125,64 @@ pub fn write_file_with_precondition(
     let revision = revision_for_path(path)?;
     Ok(WriteFileResult::Ok { revision })
 }
+
+/// Create an empty file. Errors if the path already exists. The parent
+/// directory must already exist; we do not auto-mkdir.
+#[tauri::command]
+pub fn fs_create_file(absolute_path: String) -> Result<(), String> {
+    let path = Path::new(&absolute_path);
+    if path.exists() {
+        return Err(format!("{absolute_path} already exists"));
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| format!("create failed: {e}"))?;
+    Ok(())
+}
+
+/// Create a directory and any missing parents. Errors if the leaf already
+/// exists as a file (mkdir -p semantics: re-creating an existing dir is OK).
+#[tauri::command]
+pub fn fs_create_directory(absolute_path: String) -> Result<(), String> {
+    let path = Path::new(&absolute_path);
+    if path.is_file() {
+        return Err(format!("{absolute_path} already exists as a file"));
+    }
+    fs::create_dir_all(path).map_err(|e| format!("mkdir failed: {e}"))?;
+    Ok(())
+}
+
+/// Rename / move a path. Errors if the destination already exists so we
+/// don't silently clobber a file the user didn't mean to overwrite.
+#[tauri::command]
+pub fn fs_rename(from_absolute: String, to_absolute: String) -> Result<(), String> {
+    let from = Path::new(&from_absolute);
+    let to = Path::new(&to_absolute);
+    if !from.exists() {
+        return Err(format!("source does not exist: {from_absolute}"));
+    }
+    if to.exists() {
+        return Err(format!("destination already exists: {to_absolute}"));
+    }
+    fs::rename(from, to).map_err(|e| format!("rename failed: {e}"))?;
+    Ok(())
+}
+
+/// Delete a file or directory. Directories are removed recursively.
+#[tauri::command]
+pub fn fs_delete(absolute_path: String) -> Result<(), String> {
+    let path = Path::new(&absolute_path);
+    let meta = match fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("stat failed: {e}")),
+    };
+    let result = if meta.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
+    result.map_err(|e| format!("delete failed: {e}"))
+}

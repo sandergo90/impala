@@ -216,6 +216,20 @@ export function useFileTreeData(worktreePath: string | null) {
     [fetchDir, recomputePaths, worktreePath],
   );
 
+  // Re-fetch a dir we've already loaded and republish paths. Used after our
+  // own fs mutations (new file/folder, rename, delete) so the tree updates
+  // immediately instead of waiting for the watcher's 2s debounce in
+  // backend/tauri/src/watcher.rs to fire.
+  const refresh = useCallback(
+    async (relDir: string) => {
+      if (!worktreePath) return;
+      if (relDir !== "" && !childrenByDirRef.current.has(relDir)) return;
+      await fetchDir(relDir);
+      recomputePaths();
+    },
+    [worktreePath, fetchDir, recomputePaths],
+  );
+
   const collapseAll = useCallback(() => {
     expandedDirsRef.current = new Set();
     // Drop all loaded child listings except the root so the tree shrinks back
@@ -229,5 +243,5 @@ export function useFileTreeData(worktreePath: string | null) {
     }
   }, [recomputePaths, worktreePath]);
 
-  return { paths, entriesByPath, expand, collapseAll };
+  return { paths, entriesByPath, expand, collapseAll, refresh };
 }

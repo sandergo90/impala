@@ -1,22 +1,53 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFileTree, FileTree } from "@pierre/trees/react";
-import type { GitStatusEntry } from "@pierre/trees";
+import type {
+  GitStatusEntry,
+  ContextMenuItem as TreeContextMenuItem,
+  ContextMenuOpenContext as TreeContextMenuOpenContext,
+  FileTreeRenameEvent,
+} from "@pierre/trees";
+import { open as openInShell } from "@tauri-apps/plugin-shell";
+import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
 import { openFileTab } from "../lib/tab-actions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
+import { dirname } from "../lib/path-utils";
+import {
+  createDirectory,
+  createFile,
+  deletePath,
+  renamePath,
+} from "../lib/file-mutations";
 import { getTreesStyle, resolveThemeById } from "../themes/apply";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { ChangedFile } from "../types";
 
 // Stable reference so the Zustand selector never returns a fresh array,
 // which would trip useSyncExternalStore's getSnapshot caching check.
 const EMPTY_CHANGED_FILES: ChangedFile[] = [];
 
+// Trees uses trailing `/` to mark directories. Strip it before we hand the
+// path to anything filesystem-shaped.
+function stripTrailingSlash(p: string): string {
+  return p.endsWith("/") ? p.slice(0, -1) : p;
+}
+
 export function FilesPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path ?? null;
-  const { paths, entriesByPath, expand, collapseAll } = useFileTreeData(wtPath);
+  const { paths, entriesByPath, expand, collapseAll, refresh } =
+    useFileTreeData(wtPath);
   const changedFiles =
     useDataStore((s) =>
       wtPath ? s.worktreeDataStates[wtPath]?.changedFiles : undefined,
@@ -64,9 +95,12 @@ export function FilesPanel() {
     return out;
   }, [changedFiles, entriesByPath]);
 
-  // useFileTree captures onSelectionChange once at model construction. FilesPanel
-  // does not remount on worktree switch, so route through a ref to keep wtPath /
-  // expand fresh without rebuilding the model.
+  // useFileTree captures these callbacks once at model construction. FilesPanel
+  // does not remount on worktree switch, so route through refs to keep wtPath
+  // and the rename handler fresh without rebuilding the model.
+  const wtPathRef = useRef<string | null>(wtPath);
+  wtPathRef.current = wtPath;
+
   const handlerRef = useRef<(selected: readonly string[]) => void>(() => { });
   handlerRef.current = (selected) => {
     if (!wtPath || selected.length === 0) return;
@@ -78,12 +112,45 @@ export function FilesPanel() {
     openFileTab(wtPath, path); // preview
   };
 
+  // Stable ref so we can call the latest `refresh` from inside callbacks
+  // captured once at model construction.
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
+  const handleRenameRef = useRef<(event: FileTreeRenameEvent) => void>(() => { });
+  handleRenameRef.current = ({ sourcePath, destinationPath }) => {
+    const wt = wtPathRef.current;
+    if (!wt) return;
+    const fromRel = stripTrailingSlash(sourcePath);
+    const toRel = stripTrailingSlash(destinationPath);
+    if (fromRel === toRel) return;
+    void (async () => {
+      const ok = await renamePath(wt, fromRel, toRel);
+      if (!ok) return;
+      // Refresh both ends in case of a cross-directory move.
+      await Promise.all([
+        refreshRef.current(dirname(fromRel)),
+        refreshRef.current(dirname(toRel)),
+      ]);
+    })();
+  };
+
   const { model } = useFileTree({
     paths: treePaths,
     initialExpansion: "closed",
     icons: { set: "complete", colored: true },
     gitStatus: gitStatusEntries,
     fileTreeSearchMode: "expand-matches",
+    composition: {
+      contextMenu: {
+        triggerMode: "both",
+        buttonVisibility: "when-needed",
+      },
+    },
+    renaming: {
+      onRename: (event) => handleRenameRef.current(event),
+      onError: (e) => toast.error(e),
+    },
     onSelectionChange: (selected) => handlerRef.current(selected),
   });
 
@@ -228,6 +295,129 @@ export function FilesPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFileTabPath, revealPath, treePaths]);
 
+  const [pendingDelete, setPendingDelete] = useState<{
+    path: string;
+    isDirectory: boolean;
+  } | null>(null);
+  // parentDir is "" for root. Set to non-null to open the new-item dialog.
+  const [pendingNewItem, setPendingNewItem] = useState<{
+    parentDir: string;
+    kind: "file" | "directory";
+  } | null>(null);
+
+  // Right-click on a file → its parent dir. Right-click on a dir → that dir.
+  // Used as the "where do new items go" anchor for new-file / new-folder.
+  const newItemParentDir = useCallback(
+    (item: TreeContextMenuItem): string => {
+      const rel = stripTrailingSlash(item.path);
+      return item.kind === "directory" ? rel : dirname(rel);
+    },
+    [],
+  );
+
+  const renderContextMenu = useCallback(
+    (item: TreeContextMenuItem, ctx: TreeContextMenuOpenContext) => {
+      if (!wtPath) return null;
+      const rel = stripTrailingSlash(item.path);
+      const isDirectory = item.kind === "directory";
+      const close = () => ctx.close();
+
+      const items: { label: string; onSelect: () => void; destructive?: boolean }[] = [];
+
+      if (!isDirectory) {
+        items.push({
+          label: "Open",
+          onSelect: () => {
+            close();
+            openFileTab(wtPath, rel);
+          },
+        });
+        items.push({
+          label: "Open Pinned",
+          onSelect: () => {
+            close();
+            openFileTab(wtPath, rel, { pin: true });
+          },
+        });
+        items.push({
+          label: "Open in Editor",
+          onSelect: () => {
+            close();
+            void openFileInEditor(`${wtPath}/${rel}`);
+          },
+        });
+      }
+
+      items.push({
+        label: "New File",
+        onSelect: () => {
+          close();
+          setPendingNewItem({ parentDir: newItemParentDir(item), kind: "file" });
+        },
+      });
+      items.push({
+        label: "New Folder",
+        onSelect: () => {
+          close();
+          setPendingNewItem({
+            parentDir: newItemParentDir(item),
+            kind: "directory",
+          });
+        },
+      });
+      items.push({
+        label: "Rename",
+        onSelect: () => {
+          close();
+          // Defer so the menu's blur fires before the rename input mounts;
+          // otherwise the menu's restoreFocus steals focus back to the row.
+          requestAnimationFrame(() => {
+            model.startRenaming(item.path);
+          });
+        },
+      });
+      items.push({
+        label: "Reveal in Finder",
+        onSelect: () => {
+          close();
+          const target = isDirectory
+            ? `${wtPath}/${rel}`
+            : rel
+            ? `${wtPath}/${dirname(rel)}`
+            : wtPath;
+          void openInShell(target).catch((e) => toast.error(`Reveal failed: ${e}`));
+        },
+      });
+      items.push({
+        label: "Copy Path",
+        onSelect: () => {
+          close();
+          void navigator.clipboard.writeText(rel);
+        },
+      });
+      items.push({
+        label: "Delete",
+        destructive: true,
+        onSelect: () => {
+          close();
+          setPendingDelete({ path: rel, isDirectory });
+        },
+      });
+
+      return (
+        <ContextMenuSurface anchorRect={ctx.anchorRect} items={items} />
+      );
+    },
+    [model, newItemParentDir, wtPath],
+  );
+
+  const confirmDelete = useCallback(async () => {
+    if (!wtPath || !pendingDelete) return;
+    const ok = await deletePath(wtPath, pendingDelete.path);
+    setPendingDelete(null);
+    if (ok) await refresh(dirname(pendingDelete.path));
+  }, [wtPath, pendingDelete, refresh]);
+
   if (!wtPath) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -305,8 +495,199 @@ export function FilesPanel() {
         onDoubleClick={handleDoubleClick}
         onClickCapture={handleClickCapture}
       >
-        <FileTree model={model} style={{ height: "100%", ...treesStyle }} />
+        <FileTree
+          model={model}
+          renderContextMenu={renderContextMenu}
+          style={{ height: "100%", ...treesStyle }}
+        />
       </div>
+      <NewItemDialog
+        open={pendingNewItem !== null}
+        kind={pendingNewItem?.kind ?? "file"}
+        parentDir={pendingNewItem?.parentDir ?? ""}
+        onCancel={() => setPendingNewItem(null)}
+        onSubmit={async (name) => {
+          if (!wtPath || !pendingNewItem) return;
+          const trimmed = name.trim();
+          if (!trimmed) return;
+          const rel = pendingNewItem.parentDir
+            ? `${pendingNewItem.parentDir}/${trimmed}`
+            : trimmed;
+          // Make sure the parent is loaded; refresh() bails on dirs we
+          // haven't fetched yet, so the new entry would otherwise stay
+          // invisible until the user expanded the parent manually.
+          if (pendingNewItem.parentDir) await expand(pendingNewItem.parentDir);
+          const ok =
+            pendingNewItem.kind === "directory"
+              ? await createDirectory(wtPath, rel)
+              : await createFile(wtPath, rel);
+          if (!ok) return;
+          // The watcher would catch this in ~2s; refresh now so the user sees
+          // the new entry immediately.
+          await refresh(pendingNewItem.parentDir);
+          setPendingNewItem(null);
+        }}
+      />
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {pendingDelete?.isDirectory ? "folder" : "file"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-mono text-foreground">{pendingDelete?.path}</span>
+              {pendingDelete?.isDirectory ? " and everything inside it" : ""} will be
+              deleted from disk. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+// Fixed-positioned popover anchored at `anchorRect`. Trees' slot lives in a
+// `width: 0` flex child of the anchor, so a normally-flowing menu would render
+// at the row's right edge and get clipped by FilesPanel's `overflow-hidden`.
+// Using `position: fixed` with the anchor rect escapes the clip, and we
+// measure once mounted to flip horizontally / vertically when we'd overflow
+// the viewport.
+function ContextMenuSurface({
+  anchorRect,
+  items,
+}: {
+  anchorRect: { left: number; right: number; top: number; bottom: number };
+  items: { label: string; onSelect: () => void; destructive?: boolean }[];
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    let left = anchorRect.left;
+    let top = anchorRect.bottom;
+    if (left + rect.width > window.innerWidth - margin) {
+      left = Math.max(margin, anchorRect.right - rect.width);
+    }
+    if (top + rect.height > window.innerHeight - margin) {
+      top = Math.max(margin, anchorRect.top - rect.height);
+    }
+    setPos({ left, top });
+  }, [anchorRect]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "fixed",
+        left: pos?.left ?? anchorRect.left,
+        top: pos?.top ?? anchorRect.bottom,
+        // Hide the first paint while we measure; the rect is unreliable
+        // before the element is in the DOM.
+        visibility: pos ? "visible" : "hidden",
+        zIndex: 50,
+      }}
+      className="bg-popover text-popover-foreground border border-border rounded-md shadow-md py-1 min-w-[180px] text-sm outline-none"
+    >
+      {items.map((mi) => (
+        <button
+          key={mi.label}
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={mi.onSelect}
+          className={
+            "w-full text-left px-3 py-1.5 cursor-pointer select-none outline-none hover:bg-accent hover:text-accent-foreground " +
+            (mi.destructive ? "text-destructive" : "text-foreground")
+          }
+        >
+          {mi.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function NewItemDialog({
+  open,
+  kind,
+  parentDir,
+  onCancel,
+  onSubmit,
+}: {
+  open: boolean;
+  kind: "file" | "directory";
+  parentDir: string;
+  onCancel: () => void;
+  onSubmit: (name: string) => void | Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName("");
+    // base-ui AlertDialog auto-focuses the cancel button. Override on next
+    // frame so the input is ready for typing.
+    const id = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+
+  const label = kind === "directory" ? "New folder" : "New file";
+  const placeholder = kind === "directory" ? "components" : "example.ts";
+  const inDir = parentDir ? `in ${parentDir}/` : "at the worktree root";
+
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(o) => { if (!o) onCancel(); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{label}</AlertDialogTitle>
+          <AlertDialogDescription>Create {inDir}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void onSubmit(name);
+          }}
+        >
+          <input
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={placeholder}
+            spellCheck={false}
+            autoComplete="off"
+            className="w-full px-3 py-1.5 border rounded text-sm bg-background outline-none focus:border-foreground/30"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction type="submit" disabled={name.trim().length === 0}>
+              Create
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </form>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
