@@ -182,17 +182,36 @@ export function useFileTreeData(worktreePath: string | null) {
 
   const expand = useCallback(
     async (relDir: string) => {
+      // Defer the persisted-store sync to a microtask so it lands AFTER trees
+      // finishes its synchronous click handling (selectOnly → focus → toggle).
+      // Trees fires a focus emit before the toggle, and FilesPanel's model
+      // subscription would otherwise see the dir in persisted but not yet
+      // expanded in the model and prune it — causing the new dir to expand
+      // briefly and then collapse on the next resetPaths.
+      //
+      // Always sync, even when the ref already has this dir: FilesPanel may
+      // have pruned it when the user collapsed it, and a re-expand needs to
+      // put it back. Append rather than rewrite from the ref: the ref doesn't
+      // see UI-driven collapses, so a rewrite would resurrect dirs the user
+      // has since collapsed.
+      if (worktreePath) {
+        const wt = worktreePath;
+        queueMicrotask(() => {
+          const persisted =
+            useUIStore.getState().worktreeExpandedDirs[wt] ?? [];
+          if (!persisted.includes(relDir)) {
+            useUIStore
+              .getState()
+              .setWorktreeExpandedDirs(wt, [...persisted, relDir]);
+          }
+        });
+      }
       if (expandedDirsRef.current.has(relDir)) return;
       const myEpoch = epochRef.current;
       expandedDirsRef.current.add(relDir);
       await fetchDir(relDir);
       if (myEpoch !== epochRef.current) return;
       recomputePaths();
-      if (worktreePath) {
-        useUIStore
-          .getState()
-          .setWorktreeExpandedDirs(worktreePath, Array.from(expandedDirsRef.current));
-      }
     },
     [fetchDir, recomputePaths, worktreePath],
   );

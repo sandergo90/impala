@@ -88,12 +88,34 @@ export function FilesPanel() {
   });
 
   useEffect(() => {
-    // resetPaths rebuilds the trees store from scratch — pass the known
-    // expanded set so a fresh data fetch doesn't collapse the folder the
-    // user just clicked. Trees expects directory ids with trailing `/`.
-    const initialExpandedPaths = (persistedExpandedDirs ?? []).map(
-      (d) => `${d}/`,
-    );
+    // Trees' initializeExpandedPaths walks every path's segments and silently
+    // marks each ancestor as expanded. So including "a/b/c" auto-expands "a"
+    // and "a/b" too, even if the user has collapsed them — children stay
+    // flagged "expanded" internally and remain in the persisted store, ready
+    // to drag the parent back open. Skip dirs whose ancestors aren't in the
+    // persisted set so a collapsed parent stays collapsed.
+    //
+    // Also mirror the model's current expand state for dirs it tracks: trees
+    // doesn't surface a public collapse event, so persistedExpandedDirs may
+    // briefly contain dirs the user just collapsed.
+    const persistedSet = new Set(persistedExpandedDirs ?? []);
+    const initialExpandedPaths: string[] = [];
+    for (const d of persistedExpandedDirs ?? []) {
+      let allAncestorsPersisted = true;
+      const segments = d.split("/");
+      for (let i = 1; i < segments.length; i++) {
+        if (!persistedSet.has(segments.slice(0, i).join("/"))) {
+          allAncestorsPersisted = false;
+          break;
+        }
+      }
+      if (!allAncestorsPersisted) continue;
+      const slashed = `${d}/`;
+      const item = model.getItem(slashed);
+      if (!item || ("isExpanded" in item && item.isExpanded())) {
+        initialExpandedPaths.push(slashed);
+      }
+    }
     model.resetPaths(treePaths, { initialExpandedPaths });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, treePaths]);
@@ -101,6 +123,25 @@ export function FilesPanel() {
   useEffect(() => {
     model.setGitStatus(gitStatusEntries);
   }, [model, gitStatusEntries]);
+
+  // Trees doesn't surface a public collapse event. Mirror the model's expand
+  // state into the persisted store on every change so the next resetPaths
+  // doesn't resurrect dirs the user has collapsed (mouse, keyboard, or any
+  // other path that bypasses onSelectionChange).
+  useEffect(() => {
+    if (!wtPath) return;
+    return model.subscribe(() => {
+      const persisted = useUIStore.getState().worktreeExpandedDirs[wtPath] ?? [];
+      if (persisted.length === 0) return;
+      const stillExpanded = persisted.filter((d) => {
+        const item = model.getItem(`${d}/`);
+        return !item || ("isExpanded" in item && item.isExpanded());
+      });
+      if (stillExpanded.length !== persisted.length) {
+        useUIStore.getState().setWorktreeExpandedDirs(wtPath, stillExpanded);
+      }
+    });
+  }, [model, wtPath]);
 
   // Single-select a path in the model: deselect anything else, select target.
   // The trees model only exposes `getItem(path).select()/.deselect()`.
@@ -138,18 +179,28 @@ export function FilesPanel() {
     [expand, model],
   );
 
+  // treePaths is a dep on both reveal effects so the first attempt retries
+  // once async data lands. After that, the refs gate further runs — without
+  // them, any treePaths change (collapse-all, fs events, expanding an
+  // unrelated dir) would call revealPath again and re-expand the ancestors
+  // of the active file tab.
+  const lastRevealedNonceRef = useRef<number | null>(null);
+  const lastRevealedActiveFileRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!wtPath || !pendingReveal || pendingReveal.worktreePath !== wtPath) return;
-    // Skip if the row is already selected — avoids re-running on every
-    // tree-paths update (fs events trigger frequent recomputations).
-    if (model.getSelectedPaths().includes(pendingReveal.path)) return;
+    if (lastRevealedNonceRef.current === pendingReveal.nonce) return;
+    if (model.getSelectedPaths().includes(pendingReveal.path)) {
+      lastRevealedNonceRef.current = pendingReveal.nonce;
+      return;
+    }
+    if (treePaths.length === 0) return;
+    lastRevealedNonceRef.current = pendingReveal.nonce;
     const signal = { cancelled: false };
     revealPath(pendingReveal.path, signal);
     return () => {
       signal.cancelled = true;
     };
-    // treePaths is in the deps so the reveal retries once async data lands —
-    // on FilesPanel's first mount, paths are empty and selectOnly is a no-op.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingReveal?.nonce, wtPath, revealPath, treePaths]);
 
@@ -159,15 +210,21 @@ export function FilesPanel() {
   useEffect(() => {
     if (!activeFileTabPath) {
       for (const p of model.getSelectedPaths()) model.getItem(p)?.deselect();
+      lastRevealedActiveFileRef.current = null;
       return;
     }
-    if (model.getSelectedPaths().includes(activeFileTabPath)) return;
+    if (lastRevealedActiveFileRef.current === activeFileTabPath) return;
+    if (model.getSelectedPaths().includes(activeFileTabPath)) {
+      lastRevealedActiveFileRef.current = activeFileTabPath;
+      return;
+    }
+    if (treePaths.length === 0) return;
+    lastRevealedActiveFileRef.current = activeFileTabPath;
     const signal = { cancelled: false };
     revealPath(activeFileTabPath, signal);
     return () => {
       signal.cancelled = true;
     };
-    // treePaths in deps so the effect retries on initial data load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFileTabPath, revealPath, treePaths]);
 
