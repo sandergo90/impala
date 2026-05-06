@@ -1,0 +1,149 @@
+/* Impala theme overrides for ProseMark/CodeMirror */
+
+.cm-editor {
+  --pm-header-mark-color: var(--color-muted-foreground);
+  --pm-link-color: var(--color-link);
+  --pm-muted-color: var(--color-muted-foreground);
+  --pm-code-background-color: var(--color-code-background);
+  --pm-code-font: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --pm-code-btn-background-color: var(--color-accent);
+  --pm-code-btn-hover-background-color: var(--color-muted);
+  --pm-blockquote-vertical-line-background-color: var(--color-border);
+  --pm-cursor-color: var(--color-foreground);
+
+  --pm-syntax-link: var(--color-link);
+  --pm-syntax-keyword: oklch(70.05% 0.217 296.83);
+  --pm-syntax-atom: oklch(65.69% 0.2 259.93);
+  --pm-syntax-literal: oklch(71.27% 0.101 169.93);
+  --pm-syntax-string: oklch(68.53% 0.164 25.1);
+  --pm-syntax-regexp: oklch(76.88% 0.16 43.42);
+  --pm-syntax-definition-variable: oklch(61.42% 0.158 259.6);
+  --pm-syntax-local-variable: oklch(75.88% 0.082 184.11);
+  --pm-syntax-type-namespace: oklch(64.51% 0.083 165.19);
+  --pm-syntax-class-name: oklch(76.14% 0.1 168.52);
+  --pm-syntax-special-variable-macro: oklch(66.67% 0.193 282.06);
+  --pm-syntax-definition-property: oklch(58.92% 0.132 259.4);
+  --pm-syntax-comment: var(--color-muted-foreground);
+  --pm-syntax-invalid: oklch(75.93% 0.182 28.91);
+}
+
+/* @codemirror/view's base theme sets `.cm-cursor { border-left: 1.2px solid black }`,
+   which can win over prosemark's `border-left-color: var(--pm-cursor-color)` on
+   source order. Bump specificity here so the cursor stays readable in dark mode. */
+.cm-editor .cm-cursorLayer .cm-cursor,
+.cm-editor .cm-cursorLayer .cm-dropCursor {
+  border-left-color: var(--color-foreground);
+}
+
+/* Selection — dimmed accent. CodeMirror's drawSelection extension paints
+   `.cm-selectionBackground` rectangles; the native `::selection` is the
+   fallback for text the drawn layer doesn't cover. Override both, and bump
+   specificity past CM's base theme on the focused-state selector. */
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground,
+.cm-editor .cm-content ::selection {
+  background-color: var(--color-editor-selection);
+}
+
+/* Editor layout — let parent handle scrolling */
+.cm-editor {
+  height: auto;
+  outline: none;
+  color: var(--color-foreground);
+  background: transparent;
+}
+
+.cm-editor .cm-scroller {
+  overflow: visible !important;
+}
+
+.cm-editor .cm-content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--writer-editor-outer-width, calc(734px + 4rem + 4rem));
+  margin: 0 auto;
+  padding: 0 var(--writer-editor-side-padding, 4rem) 100px;
+  font-family: var(
+    --writer-editor-font-family,
+    -apple-system-body,
+    ui-sans-serif,
+    -apple-system,
+    system-ui,
+    "Segoe UI",
+    Helvetica,
+    "Apple Color Emoji",
+    Arial,
+    sans-serif,
+    "Segoe UI Emoji",
+    "Segoe UI Symbol"
+  );
+  font-size: var(--writer-editor-font-size, 16px);
+  line-height: var(--writer-editor-line-height, 1.8);
+  letter-spacing: var(--writer-editor-letter-spacing, -0.03em);
+  color: var(--color-foreground);
+}
+
+/* Reduce height of blank lines used as block separators */
+.cm-editor .cm-line:has(> br:only-child) {
+  line-height: 1;
+}
+
+/* Indent blockquote text so it doesn't hug the vertical bar */
+.cm-editor .cm-blockquote-line {
+  padding-inline-start: 1em;
+}
+
+/* The CodeMirror search extension renders its panel into `.cm-panels-bottom`
+   which carries a default border-top divider. We use a hidden panel only to
+   flip the search state on (so the built-in match highlighter renders); the
+   actual UI is the React `EditorSearchOverlay`, so the wrapper must not paint. */
+.cm-editor .cm-panels,
+.cm-editor .cm-panels-top,
+.cm-editor .cm-panels-bottom {
+  display: none !important;
+}
+
+/* Hide gutters for a clean writing experience */
+.cm-editor .cm-gutters {
+  display: none;
+}
+
+/* Code block header overrides */
+.cm-editor .cm-code-block-lang-container {
+  display: none;
+}
+
+.cm-editor .cm-code-block-copy-button {
+  display: none;
+}
+
+/* Task checkboxes — replace native checkbox with hugeicon-style rounded square */
+.cm-editor .cm-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--color-muted-foreground);
+  border-radius: 5px;
+  cursor: pointer;
+  vertical-align: -3px;
+  margin-right: 2px;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+.cm-editor .cm-checkbox:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 12.5L10.5 15L16 9'/%3E%3C/svg%3E");
+  background-size: 20px 20px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Wiki-link autocomplete tooltip uses the UI font, not the editor font */
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul,
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li {
+  font-family: var(--ui-font);
+}
