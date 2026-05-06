@@ -39,6 +39,9 @@ export const defaultDark: Theme = {
     sidebarRing: "#343434",
     highlightMatch: "rgba(136, 192, 208, 0.2)",
     highlightActive: "rgba(136, 192, 208, 0.5)",
+    link: "#88C0D0",
+    codeBackground: "#1A1A1A",
+    editorSelection: "rgba(136, 192, 208, 0.2)",
   },
   terminal: {
     background: "#141414",
@@ -74,6 +77,9 @@ export const defaultLight: Theme = {
     primary: "#0969da",
     border: "#d1d9e0",
     accent: "#f6f8fa",
+    link: "#0969da",
+    codeBackground: "#f6f8fa",
+    editorSelection: "rgba(9, 105, 218, 0.18)",
   },
   terminal: {
     background: "#ffffff",

@@ -36,6 +36,11 @@ export interface ThemeUI {
   sidebarRing?: string;
   highlightMatch?: string;
   highlightActive?: string;
+
+  // Markdown editor (FileViewer prosemark) — optional, derived if absent
+  link?: string;
+  codeBackground?: string;
+  editorSelection?: string;
 }
 
 export interface ThemeTerminal {
@@ -106,4 +111,7 @@ export interface ResolvedCSS {
   sidebarRing: string;
   highlightMatch: string;
   highlightActive: string;
+  link: string;
+  codeBackground: string;
+  editorSelection: string;
 }

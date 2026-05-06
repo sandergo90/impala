@@ -180,6 +180,9 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
     sidebarRing: ui.sidebarRing ?? mix(foreground, 35),
     highlightMatch: ui.highlightMatch ?? `color-mix(in srgb, ${primary} 20%, transparent)`,
     highlightActive: ui.highlightActive ?? `color-mix(in srgb, ${primary} 50%, transparent)`,
+    link: ui.link ?? primary,
+    codeBackground: ui.codeBackground ?? ui.muted ?? accent,
+    editorSelection: ui.editorSelection ?? `color-mix(in srgb, ${primary} 18%, transparent)`,
   };
 }
 
@@ -218,6 +221,9 @@ const CSS_VAR_MAP: Record<keyof ResolvedCSS, string> = {
   sidebarRing: "--sidebar-ring",
   highlightMatch: "--highlight-match",
   highlightActive: "--highlight-active",
+  link: "--color-link",
+  codeBackground: "--color-code-background",
+  editorSelection: "--color-editor-selection",
 };
 
 export function applyTheme(theme: Theme): void {
