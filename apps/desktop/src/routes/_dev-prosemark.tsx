@@ -6,7 +6,28 @@ import { ProseMarkEditor } from "../components/markdown-editor";
 
 export function DevProsemarkRoute() {
   const [value, setValue] = useState(
-    "# Hello\n\nThis is **bold** and *italic*.\n\n- list item\n- another\n\n```ts\nconst x = 1;\n```\n",
+    `# Title
+
+Some text.
+
+| col A | col B |
+|-------|-------|
+| one   | two   |
+
+\`\`\`mermaid
+flowchart LR
+  A --> B
+\`\`\`
+
+<details>
+<summary>HTML block</summary>
+Hidden content.
+</details>
+
+\`\`\`ts
+const x: number = 1;
+\`\`\`
+`,
   );
   return (
     <div className="h-screen flex flex-col">

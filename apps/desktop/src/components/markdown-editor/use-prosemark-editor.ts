@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, type RefCallback } from "react";
 import { EditorView, drawSelection, keymap } from "@codemirror/view";
 import { EditorState, Prec } from "@codemirror/state";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { tags } from "@lezer/highlight";
@@ -11,6 +11,9 @@ import {
   prosemarkBaseThemeSetup,
   prosemarkMarkdownSyntaxExtensions,
 } from "@prosemark/core";
+import { tableDecorations } from "./table-decorations";
+import { mermaidDecorations } from "./mermaid-decorations";
+import { htmlBlockDecorations, htmlBlockParserExtension } from "./html-block-decorations";
 
 interface UseProsemarkEditorOptions {
   value: string;
@@ -68,9 +71,10 @@ export function useProsemarkEditor({
       doc: value,
       extensions: [
         markdown({
+          base: markdownLanguage,
           codeLanguages: languages,
           addKeymap: true,
-          extensions: [GFM, prosemarkMarkdownSyntaxExtensions],
+          extensions: [GFM, prosemarkMarkdownSyntaxExtensions, htmlBlockParserExtension],
         }),
         prosemarkBasicSetup(),
         drawSelection(),
@@ -89,6 +93,9 @@ export function useProsemarkEditor({
             ]),
           ),
         ),
+        tableDecorations(),
+        mermaidDecorations(),
+        htmlBlockDecorations(),
         saveKeymap,
         updateListener,
       ],
