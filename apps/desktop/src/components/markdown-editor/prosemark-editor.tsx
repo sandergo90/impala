@@ -28,5 +28,8 @@ export function ProseMarkEditor({
     worktreePath,
     autoFocus,
   });
-  return <div ref={editorRef} className={className} />;
+  const rootClass = className
+    ? `prosemark-editor-root ${className}`
+    : "prosemark-editor-root";
+  return <div ref={editorRef} className={rootClass} />;
 }
