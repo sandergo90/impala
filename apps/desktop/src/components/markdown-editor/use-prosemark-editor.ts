@@ -25,7 +25,6 @@ interface UseProsemarkEditorOptions {
   onSave: () => void;
   filePath: string;
   worktreePath: string;
-  getScrollContainer?: () => HTMLElement | null;
   autoFocus?: boolean;
 }
 
@@ -42,8 +41,8 @@ export function useProsemarkEditor({
   const onSaveRef = useRef(onSave);
   const isExternalUpdateRef = useRef(false);
   const autoFocusRef = useRef(autoFocus);
-  // Refs for path props so the extensions read the *current* values without
-  // forcing the EditorView to be torn down and rebuilt when the props change.
+  // Path refs let the editor's extensions read the *current* values without
+  // tearing down and rebuilding the EditorView when the props change.
   const filePathRef = useRef(filePath);
   const worktreePathRef = useRef(worktreePath);
 
@@ -53,7 +52,6 @@ export function useProsemarkEditor({
   filePathRef.current = filePath;
   worktreePathRef.current = worktreePath;
 
-  // Stable ref callback — only handles mount/unmount.
   const mountRef = useCallback<RefCallback<HTMLDivElement>>((el) => {
     if (!el) {
       const view = viewRef.current;
@@ -110,9 +108,9 @@ export function useProsemarkEditor({
         tableDecorations(),
         mermaidDecorations(),
         htmlBlockDecorations(),
-        // Order matters: imageSrcResolver runs first so http(s) URLs (incl.
-        // Linear) pass through unchanged, then linearAttachmentWidget catches
-        // the Linear ones and replaces them with placeholders + fetched data.
+        // imageSrcResolver must come before linearAttachmentWidget so http(s)
+        // Linear URLs pass through the resolver unchanged, then the widget
+        // intercepts and swaps them for fetched data URLs.
         imageSrcResolver({
           getFilePath: () => filePathRef.current,
           getWorktreePath: () => worktreePathRef.current,

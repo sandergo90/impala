@@ -6,9 +6,10 @@ import {
   oneLight,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Check, Copy } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { useUIStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
+import { isExternalHref } from "../lib/path-utils";
+import { fetchLinearAttachment, isLinearAttachment } from "../lib/linear-attachment";
 
 /**
  * Provider lets a parent intercept relative-link clicks (e.g. open the linked
@@ -93,18 +94,6 @@ function CodeBlock({
   );
 }
 
-function isExternalHref(href: string): boolean {
-  return (
-    /^[a-z][a-z0-9+.-]*:/i.test(href) ||
-    href.startsWith("//") ||
-    href.startsWith("#")
-  );
-}
-
-function isLinearAttachment(src: string): boolean {
-  return src.startsWith("https://uploads.linear.app/");
-}
-
 function LinearAttachmentImage({
   src,
   alt,
@@ -126,7 +115,7 @@ function LinearAttachmentImage({
     let cancelled = false;
     setError(null);
     setDataUrl(null);
-    invoke<string>("fetch_linear_attachment", { apiKey: linearApiKey, url: src })
+    fetchLinearAttachment(linearApiKey, src)
       .then((url) => {
         if (!cancelled) setDataUrl(url);
       })

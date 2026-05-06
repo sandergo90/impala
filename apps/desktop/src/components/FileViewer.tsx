@@ -270,14 +270,15 @@ export function FileViewer() {
         </div>
       )}
       {isMarkdown ? (
-        <MarkdownPane
-          content={bufferContent}
-          docKey={docKey!}
-          editorRef={editorRef}
-          onSave={handleSave}
-          updateDraft={updateDraft}
-          worktreePath={wtPath!}
+        <ProseMarkEditor
+          key={docKey}
+          value={bufferContent}
+          onChange={(next) => updateDraft(docKey!, next)}
+          onSave={() => void handleSave()}
           filePath={selectedFilePath}
+          worktreePath={wtPath!}
+          autoFocus
+          className="flex-1 min-h-0 overflow-auto"
         />
       ) : (
         <CodeEditor
@@ -291,35 +292,5 @@ export function FileViewer() {
         />
       )}
     </div>
-  );
-}
-
-function MarkdownPane({
-  content,
-  docKey,
-  onSave,
-  updateDraft,
-  worktreePath,
-  filePath,
-}: {
-  content: string;
-  docKey: string;
-  editorRef: React.MutableRefObject<CodeEditorHandle | null>;
-  onSave: () => Promise<void>;
-  updateDraft: (key: string, next: string) => void;
-  worktreePath: string;
-  filePath: string;
-}) {
-  return (
-    <ProseMarkEditor
-      key={docKey}
-      value={content}
-      onChange={(next) => updateDraft(docKey, next)}
-      onSave={() => void onSave()}
-      filePath={filePath}
-      worktreePath={worktreePath}
-      autoFocus
-      className="flex-1 min-h-0 overflow-auto"
-    />
   );
 }

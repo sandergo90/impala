@@ -1,15 +1,7 @@
-// Imperative analog to the React `LinearAttachmentImage` component
-// (`markdownComponents.tsx:108`). For each <img src="https://uploads.linear.app/...">
-// in the editor DOM, replace it with a placeholder, kick off
-// `fetch_linear_attachment` via the Tauri command, and swap the placeholder
-// for a real <img src={dataUrl}> on success — or an error placeholder on
-// failure / missing API key.
-
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import { invoke } from "@tauri-apps/api/core";
 import { useUIStore } from "../../store";
+import { fetchLinearAttachment, isLinearAttachment } from "../../lib/linear-attachment";
 
-const LINEAR_PREFIX = "https://uploads.linear.app/";
 const IMAGE_CLASSES = "max-w-full h-auto rounded border border-border my-4";
 const PLACEHOLDER_CLASSES =
   "inline-block text-xs text-muted-foreground border border-border rounded px-2 py-1 my-2";
@@ -28,7 +20,7 @@ function processImage(
 ): void {
   if (img.getAttribute(PROCESSED_ATTR) === "1") return;
   const src = img.getAttribute("src");
-  if (!src || !src.startsWith(LINEAR_PREFIX)) return;
+  if (!src || !isLinearAttachment(src)) return;
   img.setAttribute(PROCESSED_ATTR, "1");
 
   const parent = img.parentNode;
@@ -52,7 +44,7 @@ function processImage(
 
   const ctrl = new AbortController();
   inflight.add(ctrl);
-  invoke<string>("fetch_linear_attachment", { apiKey, url: src })
+  fetchLinearAttachment(apiKey, src)
     .then((dataUrl) => {
       inflight.delete(ctrl);
       if (ctrl.signal.aborted) return;

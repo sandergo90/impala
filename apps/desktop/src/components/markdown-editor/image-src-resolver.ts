@@ -1,16 +1,3 @@
-// Rewrites <img src="..."> attributes inside the editor DOM so relative paths
-// resolve against the active markdown file's directory (joined with the
-// worktree root) and become tauri-asset URLs.
-//
-// Pass-throughs (no rewrite):
-// - data:, blob:, asset:, http(s):// URLs
-// - https://uploads.linear.app/* (handled by linear-attachment-widget)
-//
-// Adapted from writer-computer's image-src-resolver.ts. The signature here
-// takes both `getFilePath` (worktree-relative) and `getWorktreePath`
-// (absolute) so the resolver can build an absolute filesystem path before
-// calling `convertFileSrc`.
-
 import { EditorView, ViewPlugin } from "@codemirror/view";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { dirname } from "../../lib/path-utils";
@@ -38,7 +25,6 @@ function resolveImgSrc(
   const src = img.getAttribute("src");
   if (!src) return;
   if (isPassthrough(src)) return;
-  // Normalize: leading "/" means worktree-root-relative.
   const relDir = dirname(filePath);
   const joined = src.startsWith("/")
     ? src.replace(/^\/+/, "")
