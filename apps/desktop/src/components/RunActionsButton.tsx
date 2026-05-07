@@ -87,7 +87,7 @@ export function RunActionsButton({
           </svg>
         </Menu.Trigger>
         <Menu.Portal>
-          <Menu.Positioner sideOffset={4} align="start">
+          <Menu.Positioner sideOffset={4} align="start" className="z-50">
             <Menu.Popup
               className={[
                 "bg-popover text-popover-foreground border border-border rounded-md shadow-md",
