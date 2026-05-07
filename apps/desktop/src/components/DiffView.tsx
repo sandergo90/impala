@@ -629,10 +629,11 @@ export function DiffView() {
       toast.error(`Failed to discard ${filePath}: ${e}`);
     }
   }, [fileToDiscard, worktreePath]);
-  const viewKindForViewed: "uncommitted" | "all-changes" | "commit" | null =
+  const viewKindForViewed: "uncommitted" | "all-changes" | "commit" | "last-turn" | null =
     viewMode === "commit" && selectedCommit ? "commit"
     : viewMode === "all-changes" ? "all-changes"
     : viewMode === "uncommitted" ? "uncommitted"
+    : viewMode === "last-turn" ? "last-turn"
     : null;
   const commitHashForViewed =
     viewKindForViewed === "commit" && selectedCommit ? selectedCommit.hash : null;

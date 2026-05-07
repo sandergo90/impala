@@ -6,10 +6,20 @@ use serde::Serialize;
 
 pub struct AgentStatuses(pub Mutex<HashMap<String, String>>);
 
+/// Per-worktree git tree sha captured when the user submits a prompt. Powers
+/// the "Last turn" diff view. Persists in memory until the next prompt
+/// replaces it; lost on app restart (acceptable — rebuilds on next turn).
+pub struct LastTurnSnapshots(pub Mutex<HashMap<String, String>>);
+
 #[derive(Clone, Serialize)]
 pub struct AgentStatusEvent {
     pub worktree_path: String,
     pub status: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct LastTurnSnapshotEvent {
+    pub worktree_path: String,
 }
 
 pub fn hook_command_public(event_type: &str) -> String {
@@ -221,7 +231,11 @@ pub fn install_impala_plan_skill() {
 /// Start the hook HTTP server on a random port. Returns the port number.
 /// The `statuses` map is updated with every event so the frontend can query
 /// last-known agent status after a hard reload.
-pub fn start(app_handle: AppHandle, statuses: Arc<AgentStatuses>) -> u16 {
+pub fn start(
+    app_handle: AppHandle,
+    statuses: Arc<AgentStatuses>,
+    snapshots: Arc<LastTurnSnapshots>,
+) -> u16 {
     let server = Arc::new(
         Server::http("127.0.0.1:0").expect("Failed to start hook server")
     );
@@ -270,9 +284,31 @@ pub fn start(app_handle: AppHandle, statuses: Arc<AgentStatuses>) -> u16 {
                     map.insert(worktree_path.clone(), status.to_string());
                 }
                 let _ = app_handle.emit("agent-status", AgentStatusEvent {
-                    worktree_path,
+                    worktree_path: worktree_path.clone(),
                     status: status.to_string(),
                 });
+            }
+
+            // Snapshot the worktree at the start of every turn so the "Last
+            // turn" diff view has a baseline. Done synchronously so the
+            // snapshot is captured before the agent starts modifying files.
+            if event_type == "UserPromptSubmit" && !worktree_path.is_empty() {
+                match crate::git::snapshot_worktree(&worktree_path) {
+                    Ok(tree) => {
+                        if let Ok(mut map) = snapshots.0.lock() {
+                            map.insert(worktree_path.clone(), tree);
+                        }
+                        let _ = app_handle.emit(
+                            "last-turn-snapshot-changed",
+                            LastTurnSnapshotEvent {
+                                worktree_path: worktree_path.clone(),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[impala] last-turn snapshot failed for {}: {}", worktree_path, e);
+                    }
+                }
             }
 
             let _ = request.respond(Response::from_string("ok"));

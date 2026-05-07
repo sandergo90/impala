@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ViewKind = "uncommitted" | "all-changes" | "commit";
+export type ViewKind = "uncommitted" | "all-changes" | "commit" | "last-turn";
 
 export const viewedFilesProvider = {
   async check(

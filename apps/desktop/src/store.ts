@@ -36,6 +36,8 @@ const defaultDataState: WorktreeDataState = {
   generatedFiles: [],
   uncommittedStats: { additions: 0, deletions: 0 },
   allChangesStats: { additions: 0, deletions: 0 },
+  lastTurnStats: { additions: 0, deletions: 0 },
+  hasLastTurnSnapshot: false,
   annotations: [],
   plans: [],
   planAnnotations: [],
