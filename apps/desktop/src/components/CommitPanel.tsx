@@ -302,31 +302,29 @@ export function CommitPanel() {
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0">
-        {/* Last Turn — only shown once an agent turn has happened */}
-        {hasLastTurnSnapshot && (
-          <button
-            onClick={selectLastTurn}
-            className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
-              viewMode === 'last-turn'
-                ? "bg-primary/12"
-                : "hover:bg-accent"
-            }`}
-          >
-            <div className={`text-sm font-medium ${viewMode === 'last-turn' ? "text-foreground" : "text-muted-foreground"}`}>
-              Last Turn
-            </div>
-            <div className="flex items-center gap-1 text-sm text-muted-foreground/90 mt-0.5 font-mono">
-              <span>Since last prompt</span>
-              {(lastTurnStats.additions > 0 || lastTurnStats.deletions > 0) && (
-                <span className="ml-auto">
-                  <span className="text-green-500">+{lastTurnStats.additions}</span>
-                  {" "}
-                  <span className="text-red-500">-{lastTurnStats.deletions}</span>
-                </span>
-              )}
-            </div>
-          </button>
-        )}
+        {/* Last Turn — always shown; empty until the first agent turn happens */}
+        <button
+          onClick={selectLastTurn}
+          className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
+            viewMode === 'last-turn'
+              ? "bg-primary/12"
+              : "hover:bg-accent"
+          }`}
+        >
+          <div className={`text-sm font-medium ${viewMode === 'last-turn' ? "text-foreground" : "text-muted-foreground"}`}>
+            Last Turn
+          </div>
+          <div className="flex items-center gap-1 text-sm text-muted-foreground/90 mt-0.5 font-mono">
+            <span>{hasLastTurnSnapshot ? "Since last prompt" : "No turn recorded yet"}</span>
+            {(lastTurnStats.additions > 0 || lastTurnStats.deletions > 0) && (
+              <span className="ml-auto">
+                <span className="text-green-500">+{lastTurnStats.additions}</span>
+                {" "}
+                <span className="text-red-500">-{lastTurnStats.deletions}</span>
+              </span>
+            )}
+          </div>
+        </button>
 
         {/* Uncommitted Changes */}
         <button

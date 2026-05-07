@@ -567,6 +567,18 @@ pub fn snapshot_worktree(worktree_path: &str) -> Result<String, String> {
     let temp_index_str = temp_index.to_string_lossy().to_string();
 
     let result = (|| -> Result<String, String> {
+        // Seed the temp index from HEAD so tracked-but-ignored files (e.g.
+        // files committed before a later .gitignore rule) end up in the
+        // snapshot. With an empty starting index, `git add -A` would treat
+        // them as untracked and gitignore would strip them — they'd then
+        // appear as "added during the turn" on every diff against the
+        // snapshot. Ignore failure: a fresh repo with no HEAD has no tracked
+        // files anyway.
+        let _ = run_git_with_env(
+            worktree_path,
+            &[("GIT_INDEX_FILE", temp_index_str.as_str())],
+            &["read-tree", "HEAD"],
+        );
         run_git_with_env(
             worktree_path,
             &[("GIT_INDEX_FILE", temp_index_str.as_str())],

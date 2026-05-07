@@ -170,6 +170,19 @@ function useFileContents(
           }
           oldContent = oldResult;
           newContent = workingCopy;
+        } else if (viewMode === "last-turn") {
+          // For last-turn: old = snapshot:file (state at start of turn),
+          // new = working copy. Same disk-read pattern as uncommitted so a
+          // newly-created file shows as added rather than rendered empty.
+          const oldResult = await invoke<string>("get_last_turn_file", { worktreePath, filePath }).catch(() => "");
+          const fullPath = `${worktreePath}/${filePath}`;
+          const { readTextFile, exists } = await import("@tauri-apps/plugin-fs");
+          let workingCopy = "";
+          if (await exists(fullPath)) {
+            workingCopy = await readTextFile(fullPath);
+          }
+          oldContent = oldResult;
+          newContent = workingCopy;
         } else if (viewMode === "all-changes") {
           // For all-changes: old = base branch version, new = HEAD version
           const baseBranch = await invoke<string>("detect_base_branch", { worktreePath }).catch(() => "main");
