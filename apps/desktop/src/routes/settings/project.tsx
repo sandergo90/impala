@@ -6,6 +6,7 @@ import { useDataStore } from "../../store";
 import { useDebouncedSetting } from "../../hooks/useDebouncedSetting";
 import { useInvoke } from "../../hooks/useInvoke";
 import type { Action, ProjectConfig } from "../../types";
+import { ActionsList } from "../../components/settings/ActionsList";
 
 type SaveStatus = "idle" | "saving" | "saved";
 
@@ -122,6 +123,16 @@ export function ProjectSettingsRoute() {
             <span className="text-md text-muted-foreground">Saved ✓</span>
           )}
         </div>
+      </div>
+
+      <div className="p-4 rounded-lg border border-border bg-card">
+        <ActionsList
+          actions={actions}
+          onChange={(next) => {
+            setActions(next);
+            if (loadedRef.current) saveConfig(setupRef.current, next);
+          }}
+        />
       </div>
 
       <div className="p-4 rounded-lg border border-border bg-card space-y-3">
