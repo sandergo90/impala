@@ -22,9 +22,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
-import { toggleRunScript } from "../lib/run-script";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { useHotkeyTooltip } from "../components/HotkeyDisplay";
+import { RunActionsButton } from "../components/RunActionsButton";
 import { TabPill } from "../components/TabPill";
 import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
 import { usePlanNotifications } from "../hooks/usePlanNotifications";
@@ -64,11 +64,6 @@ export function MainView() {
 
   const activeTab = navState?.activeTab ?? "diff";
 
-  const runStatus = useUIStore((s) =>
-    wtPath ? s.worktreeNavStates[wtPath]?.runStatus ?? "idle" : "idle",
-  );
-  const isRunning = runStatus === "running";
-  const isStopping = runStatus === "stopping";
   const hasUnreadRunFailure = useUIStore((s) =>
     wtPath ? s.worktreeNavStates[wtPath]?.hasUnreadRunFailure ?? false : false,
   );
@@ -76,7 +71,6 @@ export function MainView() {
   usePlanNotifications();
 
   const sidebarTooltip = useHotkeyTooltip("TOGGLE_SIDEBAR", sidebarCollapsed ? "Show sidebar" : "Hide sidebar");
-  const runScriptTooltip = useHotkeyTooltip("RUN_SCRIPT", isRunning ? "Stop script" : "Run script");
   const openInEditorTooltip = useHotkeyTooltip("OPEN_IN_EDITOR", "Open in editor");
 
   const setTab = (tab: "diff" | "terminal" | "split" | "plan") => {
@@ -239,26 +233,10 @@ export function MainView() {
         {selectedWorktree && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingLeft: "88px" }}>
             <div className="relative flex items-center gap-1.5 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => toggleRunScript()}
-                disabled={isStopping}
-                className={`relative p-1.5 rounded disabled:opacity-30 disabled:cursor-not-allowed ${
-                  isRunning || isStopping
-                    ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
-                    : "text-green-400 bg-green-500/15 hover:bg-green-500/25"
-                }`}
-                title={runScriptTooltip}
-              >
-                {isRunning || isStopping ? (
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-                    <rect x="2" y="2" width="12" height="12" rx="1" />
-                  </svg>
-                ) : (
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M4 2l10 6-10 6V2z" />
-                  </svg>
-                )}
-              </button>
+              <RunActionsButton
+                projectPath={selectedProject?.path ?? null}
+                worktreePath={selectedWorktree?.path ?? null}
+              />
               <span className="mx-0.5 w-px h-3.5 bg-border/50" />
               {([
                 { tab: "terminal" as const, label: "Terminal", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
