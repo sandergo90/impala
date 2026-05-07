@@ -3,10 +3,13 @@ import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { encodePtyInput } from "./encode-pty";
 import { RUN_PANE_ID, runPtySessionId } from "./pane-ids";
+import { resolveActionToRun } from "./actions";
+import type { ProjectConfig } from "../types";
 
 /**
- * Ensure the Run tab's PTY session exists. If TabbedTerminals has already lazy-spawned it,
- * returns the existing session ID. Otherwise spawns a new one and registers it in the data store.
+ * Ensure the Run tab's PTY session exists. If TabbedTerminals has already
+ * lazy-spawned it, returns the existing session ID. Otherwise spawns a new
+ * one and registers it in the data store.
  */
 export async function ensureRunTabSession(worktreePath: string): Promise<string> {
   const data = useDataStore.getState().getWorktreeDataState(worktreePath);
@@ -65,23 +68,25 @@ export async function stopRunScript() {
   }, 1000);
 }
 
-export function toggleRunScript() {
+export function toggleRunScript(actionId?: string) {
   const wt = useUIStore.getState().selectedWorktree;
   if (!wt) return;
   const nav = useUIStore.getState().getWorktreeNavState(wt.path);
   if (nav.runStatus === "running") {
     stopRunScript();
   } else {
-    triggerRunScript();
+    triggerRunScript(actionId);
   }
 }
 
 /**
- * Run the configured run script in the Run tab. If the Run tab's PTY doesn't
- * exist yet, spawn it first. Writes the run command into the existing PTY
- * rather than respawning, so scrollback survives.
+ * Run an Action in the Run tab. If `actionId` is provided, runs that specific
+ * Action; otherwise falls back to `resolveActionToRun(actions, lastUsedId)`.
+ *
+ * If the Run tab's PTY doesn't exist yet, spawn it first. Writes the script
+ * into the existing PTY rather than respawning, so scrollback survives.
  */
-export async function triggerRunScript() {
+export async function triggerRunScript(actionId?: string) {
   const project = useUIStore.getState().selectedProject;
   const wt = useUIStore.getState().selectedWorktree;
   if (!project || !wt) return;
@@ -92,16 +97,31 @@ export async function triggerRunScript() {
     return;
   }
 
-  let config: { setup?: string; run?: string };
+  let config: ProjectConfig;
   try {
-    config = await invoke("read_project_config", { projectPath: project.path });
+    config = await invoke<ProjectConfig>("read_project_config", {
+      projectPath: project.path,
+    });
   } catch {
     toast.error("Failed to read project config");
     return;
   }
 
-  if (!config.run?.trim()) {
-    toast("No run script configured");
+  // Phase 1: lastUsedActionId does not exist on WorktreeNavState yet.
+  // Phase 3 adds it; until then, the resolver always falls back to actions[0].
+  const lastUsedId: string | null = null;
+
+  const action = actionId
+    ? config.actions.find((a) => a.id === actionId) ?? null
+    : resolveActionToRun(config.actions, lastUsedId);
+
+  if (!action) {
+    toast("No actions configured");
+    return;
+  }
+
+  if (!action.script.trim()) {
+    toast("Action has no script");
     return;
   }
 
@@ -114,7 +134,7 @@ export async function triggerRunScript() {
       runStatus: "running",
     });
 
-    const encoded = encodePtyInput(config.run + "\n");
+    const encoded = encodePtyInput(action.script + "\n");
     await invoke("pty_write", { sessionId, data: encoded });
   } catch (e) {
     toast.error(`Failed to run script: ${e}`);

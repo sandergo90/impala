@@ -240,7 +240,7 @@ export function MainView() {
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingLeft: "88px" }}>
             <div className="relative flex items-center gap-1.5 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
               <button
-                onClick={toggleRunScript}
+                onClick={() => toggleRunScript()}
                 disabled={isStopping}
                 className={`relative p-1.5 rounded disabled:opacity-30 disabled:cursor-not-allowed ${
                   isRunning || isStopping
