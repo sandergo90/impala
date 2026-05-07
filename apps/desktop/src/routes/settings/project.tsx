@@ -8,8 +8,6 @@ import { useInvoke } from "../../hooks/useInvoke";
 import type { Action, ProjectConfig } from "../../types";
 import { ActionsList } from "../../components/settings/ActionsList";
 
-type SaveStatus = "idle" | "saving" | "saved";
-
 export function ProjectSettingsRoute() {
   const { projectId } = projectSettingsRoute.useParams();
   const projectPath = decodeURIComponent(projectId);
@@ -23,9 +21,7 @@ export function ProjectSettingsRoute() {
 
   const [setup, setSetup] = useState("");
   const [actions, setActions] = useState<Action[]>([]);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const loadedRef = useRef(false);
   const setupRef = useRef(setup);
   const actionsRef = useRef(actions);
@@ -40,7 +36,6 @@ export function ProjectSettingsRoute() {
     loadedRef.current = false;
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     };
   }, [projectPath]);
 
@@ -62,7 +57,6 @@ export function ProjectSettingsRoute() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
       debounceRef.current = setTimeout(async () => {
-        setSaveStatus("saving");
         try {
           await invoke("write_project_config", {
             projectPath,
@@ -72,14 +66,7 @@ export function ProjectSettingsRoute() {
             },
           });
           useDataStore.getState().setProjectActionsCache(projectPath, nextActions);
-          setSaveStatus("saved");
-          if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-          savedTimerRef.current = setTimeout(
-            () => setSaveStatus("idle"),
-            2000
-          );
         } catch (e) {
-          setSaveStatus("idle");
           toast.error(`Failed to save project config: ${e}`);
         }
       }, 500);
@@ -114,15 +101,6 @@ export function ProjectSettingsRoute() {
             className="w-full px-3 py-2 rounded border border-border bg-background font-mono text-sm resize-y"
             placeholder="npm install"
           />
-        </div>
-
-        <div className="flex justify-end">
-          {saveStatus === "saving" && (
-            <span className="text-md text-muted-foreground">Saving...</span>
-          )}
-          {saveStatus === "saved" && (
-            <span className="text-md text-muted-foreground">Saved ✓</span>
-          )}
         </div>
       </div>
 
