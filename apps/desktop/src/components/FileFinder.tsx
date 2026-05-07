@@ -71,6 +71,12 @@ export function FileFinder({
   // value directly; we derive it from the active [data-selected="true"] item
   // inside the list at the time the key is pressed.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
