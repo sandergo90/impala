@@ -71,6 +71,7 @@ export function ProjectSettingsRoute() {
               actions: nextActions,
             },
           });
+          useDataStore.getState().setProjectActionsCache(projectPath, nextActions);
           setSaveStatus("saved");
           if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
           savedTimerRef.current = setTimeout(

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Worktree, Project, WorktreeNavState, WorktreeDataState, SplitNode } from "./types";
+import type { Worktree, Project, WorktreeNavState, WorktreeDataState, SplitNode, Action } from "./types";
 import type { Theme } from "./themes/types";
 import { defaultDark } from "./themes/built-in";
 import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
@@ -21,6 +21,7 @@ function createDefaultNavState(): WorktreeNavState {
     userTabs: [],
     runExitCode: null,
     hasUnreadRunFailure: false,
+    lastUsedActionId: null,
   };
 }
 
@@ -269,9 +270,16 @@ export const useUIStore = create<UIState>()(
           linearApiKey,
           pendingTreeReveal,
           fileFinderOpen,
+          worktreeNavStates,
           ...rest
         } = state;
-        return rest;
+        // Strip in-memory-only fields from each nav state.
+        const cleanedNavStates: Record<string, WorktreeNavState> = {};
+        for (const [path, nav] of Object.entries(worktreeNavStates)) {
+          const { lastUsedActionId, ...persistableNav } = nav;
+          cleanedNavStates[path] = persistableNav as WorktreeNavState;
+        }
+        return { ...rest, worktreeNavStates: cleanedNavStates };
       },
       onRehydrateStorage: () => (state) => {
         if (state) {
@@ -298,6 +306,8 @@ interface DataState {
   generalTerminalPaneSessions: Record<string, string>;
   setGeneralTerminalPaneSessions: (sessions: Record<string, string>) => void;
   updateGeneralTerminalPaneSession: (paneId: string, sessionId: string) => void;
+  projectActionsCache: Record<string, Action[]>;
+  setProjectActionsCache: (projectPath: string, actions: Action[]) => void;
 }
 
 export const useDataStore = create<DataState>()(
@@ -339,6 +349,11 @@ export const useDataStore = create<DataState>()(
     updateGeneralTerminalPaneSession: (paneId, sessionId) =>
       set((state) => ({
         generalTerminalPaneSessions: { ...state.generalTerminalPaneSessions, [paneId]: sessionId },
+      })),
+    projectActionsCache: {},
+    setProjectActionsCache: (projectPath, actions) =>
+      set((state) => ({
+        projectActionsCache: { ...state.projectActionsCache, [projectPath]: actions },
       })),
   })
 );

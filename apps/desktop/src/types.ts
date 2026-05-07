@@ -157,6 +157,12 @@ export interface WorktreeNavState {
   runExitCode: number | null;
   /** True when the Run script exited non-zero and the user has not yet viewed the Run tab. */
   hasUnreadRunFailure: boolean;
+  /**
+   * Stable id of the Action most recently fired in this worktree. The header's
+   * play button and Cmd+Shift+R both fire this Action; the dropdown shows a
+   * checkmark next to it. In-memory only — reset on app restart.
+   */
+  lastUsedActionId?: string | null;
 }
 
 export interface WorktreeDataState {

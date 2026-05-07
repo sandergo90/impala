@@ -107,9 +107,7 @@ export async function triggerRunScript(actionId?: string) {
     return;
   }
 
-  // Phase 1: lastUsedActionId does not exist on WorktreeNavState yet.
-  // Phase 3 adds it; until then, the resolver always falls back to actions[0].
-  const lastUsedId: string | null = null;
+  const lastUsedId = nav.lastUsedActionId ?? null;
 
   const action = actionId
     ? config.actions.find((a) => a.id === actionId) ?? null
@@ -128,10 +126,16 @@ export async function triggerRunScript(actionId?: string) {
   try {
     const sessionId = await ensureRunTabSession(wt.path);
 
+    // Refresh the cache so the header reflects the latest config (e.g., if
+    // the settings page just autosaved a rename moments before the play
+    // button was clicked).
+    useDataStore.getState().setProjectActionsCache(project.path, config.actions);
+
     useUIStore.getState().updateWorktreeNavState(wt.path, {
       activeTab: "terminal",
       activeTerminalsTab: RUN_PANE_ID,
       runStatus: "running",
+      lastUsedActionId: action.id,
     });
 
     const encoded = encodePtyInput(action.script + "\n");
