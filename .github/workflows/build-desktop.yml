@@ -23,8 +23,17 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      # Caches ~/.cargo/{registry,git} plus the listed target/ dirs, keyed by
+      # Cargo.lock. backend/mcp lives outside the Tauri workspace so it needs
+      # its own entry here; if/when it becomes a workspace member, drop the
+      # second line.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
         with:
-          targets: ${{ matrix.target }}
+          workspaces: |
+            backend/tauri -> target
+            backend/mcp -> target
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
