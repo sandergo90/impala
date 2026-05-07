@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { encodePtyInput } from "./encode-pty";
 import { RUN_PANE_ID, runPtySessionId } from "./pane-ids";
-import { resolveActionToRun } from "./actions";
+import { resolveActionToRun, type ResolveResult } from "./actions";
 import type { ProjectConfig } from "../types";
 
 /**
@@ -109,13 +109,26 @@ export async function triggerRunScript(actionId?: string) {
 
   const lastUsedId = nav.lastUsedActionId ?? null;
 
-  const action = actionId
-    ? config.actions.find((a) => a.id === actionId) ?? null
-    : resolveActionToRun(config.actions, lastUsedId);
+  let resolved: ResolveResult;
+  if (actionId) {
+    const hit = config.actions.find((a) => a.id === actionId) ?? null;
+    resolved = { action: hit, staleLastUsed: false };
+  } else {
+    resolved = resolveActionToRun(config.actions, lastUsedId);
+  }
 
+  const action = resolved.action;
   if (!action) {
     toast("No actions configured");
     return;
+  }
+
+  if (resolved.staleLastUsed) {
+    // The user's last-used Action was deleted; reset the pointer so the
+    // dropdown checkmark and future fallbacks reflect the new actions[0].
+    useUIStore
+      .getState()
+      .updateWorktreeNavState(wt.path, { lastUsedActionId: null });
   }
 
   if (!action.script.trim()) {

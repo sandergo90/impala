@@ -31,11 +31,16 @@ export function RunActionsButton({
 
   const isRunning = runStatus === "running";
   const isStopping = runStatus === "stopping";
-  const resolved = resolveActionToRun(actions, lastUsedId);
+  const { action: resolved } = resolveActionToRun(actions, lastUsedId);
   const buttonLabel = resolved ? actionLabel(resolved) : "Run";
+  const noActions = actions.length === 0;
   const playTooltip = useHotkeyTooltip(
     "RUN_SCRIPT",
-    isRunning ? "Stop script" : `Run ${buttonLabel}`,
+    isRunning
+      ? "Stop script"
+      : noActions
+        ? "No actions configured"
+        : `Run ${buttonLabel}`,
   );
 
   const playDisabled = !resolved && !isRunning && !isStopping;
