@@ -5,11 +5,7 @@ import { projectSettingsRoute } from "../../router";
 import { useDataStore } from "../../store";
 import { useDebouncedSetting } from "../../hooks/useDebouncedSetting";
 import { useInvoke } from "../../hooks/useInvoke";
-
-interface ProjectConfig {
-  setup?: string | null;
-  run?: string | null;
-}
+import type { Action, ProjectConfig } from "../../types";
 
 type SaveStatus = "idle" | "saving" | "saved";
 
@@ -25,15 +21,15 @@ export function ProjectSettingsRoute() {
     projectPath;
 
   const [setup, setSetup] = useState("");
-  const [run, setRun] = useState("");
+  const [actions, setActions] = useState<Action[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const loadedRef = useRef(false);
   const setupRef = useRef(setup);
-  const runRef = useRef(run);
+  const actionsRef = useRef(actions);
   setupRef.current = setup;
-  runRef.current = run;
+  actionsRef.current = actions;
 
   const [claudeFlags, handleClaudeFlagsChange] = useDebouncedSetting("claudeFlags", projectPath);
   const [codexFlags, handleCodexFlagsChange] = useDebouncedSetting("codexFlags", projectPath);
@@ -51,7 +47,7 @@ export function ProjectSettingsRoute() {
   useInvoke<ProjectConfig>("read_project_config", { projectPath }, {
     onSuccess: (config) => {
       setSetup(config.setup ?? "");
-      setRun(config.run ?? "");
+      setActions(config.actions ?? []);
       loadedRef.current = true;
     },
     onError: (e) => {
@@ -61,7 +57,7 @@ export function ProjectSettingsRoute() {
   });
 
   const saveConfig = useCallback(
-    (nextSetup: string, nextRun: string) => {
+    (nextSetup: string, nextActions: Action[]) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
       debounceRef.current = setTimeout(async () => {
@@ -71,7 +67,7 @@ export function ProjectSettingsRoute() {
             projectPath,
             config: {
               setup: nextSetup.trim() || null,
-              run: nextRun.trim() || null,
+              actions: nextActions,
             },
           });
           setSaveStatus("saved");
@@ -91,12 +87,7 @@ export function ProjectSettingsRoute() {
 
   const handleSetupChange = (value: string) => {
     setSetup(value);
-    if (loadedRef.current) saveConfig(value, runRef.current);
-  };
-
-  const handleRunChange = (value: string) => {
-    setRun(value);
-    if (loadedRef.current) saveConfig(setupRef.current, value);
+    if (loadedRef.current) saveConfig(value, actionsRef.current);
   };
 
   return (
@@ -120,20 +111,6 @@ export function ProjectSettingsRoute() {
             rows={4}
             className="w-full px-3 py-2 rounded border border-border bg-background font-mono text-sm resize-y"
             placeholder="npm install"
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Run</label>
-          <p className="text-md text-muted-foreground">
-            Start the dev server. Triggered via Cmd+Shift+R.
-          </p>
-          <textarea
-            value={run}
-            onChange={(e) => handleRunChange(e.target.value)}
-            rows={4}
-            className="w-full px-3 py-2 rounded border border-border bg-background font-mono text-sm resize-y"
-            placeholder="npm run dev"
           />
         </div>
 

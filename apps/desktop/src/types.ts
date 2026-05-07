@@ -240,3 +240,14 @@ export interface GithubCliStatus {
   authenticated: boolean;
   username: string | null;
 }
+
+export interface Action {
+  id: string;
+  name: string;
+  script: string;
+}
+
+export interface ProjectConfig {
+  setup: string | null;
+  actions: Action[];
+}
