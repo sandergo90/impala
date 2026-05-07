@@ -57,12 +57,12 @@ export function RunActionsButton({
   };
 
   return (
-    <div className="flex items-stretch rounded overflow-hidden">
+    <div className="flex items-stretch rounded-md overflow-hidden ring-1 ring-inset ring-black/20">
       <button
         onClick={() => toggleRunScript()}
         disabled={isStopping || playDisabled}
         title={playTooltip}
-        className={`flex items-center gap-1.5 px-2 py-1.5 text-md font-medium disabled:opacity-30 disabled:cursor-not-allowed ${variantClasses}`}
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 text-md font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${variantClasses}`}
       >
         {isActive ? (
           <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
@@ -77,74 +77,112 @@ export function RunActionsButton({
       </button>
 
       {showDropdown && (
-      <Menu.Root>
-        <Menu.Trigger
-          aria-label="Pick an action"
-          className={`px-1.5 border-l border-background/30 ${variantClasses}`}
-        >
-          <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
-            <path d="M2 4l4 4 4-4z" />
-          </svg>
-        </Menu.Trigger>
-        <Menu.Portal>
-          <Menu.Positioner sideOffset={4} align="start" className="z-50">
-            <Menu.Popup
-              className={[
-                "bg-popover text-popover-foreground border border-border rounded-md shadow-md",
-                "py-1 min-w-[180px] text-sm outline-none",
-                "data-open:animate-in data-open:fade-in-0",
-                "data-closed:animate-out data-closed:fade-out-0",
-              ].join(" ")}
-            >
-              {actions.length === 0 ? (
-                <Menu.Item
-                  onClick={handleEditActions}
-                  className="px-3 py-1.5 cursor-pointer select-none outline-none text-muted-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground"
-                >
-                  No actions — Edit actions…
-                </Menu.Item>
-              ) : (
-                <>
-                  {actions.map((action) => {
-                    const isLastUsed = action.id === lastUsedId;
-                    return (
-                      <Menu.Item
-                        key={action.id}
-                        disabled={isActive}
-                        onClick={() => {
-                          if (isActive) return;
-                          if (!action.script.trim()) {
-                            toast("Action has no script");
-                            return;
-                          }
-                          triggerRunScript(action.id);
-                        }}
-                        className={[
-                          "px-3 py-1.5 cursor-pointer select-none outline-none flex items-center gap-2",
-                          "text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground",
-                          "data-disabled:opacity-40 data-disabled:cursor-not-allowed",
-                        ].join(" ")}
-                      >
-                        <span className="w-3 inline-flex items-center justify-center text-foreground/80">
-                          {isLastUsed ? "✓" : ""}
-                        </span>
-                        <span className="truncate">{actionLabel(action)}</span>
-                      </Menu.Item>
-                    );
-                  })}
-                  <div className="my-1 h-px bg-border" />
+        <Menu.Root>
+          <Menu.Trigger
+            aria-label="Pick an action"
+            className={`flex items-center px-1.5 border-l border-black/20 transition-colors ${variantClasses}`}
+          >
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M2 4l4 4 4-4z" />
+            </svg>
+          </Menu.Trigger>
+          <Menu.Portal>
+            <Menu.Positioner sideOffset={6} align="start" className="z-50">
+              <Menu.Popup
+                className={[
+                  "bg-popover text-popover-foreground border border-border/80 rounded-lg shadow-xl shadow-black/30",
+                  "py-1 min-w-[200px] text-md outline-none",
+                  "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
+                  "data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+                ].join(" ")}
+              >
+                {actions.length === 0 ? (
                   <Menu.Item
                     onClick={handleEditActions}
-                    className="px-3 py-1.5 cursor-pointer select-none outline-none text-muted-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+                    className="mx-1 px-2.5 py-1.5 rounded-md cursor-pointer select-none outline-none text-muted-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground"
                   >
-                    Edit actions…
+                    No actions — Edit actions…
                   </Menu.Item>
-                </>
-              )}
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>
+                ) : (
+                  <>
+                    <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">
+                      Actions
+                    </div>
+                    {actions.map((action) => {
+                      const isResolved = action.id === resolved?.id;
+                      return (
+                        <Menu.Item
+                          key={action.id}
+                          disabled={isActive}
+                          onClick={() => {
+                            if (isActive) return;
+                            if (!action.script.trim()) {
+                              toast("Action has no script");
+                              return;
+                            }
+                            triggerRunScript(action.id);
+                          }}
+                          className={[
+                            "mx-1 px-2.5 py-1.5 rounded-md cursor-pointer select-none outline-none flex items-center gap-2",
+                            "text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+                            "data-disabled:opacity-40 data-disabled:cursor-not-allowed",
+                          ].join(" ")}
+                        >
+                          <svg
+                            width="9"
+                            height="9"
+                            viewBox="0 0 16 16"
+                            fill="currentColor"
+                            className="text-green-400/80 shrink-0"
+                          >
+                            <path d="M4 2l10 6-10 6V2z" />
+                          </svg>
+                          <span className="flex-1 truncate">{actionLabel(action)}</span>
+                          {isResolved && (
+                            <svg
+                              width="11"
+                              height="11"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="text-foreground/70 shrink-0"
+                            >
+                              <path d="M3 8l3.5 3.5L13 5" />
+                            </svg>
+                          )}
+                        </Menu.Item>
+                      );
+                    })}
+                    <div className="my-1 mx-1 h-px bg-border/70" />
+                    <Menu.Item
+                      onClick={handleEditActions}
+                      className="mx-1 px-2.5 py-1.5 rounded-md cursor-pointer select-none outline-none flex items-center gap-2 text-muted-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+                    >
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="shrink-0"
+                      >
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                      </svg>
+                      <span>Edit actions…</span>
+                    </Menu.Item>
+                  </>
+                )}
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.Root>
       )}
     </div>
   );
