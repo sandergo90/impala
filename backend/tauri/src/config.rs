@@ -60,8 +60,8 @@ pub fn read_project_config(project_path: String) -> Result<ProjectConfig, String
     let legacy: LegacyProjectConfig = serde_json::from_str(&contents)
         .map_err(|e| format!("Failed to parse config: {}", e))?;
 
-    // If the file already has actions[], use it directly. Otherwise migrate
-    // a legacy `run` field into actions[0] and rewrite to disk so the legacy
+    // If the file already has actions[], use it directly. Otherwise convert a
+    // legacy `run` field into actions[0] and rewrite to disk so the legacy
     // shape disappears forever after this read.
     let mut migrated = false;
     let actions = match legacy.actions {
@@ -76,9 +76,9 @@ pub fn read_project_config(project_path: String) -> Result<ProjectConfig, String
                         name: "Run".to_string(),
                         script: run.clone(),
                     });
+                    migrated = true;
                 }
             }
-            migrated = true;
             acts
         }
     };

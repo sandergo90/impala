@@ -23,7 +23,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { useUIStore, useDataStore } from "../store";
-import type { SplitNode, UserTab, WorktreeIssue } from "../types";
+import type { ProjectConfig, SplitNode, UserTab, WorktreeIssue } from "../types";
 import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
@@ -56,11 +56,6 @@ type TabKind = "terminal" | "agent" | "file";
 // equality and triggering an infinite re-render loop.
 const EMPTY_USER_TABS: UserTab[] = [];
 
-interface ProjectConfig {
-  setup?: string | null;
-  run?: string | null;
-}
-
 interface TabDescriptor {
   id: string;
   label: string;
@@ -73,7 +68,7 @@ interface TabDescriptor {
 /**
  * Tabbed terminals view for a single worktree.
  *
- * System tabs: Agent (always) and Run (when config.setup or config.run is set).
+ * System tabs: Agent (always) and Run (when config.setup is set or any actions exist).
  * User tabs: from nav.userTabs, created via the plus button.
  *
  * When `agentOnly` is true, the tab strip + plus button are hidden and only
@@ -102,15 +97,17 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   useEffect(() => {
     const projectPath = useUIStore.getState().selectedProject?.path;
     if (!projectPath) {
-      setConfig({});
+      setConfig(null);
       return;
     }
     invoke<ProjectConfig>("read_project_config", { projectPath })
-      .then((c) => setConfig(c ?? {}))
-      .catch(() => setConfig({}));
+      .then((c) => setConfig(c))
+      .catch(() => setConfig(null));
   }, [worktreePath]);
 
-  const hasRunTab = Boolean(config?.setup?.trim() || config?.run?.trim());
+  const hasRunTab = Boolean(
+    config?.setup?.trim() || (config?.actions.length ?? 0) > 0,
+  );
 
   useEffect(() => {
     if (!hasRunTab) return;

@@ -31,19 +31,21 @@ export function RunActionsButton({
 
   const isRunning = runStatus === "running";
   const isStopping = runStatus === "stopping";
+  const isActive = isRunning || isStopping;
   const { action: resolved } = resolveActionToRun(actions, lastUsedId);
   const buttonLabel = resolved ? actionLabel(resolved) : "Run";
   const noActions = actions.length === 0;
-  const playTooltip = useHotkeyTooltip(
-    "RUN_SCRIPT",
-    isRunning
-      ? "Stop script"
-      : noActions
-        ? "No actions configured"
-        : `Run ${buttonLabel}`,
-  );
 
-  const playDisabled = !resolved && !isRunning && !isStopping;
+  let tooltipText: string;
+  if (isRunning) tooltipText = "Stop script";
+  else if (noActions) tooltipText = "No actions configured";
+  else tooltipText = `Run ${buttonLabel}`;
+  const playTooltip = useHotkeyTooltip("RUN_SCRIPT", tooltipText);
+
+  const playDisabled = !resolved && !isActive;
+  const variantClasses = isActive
+    ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
+    : "text-green-400 bg-green-500/15 hover:bg-green-500/25";
 
   const handleEditActions = () => {
     if (!projectPath) return;
@@ -59,13 +61,9 @@ export function RunActionsButton({
         onClick={() => toggleRunScript()}
         disabled={isStopping || playDisabled}
         title={playTooltip}
-        className={`flex items-center gap-1.5 px-2 py-1.5 text-md font-medium disabled:opacity-30 disabled:cursor-not-allowed ${
-          isRunning || isStopping
-            ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
-            : "text-green-400 bg-green-500/15 hover:bg-green-500/25"
-        }`}
+        className={`flex items-center gap-1.5 px-2 py-1.5 text-md font-medium disabled:opacity-30 disabled:cursor-not-allowed ${variantClasses}`}
       >
-        {isRunning || isStopping ? (
+        {isActive ? (
           <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
             <rect x="2" y="2" width="12" height="12" rx="1" />
           </svg>
@@ -80,11 +78,7 @@ export function RunActionsButton({
       <Menu.Root>
         <Menu.Trigger
           aria-label="Pick an action"
-          className={`px-1.5 border-l border-background/30 disabled:opacity-30 disabled:cursor-not-allowed ${
-            isRunning || isStopping
-              ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
-              : "text-green-400 bg-green-500/15 hover:bg-green-500/25"
-          }`}
+          className={`px-1.5 border-l border-background/30 ${variantClasses}`}
         >
           <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
             <path d="M2 4l4 4 4-4z" />
@@ -111,13 +105,12 @@ export function RunActionsButton({
                 <>
                   {actions.map((action) => {
                     const isLastUsed = action.id === lastUsedId;
-                    const itemDisabled = isRunning || isStopping;
                     return (
                       <Menu.Item
                         key={action.id}
-                        disabled={itemDisabled}
+                        disabled={isActive}
                         onClick={() => {
-                          if (itemDisabled) return;
+                          if (isActive) return;
                           if (!action.script.trim()) {
                             toast("Action has no script");
                             return;

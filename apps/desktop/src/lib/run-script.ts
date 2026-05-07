@@ -97,35 +97,40 @@ export async function triggerRunScript(actionId?: string) {
     return;
   }
 
-  let config: ProjectConfig;
-  try {
-    config = await invoke<ProjectConfig>("read_project_config", {
-      projectPath: project.path,
-    });
-  } catch {
-    toast.error("Failed to read project config");
-    return;
+  // Read from the project-actions cache (populated by useProjectActions on
+  // the header and refreshed after settings autosave). Fall back to disk only
+  // when the cache is cold — e.g. a hotkey fired before the header mounted.
+  let actions = useDataStore.getState().projectActionsCache[project.path];
+  if (!actions) {
+    try {
+      const config = await invoke<ProjectConfig>("read_project_config", {
+        projectPath: project.path,
+      });
+      actions = config.actions;
+      useDataStore.getState().setProjectActionsCache(project.path, actions);
+    } catch {
+      toast.error("Failed to read project config");
+      return;
+    }
   }
 
   const lastUsedId = nav.lastUsedActionId ?? null;
 
   let resolved: ResolveResult;
   if (actionId) {
-    const hit = config.actions.find((a) => a.id === actionId) ?? null;
+    const hit = actions.find((a) => a.id === actionId) ?? null;
     resolved = { action: hit, staleLastUsed: false };
   } else {
-    resolved = resolveActionToRun(config.actions, lastUsedId);
+    resolved = resolveActionToRun(actions, lastUsedId);
   }
 
   const action = resolved.action;
   if (!action) {
-    toast("No actions configured");
+    toast(actionId ? "Action no longer exists" : "No actions configured");
     return;
   }
 
   if (resolved.staleLastUsed) {
-    // The user's last-used Action was deleted; reset the pointer so the
-    // dropdown checkmark and future fallbacks reflect the new actions[0].
     useUIStore
       .getState()
       .updateWorktreeNavState(wt.path, { lastUsedActionId: null });
@@ -138,11 +143,6 @@ export async function triggerRunScript(actionId?: string) {
 
   try {
     const sessionId = await ensureRunTabSession(wt.path);
-
-    // Refresh the cache so the header reflects the latest config (e.g., if
-    // the settings page just autosaved a rename moments before the play
-    // button was clicked).
-    useDataStore.getState().setProjectActionsCache(project.path, config.actions);
 
     useUIStore.getState().updateWorktreeNavState(wt.path, {
       activeTab: "terminal",

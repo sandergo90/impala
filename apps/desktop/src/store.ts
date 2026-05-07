@@ -352,8 +352,21 @@ export const useDataStore = create<DataState>()(
       })),
     projectActionsCache: {},
     setProjectActionsCache: (projectPath, actions) =>
-      set((state) => ({
-        projectActionsCache: { ...state.projectActionsCache, [projectPath]: actions },
-      })),
+      set((state) => {
+        const prev = state.projectActionsCache[projectPath];
+        if (
+          prev &&
+          prev.length === actions.length &&
+          prev.every((a, i) => a === actions[i])
+        ) {
+          return state;
+        }
+        return {
+          projectActionsCache: {
+            ...state.projectActionsCache,
+            [projectPath]: actions,
+          },
+        };
+      }),
   })
 );

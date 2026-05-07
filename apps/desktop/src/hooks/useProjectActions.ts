@@ -1,7 +1,8 @@
-import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import type { Action, ProjectConfig } from "../types";
 import { useDataStore } from "../store";
+import { useInvoke } from "./useInvoke";
+
+const EMPTY_ACTIONS: Action[] = [];
 
 /**
  * Read-on-mount and re-read-when-projectPath-changes hook that populates the
@@ -13,27 +14,19 @@ export function useProjectActions(projectPath: string | null): Action[] {
     projectPath ? s.projectActionsCache[projectPath] ?? null : null,
   );
 
-  useEffect(() => {
-    if (!projectPath) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const config = await invoke<ProjectConfig>("read_project_config", {
-          projectPath,
-        });
-        if (!cancelled) {
-          useDataStore
-            .getState()
-            .setProjectActionsCache(projectPath, config.actions ?? []);
-        }
-      } catch {
-        // ignore — header renders empty actions if read fails
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [projectPath]);
+  useInvoke<ProjectConfig>(
+    "read_project_config",
+    projectPath ? { projectPath } : undefined,
+    {
+      enabled: !!projectPath,
+      onSuccess: (config) => {
+        if (!projectPath) return;
+        useDataStore
+          .getState()
+          .setProjectActionsCache(projectPath, config.actions ?? []);
+      },
+    },
+  );
 
-  return cached ?? [];
+  return cached ?? EMPTY_ACTIONS;
 }

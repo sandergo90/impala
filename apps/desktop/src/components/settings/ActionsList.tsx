@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Action } from "../../types";
+import { actionLabel } from "../../lib/actions";
 
 interface ActionsListProps {
   actions: Action[];
@@ -50,8 +51,7 @@ export function ActionsList({ actions, onChange }: ActionsListProps) {
       const removed = actions[index];
       const next = actions.filter((a) => a.id !== id);
       onChange(next);
-      const label = removed.name.trim() || "Untitled";
-      toast(`Deleted "${label}"`, {
+      toast(`Deleted "${actionLabel(removed)}"`, {
         action: {
           label: "Undo",
           onClick: () => {
