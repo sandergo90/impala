@@ -49,8 +49,12 @@ export function createCodeMirrorTheme(
           }
         : { caretColor: term.foreground },
       ".cm-cursor, .cm-dropCursor": { borderLeftColor: term.foreground },
-      "&.cm-focused .cm-selectionBackgroundCollapsed, ::selection, .cm-selectionBackground":
-        { backgroundColor: term.selectionBackground },
+      // CM's base theme paints `.cm-focused > .cm-scroller > .cm-selectionLayer
+      // .cm-selectionBackground` with a higher-specificity selector that beats
+      // a plain `.cm-selectionBackground` override. Match its specificity so the
+      // selection stays themed while the editor is focused too.
+      "&.cm-focused .cm-selectionBackgroundCollapsed, ::selection, .cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground":
+        { backgroundColor: ui.editorSelection },
       ".cm-gutters": {
         backgroundColor: term.background,
         color: muted,

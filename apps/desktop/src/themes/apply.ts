@@ -182,7 +182,7 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
     highlightActive: ui.highlightActive ?? `color-mix(in srgb, ${primary} 50%, transparent)`,
     link: ui.link ?? primary,
     codeBackground: ui.codeBackground ?? ui.muted ?? accent,
-    editorSelection: ui.editorSelection ?? `color-mix(in srgb, ${primary} 18%, transparent)`,
+    editorSelection: ui.editorSelection ?? `color-mix(in srgb, ${primary} 35%, transparent)`,
   };
 }
 

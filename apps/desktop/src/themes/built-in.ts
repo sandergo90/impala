@@ -41,7 +41,7 @@ export const defaultDark: Theme = {
     highlightActive: "rgba(136, 192, 208, 0.5)",
     link: "#88C0D0",
     codeBackground: "#1A1A1A",
-    editorSelection: "rgba(136, 192, 208, 0.2)",
+    editorSelection: "rgba(136, 192, 208, 0.4)",
   },
   terminal: {
     background: "#141414",
@@ -79,7 +79,7 @@ export const defaultLight: Theme = {
     accent: "#f6f8fa",
     link: "#0969da",
     codeBackground: "#f6f8fa",
-    editorSelection: "rgba(9, 105, 218, 0.18)",
+    editorSelection: "rgba(9, 105, 218, 0.3)",
   },
   terminal: {
     background: "#ffffff",
