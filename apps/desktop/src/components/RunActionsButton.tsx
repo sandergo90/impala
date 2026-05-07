@@ -43,6 +43,7 @@ export function RunActionsButton({
   const playTooltip = useHotkeyTooltip("RUN_SCRIPT", tooltipText);
 
   const playDisabled = !resolved && !isActive;
+  const showDropdown = actions.length !== 1;
   const variantClasses = isActive
     ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
     : "text-green-400 bg-green-500/15 hover:bg-green-500/25";
@@ -75,6 +76,7 @@ export function RunActionsButton({
         <span className="max-w-[120px] truncate">{buttonLabel}</span>
       </button>
 
+      {showDropdown && (
       <Menu.Root>
         <Menu.Trigger
           aria-label="Pick an action"
@@ -143,6 +145,7 @@ export function RunActionsButton({
           </Menu.Positioner>
         </Menu.Portal>
       </Menu.Root>
+      )}
     </div>
   );
 }
