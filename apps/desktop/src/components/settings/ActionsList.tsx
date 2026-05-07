@@ -1,5 +1,20 @@
 import { useCallback } from "react";
 import { toast } from "sonner";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { Action } from "../../types";
 
 interface ActionsListProps {
@@ -53,6 +68,24 @@ export function ActionsList({ actions, onChange }: ActionsListProps) {
     [actions, onChange],
   );
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 4 },
+    }),
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = actions.findIndex((a) => a.id === active.id);
+      const newIndex = actions.findIndex((a) => a.id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return;
+      onChange(arrayMove(actions, oldIndex, newIndex));
+    },
+    [actions, onChange],
+  );
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -77,16 +110,27 @@ export function ActionsList({ actions, onChange }: ActionsListProps) {
           No actions configured. Click <span className="font-medium">Add action</span> to create one.
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
-          {actions.map((action) => (
-            <ActionCard
-              key={action.id}
-              action={action}
-              onChange={(patch) => updateAction(action.id, patch)}
-              onDelete={() => deleteAction(action.id)}
-            />
-          ))}
-        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={actions.map((a) => a.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="flex flex-col gap-3">
+              {actions.map((action) => (
+                <ActionCard
+                  key={action.id}
+                  action={action}
+                  onChange={(patch) => updateAction(action.id, patch)}
+                  onDelete={() => deleteAction(action.id)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
     </div>
   );
@@ -99,9 +143,38 @@ interface ActionCardProps {
 }
 
 function ActionCard({ action, onChange, onDelete }: ActionCardProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: action.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
   return (
-    <div className="p-3 rounded-lg border border-border bg-card space-y-2">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="p-3 rounded-lg border border-border bg-card space-y-2"
+    >
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Drag to reorder"
+          className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground hover:text-foreground touch-none"
+          {...attributes}
+          {...listeners}
+        >
+          <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor">
+            <circle cx="3" cy="3" r="1.2" />
+            <circle cx="9" cy="3" r="1.2" />
+            <circle cx="3" cy="7" r="1.2" />
+            <circle cx="9" cy="7" r="1.2" />
+            <circle cx="3" cy="11" r="1.2" />
+            <circle cx="9" cy="11" r="1.2" />
+          </svg>
+        </button>
         <input
           type="text"
           value={action.name}
