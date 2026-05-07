@@ -232,7 +232,7 @@ function FileItem({
         }
       }}
       data-path={path}
-      className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md cursor-pointer data-[selected=true]:bg-accent"
+      className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
     >
       <svg
         width="12"

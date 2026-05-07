@@ -61,7 +61,12 @@ export function createCodeMirrorTheme(
         border: "none",
         ...(isMarkdown ? { display: "none" } : {}),
       },
-      ".cm-activeLine": { backgroundColor: accentBg },
+      // Same hue as the selection, half the alpha — keeps the editor's
+      // highlight palette cohesive (active line reads as a faint preview of
+      // selection). Translucency is also load-bearing: the selectionLayer
+      // paints below .cm-content, so an opaque activeLine bg would mask
+      // selection on the cursor's line.
+      ".cm-activeLine": { backgroundColor: `color-mix(in srgb, ${ui.editorSelection} 50%, transparent)` },
       ".cm-activeLineGutter": { backgroundColor: accentBg },
       ".cm-selectionMatch": { backgroundColor: accentBg },
       ".cm-searchMatch": {

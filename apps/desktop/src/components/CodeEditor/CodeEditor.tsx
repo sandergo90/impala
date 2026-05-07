@@ -5,14 +5,41 @@ import { bracketMatching, indentOnInput } from "@codemirror/language";
 import { highlightSelectionMatches, openSearchPanel, searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState } from "@codemirror/state";
 import {
-  drawSelection, dropCursor, EditorView, highlightActiveLine,
+  Decoration, type DecorationSet, drawSelection, dropCursor, EditorView,
   highlightActiveLineGutter, highlightSpecialChars, keymap, lineNumbers,
+  ViewPlugin, type ViewUpdate,
 } from "@codemirror/view";
 import { type MutableRefObject, useEffect, useRef } from "react";
 import { useUIStore } from "../../store";
 import { resolveThemeById } from "../../themes/apply";
 import { createCodeMirrorTheme } from "./createCodeMirrorTheme";
 import { loadLanguageSupport } from "./loadLanguageSupport";
+
+// Like CodeMirror's built-in highlightActiveLine, but suppresses while a
+// non-empty selection is on the line — the activeLine bg stacks on top of
+// the selectionLayer (which paints below .cm-content) and would otherwise
+// make the cursor's line look different from the rest of the selection.
+const activeLineDeco = Decoration.line({ class: "cm-activeLine" });
+const highlightActiveLineWhenCollapsed = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = this.build(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.selectionSet) {
+        this.decorations = this.build(update.view);
+      }
+    }
+    build(view: EditorView): DecorationSet {
+      const main = view.state.selection.main;
+      if (!main.empty) return Decoration.none;
+      const line = view.state.doc.lineAt(main.head);
+      return Decoration.set([activeLineDeco.range(line.from)]);
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
 
 export interface CodeEditorHandle {
   focus(): void;
@@ -81,7 +108,7 @@ export function CodeEditor({
         EditorState.allowMultipleSelections.of(true),
         indentOnInput(),
         bracketMatching(),
-        highlightActiveLine(),
+        highlightActiveLineWhenCollapsed,
         highlightSelectionMatches(),
         EditorView.lineWrapping,
         editableCompartment.of([
