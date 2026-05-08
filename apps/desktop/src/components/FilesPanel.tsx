@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useFileTree, FileTree } from "@pierre/trees/react";
 import type {
   GitStatusEntry,
@@ -558,12 +559,10 @@ export function FilesPanel() {
   );
 }
 
-// Fixed-positioned popover anchored at `anchorRect`. Trees' slot lives in a
-// `width: 0` flex child of the anchor, so a normally-flowing menu would render
-// at the row's right edge and get clipped by FilesPanel's `overflow-hidden`.
-// Using `position: fixed` with the anchor rect escapes the clip, and we
-// measure once mounted to flip horizontally / vertically when we'd overflow
-// the viewport.
+// Portaled to `document.body` so the menu sits outside the trees shadow-DOM
+// slot. The slot wraps content in a `position: fixed; width: 0` flex anchor
+// which, on right-click, breaks nested `position: fixed` layout — items render
+// blank. A body-level portal sidesteps the slot entirely.
 function ContextMenuSurface({
   anchorRect,
   items,
@@ -590,7 +589,7 @@ function ContextMenuSurface({
     setPos({ left, top });
   }, [anchorRect]);
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       style={{
@@ -602,7 +601,12 @@ function ContextMenuSurface({
         visibility: pos ? "visible" : "hidden",
         zIndex: 50,
       }}
-      className="bg-popover text-popover-foreground border border-border rounded-md shadow-md py-1 min-w-[180px] text-sm outline-none"
+      // `flex flex-col` so children stretch via `align-items: stretch` instead
+      // of `w-full`. A percentage width on children + shrink-to-fit on the
+      // parent is circular — browsers resolve the percentage against the
+      // containing block (the viewport here, after the portal), which makes
+      // the popover blow up to viewport width.
+      className="flex flex-col bg-popover text-popover-foreground border border-border rounded-md shadow-md py-1 min-w-[180px] text-sm outline-none"
     >
       {items.map((mi) => (
         <button
@@ -611,14 +615,15 @@ function ContextMenuSurface({
           onMouseDown={(e) => e.preventDefault()}
           onClick={mi.onSelect}
           className={
-            "w-full text-left px-3 py-1.5 cursor-pointer select-none outline-none hover:bg-accent hover:text-accent-foreground " +
+            "text-left px-3 py-1.5 cursor-pointer select-none outline-none hover:bg-accent hover:text-accent-foreground " +
             (mi.destructive ? "text-destructive" : "text-foreground")
           }
         >
           {mi.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
