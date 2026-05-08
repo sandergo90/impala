@@ -135,10 +135,18 @@ function useFileContents(
   filePath: string,
   commitHash: string | null,
   viewMode: string,
+  skip = false,
 ) {
   const [contents, setContents] = useState<{ old: string; new: string } | null>(null);
 
   useEffect(() => {
+    if (skip) {
+      // Force fall-through to PatchDiff (patch-only, no full-file git/disk
+      // read). MultiFileDiff with large file contents is the bottleneck on
+      // the All-Changes tab when many heavy diffs share the viewport.
+      setContents(null);
+      return;
+    }
     if (!worktreePath || !filePath) return;
     let cancelled = false;
 
@@ -202,7 +210,7 @@ function useFileContents(
 
     load();
     return () => { cancelled = true; };
-  }, [worktreePath, filePath, commitHash, viewMode]);
+  }, [worktreePath, filePath, commitHash, viewMode, skip]);
 
   return contents;
 }
@@ -235,10 +243,17 @@ const FileDiffItem = memo(function FileDiffItem({
   measureElement: (el: HTMLElement | null) => void;
   scrollMargin: number;
 }) {
-  const fileContents = useFileContents(worktreePath, file.path, selectedCommitHash, viewMode);
-
-  const isLargeFile = (patch ?? "").length > 100_000;
+  const patchSize = (patch ?? "").length;
+  // Auto-collapse threshold (loud diffs the user probably doesn't want to
+  // read inline). Kept separate from the PatchDiff cutoff below so a medium
+  // file can render expanded but still skip the heavy MultiFileDiff path.
+  const isLargeFile = patchSize > 100_000;
+  // PatchDiff cutoff: skip the full-file fetch and render the patch only.
+  // Lower than the collapse threshold so files that *are* shown inline still
+  // bypass MultiFileDiff when they're heavy enough to lag the viewport.
+  const usePatchOnly = patchSize > 50_000;
   const isGenerated = generatedFiles.has(file.path);
+  const fileContents = useFileContents(worktreePath, file.path, selectedCommitHash, viewMode, usePatchOnly);
   const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !collapsedFiles.has(`expanded:${file.path}`)) || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
 
   const toggleCollapse = () => {
