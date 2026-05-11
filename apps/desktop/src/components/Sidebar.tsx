@@ -7,7 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
-import { useUIStore, useDataStore } from "../store";
+import { useUIStore, useDataStore, useFilteredWorktrees } from "../store";
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { releaseCachedTerminal } from "./XtermTerminal";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
@@ -133,7 +133,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const navigate = useNavigate();
   const selectedProject = useUIStore((s) => s.selectedProject);
   const projectIcons = useDataStore((s) => s.projectIcons);
-  const worktrees = useDataStore((s) => s.worktrees);
+  const worktrees = useFilteredWorktrees();
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
   const agentStatuses = useDataStore(
@@ -311,7 +311,7 @@ export function Sidebar() {
   const projectIcons = useDataStore((s) => s.projectIcons);
   const setProjectIcon = useDataStore((s) => s.setProjectIcon);
   const selectedProject = useUIStore((s) => s.selectedProject);
-  const worktrees = useDataStore((s) => s.worktrees);
+  const worktrees = useFilteredWorktrees();
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);

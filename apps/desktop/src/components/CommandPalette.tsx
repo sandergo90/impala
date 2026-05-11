@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Command } from "cmdk";
 import { useNavigate } from "@tanstack/react-router";
-import { useUIStore, useDataStore } from "../store";
+import { useUIStore, useDataStore, useFilteredWorktrees } from "../store";
 import { selectWorktree, selectProject } from "../hooks/useWorktreeActions";
 import { HotkeyDisplay } from "./HotkeyDisplay";
 import { projectColor } from "../lib/utils";
@@ -14,7 +14,7 @@ export function CommandPalette({
   onClose: () => void;
 }) {
   const projects = useDataStore((s) => s.projects);
-  const worktrees = useDataStore((s) => s.worktrees);
+  const worktrees = useFilteredWorktrees();
   const selectedProject = useUIStore((s) => s.selectedProject);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const navigate = useNavigate();

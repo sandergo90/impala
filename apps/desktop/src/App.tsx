@@ -7,7 +7,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { FileFinder } from "./components/FileFinder";
 import { Toaster } from "./components/ui/sonner";
 import { UpdateChecker } from "./components/UpdateChecker";
-import { useUIStore, useDataStore } from "./store";
+import { useUIStore, useDataStore, useFilteredWorktrees } from "./store";
 import {
   splitNode,
   removeNode,
@@ -52,6 +52,21 @@ export function RootLayout() {
         }
       } catch {
         // Backend unavailable — fall back to whatever Zustand has
+      }
+    })();
+
+    // Mirror the DB-backed worktree base dir into the UI store so
+    // useFilteredWorktrees can run synchronously without re-fetching.
+    (async () => {
+      try {
+        const [override, defaultDir] = await Promise.all([
+          invoke<string | null>("get_setting", { key: "worktreeBaseDir", scope: "global" }),
+          invoke<string>("get_default_worktree_base_dir"),
+        ]);
+        useUIStore.getState().setWorktreeBaseDirOverride(override);
+        useUIStore.getState().setWorktreeDefaultBaseDir(defaultDir);
+      } catch {
+        // Backend unavailable — filter will fall back to showing everything.
       }
     })();
   }, []);
@@ -206,7 +221,7 @@ export function RootLayout() {
   );
 
   // -- Worktree jump shortcuts (always active) --
-  const worktrees = useDataStore((s) => s.worktrees);
+  const worktrees = useFilteredWorktrees();
   const jumpTo = (index: number) => {
     if (worktrees[index]) selectWorktree(worktrees[index]);
   };

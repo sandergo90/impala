@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useUIStore } from "../../store";
 
 interface GitInfo {
   author_name: string | null;
@@ -44,6 +45,10 @@ export function GitWorktreesPane() {
   const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
   const [worktreeBaseDir, setWorktreeBaseDir] = useState<string | null>(null);
   const [defaultBaseDir, setDefaultBaseDir] = useState("");
+  const filterEnabled = useUIStore((s) => s.worktreeFilterEnabled);
+  const setFilterEnabled = useUIStore((s) => s.setWorktreeFilterEnabled);
+  const setStoredBaseDirOverride = useUIStore((s) => s.setWorktreeBaseDirOverride);
+  const setStoredDefaultBaseDir = useUIStore((s) => s.setWorktreeDefaultBaseDir);
 
   useEffect(() => {
     invoke<string | null>("get_setting", {
@@ -70,9 +75,10 @@ export function GitWorktreesPane() {
       scope: "global",
     }).then((v) => setWorktreeBaseDir(v));
 
-    invoke<string>("get_default_worktree_base_dir").then((v) =>
-      setDefaultBaseDir(v),
-    );
+    invoke<string>("get_default_worktree_base_dir").then((v) => {
+      setDefaultBaseDir(v);
+      setStoredDefaultBaseDir(v);
+    });
 
     invoke<GitInfo>("get_git_info").then((info) => setGitInfo(info));
   }, []);
@@ -114,6 +120,7 @@ export function GitWorktreesPane() {
     });
     if (selected) {
       setWorktreeBaseDir(selected as string);
+      setStoredBaseDirOverride(selected as string);
       invoke("set_setting", {
         key: "worktreeBaseDir",
         scope: "global",
@@ -124,6 +131,7 @@ export function GitWorktreesPane() {
 
   const handleResetDir = () => {
     setWorktreeBaseDir(null);
+    setStoredBaseDirOverride(null);
     invoke("delete_setting", { key: "worktreeBaseDir", scope: "global" });
   };
 
@@ -206,6 +214,30 @@ export function GitWorktreesPane() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="mt-8 flex items-center justify-between max-w-2xl">
+        <div>
+          <div className="text-md font-medium">
+            Only show worktrees in this location
+          </div>
+          <div className="text-md text-muted-foreground mt-0.5">
+            Hide git worktrees that live outside the directory below. The
+            main checkout always stays visible.
+          </div>
+        </div>
+        <button
+          onClick={() => setFilterEnabled(!filterEnabled)}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+            filterEnabled ? "bg-primary" : "bg-muted-foreground/30"
+          }`}
+        >
+          <span
+            className={`inline-block h-3.5 w-3.5 rounded-full bg-background transition-transform ${
+              filterEnabled ? "translate-x-[18px]" : "translate-x-[3px]"
+            }`}
+          />
+        </button>
       </div>
 
       <div className="mt-8 max-w-2xl">

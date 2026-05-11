@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Worktree, Project, WorktreeNavState, WorktreeDataState, SplitNode, Action } from "./types";
@@ -107,6 +108,16 @@ interface UIState {
   revealFileInTree: (worktreePath: string, path: string) => void;
   fileFinderOpen: boolean;
   setFileFinderOpen: (open: boolean) => void;
+  // Whether the sidebar (and other worktree consumers) hides worktrees that
+  // live outside the configured worktree base directory. Persisted.
+  worktreeFilterEnabled: boolean;
+  setWorktreeFilterEnabled: (enabled: boolean) => void;
+  // Mirror of the DB-backed `worktreeBaseDir` setting + the platform default,
+  // populated at app boot. Not persisted (the DB / backend are authoritative).
+  worktreeBaseDirOverride: string | null;
+  setWorktreeBaseDirOverride: (path: string | null) => void;
+  worktreeDefaultBaseDir: string | null;
+  setWorktreeDefaultBaseDir: (path: string) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -215,6 +226,12 @@ export const useUIStore = create<UIState>()(
         set({ pendingTreeReveal: { worktreePath, path, nonce: Date.now() } }),
       fileFinderOpen: false,
       setFileFinderOpen: (open) => set({ fileFinderOpen: open }),
+      worktreeFilterEnabled: true,
+      setWorktreeFilterEnabled: (enabled) => set({ worktreeFilterEnabled: enabled }),
+      worktreeBaseDirOverride: null,
+      setWorktreeBaseDirOverride: (path) => set({ worktreeBaseDirOverride: path }),
+      worktreeDefaultBaseDir: null,
+      setWorktreeDefaultBaseDir: (path) => set({ worktreeDefaultBaseDir: path }),
     }),
     {
       name: "impala-ui-state",
@@ -280,6 +297,8 @@ export const useUIStore = create<UIState>()(
           pendingTreeReveal,
           fileFinderOpen,
           worktreeNavStates,
+          worktreeBaseDirOverride,
+          worktreeDefaultBaseDir,
           ...rest
         } = state;
         // Strip in-memory-only fields from each nav state.
@@ -379,3 +398,26 @@ export const useDataStore = create<DataState>()(
       }),
   })
 );
+
+/**
+ * Worktrees as the user wants to see them.
+ *
+ * When `worktreeFilterEnabled` is on, hides any worktree whose path doesn't
+ * sit under the configured base directory. Main worktrees (the repo root —
+ * identified by `title === null`, set in lib.rs::list_worktrees) are always
+ * kept so the user never loses access to the primary checkout.
+ */
+export function useFilteredWorktrees(): Worktree[] {
+  const worktrees = useDataStore((s) => s.worktrees);
+  const enabled = useUIStore((s) => s.worktreeFilterEnabled);
+  const override = useUIStore((s) => s.worktreeBaseDirOverride);
+  const defaultDir = useUIStore((s) => s.worktreeDefaultBaseDir);
+  const baseDir = override ?? defaultDir;
+  return useMemo(() => {
+    if (!enabled || !baseDir) return worktrees;
+    const prefix = baseDir.endsWith("/") ? baseDir : `${baseDir}/`;
+    return worktrees.filter(
+      (w) => w.title === null || w.path === baseDir || w.path.startsWith(prefix),
+    );
+  }, [worktrees, enabled, baseDir]);
+}
