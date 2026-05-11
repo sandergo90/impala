@@ -1108,6 +1108,50 @@ fn delete_setting(
     settings::delete_setting(&conn, &key, &scope)
 }
 
+#[tauri::command]
+#[allow(unused_variables)]
+fn set_window_vibrancy(window: tauri::WebviewWindow, material: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use window_vibrancy::{apply_vibrancy, clear_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+        // The window is created with `transparent: true`, so when vibrancy is
+        // off the user sees the body's actual background colour. The frontend
+        // is responsible for setting that background opaque vs. translucent.
+        match material.as_str() {
+            "off" => clear_vibrancy(&window)
+                .map(|_| ())
+                .map_err(|e| format!("clear_vibrancy: {}", e)),
+            "subtle" => apply_vibrancy(
+                &window,
+                NSVisualEffectMaterial::UnderWindowBackground,
+                Some(NSVisualEffectState::Active),
+                None,
+            )
+            .map_err(|e| format!("apply_vibrancy: {}", e)),
+            "medium" => apply_vibrancy(
+                &window,
+                NSVisualEffectMaterial::Sidebar,
+                Some(NSVisualEffectState::Active),
+                None,
+            )
+            .map_err(|e| format!("apply_vibrancy: {}", e)),
+            "strong" => apply_vibrancy(
+                &window,
+                NSVisualEffectMaterial::HudWindow,
+                Some(NSVisualEffectState::Active),
+                None,
+            )
+            .map_err(|e| format!("apply_vibrancy: {}", e)),
+            other => Err(format!("unknown vibrancy material: {}", other)),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = material;
+        Ok(())
+    }
+}
+
 #[derive(serde::Serialize)]
 struct GitInfo {
     author_name: Option<String>,
@@ -1587,6 +1631,7 @@ pub fn run() {
             get_setting,
             set_setting,
             delete_setting,
+            set_window_vibrancy,
             get_git_info,
             get_default_worktree_base_dir,
             write_linear_context,

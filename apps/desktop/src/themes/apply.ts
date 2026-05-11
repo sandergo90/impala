@@ -1,7 +1,8 @@
 import { registerCustomTheme } from "@pierre/diffs";
 import type { DiffsThemeNames } from "@pierre/diffs/react";
+import { invoke } from "@tauri-apps/api/core";
 import type { CSSProperties } from "react";
-import type { Theme, ResolvedCSS } from "./types";
+import type { Theme, ResolvedCSS, VibrancyMaterial } from "./types";
 import { getBuiltInTheme, defaultDark } from "./built-in";
 
 // ---------------------------------------------------------------------------
@@ -226,17 +227,54 @@ const CSS_VAR_MAP: Record<keyof ResolvedCSS, string> = {
   editorSelection: "--color-editor-selection",
 };
 
-export function applyTheme(theme: Theme): void {
+/** Alpha applied to surface CSS variables when the vibrancy material is active. */
+const VIBRANCY_ALPHA: Record<VibrancyMaterial, number> = {
+  off: 1,
+  subtle: 0.75,
+  medium: 0.5,
+  strong: 0.25,
+};
+
+/** Variables that paint app surfaces — these need to fade so vibrancy shows through. */
+const TRANSLUCENT_KEYS: ReadonlyArray<keyof ResolvedCSS> = [
+  "background",
+  "card",
+  "popover",
+  "muted",
+  "sidebar",
+  "sidebarAccent",
+];
+
+function fadeColor(color: string, alpha: number): string {
+  if (alpha >= 1) return color;
+  const pct = Math.round(alpha * 100);
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+}
+
+export function applyTheme(theme: Theme, vibrancy: VibrancyMaterial = "off"): void {
   const resolved = resolveTheme(theme);
   const root = document.documentElement;
+  const alpha = VIBRANCY_ALPHA[vibrancy];
+  const translucent = new Set<string>(TRANSLUCENT_KEYS as readonly string[]);
 
   for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
-    root.style.setProperty(cssVar, resolved[key as keyof ResolvedCSS]);
+    const value = resolved[key as keyof ResolvedCSS];
+    root.style.setProperty(cssVar, translucent.has(key) ? fadeColor(value, alpha) : value);
   }
 
   root.setAttribute("data-theme-type", theme.type);
+  root.setAttribute("data-vibrancy", vibrancy);
   root.style.colorScheme = theme.type;
   root.classList.remove("dark");
+}
+
+/** Apply (or clear) the macOS NSVisualEffect vibrancy on the window. No-op on other OSes. */
+export async function applyWindowVibrancy(material: VibrancyMaterial): Promise<void> {
+  try {
+    await invoke("set_window_vibrancy", { material });
+  } catch (e) {
+    console.warn("[impala] failed to set window vibrancy", e);
+  }
 }
 
 /** Resolve a theme by ID, checking built-ins then custom themes, falling back to defaultDark */
@@ -244,6 +282,11 @@ export function resolveThemeById(id: string, customThemes: Theme[]): Theme {
   return getBuiltInTheme(id) ?? customThemes.find((t) => t.id === id) ?? defaultDark;
 }
 
-export function initThemeFromStore(activeThemeId: string, customThemes: Theme[]): void {
-  applyTheme(resolveThemeById(activeThemeId, customThemes));
+export function initThemeFromStore(
+  activeThemeId: string,
+  customThemes: Theme[],
+  vibrancy: VibrancyMaterial = "off",
+): void {
+  applyTheme(resolveThemeById(activeThemeId, customThemes), vibrancy);
+  void applyWindowVibrancy(vibrancy);
 }

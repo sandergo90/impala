@@ -99,6 +99,14 @@
   html {
     @apply font-sans;
     }
+  /* When NSVisualEffect vibrancy is active the window itself is transparent;
+     keep the body transparent so the native blur shows through. Surface
+     CSS variables (--background, --sidebar, ...) are faded by applyTheme. */
+  html[data-vibrancy="subtle"] body,
+  html[data-vibrancy="medium"] body,
+  html[data-vibrancy="strong"] body {
+    background-color: transparent;
+  }
 }
 
 /* Plan markdown rendering */

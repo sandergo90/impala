@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useUIStore } from "../../store";
 import { builtInThemes } from "../../themes/built-in";
 import { parseThemeJSON, generateTemplate } from "../../themes/import";
+import type { VibrancyMaterial } from "../../themes/types";
 import { ThemeCard } from "../ThemeCard";
 import { FontSettingSection } from "./FontSettingSection";
 
@@ -13,10 +14,19 @@ const lightThemes = builtInThemes.filter((t) => t.type === "light");
 const MIN_FONT_SIZE = 10;
 const MAX_FONT_SIZE = 24;
 
+const VIBRANCY_OPTIONS: { value: VibrancyMaterial; label: string; description: string }[] = [
+  { value: "off", label: "Off", description: "Solid background" },
+  { value: "subtle", label: "Subtle", description: "Light blur" },
+  { value: "medium", label: "Medium", description: "Sidebar-style blur" },
+  { value: "strong", label: "Strong", description: "HUD-style blur" },
+];
+
 export function AppearancePane() {
   const activeThemeId = useUIStore((s) => s.activeThemeId);
   const customThemes = useUIStore((s) => s.customThemes);
   const fontSize = useUIStore((s) => s.fontSize);
+  const windowVibrancy = useUIStore((s) => s.windowVibrancy);
+  const setWindowVibrancy = useUIStore((s) => s.setWindowVibrancy);
 
   const handleImport = async () => {
     const path = await open({
@@ -156,6 +166,35 @@ export function AppearancePane() {
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M12 5v14"/></svg>
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Window translucency (macOS vibrancy) */}
+      <div className="mt-8 border-t border-border pt-6">
+        <div className="max-w-lg">
+          <div className="text-md font-medium">Window translucency</div>
+          <div className="text-md text-muted-foreground mt-0.5 mb-3">
+            Blur the desktop behind the app (macOS only)
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {VIBRANCY_OPTIONS.map((option) => {
+              const isActive = windowVibrancy === option.value;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => setWindowVibrancy(option.value)}
+                  className={`flex flex-col items-start gap-0.5 rounded-lg border p-3 text-left transition-colors ${
+                    isActive
+                      ? "border-primary bg-accent/40"
+                      : "border-border hover:bg-accent/30"
+                  }`}
+                >
+                  <span className="text-md font-medium text-foreground">{option.label}</span>
+                  <span className="text-xs text-muted-foreground">{option.description}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Worktree, Project, WorktreeNavState, WorktreeDataState, SplitNode, Action } from "./types";
-import type { Theme } from "./themes/types";
+import type { Theme, VibrancyMaterial } from "./themes/types";
 import { defaultDark } from "./themes/built-in";
-import { applyTheme, initThemeFromStore, resolveThemeById } from "./themes/apply";
+import { applyTheme, applyWindowVibrancy, initThemeFromStore, resolveThemeById } from "./themes/apply";
 import { createLeaf } from "./lib/split-tree";
 
 function createDefaultNavState(): WorktreeNavState {
@@ -66,6 +66,8 @@ interface UIState {
   customThemes: Theme[];
   addCustomTheme: (theme: Theme) => void;
   removeCustomTheme: (id: string) => void;
+  windowVibrancy: VibrancyMaterial;
+  setWindowVibrancy: (material: VibrancyMaterial) => void;
   showResolved: boolean;
   setShowResolved: (show: boolean) => void;
   linearApiKey: string;
@@ -143,7 +145,7 @@ export const useUIStore = create<UIState>()(
       activeThemeId: "default-dark",
       setActiveThemeId: (id) => {
         set({ activeThemeId: id });
-        applyTheme(resolveThemeById(id, get().customThemes));
+        applyTheme(resolveThemeById(id, get().customThemes), get().windowVibrancy);
       },
       customThemes: [],
       addCustomTheme: (theme) =>
@@ -156,7 +158,14 @@ export const useUIStore = create<UIState>()(
           customThemes: state.customThemes.filter((t) => t.id !== id),
           activeThemeId: wasActive ? "default-dark" : state.activeThemeId,
         }));
-        if (wasActive) applyTheme(defaultDark);
+        if (wasActive) applyTheme(defaultDark, get().windowVibrancy);
+      },
+      windowVibrancy: "off",
+      setWindowVibrancy: (material) => {
+        set({ windowVibrancy: material });
+        const theme = resolveThemeById(get().activeThemeId, get().customThemes);
+        applyTheme(theme, material);
+        void applyWindowVibrancy(material);
       },
       showResolved: false,
       setShowResolved: (show) => set({ showResolved: show }),
@@ -283,7 +292,7 @@ export const useUIStore = create<UIState>()(
       },
       onRehydrateStorage: () => (state) => {
         if (state) {
-          initThemeFromStore(state.activeThemeId, state.customThemes);
+          initThemeFromStore(state.activeThemeId, state.customThemes, state.windowVibrancy ?? "off");
           document.documentElement.style.fontSize = `${state.fontSize ?? 14}px`;
         }
       },

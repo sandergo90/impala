@@ -66,6 +66,8 @@ export interface ThemeTerminal {
   brightWhite: string;
 }
 
+export type VibrancyMaterial = "off" | "subtle" | "medium" | "strong";
+
 export interface Theme {
   id: string;
   name: string;

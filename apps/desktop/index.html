@@ -17,6 +17,8 @@
           const themeType = state.activeThemeId?.includes("light") ? "light" : "dark";
           document.documentElement.setAttribute("data-theme-type", themeType);
           document.documentElement.style.colorScheme = themeType;
+          const vibrancy = state.windowVibrancy ?? "off";
+          document.documentElement.setAttribute("data-vibrancy", vibrancy);
         }
       } catch {}
     </script>
