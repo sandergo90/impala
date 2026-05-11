@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
@@ -13,6 +13,9 @@ const statusColor: Record<string, string> = {
   M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
 };
 
+const AUTO_REFRESH_DELAY_MS = 750;
+const WORKING_AGENT_AUTO_REFRESH_DELAY_MS = 2500;
+
 function countDiffStats(diff: string): { additions: number; deletions: number } {
   let additions = 0;
   let deletions = 0;
@@ -22,6 +25,51 @@ function countDiffStats(diff: string): { additions: number; deletions: number } 
     else if (line.startsWith("-")) deletions++;
   }
   return { additions, deletions };
+}
+
+function sameStats(
+  a: { additions: number; deletions: number },
+  b: { additions: number; deletions: number },
+): boolean {
+  return a.additions === b.additions && a.deletions === b.deletions;
+}
+
+function sameChangedFiles(a: ChangedFile[], b: ChangedFile[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].path !== b[i].path || a[i].status !== b[i].status) return false;
+  }
+  return true;
+}
+
+function sameStringArray(a: string[], b: string[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function sameFileDiffs(a: Record<string, string>, b: Record<string, string>): boolean {
+  if (a === b) return true;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+function statsKeyForMode(
+  mode: WorktreeNavState["viewMode"],
+): "uncommittedStats" | "allChangesStats" | "lastTurnStats" | null {
+  if (mode === "uncommitted") return "uncommittedStats";
+  if (mode === "all-changes") return "allChangesStats";
+  if (mode === "last-turn") return "lastTurnStats";
+  return null;
 }
 
 export function CommitPanel() {
@@ -42,6 +90,10 @@ export function CommitPanel() {
   const allChangesStats = dataState?.allChangesStats ?? { additions: 0, deletions: 0 };
   const lastTurnStats = dataState?.lastTurnStats ?? { additions: 0, deletions: 0 };
   const hasLastTurnSnapshot = dataState?.hasLastTurnSnapshot ?? false;
+  const autoRefreshTimerRef = useRef<number | null>(null);
+  const autoRefreshInFlightRef = useRef(false);
+  const autoRefreshQueuedRef = useRef(false);
+  const selectionRequestRef = useRef(0);
 
   const updateNav = useCallback((updates: Partial<WorktreeNavState>) =>
     useUIStore.getState().updateWorktreeNavState(worktreePath, updates),
@@ -52,6 +104,13 @@ export function CommitPanel() {
     useDataStore.getState().updateWorktreeDataState(worktreePath, updates),
     [worktreePath]
   );
+
+  const clearScheduledAutoRefresh = useCallback(() => {
+    if (autoRefreshTimerRef.current !== null) {
+      window.clearTimeout(autoRefreshTimerRef.current);
+      autoRefreshTimerRef.current = null;
+    }
+  }, []);
 
   const splitPatch = useCallback((fullDiff: string): Record<string, string> => {
     const fileDiffs: Record<string, string> = {};
@@ -70,81 +129,136 @@ export function CommitPanel() {
     return fileDiffs;
   }, []);
 
+  const loadGeneratedFiles = useCallback(async (files: ChangedFile[]): Promise<string[]> => {
+    const current = useDataStore.getState().getWorktreeDataState(worktreePath);
+    if (sameChangedFiles(current.changedFiles, files)) {
+      return current.generatedFiles;
+    }
+    return invoke<string[]>("check_generated_files", {
+      worktreePath,
+      files: files.map(f => f.path),
+    });
+  }, [worktreePath]);
+
+  const loadDiffPayload = useCallback(async (
+    mode: WorktreeNavState["viewMode"],
+    commit?: CommitInfo,
+  ): Promise<{ files: ChangedFile[]; fullDiff: string; generatedFiles: string[] }> => {
+    let files: ChangedFile[];
+    let fullDiff: string;
+
+    if (mode === "uncommitted") {
+      [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
+        invoke<string>("get_uncommitted_diff", { worktreePath }),
+      ]);
+    } else if (mode === "last-turn") {
+      [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_last_turn_files", { worktreePath }),
+        invoke<string>("get_last_turn_diff", { worktreePath }),
+      ]);
+    } else if (mode === "all-changes") {
+      [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
+        invoke<string>("get_full_branch_diff", { worktreePath }),
+      ]);
+    } else {
+      if (!commit) throw new Error("Missing commit for commit diff");
+      [files, fullDiff] = await Promise.all([
+        invoke<ChangedFile[]>("get_changed_files", { worktreePath, commitHash: commit.hash }),
+        invoke<string>("get_full_commit_diff", { worktreePath, commitHash: commit.hash }),
+      ]);
+    }
+
+    const generatedFiles = await loadGeneratedFiles(files);
+    return { files, fullDiff, generatedFiles };
+  }, [loadGeneratedFiles, worktreePath]);
+
+  const applyDiffPayload = useCallback((
+    mode: WorktreeNavState["viewMode"],
+    payload: { files: ChangedFile[]; fullDiff: string; generatedFiles: string[] },
+    force = false,
+  ) => {
+    const fileDiffs = splitPatch(payload.fullDiff);
+    const stats = countDiffStats(payload.fullDiff);
+    const current = useDataStore.getState().getWorktreeDataState(worktreePath);
+    const updates: Partial<WorktreeDataState> = {};
+
+    if (force || !sameChangedFiles(current.changedFiles, payload.files)) {
+      updates.changedFiles = payload.files;
+    }
+    if (force || !sameFileDiffs(current.fileDiffs, fileDiffs)) {
+      updates.fileDiffs = fileDiffs;
+    }
+    if (force || !sameStringArray(current.generatedFiles, payload.generatedFiles)) {
+      updates.generatedFiles = payload.generatedFiles;
+    }
+
+    const statsKey = statsKeyForMode(mode);
+    if (statsKey && (force || !sameStats(current[statsKey], stats))) {
+      updates[statsKey] = stats;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      updateData(updates);
+    }
+  }, [splitPatch, updateData, worktreePath]);
+
   const selectAllChanges = async () => {
+    const requestId = ++selectionRequestRef.current;
+    clearScheduledAutoRefresh();
     const currentTab = navState?.activeTab ?? 'diff';
     updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
-      const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
-        invoke<string>("get_full_branch_diff", { worktreePath }),
-      ]);
-      const fileDiffs = splitPatch(fullDiff);
-      const generatedFiles = await invoke<string[]>("check_generated_files", {
-        worktreePath,
-        files: files.map(f => f.path),
-      });
-      updateData({ changedFiles: files, fileDiffs, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
+      const payload = await loadDiffPayload("all-changes");
+      if (selectionRequestRef.current !== requestId) return;
+      applyDiffPayload("all-changes", payload, true);
     } catch (e) {
       toast.error("Failed to load changed files");
     }
   };
 
   const selectLastTurn = async () => {
+    const requestId = ++selectionRequestRef.current;
+    clearScheduledAutoRefresh();
     const currentTab = navState?.activeTab ?? 'diff';
     updateNav({ viewMode: 'last-turn', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
-      const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_last_turn_files", { worktreePath }),
-        invoke<string>("get_last_turn_diff", { worktreePath }),
-      ]);
-      const fileDiffs = splitPatch(fullDiff);
-      const generatedFiles = await invoke<string[]>("check_generated_files", {
-        worktreePath,
-        files: files.map(f => f.path),
-      });
-      updateData({ changedFiles: files, fileDiffs, generatedFiles, lastTurnStats: countDiffStats(fullDiff) });
+      const payload = await loadDiffPayload("last-turn");
+      if (selectionRequestRef.current !== requestId) return;
+      applyDiffPayload("last-turn", payload, true);
     } catch (e) {
       toast.error("Failed to load last turn changes");
     }
   };
 
   const selectUncommitted = async () => {
+    const requestId = ++selectionRequestRef.current;
+    clearScheduledAutoRefresh();
     const currentTab = navState?.activeTab ?? 'diff';
     updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
-      const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
-        invoke<string>("get_uncommitted_diff", { worktreePath }),
-      ]);
-      const fileDiffs = splitPatch(fullDiff);
-      const generatedFiles = await invoke<string[]>("check_generated_files", {
-        worktreePath,
-        files: files.map(f => f.path),
-      });
-      updateData({ changedFiles: files, fileDiffs, generatedFiles, uncommittedStats: countDiffStats(fullDiff) });
+      const payload = await loadDiffPayload("uncommitted");
+      if (selectionRequestRef.current !== requestId) return;
+      applyDiffPayload("uncommitted", payload, true);
     } catch (e) {
       toast.error("Failed to load uncommitted changes");
     }
   };
 
   const selectCommit = async (commit: CommitInfo) => {
+    const requestId = ++selectionRequestRef.current;
+    clearScheduledAutoRefresh();
     const currentTab = navState?.activeTab ?? 'diff';
     updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
-      const [files, fullDiff] = await Promise.all([
-        invoke<ChangedFile[]>("get_changed_files", { worktreePath, commitHash: commit.hash }),
-        invoke<string>("get_full_commit_diff", { worktreePath, commitHash: commit.hash }),
-      ]);
-      const fileDiffs = splitPatch(fullDiff);
-      const generatedFiles = await invoke<string[]>("check_generated_files", {
-        worktreePath,
-        files: files.map(f => f.path),
-      });
-      updateData({ changedFiles: files, fileDiffs, generatedFiles });
+      const payload = await loadDiffPayload("commit", commit);
+      if (selectionRequestRef.current !== requestId) return;
+      applyDiffPayload("commit", payload, true);
     } catch (e) {
       toast.error("Failed to load commit");
     }
@@ -159,6 +273,8 @@ export function CommitPanel() {
 
   // Auto-refresh when files or git refs change on disk
   const refreshCurrentView = useCallback(async () => {
+    if (!worktreePath) return;
+
     // Keep selectedWorktree.head_commit in sync with actual HEAD
     try {
       const headCommit = await invoke<string>("get_head_commit", { worktreePath });
@@ -173,9 +289,13 @@ export function CommitPanel() {
     // Always refresh commit list so sidebar counts stay accurate.
     // Skip the store update if the list is unchanged to avoid churning
     // downstream re-renders (which can flicker the diff panel).
-    if (baseBranch) {
+    const currentData = useDataStore.getState().getWorktreeDataState(worktreePath);
+    const currentBaseBranch = currentData.baseBranch;
+    const currentViewMode = useUIStore.getState().getWorktreeNavState(worktreePath).viewMode;
+
+    if (currentBaseBranch) {
       try {
-        const nextCommits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath, baseBranch });
+        const nextCommits = await invoke<CommitInfo[]>("get_diverged_commits", { worktreePath, baseBranch: currentBaseBranch });
         const prev = useDataStore.getState().getWorktreeDataState(worktreePath).commits;
         const sameLen = prev.length === nextCommits.length;
         const sameHashes = sameLen && prev.every((c, i) => c.hash === nextCommits[i].hash);
@@ -188,85 +308,79 @@ export function CommitPanel() {
     }
 
     // Committed diffs are immutable, so skip the refetch.
-    if (viewMode === 'commit') {
+    if (currentViewMode === 'commit') {
       return;
     }
 
-    if (viewMode === 'uncommitted') {
-      try {
-        const [files, fullDiff] = await Promise.all([
-          invoke<ChangedFile[]>("get_uncommitted_files", { worktreePath }),
-          invoke<string>("get_uncommitted_diff", { worktreePath }),
-        ]);
-        const fileDiffs = splitPatch(fullDiff);
-        const generatedFiles = await invoke<string[]>("check_generated_files", {
-          worktreePath,
-          files: files.map(f => f.path),
-        });
-        updateData({ changedFiles: files, fileDiffs, generatedFiles, uncommittedStats: countDiffStats(fullDiff) });
-      } catch {
-        // Silently fail on auto-refresh
-      }
-    } else if (viewMode === 'last-turn') {
-      try {
-        const [files, fullDiff] = await Promise.all([
-          invoke<ChangedFile[]>("get_last_turn_files", { worktreePath }),
-          invoke<string>("get_last_turn_diff", { worktreePath }),
-        ]);
-        const fileDiffs = splitPatch(fullDiff);
-        const generatedFiles = await invoke<string[]>("check_generated_files", {
-          worktreePath,
-          files: files.map(f => f.path),
-        });
-        updateData({ changedFiles: files, fileDiffs, generatedFiles, lastTurnStats: countDiffStats(fullDiff) });
-      } catch {
-        // Silently fail on auto-refresh
-      }
-    } else if (viewMode === 'all-changes') {
-      try {
-        const [files, fullDiff] = await Promise.all([
-          invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
-          invoke<string>("get_full_branch_diff", { worktreePath }),
-        ]);
-        const fileDiffs = splitPatch(fullDiff);
-        const generatedFiles = await invoke<string[]>("check_generated_files", {
-          worktreePath,
-          files: files.map(f => f.path),
-        });
-        updateData({ changedFiles: files, fileDiffs, generatedFiles, allChangesStats: countDiffStats(fullDiff) });
-      } catch {
-        // Silently fail on auto-refresh
-      }
+    try {
+      const payload = await loadDiffPayload(currentViewMode);
+      const latestMode = useUIStore.getState().getWorktreeNavState(worktreePath).viewMode;
+      if (latestMode !== currentViewMode) return;
+      applyDiffPayload(currentViewMode, payload);
+    } catch {
+      // Silently fail on auto-refresh
     }
-  }, [viewMode, worktreePath, baseBranch, splitPatch, updateData]);
+  }, [applyDiffPayload, loadDiffPayload, updateData, worktreePath]);
+
+  const runAutoRefresh = useCallback(async () => {
+    if (autoRefreshInFlightRef.current) {
+      autoRefreshQueuedRef.current = true;
+      return;
+    }
+
+    autoRefreshInFlightRef.current = true;
+    try {
+      do {
+        autoRefreshQueuedRef.current = false;
+        await refreshCurrentView();
+      } while (autoRefreshQueuedRef.current);
+    } finally {
+      autoRefreshInFlightRef.current = false;
+    }
+  }, [refreshCurrentView]);
+
+  const scheduleAutoRefresh = useCallback((delay = AUTO_REFRESH_DELAY_MS) => {
+    if (autoRefreshTimerRef.current !== null) {
+      window.clearTimeout(autoRefreshTimerRef.current);
+    }
+    autoRefreshTimerRef.current = window.setTimeout(() => {
+      autoRefreshTimerRef.current = null;
+      void runAutoRefresh();
+    }, delay);
+  }, [runAutoRefresh]);
 
   useEffect(() => {
     if (!worktreePath) return;
-    refreshCurrentView();
+    void runAutoRefresh();
     invoke<boolean>("has_last_turn_snapshot", { worktreePath })
       .then((has) => updateData({ hasLastTurnSnapshot: has }))
       .catch(() => { /* ignore */ });
-  }, [worktreePath, refreshCurrentView, updateData]);
+  }, [worktreePath, runAutoRefresh, updateData]);
 
   useEffect(() => {
+    if (!worktreePath) return;
     const safeId = worktreePath.replace(/[^a-zA-Z0-9\-_]/g, "-");
     let unlisten: (() => void) | null = null;
 
     listen(`fs-changed-${safeId}`, () => {
       // Invalidate branch cache so next "All Changes" fetch is fresh
-      invoke("invalidate_branch_cache", { worktreePath });
+      void invoke("invalidate_branch_cache", { worktreePath });
       // Only refresh diffs if viewing diffs — skip heavy git operations when on terminal/split tab
       const tab = useUIStore.getState().getWorktreeNavState(worktreePath)?.activeTab;
       if (tab === "terminal") return;
-      refreshCurrentView();
+      const agentStatus = useDataStore.getState().getWorktreeDataState(worktreePath).agentStatus;
+      scheduleAutoRefresh(
+        agentStatus === "working" ? WORKING_AGENT_AUTO_REFRESH_DELAY_MS : AUTO_REFRESH_DELAY_MS,
+      );
     }).then((fn) => {
       unlisten = fn;
     });
 
     return () => {
+      clearScheduledAutoRefresh();
       unlisten?.();
     };
-  }, [worktreePath, refreshCurrentView]);
+  }, [clearScheduledAutoRefresh, scheduleAutoRefresh, worktreePath]);
 
   useEffect(() => {
     if (!worktreePath) return;
@@ -276,11 +390,11 @@ export function CommitPanel() {
       updateData({ hasLastTurnSnapshot: true });
       const currentMode = useUIStore.getState().getWorktreeNavState(worktreePath).viewMode;
       if (currentMode === 'last-turn') {
-        refreshCurrentView();
+        scheduleAutoRefresh(0);
       }
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
-  }, [worktreePath, refreshCurrentView, updateData]);
+  }, [worktreePath, scheduleAutoRefresh, updateData]);
 
   if (!selectedWorktree || (!navState && !dataState)) {
     return (
