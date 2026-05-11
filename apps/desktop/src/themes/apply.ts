@@ -235,14 +235,15 @@ const VIBRANCY_ALPHA: Record<VibrancyMaterial, number> = {
   strong: 0.25,
 };
 
-/** Variables that paint app surfaces — these need to fade so vibrancy shows through. */
+/**
+ * Variables that paint window-level surfaces — only these fade so vibrancy
+ * shows through. Overlay surfaces (popover, card) and input/muted surfaces
+ * stay opaque so dropdowns, menus and form fields actually obscure what's
+ * behind them.
+ */
 const TRANSLUCENT_KEYS: ReadonlyArray<keyof ResolvedCSS> = [
   "background",
-  "card",
-  "popover",
-  "muted",
   "sidebar",
-  "sidebarAccent",
 ];
 
 function fadeColor(color: string, alpha: number): string {
