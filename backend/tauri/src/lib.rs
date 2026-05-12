@@ -29,8 +29,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{Emitter, Manager};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::{Emitter, Manager};
 
 pub(crate) struct DbState(pub(crate) Mutex<rusqlite::Connection>);
 struct DiffCache(Mutex<lru::LruCache<String, String>>);
@@ -52,7 +52,9 @@ fn sanitize_prefix(name: &str) -> String {
 
 fn resolve_branch_prefix(mode: &str, custom: &str) -> String {
     match mode {
-        "author" => git::get_git_user_name().map(|n| sanitize_prefix(&n)).unwrap_or_default(),
+        "author" => git::get_git_user_name()
+            .map(|n| sanitize_prefix(&n))
+            .unwrap_or_default(),
         "custom" => custom.to_string(),
         _ => String::new(),
     }
@@ -77,13 +79,19 @@ async fn check_git() -> Result<String, String> {
 
 #[tauri::command]
 fn load_projects(state: tauri::State<'_, DbState>) -> Result<Vec<String>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     settings::load_projects(&conn)
 }
 
 #[tauri::command]
 fn save_projects(state: tauri::State<'_, DbState>, projects: Vec<String>) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     settings::save_projects(&conn, &projects)
 }
 
@@ -97,7 +105,10 @@ async fn list_worktrees(
         .map_err(|e| format!("Task join error: {}", e))??;
 
     let titles = {
-        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        let conn = state
+            .0
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
         worktrees::get_all_titles(&conn)?
     };
     for wt in worktrees.iter_mut() {
@@ -148,9 +159,11 @@ async fn get_commit_diff(
     commit_hash: String,
     file_path: String,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || git::get_commit_diff(&worktree_path, &commit_hash, &file_path))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    tokio::task::spawn_blocking(move || {
+        git::get_commit_diff(&worktree_path, &commit_hash, &file_path)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -161,16 +174,24 @@ async fn get_full_commit_diff(
 ) -> Result<String, String> {
     let key = format!("commit:{}:{}", worktree_path, commit_hash);
     {
-        let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        let mut c = cache
+            .0
+            .lock()
+            .map_err(|e| format!("Cache lock error: {}", e))?;
         if let Some(cached) = c.get(&key) {
             return Ok(cached.clone());
         }
     }
-    let result = tokio::task::spawn_blocking(move || git::get_full_commit_diff(&worktree_path, &commit_hash))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))??;
+    let result = tokio::task::spawn_blocking(move || {
+        git::get_full_commit_diff(&worktree_path, &commit_hash)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
     {
-        let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        let mut c = cache
+            .0
+            .lock()
+            .map_err(|e| format!("Cache lock error: {}", e))?;
         c.put(key, result.clone());
     }
     Ok(result)
@@ -222,7 +243,10 @@ async fn get_full_branch_diff(
 ) -> Result<String, String> {
     let key = format!("branch:{}", worktree_path);
     {
-        let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        let mut c = cache
+            .0
+            .lock()
+            .map_err(|e| format!("Cache lock error: {}", e))?;
         if let Some(cached) = c.get(&key) {
             return Ok(cached.clone());
         }
@@ -231,7 +255,10 @@ async fn get_full_branch_diff(
         .await
         .map_err(|e| format!("Task join error: {}", e))??;
     {
-        let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        let mut c = cache
+            .0
+            .lock()
+            .map_err(|e| format!("Cache lock error: {}", e))?;
         c.put(key, result.clone());
     }
     Ok(result)
@@ -242,7 +269,10 @@ fn invalidate_branch_cache(
     cache: tauri::State<'_, DiffCache>,
     worktree_path: String,
 ) -> Result<(), String> {
-    let mut c = cache.0.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+    let mut c = cache
+        .0
+        .lock()
+        .map_err(|e| format!("Cache lock error: {}", e))?;
     let key = format!("branch:{}", worktree_path);
     c.pop(&key);
     Ok(())
@@ -273,7 +303,9 @@ async fn get_last_turn_files(
         .map_err(|e| format!("Snapshot lock error: {}", e))?
         .get(&worktree_path)
         .cloned();
-    let Some(snap) = snapshot else { return Ok(vec![]) };
+    let Some(snap) = snapshot else {
+        return Ok(vec![]);
+    };
     tokio::task::spawn_blocking(move || git::get_last_turn_files(&worktree_path, &snap))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -290,7 +322,9 @@ async fn get_last_turn_diff(
         .map_err(|e| format!("Snapshot lock error: {}", e))?
         .get(&worktree_path)
         .cloned();
-    let Some(snap) = snapshot else { return Ok(String::new()) };
+    let Some(snap) = snapshot else {
+        return Ok(String::new());
+    };
     tokio::task::spawn_blocking(move || git::get_last_turn_diff(&worktree_path, &snap))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -320,7 +354,9 @@ async fn get_last_turn_file(
         .map_err(|e| format!("Snapshot lock error: {}", e))?
         .get(&worktree_path)
         .cloned();
-    let Some(snap) = snapshot else { return Ok(String::new()) };
+    let Some(snap) = snapshot else {
+        return Ok(String::new());
+    };
     tokio::task::spawn_blocking(move || git::get_file_at_ref(&worktree_path, &snap, &file_path))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -341,7 +377,10 @@ async fn create_worktree(
     }
 
     let (prefix_mode, prefix_custom, worktree_base_dir) = {
-        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        let conn = state
+            .0
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
         (
             settings::get_setting(&conn, "branchPrefixMode", "global")?.unwrap_or_default(),
             settings::get_setting(&conn, "branchPrefixCustom", "global")?.unwrap_or_default(),
@@ -380,7 +419,10 @@ async fn create_worktree(
     .map_err(|e| format!("Task join error: {}", e))??;
 
     {
-        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        let conn = state
+            .0
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
         settings::set_setting(&conn, "selectedAgent", &worktree.path, &agent)?;
         settings::set_setting(&conn, "lastAgentForProject", &repo_path, &agent)?;
 
@@ -405,7 +447,10 @@ async fn delete_worktree(
     force: bool,
 ) -> Result<(), String> {
     let delete_branch = {
-        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        let conn = state
+            .0
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
         settings::get_setting(&conn, "deleteLocalBranch", "global")?
             .map(|v| v == "true")
             .unwrap_or(true)
@@ -438,7 +483,10 @@ fn create_annotation(
     state: tauri::State<'_, DbState>,
     annotation: annotations::NewAnnotation,
 ) -> Result<annotations::Annotation, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     annotations::create_annotation(&conn, annotation)
 }
 
@@ -449,7 +497,10 @@ fn list_annotations(
     file: Option<String>,
     commit: Option<String>,
 ) -> Result<Vec<annotations::Annotation>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     annotations::list_annotations(&conn, &repo, file.as_deref(), commit.as_deref())
 }
 
@@ -459,16 +510,19 @@ fn update_annotation(
     id: String,
     changes: annotations::UpdateAnnotation,
 ) -> Result<annotations::Annotation, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     annotations::update_annotation(&conn, &id, changes)
 }
 
 #[tauri::command]
-fn delete_annotation(
-    state: tauri::State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+fn delete_annotation(state: tauri::State<'_, DbState>, id: String) -> Result<(), String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     annotations::delete_annotation(&conn, &id)
 }
 
@@ -477,7 +531,10 @@ fn create_plan(
     state: tauri::State<'_, DbState>,
     plan: plans::NewPlan,
 ) -> Result<plans::Plan, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     plans::create_plan(&conn, plan)
 }
 
@@ -486,16 +543,19 @@ fn list_plans(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
 ) -> Result<Vec<plans::Plan>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     plans::list_plans(&conn, &worktree_path)
 }
 
 #[tauri::command]
-fn get_plan(
-    state: tauri::State<'_, DbState>,
-    id: String,
-) -> Result<plans::Plan, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+fn get_plan(state: tauri::State<'_, DbState>, id: String) -> Result<plans::Plan, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     plans::get_plan(&conn, &id)
 }
 
@@ -504,7 +564,10 @@ fn list_plan_version_files(
     state: tauri::State<'_, DbState>,
     plan_id: String,
 ) -> Result<Vec<plans::PlanFile>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     plans::list_plan_version_files(&conn, &plan_id)
 }
 
@@ -514,7 +577,10 @@ fn update_plan(
     id: String,
     changes: plans::UpdatePlan,
 ) -> Result<plans::Plan, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     let updated = plans::update_plan(&conn, &id, changes)?;
 
     if updated.status != "pending" {
@@ -530,7 +596,10 @@ fn create_plan_annotation(
     state: tauri::State<'_, DbState>,
     annotation: plan_annotations::NewPlanAnnotation,
 ) -> Result<plan_annotations::PlanAnnotation, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     plan_annotations::create_plan_annotation(&conn, annotation)
 }
 
@@ -540,7 +609,10 @@ fn list_plan_annotations(
     plan_path: String,
     worktree_path: Option<String>,
 ) -> Result<Vec<plan_annotations::PlanAnnotation>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     plan_annotations::list_plan_annotations(&conn, &plan_path, worktree_path.as_deref())
 }
 
@@ -550,16 +622,19 @@ fn update_plan_annotation(
     id: String,
     changes: plan_annotations::UpdatePlanAnnotation,
 ) -> Result<plan_annotations::PlanAnnotation, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     plan_annotations::update_plan_annotation(&conn, &id, changes)
 }
 
 #[tauri::command]
-fn delete_plan_annotation(
-    state: tauri::State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+fn delete_plan_annotation(state: tauri::State<'_, DbState>, id: String) -> Result<(), String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     plan_annotations::delete_plan_annotation(&conn, &id)
 }
 
@@ -588,7 +663,11 @@ async fn list_plan_files(path: String) -> Result<Vec<String>, String> {
         let dir = if p.is_dir() {
             p.to_path_buf()
         } else if let Some(parent) = p.parent() {
-            if parent.is_dir() { parent.to_path_buf() } else { return Ok(vec![]); }
+            if parent.is_dir() {
+                parent.to_path_buf()
+            } else {
+                return Ok(vec![]);
+            }
         } else {
             return Ok(vec![]);
         };
@@ -601,24 +680,36 @@ async fn list_plan_files(path: String) -> Result<Vec<String>, String> {
         let mut files: Vec<String> = std::fs::read_dir(&dir)
             .map_err(|e| format!("Failed to read directory: {}", e))?
             .flatten()
-            .filter(|e| {
-                e.path().extension().is_some_and(|ext| ext == "md") && e.path().is_file()
-            })
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md") && e.path().is_file())
             .map(|e| e.path().to_string_lossy().to_string())
             .collect();
 
         // Sort: overview.md first, then task-N.md in order, then rest
         files.sort_by(|a, b| {
-            let a_name = std::path::Path::new(a).file_name().unwrap_or_default().to_string_lossy();
-            let b_name = std::path::Path::new(b).file_name().unwrap_or_default().to_string_lossy();
+            let a_name = std::path::Path::new(a)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
+            let b_name = std::path::Path::new(b)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
             let rank = |name: &str| -> u32 {
-                if name == "overview.md" { 0 }
-                else if name.starts_with("task-") { 1 }
-                else { 2 }
+                if name == "overview.md" {
+                    0
+                } else if name.starts_with("task-") {
+                    1
+                } else {
+                    2
+                }
             };
             let ra = rank(&a_name);
             let rb = rank(&b_name);
-            if ra != rb { ra.cmp(&rb) } else { a_name.cmp(&b_name) }
+            if ra != rb {
+                ra.cmp(&rb)
+            } else {
+                a_name.cmp(&b_name)
+            }
         });
 
         Ok(files)
@@ -636,7 +727,10 @@ fn set_file_viewed(
     file_path: String,
 ) -> Result<(), String> {
     let view = viewed_files::ViewKind::from_parts(&view_kind, commit_hash.as_deref())?;
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     viewed_files::set_viewed(&conn, &worktree_path, view, &file_path)
 }
 
@@ -646,9 +740,11 @@ async fn get_file_diff_since_commit(
     since_commit: String,
     file_path: String,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || git::get_file_diff_since_commit(&worktree_path, &since_commit, &file_path))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    tokio::task::spawn_blocking(move || {
+        git::get_file_diff_since_commit(&worktree_path, &since_commit, &file_path)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -657,7 +753,10 @@ fn unset_file_viewed(
     worktree_path: String,
     file_path: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     viewed_files::unset_viewed(&conn, &worktree_path, &file_path)
 }
 
@@ -670,7 +769,10 @@ fn set_files_viewed(
     file_paths: Vec<String>,
 ) -> Result<(), String> {
     let view = viewed_files::ViewKind::from_parts(&view_kind, commit_hash.as_deref())?;
-    let mut conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     viewed_files::set_many_viewed(&mut conn, &worktree_path, view, &file_paths)
 }
 
@@ -680,7 +782,10 @@ fn unset_files_viewed(
     worktree_path: String,
     file_paths: Vec<String>,
 ) -> Result<(), String> {
-    let mut conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     viewed_files::unset_many_viewed(&mut conn, &worktree_path, &file_paths)
 }
 
@@ -693,7 +798,10 @@ fn check_viewed_files(
     file_paths: Vec<String>,
 ) -> Result<Vec<String>, String> {
     let view = viewed_files::ViewKind::from_parts(&view_kind, commit_hash.as_deref())?;
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     viewed_files::check_viewed(&conn, &worktree_path, view, &file_paths)
 }
 
@@ -702,7 +810,10 @@ fn clear_viewed_files(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     viewed_files::clear_for_worktree(&conn, &worktree_path)
 }
 
@@ -715,24 +826,26 @@ async fn prepare_agent_config(
     let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
     let mcp_binary = which_mcp_binary(&home)?;
 
-    let env = tokio::task::spawn_blocking(move || -> Result<std::collections::HashMap<String, String>, String> {
-        let mut env = std::collections::HashMap::new();
-        match agent.as_str() {
-            "claude" => {
-                setup_claude_integration_sync()?;
-                agent_config::write_claude_config(&path)?;
+    let env = tokio::task::spawn_blocking(
+        move || -> Result<std::collections::HashMap<String, String>, String> {
+            let mut env = std::collections::HashMap::new();
+            match agent.as_str() {
+                "claude" => {
+                    setup_claude_integration_sync()?;
+                    agent_config::write_claude_config(&path)?;
+                }
+                "codex" => {
+                    let codex_home = agent_config::write_codex_config(&path, &mcp_binary)?;
+                    env.insert(
+                        "CODEX_HOME".to_string(),
+                        codex_home.to_string_lossy().to_string(),
+                    );
+                }
+                other => return Err(format!("unknown agent: {}", other)),
             }
-            "codex" => {
-                let codex_home = agent_config::write_codex_config(&path, &mcp_binary)?;
-                env.insert(
-                    "CODEX_HOME".to_string(),
-                    codex_home.to_string_lossy().to_string(),
-                );
-            }
-            other => return Err(format!("unknown agent: {}", other)),
-        }
-        Ok(env)
-    })
+            Ok(env)
+        },
+    )
     .await
     .map_err(|e| format!("task join: {}", e))??;
 
@@ -740,8 +853,7 @@ async fn prepare_agent_config(
 }
 
 fn setup_claude_integration_sync() -> Result<String, String> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| "Could not determine home directory".to_string())?;
+    let home = dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
 
     let mcp_binary = which_mcp_binary(&home)?;
 
@@ -763,15 +875,17 @@ fn setup_claude_integration_sync() -> Result<String, String> {
     mcp_servers
         .as_object_mut()
         .ok_or_else(|| "mcpServers is not a JSON object".to_string())?
-        .insert("impala".to_string(), serde_json::json!({
-            "command": mcp_binary,
-            "args": []
-        }));
+        .insert(
+            "impala".to_string(),
+            serde_json::json!({
+                "command": mcp_binary,
+                "args": []
+            }),
+        );
 
     let formatted = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-    fs::write(&settings_path, formatted)
-        .map_err(|e| format!("Failed to write settings: {}", e))?;
+    fs::write(&settings_path, formatted).map_err(|e| format!("Failed to write settings: {}", e))?;
 
     Ok(mcp_binary)
 }
@@ -787,7 +901,10 @@ fn which_mcp_binary(home: &std::path::Path) -> Result<String, String> {
         }
     }
 
-    if let Ok(output) = std::process::Command::new("which").arg("impala-mcp").output() {
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("impala-mcp")
+        .output()
+    {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -832,31 +949,25 @@ async fn open_in_editor(
                         .output()
                         .map_err(|e| format!("Failed to launch {}: {}", app_name, e))?
                 }
-                "zed" => {
-                    std::process::Command::new("zed")
-                        .arg(format!("{}:{}:{}", path, ln, col))
-                        .output()
-                        .map_err(|e| format!("Failed to launch Zed: {}", e))?
-                }
-                "sublime" => {
-                    std::process::Command::new("subl")
-                        .arg(format!("{}:{}:{}", path, ln, col))
-                        .output()
-                        .map_err(|e| format!("Failed to launch Sublime Text: {}", e))?
-                }
-                "webstorm" => {
-                    std::process::Command::new("open")
-                        .arg("-a")
-                        .arg(app_name)
-                        .arg("--args")
-                        .arg("--line")
-                        .arg(ln.to_string())
-                        .arg("--column")
-                        .arg(col.to_string())
-                        .arg(&path)
-                        .output()
-                        .map_err(|e| format!("Failed to launch WebStorm: {}", e))?
-                }
+                "zed" => std::process::Command::new("zed")
+                    .arg(format!("{}:{}:{}", path, ln, col))
+                    .output()
+                    .map_err(|e| format!("Failed to launch Zed: {}", e))?,
+                "sublime" => std::process::Command::new("subl")
+                    .arg(format!("{}:{}:{}", path, ln, col))
+                    .output()
+                    .map_err(|e| format!("Failed to launch Sublime Text: {}", e))?,
+                "webstorm" => std::process::Command::new("open")
+                    .arg("-a")
+                    .arg(app_name)
+                    .arg("--args")
+                    .arg("--line")
+                    .arg(ln.to_string())
+                    .arg("--column")
+                    .arg(col.to_string())
+                    .arg(&path)
+                    .output()
+                    .map_err(|e| format!("Failed to launch WebStorm: {}", e))?,
                 _ => unreachable!(),
             }
         } else {
@@ -905,12 +1016,17 @@ fn get_hook_port(state: tauri::State<'_, HookPort>) -> u16 {
 }
 
 #[tauri::command]
-fn get_agent_statuses(state: tauri::State<'_, Arc<hook_server::AgentStatuses>>) -> HashMap<String, String> {
+fn get_agent_statuses(
+    state: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
+) -> HashMap<String, String> {
     state.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 #[tauri::command]
-async fn check_generated_files(worktree_path: String, files: Vec<String>) -> Result<Vec<String>, String> {
+async fn check_generated_files(
+    worktree_path: String,
+    files: Vec<String>,
+) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || git::check_generated_files(&worktree_path, &files))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -924,7 +1040,10 @@ async fn get_my_linear_issues(api_key: String) -> Result<Vec<linear::LinearIssue
 }
 
 #[tauri::command]
-async fn search_linear_issues(api_key: String, query: String) -> Result<Vec<linear::LinearIssue>, String> {
+async fn search_linear_issues(
+    api_key: String,
+    query: String,
+) -> Result<Vec<linear::LinearIssue>, String> {
     tokio::task::spawn_blocking(move || linear::search_issues(&api_key, &query))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -940,12 +1059,15 @@ async fn start_linear_issue(api_key: String, issue_id: String) -> Result<(), Str
 #[tauri::command]
 async fn fetch_linear_attachment(api_key: String, url: String) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    let (content_type, bytes) = tokio::task::spawn_blocking(move || {
-        linear::fetch_attachment(&api_key, &url)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))??;
-    Ok(format!("data:{};base64,{}", content_type, STANDARD.encode(bytes)))
+    let (content_type, bytes) =
+        tokio::task::spawn_blocking(move || linear::fetch_attachment(&api_key, &url))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))??;
+    Ok(format!(
+        "data:{};base64,{}",
+        content_type,
+        STANDARD.encode(bytes)
+    ))
 }
 
 #[tauri::command]
@@ -955,7 +1077,10 @@ fn link_worktree_issue(
     issue_id: String,
     identifier: String,
 ) -> Result<worktree_issues::WorktreeIssue, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     worktree_issues::link_worktree(&conn, &worktree_path, &issue_id, &identifier)
 }
 
@@ -964,7 +1089,10 @@ fn get_worktree_issue(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
 ) -> Result<Option<worktree_issues::WorktreeIssue>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     worktree_issues::get_issue_for_worktree(&conn, &worktree_path)
 }
 
@@ -972,7 +1100,10 @@ fn get_worktree_issue(
 fn get_all_worktree_issues(
     state: tauri::State<'_, DbState>,
 ) -> Result<Vec<worktree_issues::WorktreeIssue>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     worktree_issues::get_all_worktree_issues(&conn)
 }
 
@@ -981,7 +1112,10 @@ fn unlink_worktree_issue(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     worktree_issues::unlink_worktree(&conn, &worktree_path)
 }
 
@@ -995,7 +1129,10 @@ fn rename_worktree_title(
     if trimmed.is_empty() {
         return Err("Title cannot be empty".to_string());
     }
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     worktrees::upsert_title(&conn, &worktree_path, trimmed)
 }
 
@@ -1004,7 +1141,10 @@ fn unlink_worktree_title(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     worktrees::delete_row(&conn, &worktree_path)
 }
 
@@ -1013,7 +1153,10 @@ fn get_pr_status(
     state: tauri::State<'_, DbState>,
     worktree_path: String,
 ) -> Result<Option<github::PrStatus>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     github::read_status(&conn, &worktree_path)
 }
 
@@ -1039,7 +1182,10 @@ async fn refresh_pr_status(
     let Ok(status) = fetched else { return Ok(()) };
 
     {
-        let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        let conn = state
+            .0
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
         // Skip emit when the status hasn't changed — stops the 60s poll
         // from re-rendering the sidebar for every worktree every minute.
         if github::read_status(&conn, &worktree_path)?.as_ref() == Some(&status) {
@@ -1059,11 +1205,11 @@ async fn refresh_pr_status(
 }
 
 #[tauri::command]
-fn delete_pr_status(
-    state: tauri::State<'_, DbState>,
-    worktree_path: String,
-) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+fn delete_pr_status(state: tauri::State<'_, DbState>, worktree_path: String) -> Result<(), String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     github::delete_status(&conn, &worktree_path)
 }
 
@@ -1083,7 +1229,10 @@ fn get_setting(
     key: String,
     scope: String,
 ) -> Result<Option<String>, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     settings::get_setting(&conn, &key, &scope)
 }
 
@@ -1094,7 +1243,10 @@ fn set_setting(
     scope: String,
     value: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     settings::set_setting(&conn, &key, &scope, &value)
 }
 
@@ -1104,7 +1256,10 @@ fn delete_setting(
     key: String,
     scope: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     settings::delete_setting(&conn, &key, &scope)
 }
 
@@ -1113,7 +1268,9 @@ fn delete_setting(
 fn set_window_vibrancy(window: tauri::WebviewWindow, material: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use window_vibrancy::{apply_vibrancy, clear_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+        use window_vibrancy::{
+            apply_vibrancy, clear_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
+        };
         // The window is created with `transparent: true`, so when vibrancy is
         // off the user sees the body's actual background colour. The frontend
         // is responsible for setting that background opaque vs. translucent.
@@ -1174,17 +1331,29 @@ fn get_default_worktree_base_dir() -> String {
 }
 
 #[tauri::command]
-async fn write_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || linear_context::write_context(&api_key, &issue_id, &worktree_path, true))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+async fn write_linear_context(
+    api_key: String,
+    issue_id: String,
+    worktree_path: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        linear_context::write_context(&api_key, &issue_id, &worktree_path, true)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-async fn refresh_linear_context(api_key: String, issue_id: String, worktree_path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || linear_context::write_context(&api_key, &issue_id, &worktree_path, false))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+async fn refresh_linear_context(
+    api_key: String,
+    issue_id: String,
+    worktree_path: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        linear_context::write_context(&api_key, &issue_id, &worktree_path, false)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// Exact paths to check first (top-level, highest priority).
@@ -1232,19 +1401,15 @@ fn mime_for_ext(ext: &str) -> &'static str {
 }
 
 fn read_icon_as_data_url(path: &Path) -> Result<Option<String>, String> {
-    let meta = fs::metadata(path)
-        .map_err(|e| format!("Failed to stat {}: {}", path.display(), e))?;
+    let meta =
+        fs::metadata(path).map_err(|e| format!("Failed to stat {}: {}", path.display(), e))?;
     if meta.len() > MAX_FAVICON_SIZE {
         return Ok(None);
     }
-    let bytes = fs::read(path)
-        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let bytes = fs::read(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
     let mime = mime_for_ext(ext);
-    let b64 = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        &bytes,
-    );
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
     Ok(Some(format!("data:{};base64,{}", mime, b64)))
 }
 
@@ -1265,7 +1430,19 @@ async fn discover_project_icon(project_path: String) -> Result<Option<String>, S
 
         // Phase 2: glob patterns for monorepos (skipping heavy dirs)
         use std::collections::HashSet;
-        let skip: HashSet<&str> = ["node_modules", ".git", "dist", "build", ".turbo", ".next", "coverage", "testing"].iter().copied().collect();
+        let skip: HashSet<&str> = [
+            "node_modules",
+            ".git",
+            "dist",
+            "build",
+            ".turbo",
+            ".next",
+            "coverage",
+            "testing",
+        ]
+        .iter()
+        .copied()
+        .collect();
 
         for glob_pattern in FAVICON_GLOBS {
             if let Some(found) = walk_for_glob(root, glob_pattern, &skip) {
@@ -1283,7 +1460,11 @@ async fn discover_project_icon(project_path: String) -> Result<Option<String>, S
 
 /// Simple glob matcher: splits a `**/name` pattern and walks the tree.
 /// Only supports patterns starting with `**/`.
-fn walk_for_glob(root: &Path, pattern: &str, skip_dirs: &std::collections::HashSet<&str>) -> Option<PathBuf> {
+fn walk_for_glob(
+    root: &Path,
+    pattern: &str,
+    skip_dirs: &std::collections::HashSet<&str>,
+) -> Option<PathBuf> {
     let suffix = pattern.strip_prefix("**/")?;
     walk_dir_for_suffix(root, suffix, skip_dirs, 0)
 }
@@ -1294,7 +1475,9 @@ fn walk_dir_for_suffix(
     skip_dirs: &std::collections::HashSet<&str>,
     depth: u32,
 ) -> Option<PathBuf> {
-    if depth > 5 { return None; }
+    if depth > 5 {
+        return None;
+    }
     // Check if suffix exists directly under this dir
     let candidate = dir.join(suffix);
     if candidate.is_file() {
@@ -1355,8 +1538,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .menu(|handle| {
-            let check_updates = MenuItemBuilder::with_id("check_for_updates", "Check for Updates...")
-                .build(handle)?;
+            let check_updates =
+                MenuItemBuilder::with_id("check_for_updates", "Check for Updates...")
+                    .build(handle)?;
             let app_menu = SubmenuBuilder::new(handle, "Impala")
                 .about(None)
                 .separator()
@@ -1448,7 +1632,12 @@ pub fn run() {
                 if hotkeys_file.exists() {
                     if let Ok(contents) = fs::read_to_string(&hotkeys_file) {
                         if serde_json::from_str::<serde_json::Value>(&contents).is_ok() {
-                            let _ = settings::set_setting(&conn, "hotkeyOverrides", "global", contents.trim());
+                            let _ = settings::set_setting(
+                                &conn,
+                                "hotkeyOverrides",
+                                "global",
+                                contents.trim(),
+                            );
                         }
                     }
                     let _ = fs::remove_file(&hotkeys_file);
@@ -1466,7 +1655,8 @@ pub fn run() {
             ))));
 
             let agent_statuses = Arc::new(hook_server::AgentStatuses(Mutex::new(HashMap::new())));
-            let last_turn_snapshots = Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
+            let last_turn_snapshots =
+                Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
             let caffeinators = Arc::new(hook_server::Caffeinators::new());
             let hook_port = hook_server::start(
                 app.handle().clone(),
@@ -1494,7 +1684,10 @@ pub fn run() {
                                 client.daemon_pid,
                                 client.paths.sock.display()
                             );
-                            debug_assert!(std::env::var("IMPALA_SESSION_ID").is_ok(), "session_id should be set");
+                            debug_assert!(
+                                std::env::var("IMPALA_SESSION_ID").is_ok(),
+                                "session_id should be set"
+                            );
                             if let Some(state) =
                                 app_handle.try_state::<daemon_client::DaemonState>()
                             {
@@ -1519,14 +1712,21 @@ pub fn run() {
                 std::thread::spawn(move || {
                     let Ok(poll_conn) = rusqlite::Connection::open_with_flags(
                         &db_path,
-                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-                    ) else { return };
+                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                    ) else {
+                        return;
+                    };
                     let mut last_version: i64 = poll_conn
                         .pragma_query_value(None, "data_version", |row| row.get(0))
                         .unwrap_or(0);
                     loop {
                         std::thread::sleep(Duration::from_secs(1));
-                        if let Ok(version) = poll_conn.pragma_query_value(None, "data_version", |row| row.get::<_, i64>(0)) {
+                        if let Ok(version) =
+                            poll_conn.pragma_query_value(None, "data_version", |row| {
+                                row.get::<_, i64>(0)
+                            })
+                        {
                             if version != last_version {
                                 last_version = version;
                                 let _ = app_handle.emit("annotations-changed", ());
@@ -1552,8 +1752,8 @@ pub fn run() {
             // Set macOS application icon for dock/window in dev mode
             #[cfg(target_os = "macos")]
             {
-                use objc2::MainThreadMarker;
                 use objc2::AnyThread;
+                use objc2::MainThreadMarker;
                 use objc2_app_kit::{NSApplication, NSImage};
                 use objc2_foundation::NSData;
 
@@ -1682,8 +1882,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 // Reap any caffeinate children still alive so they don't
                 // linger reparented to launchd after the app exits.
-                if let Some(caffeinators) =
-                    app_handle.try_state::<Arc<hook_server::Caffeinators>>()
+                if let Some(caffeinators) = app_handle.try_state::<Arc<hook_server::Caffeinators>>()
                 {
                     caffeinators.kill_all();
                 }

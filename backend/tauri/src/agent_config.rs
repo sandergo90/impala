@@ -1,12 +1,10 @@
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Lines we append to <worktree>/.git/info/exclude so the per-worktree config
 /// files don't show up as untracked changes in the user's git status.
-const EXCLUDE_LINES: &[&str] = &[
-    "# Added by Impala",
-    "/.claude/settings.local.json",
-];
+const EXCLUDE_LINES: &[&str] = &["# Added by Impala", "/.claude/settings.local.json"];
 
 /// Write per-worktree Claude config: <worktree>/.claude/settings.local.json
 /// registers Impala hooks. Claude Code merges settings.local.json (gitignored
@@ -60,33 +58,35 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
         let already = defs.iter().any(|def| {
             def.get("hooks")
                 .and_then(|h| h.as_array())
-                .map(|hs| hs.iter().any(|h| {
-                    h.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(|c| c.contains("IMPALA_HOOK_PORT"))
-                        .unwrap_or(false)
-                }))
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains("IMPALA_HOOK_PORT"))
+                            .unwrap_or(false)
+                    })
+                })
                 .unwrap_or(false)
         });
-        if already { continue; }
+        if already {
+            continue;
+        }
 
         let mut new_def = serde_json::json!({
             "hooks": [{ "type": "command", "command": cmd }]
         });
-        if *needs_matcher { new_def["matcher"] = serde_json::json!("*"); }
+        if *needs_matcher {
+            new_def["matcher"] = serde_json::json!("*");
+        }
         defs.push(new_def);
     }
     let formatted = serde_json::to_string_pretty(&value)
         .map_err(|e| format!("serialize .claude/settings.local.json: {}", e))?;
-    fs::write(&path, formatted)
-        .map_err(|e| format!("write .claude/settings.local.json: {}", e))?;
+    fs::write(&path, formatted).map_err(|e| format!("write .claude/settings.local.json: {}", e))?;
     Ok(())
 }
 
-pub(crate) const CODEX_EXCLUDE_LINES: &[&str] = &[
-    "# Added by Impala",
-    "/.impala/",
-];
+pub(crate) const CODEX_EXCLUDE_LINES: &[&str] = &["# Added by Impala", "/.impala/"];
 
 /// Make sure <CODEX_HOME>/auth.json is a symlink to ~/.codex/auth.json so
 /// `codex login` only has to happen once per machine. If a real auth.json
@@ -98,14 +98,16 @@ fn link_codex_auth(codex_home: &Path) -> Result<(), String> {
     let user_codex = dirs::home_dir()
         .ok_or_else(|| "no home dir".to_string())?
         .join(".codex");
-    fs::create_dir_all(&user_codex)
-        .map_err(|e| format!("mkdir ~/.codex: {}", e))?;
+    fs::create_dir_all(&user_codex).map_err(|e| format!("mkdir ~/.codex: {}", e))?;
     let user_auth = user_codex.join("auth.json");
     let worktree_auth = codex_home.join("auth.json");
 
     if let Ok(meta) = worktree_auth.symlink_metadata() {
         if meta.file_type().is_symlink() {
-            if fs::read_link(&worktree_auth).map(|t| t == user_auth).unwrap_or(false) {
+            if fs::read_link(&worktree_auth)
+                .map(|t| t == user_auth)
+                .unwrap_or(false)
+            {
                 return Ok(());
             }
         } else if !user_auth.exists() {
@@ -115,8 +117,7 @@ fn link_codex_auth(codex_home: &Path) -> Result<(), String> {
         }
         let _ = fs::remove_file(&worktree_auth);
     }
-    symlink(&user_auth, &worktree_auth)
-        .map_err(|e| format!("symlink auth.json: {}", e))?;
+    symlink(&user_auth, &worktree_auth).map_err(|e| format!("symlink auth.json: {}", e))?;
     Ok(())
 }
 
@@ -162,6 +163,106 @@ fn read_user_codex_config() -> toml::value::Table {
     }
 }
 
+fn codex_hook_event_key_label(event_name: &str) -> Result<&'static str, String> {
+    match event_name {
+        "PreToolUse" => Ok("pre_tool_use"),
+        "PermissionRequest" => Ok("permission_request"),
+        "PostToolUse" => Ok("post_tool_use"),
+        "PreCompact" => Ok("pre_compact"),
+        "PostCompact" => Ok("post_compact"),
+        "SessionStart" => Ok("session_start"),
+        "UserPromptSubmit" => Ok("user_prompt_submit"),
+        "Stop" => Ok("stop"),
+        other => Err(format!("unknown Codex hook event: {}", other)),
+    }
+}
+
+fn sort_json_value(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(sort_json_value).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let mut sorted = serde_json::Map::new();
+            let mut entries: Vec<_> = map.into_iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            for (key, value) in entries {
+                sorted.insert(key, sort_json_value(value));
+            }
+            serde_json::Value::Object(sorted)
+        }
+        other => other,
+    }
+}
+
+fn codex_hook_trusted_hash(event_name: &str, command: &str) -> Result<String, String> {
+    use toml::Value;
+
+    let mut handler = toml::value::Table::new();
+    handler.insert("type".into(), Value::String("command".into()));
+    handler.insert("command".into(), Value::String(command.to_string()));
+    handler.insert("timeout".into(), Value::Integer(600));
+    handler.insert("async".into(), Value::Boolean(false));
+
+    let mut identity = toml::value::Table::new();
+    identity.insert(
+        "event_name".into(),
+        Value::String(codex_hook_event_key_label(event_name)?.to_string()),
+    );
+    identity.insert("hooks".into(), Value::Array(vec![Value::Table(handler)]));
+
+    let json = serde_json::to_value(Value::Table(identity))
+        .map_err(|e| format!("serialize hook identity: {}", e))?;
+    let canonical = sort_json_value(json);
+    let bytes = serde_json::to_vec(&canonical)
+        .map_err(|e| format!("serialize hook identity json: {}", e))?;
+    let digest = Sha256::digest(bytes);
+    Ok(format!("sha256:{:x}", digest))
+}
+
+fn codex_config_key_source(config_path: &Path) -> PathBuf {
+    match config_path
+        .parent()
+        .and_then(|parent| fs::canonicalize(parent).ok())
+    {
+        Some(parent) => parent.join(
+            config_path
+                .file_name()
+                .unwrap_or_else(|| std::ffi::OsStr::new("config.toml")),
+        ),
+        None => config_path.to_path_buf(),
+    }
+}
+
+fn trust_codex_hook(
+    hooks: &mut toml::value::Table,
+    config_path: &Path,
+    event_name: &str,
+    group_index: usize,
+    command: &str,
+) -> Result<(), String> {
+    use toml::Value;
+
+    let state = hooks
+        .entry("state".to_string())
+        .or_insert_with(|| Value::Table(toml::value::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| "hooks.state in ~/.codex/config.toml is not a table".to_string())?;
+    let key = format!(
+        "{}:{}:{}:0",
+        codex_config_key_source(config_path).to_string_lossy(),
+        codex_hook_event_key_label(event_name)?,
+        group_index,
+    );
+    let mut trust = toml::value::Table::new();
+    trust.insert(
+        "trusted_hash".into(),
+        Value::String(codex_hook_trusted_hash(event_name, command)?),
+    );
+    state.insert(key, Value::Table(trust));
+    Ok(())
+}
+
 /// Build the merged TOML written to <CODEX_HOME>/config.toml. Starts from the
 /// user's ~/.codex/config.toml so settings like `model`, `model_provider`,
 /// `sandbox_mode`, custom MCP servers, etc. carry over. Then layers Impala-
@@ -171,7 +272,11 @@ fn read_user_codex_config() -> toml::value::Table {
 /// - `hooks.<Event>` — append Impala's hook handler to each event array,
 ///    preserving any user-defined hooks. Idempotent on the IMPALA_HOOK_PORT
 ///    marker so we never duplicate our own entry across runs.
-fn build_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<String, String> {
+fn build_codex_config(
+    worktree_path: &Path,
+    mcp_binary: &str,
+    config_path: &Path,
+) -> Result<String, String> {
     use toml::Value;
     let mut root = read_user_codex_config();
 
@@ -195,10 +300,7 @@ fn build_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<String, 
             .ok_or_else(|| "projects in ~/.codex/config.toml is not a table".to_string())?;
         let mut trust = toml::value::Table::new();
         trust.insert("trust_level".into(), Value::String("trusted".into()));
-        projects.insert(
-            repo_root.to_string_lossy().to_string(),
-            Value::Table(trust),
-        );
+        projects.insert(repo_root.to_string_lossy().to_string(), Value::Table(trust));
     }
 
     // hooks.<event> — append Impala's matcher group to whatever the user has.
@@ -212,7 +314,12 @@ fn build_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<String, 
         .or_insert_with(|| Value::Table(toml::value::Table::new()))
         .as_table_mut()
         .ok_or_else(|| "hooks in ~/.codex/config.toml is not a table".to_string())?;
-    for event in ["UserPromptSubmit", "Stop", "PostToolUse", "PermissionRequest"] {
+    for event in [
+        "UserPromptSubmit",
+        "Stop",
+        "PostToolUse",
+        "PermissionRequest",
+    ] {
         let cmd = hook_cmd.replace("PLACEHOLDER", event);
         let arr = hooks
             .entry(event.to_string())
@@ -222,12 +329,14 @@ fn build_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<String, 
         let already = arr.iter().any(|g| {
             g.get("hooks")
                 .and_then(|hs| hs.as_array())
-                .map(|hs| hs.iter().any(|h| {
-                    h.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(|c| c.contains("IMPALA_HOOK_PORT"))
-                        .unwrap_or(false)
-                }))
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains("IMPALA_HOOK_PORT"))
+                            .unwrap_or(false)
+                    })
+                })
                 .unwrap_or(false)
         });
         if already {
@@ -235,10 +344,12 @@ fn build_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<String, 
         }
         let mut handler = toml::value::Table::new();
         handler.insert("type".into(), Value::String("command".into()));
-        handler.insert("command".into(), Value::String(cmd));
+        handler.insert("command".into(), Value::String(cmd.clone()));
         let mut group = toml::value::Table::new();
         group.insert("hooks".into(), Value::Array(vec![Value::Table(handler)]));
+        let group_index = arr.len();
         arr.push(Value::Table(group));
+        trust_codex_hook(hooks, config_path, event, group_index, &cmd)?;
     }
 
     let body = toml::to_string_pretty(&Value::Table(root))
@@ -254,13 +365,9 @@ fn build_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<String, 
 
 /// Write per-worktree Codex config under <worktree>/.impala/codex/config.toml.
 /// Returns the path to use as CODEX_HOME.
-pub fn write_codex_config(
-    worktree_path: &Path,
-    mcp_binary: &str,
-) -> Result<PathBuf, String> {
+pub fn write_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<PathBuf, String> {
     let codex_home = worktree_path.join(".impala").join("codex");
-    fs::create_dir_all(&codex_home)
-        .map_err(|e| format!("mkdir .impala/codex: {}", e))?;
+    fs::create_dir_all(&codex_home).map_err(|e| format!("mkdir .impala/codex: {}", e))?;
 
     // Symlink auth.json from ~/.codex so login persists across worktrees.
     // Without this, every worktree has its own CODEX_HOME and Codex would
@@ -268,16 +375,14 @@ pub fn write_codex_config(
     link_codex_auth(&codex_home)?;
 
     let config_path = codex_home.join("config.toml");
-    let toml_out = build_codex_config(worktree_path, mcp_binary)?;
+    let toml_out = build_codex_config(worktree_path, mcp_binary, &config_path)?;
 
-    fs::write(&config_path, toml_out)
-        .map_err(|e| format!("write codex config.toml: {}", e))?;
+    fs::write(&config_path, toml_out).map_err(|e| format!("write codex config.toml: {}", e))?;
 
     // Write Codex slash command files inside CODEX_HOME. Codex reads
     // slash commands from <CODEX_HOME>/commands/*.md.
     let commands_dir = codex_home.join("commands");
-    fs::create_dir_all(&commands_dir)
-        .map_err(|e| format!("mkdir codex commands: {}", e))?;
+    fs::create_dir_all(&commands_dir).map_err(|e| format!("mkdir codex commands: {}", e))?;
     fs::write(commands_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
         .map_err(|e| format!("write codex impala-review.md: {}", e))?;
     fs::write(commands_dir.join("impala-plan.md"), IMPALA_PLAN_COMMAND)
@@ -287,6 +392,38 @@ pub fn write_codex_config(
 
     add_git_excludes(worktree_path, CODEX_EXCLUDE_LINES)?;
     Ok(codex_home)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_hook_hash_matches_codex_current_hash() {
+        assert_eq!(
+            codex_hook_trusted_hash("UserPromptSubmit", "echo hi").unwrap(),
+            "sha256:4ac11110e7e52a7ace4a63994f6a554e0c891264e3e3733d1f0541b1cd0b3b3e"
+        );
+        assert_eq!(
+            codex_hook_trusted_hash("PostToolUse", "echo hi").unwrap(),
+            "sha256:5130c1496a4cf303e70321c56c8c8829a88cf2cd8cda2e4f61079877fc54e834"
+        );
+        assert_eq!(
+            codex_hook_trusted_hash("PermissionRequest", "echo hi").unwrap(),
+            "sha256:627d5479bfc3fc09415e10ece2e91756f584fcc0076ca6e31e55cd0bab0090b5"
+        );
+    }
+
+    #[test]
+    fn codex_config_key_source_canonicalizes_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        assert_eq!(
+            codex_config_key_source(&config_path),
+            fs::canonicalize(dir.path()).unwrap().join("config.toml")
+        );
+    }
 }
 
 const IMPALA_REVIEW_COMMAND: &str = r#"---
@@ -366,7 +503,9 @@ pub(crate) fn add_git_excludes(worktree_path: &Path, lines: &[&str]) -> Result<(
             to_add.push(line);
         }
     }
-    if to_add.is_empty() { return Ok(()); }
+    if to_add.is_empty() {
+        return Ok(());
+    }
     let mut new_content = existing;
     if !new_content.ends_with('\n') && !new_content.is_empty() {
         new_content.push('\n');
@@ -375,8 +514,7 @@ pub(crate) fn add_git_excludes(worktree_path: &Path, lines: &[&str]) -> Result<(
         new_content.push_str(line);
         new_content.push('\n');
     }
-    fs::write(&exclude_path, new_content)
-        .map_err(|e| format!("write .git/info/exclude: {}", e))?;
+    fs::write(&exclude_path, new_content).map_err(|e| format!("write .git/info/exclude: {}", e))?;
     Ok(())
 }
 

@@ -1,4 +1,58 @@
 {
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "command": "[ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --data-urlencode \"event_type=PermissionRequest\" --data-urlencode \"worktree_path=${IMPALA_WORKTREE_PATH}\" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 || true",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "[ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --data-urlencode \"event_type=PostToolUse\" --data-urlencode \"worktree_path=${IMPALA_WORKTREE_PATH}\" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 || true",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "command": "[ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --data-urlencode \"event_type=PostToolUseFailure\" --data-urlencode \"worktree_path=${IMPALA_WORKTREE_PATH}\" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 || true",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "[ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --data-urlencode \"event_type=Stop\" --data-urlencode \"worktree_path=${IMPALA_WORKTREE_PATH}\" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 || true",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "[ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --data-urlencode \"event_type=UserPromptSubmit\" --data-urlencode \"worktree_path=${IMPALA_WORKTREE_PATH}\" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 || true",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(echo 'export TAURI_SIGNING_PRIVATE_KEY=\"$\\(cat ~/.tauri/canopy.key\\)\"')",

@@ -1,8 +1,8 @@
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
-use tiny_http::{Server, Response};
-use serde::Serialize;
+use tiny_http::{Response, Server};
 
 pub struct AgentStatuses(pub Mutex<HashMap<String, String>>);
 
@@ -254,7 +254,9 @@ pub fn install_impala_plan_skill() {
 /// so the system can resume normal idle-sleep behaviour.
 #[cfg(target_os = "macos")]
 fn apply_caffeinate(caffeinators: &Caffeinators, worktree_path: &str, status: &str) {
-    let Ok(mut map) = caffeinators.0.lock() else { return };
+    let Ok(mut map) = caffeinators.0.lock() else {
+        return;
+    };
     match status {
         "working" => {
             if map.contains_key(worktree_path) {
@@ -271,7 +273,10 @@ fn apply_caffeinate(caffeinators: &Caffeinators, worktree_path: &str, status: &s
                     map.insert(worktree_path.to_string(), child);
                 }
                 Err(e) => {
-                    eprintln!("[impala] caffeinate spawn failed for {}: {}", worktree_path, e);
+                    eprintln!(
+                        "[impala] caffeinate spawn failed for {}: {}",
+                        worktree_path, e
+                    );
                 }
             }
         }
@@ -297,9 +302,7 @@ pub fn start(
     snapshots: Arc<LastTurnSnapshots>,
     caffeinators: Arc<Caffeinators>,
 ) -> u16 {
-    let server = Arc::new(
-        Server::http("127.0.0.1:0").expect("Failed to start hook server")
-    );
+    let server = Arc::new(Server::http("127.0.0.1:0").expect("Failed to start hook server"));
     let port = server.server_addr().to_ip().unwrap().port();
 
     // Write port to a well-known file so persistent PTY sessions can
@@ -345,10 +348,13 @@ pub fn start(
                     map.insert(worktree_path.clone(), status.to_string());
                 }
                 apply_caffeinate(&caffeinators, &worktree_path, status);
-                let _ = app_handle.emit("agent-status", AgentStatusEvent {
-                    worktree_path: worktree_path.clone(),
-                    status: status.to_string(),
-                });
+                let _ = app_handle.emit(
+                    "agent-status",
+                    AgentStatusEvent {
+                        worktree_path: worktree_path.clone(),
+                        status: status.to_string(),
+                    },
+                );
             }
 
             // Snapshot the worktree at the start of every turn so the "Last
@@ -368,7 +374,10 @@ pub fn start(
                         );
                     }
                     Err(e) => {
-                        eprintln!("[impala] last-turn snapshot failed for {}: {}", worktree_path, e);
+                        eprintln!(
+                            "[impala] last-turn snapshot failed for {}: {}",
+                            worktree_path, e
+                        );
                     }
                 }
             }
