@@ -246,7 +246,7 @@ export function NewWorktreeDialog({
       }}
     >
       <form
-        className="bg-background border rounded-lg shadow-lg p-6 w-[420px] space-y-4"
+        className="bg-popover border rounded-lg shadow-lg p-6 w-[420px] space-y-4"
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
@@ -298,7 +298,7 @@ export function NewWorktreeDialog({
               <label className="block text-md text-muted-foreground mb-1">
                 Branch name
               </label>
-              <div className="flex w-full border rounded bg-background overflow-hidden">
+              <div className="flex w-full border rounded bg-popover overflow-hidden">
                 {branchPrefix && (
                   <span className="px-3 py-1.5 text-sm text-muted-foreground bg-muted/50 shrink-0 border-r">
                     {branchPrefix}
@@ -324,7 +324,7 @@ export function NewWorktreeDialog({
                 value={baseBranch}
                 onChange={(e) => setBaseBranch(e.target.value)}
                 placeholder="develop"
-                className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+                className="w-full px-3 py-1.5 border rounded text-sm bg-popover"
                 spellCheck={false}
               />
             </div>
@@ -338,7 +338,7 @@ export function NewWorktreeDialog({
             </label>
             <div className="relative" ref={existingComboboxRef}>
               {selectedBranch ? (
-                <div className="flex items-center gap-2 w-full px-3 py-1.5 border rounded text-sm bg-background">
+                <div className="flex items-center gap-2 w-full px-3 py-1.5 border rounded text-sm bg-popover">
                   <span className="font-mono truncate flex-1">{selectedBranch}</span>
                   <button
                     type="button"
@@ -371,7 +371,7 @@ export function NewWorktreeDialog({
                         ? "Search branches..."
                         : "Loading branches..."
                   }
-                  className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+                  className="w-full px-3 py-1.5 border rounded text-sm bg-popover"
                   autoFocus
                   spellCheck={false}
                 />
@@ -435,7 +435,7 @@ export function NewWorktreeDialog({
                   </label>
                   <div className="relative" ref={comboboxRef}>
                     {selectedIssue ? (
-                      <div className="flex items-center gap-2 w-full px-3 py-1.5 border rounded text-sm bg-background">
+                      <div className="flex items-center gap-2 w-full px-3 py-1.5 border rounded text-sm bg-popover">
                         <span className="font-mono text-md text-muted-foreground">
                           {selectedIssue.identifier}
                         </span>
@@ -463,7 +463,7 @@ export function NewWorktreeDialog({
                           }
                         }}
                         placeholder={linearLoading ? "Loading issues..." : "Search issues..."}
-                        className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+                        className="w-full px-3 py-1.5 border rounded text-sm bg-popover"
                         autoFocus
                         spellCheck={false}
                       />
@@ -501,7 +501,7 @@ export function NewWorktreeDialog({
                   <label className="block text-md text-muted-foreground mb-1">
                     Branch name
                   </label>
-                  <div className="flex w-full border rounded bg-background overflow-hidden">
+                  <div className="flex w-full border rounded bg-popover overflow-hidden">
                     {branchPrefix && (
                       <span className="px-3 py-1.5 text-sm text-muted-foreground bg-muted/50 shrink-0 border-r">
                         {branchPrefix}
@@ -527,7 +527,7 @@ export function NewWorktreeDialog({
                     value={linearBaseBranch}
                     onChange={(e) => setLinearBaseBranch(e.target.value)}
                     placeholder="develop"
-                    className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+                    className="w-full px-3 py-1.5 border rounded text-sm bg-popover"
                     spellCheck={false}
                   />
                 </div>
