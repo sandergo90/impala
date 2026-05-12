@@ -1467,14 +1467,17 @@ pub fn run() {
 
             let agent_statuses = Arc::new(hook_server::AgentStatuses(Mutex::new(HashMap::new())));
             let last_turn_snapshots = Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
+            let caffeinators = Arc::new(hook_server::Caffeinators::new());
             let hook_port = hook_server::start(
                 app.handle().clone(),
                 agent_statuses.clone(),
                 last_turn_snapshots.clone(),
+                caffeinators.clone(),
             );
             app.manage(HookPort(hook_port));
             app.manage(agent_statuses);
             app.manage(last_turn_snapshots);
+            app.manage(caffeinators);
 
             // Bring up the detached PTY daemon in the background. Until it
             // lands, pty_* commands return "pty daemon not ready". The
@@ -1673,6 +1676,17 @@ pub fn run() {
             plan_scanner::watch_plan_directories,
             plan_scanner::unwatch_plan_directories,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Reap any caffeinate children still alive so they don't
+                // linger reparented to launchd after the app exits.
+                if let Some(caffeinators) =
+                    app_handle.try_state::<Arc<hook_server::Caffeinators>>()
+                {
+                    caffeinators.kill_all();
+                }
+            }
+        });
 }

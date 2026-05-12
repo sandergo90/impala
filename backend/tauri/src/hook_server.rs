@@ -11,6 +11,27 @@ pub struct AgentStatuses(pub Mutex<HashMap<String, String>>);
 /// replaces it; lost on app restart (acceptable — rebuilds on next turn).
 pub struct LastTurnSnapshots(pub Mutex<HashMap<String, String>>);
 
+/// One `caffeinate -i` child per worktree currently in "working" status.
+/// Spawned on the working transition, killed on idle/permission. Exposed so
+/// the app's RunEvent::Exit handler can drain it on shutdown; otherwise the
+/// reparented caffeinate processes would linger.
+pub struct Caffeinators(pub Mutex<HashMap<String, std::process::Child>>);
+
+impl Caffeinators {
+    pub fn new() -> Self {
+        Self(Mutex::new(HashMap::new()))
+    }
+
+    /// Kill every caffeinate child and clear the map. Idempotent.
+    pub fn kill_all(&self) {
+        let Ok(mut map) = self.0.lock() else { return };
+        for (_, mut child) in map.drain() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct AgentStatusEvent {
     pub worktree_path: String,
@@ -228,6 +249,45 @@ pub fn install_impala_plan_skill() {
     let _ = std::fs::write(&skill_path, IMPALA_PLAN_SKILL);
 }
 
+/// macOS only. Maintains one `caffeinate -i` process per worktree that is
+/// currently in "working" status. On idle/permission the child is killed
+/// so the system can resume normal idle-sleep behaviour.
+#[cfg(target_os = "macos")]
+fn apply_caffeinate(caffeinators: &Caffeinators, worktree_path: &str, status: &str) {
+    let Ok(mut map) = caffeinators.0.lock() else { return };
+    match status {
+        "working" => {
+            if map.contains_key(worktree_path) {
+                return;
+            }
+            match std::process::Command::new("caffeinate")
+                .arg("-i")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(child) => {
+                    map.insert(worktree_path.to_string(), child);
+                }
+                Err(e) => {
+                    eprintln!("[impala] caffeinate spawn failed for {}: {}", worktree_path, e);
+                }
+            }
+        }
+        "idle" | "permission" => {
+            if let Some(mut child) = map.remove(worktree_path) {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_caffeinate(_caffeinators: &Caffeinators, _worktree_path: &str, _status: &str) {}
+
 /// Start the hook HTTP server on a random port. Returns the port number.
 /// The `statuses` map is updated with every event so the frontend can query
 /// last-known agent status after a hard reload.
@@ -235,6 +295,7 @@ pub fn start(
     app_handle: AppHandle,
     statuses: Arc<AgentStatuses>,
     snapshots: Arc<LastTurnSnapshots>,
+    caffeinators: Arc<Caffeinators>,
 ) -> u16 {
     let server = Arc::new(
         Server::http("127.0.0.1:0").expect("Failed to start hook server")
@@ -283,6 +344,7 @@ pub fn start(
                 if let Ok(mut map) = statuses.0.lock() {
                     map.insert(worktree_path.clone(), status.to_string());
                 }
+                apply_caffeinate(&caffeinators, &worktree_path, status);
                 let _ = app_handle.emit("agent-status", AgentStatusEvent {
                     worktree_path: worktree_path.clone(),
                     status: status.to_string(),
