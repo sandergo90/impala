@@ -592,6 +592,12 @@ function ContextMenuSurface({
   return createPortal(
     <div
       ref={ref}
+      // Trees' outside-click detector is a document-level capture-phase
+      // mousedown listener that walks `composedPath()` looking for this
+      // dataset flag. Without it, the first mousedown on a menu item closes
+      // the menu (capture phase fires before our React handlers), unmounting
+      // the button before `click` lands.
+      data-file-tree-context-menu-root="true"
       style={{
         position: "fixed",
         left: pos?.left ?? anchorRect.left,
