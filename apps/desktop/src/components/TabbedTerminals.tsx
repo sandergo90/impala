@@ -460,7 +460,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           {menuOpen && (
             <div
               ref={menuRef}
-              className="absolute top-full left-0 mt-1 z-20 min-w-[160px] rounded border border-border bg-background shadow-lg py-1"
+              className="absolute top-full left-0 mt-1 z-20 min-w-[160px] rounded border border-border bg-popover text-popover-foreground shadow-lg py-1"
             >
               <button
                 onClick={handleNewTerminal}

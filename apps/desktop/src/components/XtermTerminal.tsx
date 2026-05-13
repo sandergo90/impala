@@ -608,7 +608,7 @@ function XtermTerminalInner({
       style={{ background: termBg, padding: "4px" }}
     >
       {searchVisible && (
-        <div className="absolute top-1 right-2 z-30 flex items-center gap-1 bg-background border border-border rounded px-2 py-1 shadow-lg">
+        <div className="absolute top-1 right-2 z-30 flex items-center gap-1 bg-popover text-popover-foreground border border-border rounded px-2 py-1 shadow-lg">
           <input
             ref={searchInputRef}
             type="text"
