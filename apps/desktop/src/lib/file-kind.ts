@@ -1,8 +1,10 @@
-export type FileKind = "image" | "svg" | "binary" | "text";
+export type FileKind = "image" | "svg" | "binary" | "text" | "html";
 
 const IMAGE_EXTS = new Set([
   "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif", "apng", "tiff",
 ]);
+
+const HTML_EXTS = new Set(["html", "htm"]);
 
 const BINARY_EXTS = new Set([
   // Executables / libs
@@ -24,6 +26,7 @@ export function classifyFile(path: string): FileKind {
   if (dot === -1 || dot === path.length - 1) return "text";
   const ext = path.slice(dot + 1).toLowerCase();
   if (ext === "svg") return "svg";
+  if (HTML_EXTS.has(ext)) return "html";
   if (IMAGE_EXTS.has(ext)) return "image";
   if (BINARY_EXTS.has(ext)) return "binary";
   return "text";

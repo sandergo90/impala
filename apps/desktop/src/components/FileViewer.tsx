@@ -53,10 +53,16 @@ export function FileViewer() {
   const initialKind: FileKind | null = selectedFilePath ? classifyFile(selectedFilePath) : null;
 
   const [svgSourceMode, setSvgSourceMode] = useState(false);
+  const [htmlSourceMode, setHtmlSourceMode] = useState(false);
   const [forceLoadLarge, setForceLoadLarge] = useState(false);
+  const [htmlContent, setHtmlContent] = useState<string | null>(null);
+  const [htmlError, setHtmlError] = useState<string | null>(null);
   useEffect(() => {
     setSvgSourceMode(false);
+    setHtmlSourceMode(false);
     setForceLoadLarge(false);
+    setHtmlContent(null);
+    setHtmlError(null);
   }, [fullPath]);
 
   const [size, setSize] = useState<number | null>(null);
@@ -83,14 +89,34 @@ export function FileViewer() {
   const effectiveKind: FileKind | null = useMemo(() => {
     if (!initialKind) return null;
     if (initialKind === "svg") return svgSourceMode ? "text" : "svg";
+    if (initialKind === "html") return htmlSourceMode ? "text" : "html";
     return initialKind;
-  }, [initialKind, svgSourceMode]);
+  }, [initialKind, svgSourceMode, htmlSourceMode]);
 
   const shouldLoadText =
     fullPath !== null &&
     size !== null &&
     effectiveKind === "text" &&
     (size <= TEXT_SIZE_CAP_BYTES || forceLoadLarge);
+
+  useEffect(() => {
+    if (effectiveKind !== "html" || !fullPath || size === null) return;
+    if (size > TEXT_SIZE_CAP_BYTES && !forceLoadLarge) return;
+    if (htmlContent !== null || htmlError !== null) return;
+    let cancelled = false;
+    invoke<{ content: string; revision: string }>("read_file_with_revision", {
+      absolutePath: fullPath,
+    })
+      .then((res) => {
+        if (!cancelled) setHtmlContent(res.content);
+      })
+      .catch((e) => {
+        if (!cancelled) setHtmlError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveKind, fullPath, size, forceLoadLarge, htmlContent, htmlError]);
 
   const docKey = wtPath && selectedFilePath ? buildDocumentKey(wtPath, selectedFilePath) : null;
   const doc = useEditorDocsStore((s) => (docKey ? s.docs[docKey] : undefined));
@@ -188,6 +214,56 @@ export function FileViewer() {
             </button>
           )}
         </div>
+      </div>
+    );
+  }
+  if (effectiveKind === "html") {
+    if (size > TEXT_SIZE_CAP_BYTES && !forceLoadLarge) {
+      return (
+        <Placeholder>
+          <div>{selectedFilePath} is {formatBytes(size)}</div>
+          <div className="text-xs">Files larger than 1 MB are not previewed by default.</div>
+          <button
+            onClick={() => setForceLoadLarge(true)}
+            className="mt-2 px-3 py-1 rounded border text-xs hover:bg-accent"
+          >
+            Load anyway
+          </button>
+        </Placeholder>
+      );
+    }
+    return (
+      <div className="h-full flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-1 border-b border-border text-xs shrink-0">
+          <span className="truncate text-muted-foreground font-mono">
+            {selectedFilePath}
+          </span>
+          <div className="flex items-center gap-1 shrink-0 ml-2">
+            <button
+              onClick={() => setHtmlSourceMode(true)}
+              className="px-2 py-0.5 rounded border text-xs hover:bg-accent"
+            >
+              View source
+            </button>
+            <OpenInEditorButton worktreePath={wtPath!} filePath={selectedFilePath} />
+            <RevealInFinderButton worktreePath={wtPath!} filePath={selectedFilePath} />
+          </div>
+        </div>
+        {htmlError ? (
+          <Placeholder tone="error">
+            <div>Failed to read {selectedFilePath}:</div>
+            <div className="text-xs">{htmlError}</div>
+          </Placeholder>
+        ) : htmlContent === null ? (
+          <Placeholder>Loading {selectedFilePath}…</Placeholder>
+        ) : (
+          <iframe
+            srcDoc={htmlContent}
+            title={selectedFilePath}
+            sandbox="allow-scripts"
+            className="flex-1 min-h-0 w-full border-0 bg-white"
+          />
+        )}
       </div>
     );
   }
