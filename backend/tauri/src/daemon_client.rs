@@ -63,8 +63,7 @@ impl DaemonClient {
         std::fs::create_dir_all(&paths.root)?;
         ensure_token(&paths.token)?;
 
-        let (stream, daemon_version, daemon_pid) =
-            connect_or_spawn(&paths, &app_data_dir).await?;
+        let (stream, daemon_version, daemon_pid) = connect_or_spawn(&paths, &app_data_dir).await?;
         let (reader, writer) = stream.into_split();
 
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Response>>>> =
@@ -129,7 +128,9 @@ async fn connect_or_spawn(
                 if let Err(e) = request_shutdown(stream).await {
                     eprintln!("[impala] daemon refused shutdown: {e:#}");
                 }
-                wait_for_socket_gone(&paths.sock, SHUTDOWN_TIMEOUT).await.ok();
+                wait_for_socket_gone(&paths.sock, SHUTDOWN_TIMEOUT)
+                    .await
+                    .ok();
             }
             Err(e) => last_err = Some(e),
         }
@@ -264,7 +265,11 @@ async fn wait_for_socket(path: &Path, timeout: Duration) -> Result<()> {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    bail!("socket {} did not appear within {:?}", path.display(), timeout)
+    bail!(
+        "socket {} did not appear within {:?}",
+        path.display(),
+        timeout
+    )
 }
 
 async fn wait_for_socket_gone(path: &Path, timeout: Duration) -> Result<()> {
@@ -321,10 +326,7 @@ const fn target_triple() -> &'static str {
 // I/O tasks
 // --------------------------------------------------------------------
 
-async fn writer_task(
-    mut rx: mpsc::UnboundedReceiver<(u64, Request)>,
-    mut writer: OwnedWriteHalf,
-) {
+async fn writer_task(mut rx: mpsc::UnboundedReceiver<(u64, Request)>, mut writer: OwnedWriteHalf) {
     while let Some((id, req)) = rx.recv().await {
         let frame = ClientFrame { id, req };
         let mut buf = match serde_json::to_vec(&frame) {
@@ -447,10 +449,7 @@ fn dispatch_event(
             let name = format!("pty-error-{}", sanitize_event_id(&session_id));
             let _ = app.emit(&name, message);
         }
-        Event::ShellReady {
-            session_id,
-            reason,
-        } => {
+        Event::ShellReady { session_id, reason } => {
             let name = format!("pty-shell-ready-{}", sanitize_event_id(&session_id));
             let _ = app.emit(&name, reason);
         }

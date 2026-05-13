@@ -28,7 +28,10 @@ fn user_codex_agents_content() -> String {
 /// Codex reads <CODEX_HOME>/AGENTS.md when CODEX_HOME points at the worktree,
 /// so without this seeding the user loses their global Codex instructions.
 pub fn ensure_codex_context(worktree_path: &Path) -> Result<(), String> {
-    let path = worktree_path.join(".impala").join("codex").join("AGENTS.md");
+    let path = worktree_path
+        .join(".impala")
+        .join("codex")
+        .join("AGENTS.md");
     if path.exists() {
         return Ok(());
     }

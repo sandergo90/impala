@@ -2,7 +2,10 @@ use crate::daemon_client::DaemonState;
 use impala_daemon_shared::wire::{Request, Response};
 use std::collections::HashMap;
 
-fn unwrap_or_err<T>(resp: Result<Response, String>, f: impl FnOnce(Response) -> Option<T>) -> Result<T, String> {
+fn unwrap_or_err<T>(
+    resp: Result<Response, String>,
+    f: impl FnOnce(Response) -> Option<T>,
+) -> Result<T, String> {
     let resp = resp?;
     if let Response::Error { message } = &resp {
         return Err(message.clone());
@@ -20,10 +23,7 @@ pub async fn pty_spawn(
     shell_args: Option<Vec<String>>,
     env_vars: Option<HashMap<String, String>>,
 ) -> Result<bool, String> {
-    let env: Vec<(String, String)> = env_vars
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+    let env: Vec<(String, String)> = env_vars.unwrap_or_default().into_iter().collect();
     let resp = state
         .client()?
         .request(Request::Spawn {
@@ -38,7 +38,9 @@ pub async fn pty_spawn(
         })
         .await;
     unwrap_or_err(resp, |r| match r {
-        Response::Spawned { already_existed, .. } => Some(!already_existed),
+        Response::Spawned {
+            already_existed, ..
+        } => Some(!already_existed),
         _ => None,
     })
 }
@@ -98,7 +100,11 @@ pub async fn pty_kill(
     session_id: String,
 ) -> Result<(), String> {
     let client = state.client()?;
-    let resp = client.request(Request::Kill { session_id: session_id.clone() }).await;
+    let resp = client
+        .request(Request::Kill {
+            session_id: session_id.clone(),
+        })
+        .await;
     client.forget_session(&session_id);
     unwrap_or_err(resp, |r| matches!(r, Response::Killed).then_some(()))
 }

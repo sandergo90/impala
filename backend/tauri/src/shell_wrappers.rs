@@ -140,8 +140,7 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
             return Ok(());
         }
     }
-    let mut f = fs::File::create(path)
-        .with_context(|| format!("create {}", path.display()))?;
+    let mut f = fs::File::create(path).with_context(|| format!("create {}", path.display()))?;
     f.write_all(contents.as_bytes())
         .with_context(|| format!("write {}", path.display()))?;
     Ok(())
@@ -185,6 +184,9 @@ mod tests {
             .unwrap()
             .modified()
             .unwrap();
-        assert_eq!(mtime_before, mtime_after, "zshrc was rewritten unnecessarily");
+        assert_eq!(
+            mtime_before, mtime_after,
+            "zshrc was rewritten unnecessarily"
+        );
     }
 }

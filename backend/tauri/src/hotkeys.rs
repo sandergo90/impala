@@ -13,7 +13,10 @@ use crate::DbState;
 
 #[tauri::command]
 pub fn read_hotkey_overrides(state: tauri::State<'_, DbState>) -> Result<HotkeyOverrides, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     match settings::get_setting(&conn, "hotkeyOverrides", "global")? {
         Some(json) => serde_json::from_str(&json)
             .map_err(|e| format!("Failed to parse hotkey overrides: {}", e)),
@@ -26,7 +29,10 @@ pub fn write_hotkey_overrides(
     state: tauri::State<'_, DbState>,
     overrides: HotkeyOverrides,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     let json = serde_json::to_string(&overrides)
         .map_err(|e| format!("Failed to serialize hotkey overrides: {}", e))?;
     settings::set_setting(&conn, "hotkeyOverrides", "global", &json)

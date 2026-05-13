@@ -130,7 +130,14 @@ pub fn set_viewed(
     let content_sha = content_sha_for_file(worktree_path, view, file_path);
     let viewed_at_commit = git::get_head_commit(worktree_path).ok();
     let now = chrono::Utc::now().to_rfc3339();
-    insert_one(conn, worktree_path, file_path, &content_sha, viewed_at_commit.as_deref(), &now)
+    insert_one(
+        conn,
+        worktree_path,
+        file_path,
+        &content_sha,
+        viewed_at_commit.as_deref(),
+        &now,
+    )
 }
 
 pub fn set_many_viewed(
@@ -154,7 +161,14 @@ pub fn set_many_viewed(
             .get(path)
             .cloned()
             .unwrap_or_else(|| DELETED_SENTINEL.to_string());
-        insert_one(&tx, worktree_path, path, &sha, viewed_at_commit.as_deref(), &now)?;
+        insert_one(
+            &tx,
+            worktree_path,
+            path,
+            &sha,
+            viewed_at_commit.as_deref(),
+            &now,
+        )?;
     }
     tx.commit()
         .map_err(|e| format!("Failed to commit transaction: {}", e))?;
@@ -176,7 +190,13 @@ fn insert_one(
          ON CONFLICT(worktree_path, file_path, content_sha)
          DO UPDATE SET viewed_at_commit = excluded.viewed_at_commit,
                        created_at       = excluded.created_at",
-        params![worktree_path, file_path, content_sha, viewed_at_commit, created_at],
+        params![
+            worktree_path,
+            file_path,
+            content_sha,
+            viewed_at_commit,
+            created_at
+        ],
     )
     .map_err(|e| format!("Failed to set file as viewed: {}", e))?;
     Ok(())
@@ -185,11 +205,7 @@ fn insert_one(
 /// Un-view wipes every stored version for this file — clicking "un-view"
 /// means "I have not reviewed any version of this file," not just "forget
 /// the one currently on disk."
-pub fn unset_viewed(
-    conn: &Connection,
-    worktree_path: &str,
-    file_path: &str,
-) -> Result<(), String> {
+pub fn unset_viewed(conn: &Connection, worktree_path: &str, file_path: &str) -> Result<(), String> {
     conn.execute(
         "DELETE FROM viewed_files WHERE worktree_path = ?1 AND file_path = ?2",
         params![worktree_path, file_path],
@@ -235,9 +251,7 @@ pub fn check_viewed(
 
     let stored: HashSet<(String, String)> = {
         let mut stmt = conn
-            .prepare(
-                "SELECT file_path, content_sha FROM viewed_files WHERE worktree_path = ?1",
-            )
+            .prepare("SELECT file_path, content_sha FROM viewed_files WHERE worktree_path = ?1")
             .map_err(|e| format!("Failed to prepare query: {}", e))?;
         let rows = stmt
             .query_map(params![worktree_path], |row| {

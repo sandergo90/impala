@@ -77,7 +77,9 @@ pub fn get_all_titles(conn: &Connection) -> Result<HashMap<String, String>, Stri
         .prepare("SELECT path, title FROM worktrees")
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| format!("Failed to query worktree titles: {}", e))?;
     let mut map = HashMap::new();
     for row in rows {
@@ -109,15 +111,24 @@ mod tests {
 
     #[test]
     fn de_slug_basic() {
-        assert_eq!(default_title_from_branch("feature/password-reset"), "Password reset");
-        assert_eq!(default_title_from_branch("fix/modal-close-bug"), "Modal close bug");
+        assert_eq!(
+            default_title_from_branch("feature/password-reset"),
+            "Password reset"
+        );
+        assert_eq!(
+            default_title_from_branch("fix/modal-close-bug"),
+            "Modal close bug"
+        );
         assert_eq!(default_title_from_branch("sander/scratch"), "Scratch");
     }
 
     #[test]
     fn de_slug_ticket_prefix() {
         assert_eq!(default_title_from_branch("ENG-123-add-auth"), "Add auth");
-        assert_eq!(default_title_from_branch("feature/ENG-42-new-thing"), "New thing");
+        assert_eq!(
+            default_title_from_branch("feature/ENG-42-new-thing"),
+            "New thing"
+        );
     }
 
     #[test]
@@ -142,6 +153,9 @@ mod tests {
 
     #[test]
     fn de_slug_preserves_acronyms() {
-        assert_eq!(default_title_from_branch("feature/api-tokens"), "Api tokens");
+        assert_eq!(
+            default_title_from_branch("feature/api-tokens"),
+            "Api tokens"
+        );
     }
 }

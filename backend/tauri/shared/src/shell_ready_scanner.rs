@@ -82,13 +82,19 @@ impl ShellReadyScanState {
                     self.held.clear();
                     self.match_pos = 0;
                     output.extend_from_slice(&data[i + 1..]);
-                    return ScanResult { output, matched: true };
+                    return ScanResult {
+                        output,
+                        matched: true,
+                    };
                 }
                 self.held.push(byte);
             }
         }
 
-        ScanResult { output, matched: false }
+        ScanResult {
+            output,
+            matched: false,
+        }
     }
 }
 

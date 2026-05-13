@@ -97,7 +97,8 @@ pub fn list_annotations(
         .prepare(&sql)
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
-    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(repo_path.to_string())];
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
+        vec![Box::new(repo_path.to_string())];
     if let Some(fp) = file_path {
         params_vec.push(Box::new(fp.to_string()));
     }
@@ -105,7 +106,8 @@ pub fn list_annotations(
         params_vec.push(Box::new(ch.to_string()));
     }
 
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_vec.iter().map(|p| p.as_ref()).collect();
 
     let rows = stmt
         .query_map(param_refs.as_slice(), |row| {
@@ -162,7 +164,8 @@ pub fn update_annotation(
     );
     params_vec.push(Box::new(id.to_string()));
 
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_vec.iter().map(|p| p.as_ref()).collect();
 
     let rows_affected = conn
         .execute(&sql, param_refs.as_slice())

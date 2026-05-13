@@ -76,9 +76,7 @@ pub fn get_issue_for_worktree(
     }
 }
 
-pub fn get_all_worktree_issues(
-    conn: &Connection,
-) -> Result<Vec<WorktreeIssue>, String> {
+pub fn get_all_worktree_issues(conn: &Connection) -> Result<Vec<WorktreeIssue>, String> {
     let mut stmt = conn
         .prepare("SELECT worktree_path, issue_id, identifier, created_at FROM worktree_issues")
         .map_err(|e| format!("Failed to prepare query: {}", e))?;

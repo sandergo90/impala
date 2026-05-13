@@ -83,10 +83,7 @@ fn get_modified_at(path: &Path) -> String {
 
 fn scan(worktree_path: &str, extra_dirs: &[String]) -> Vec<DiscoveredPlan> {
     let root = Path::new(worktree_path);
-    let default_dirs = vec![
-        root.join(".claude/plans"),
-        root.join("docs/plans"),
-    ];
+    let default_dirs = vec![root.join(".claude/plans"), root.join("docs/plans")];
 
     let mut all_dirs: Vec<std::path::PathBuf> = default_dirs;
     for dir in extra_dirs {
@@ -166,10 +163,7 @@ fn get_extra_dirs(db_state: &DbState) -> Vec<String> {
 
 fn plan_directories(worktree_path: &str, extra_dirs: &[String]) -> Vec<std::path::PathBuf> {
     let root = Path::new(worktree_path);
-    let mut dirs = vec![
-        root.join(".claude/plans"),
-        root.join("docs/plans"),
-    ];
+    let mut dirs = vec![root.join(".claude/plans"), root.join("docs/plans")];
     for dir in extra_dirs {
         let p = Path::new(dir);
         if p.is_absolute() {
@@ -254,20 +248,17 @@ pub fn watch_plan_directories(
                         let wt_inner = wt_path.clone();
                         let flag_inner = flag_ref.clone();
 
-                        std::thread::spawn(move || {
-                            loop {
-                                std::thread::sleep(Duration::from_millis(2000));
-                                let elapsed = {
-                                    let last = last_inner.lock().unwrap();
-                                    last.elapsed()
-                                };
-                                if elapsed >= Duration::from_millis(2000) {
-                                    let _ = app_inner
-                                        .emit("plan-directories-changed", &wt_inner);
-                                    let mut f = flag_inner.lock().unwrap();
-                                    *f = false;
-                                    break;
-                                }
+                        std::thread::spawn(move || loop {
+                            std::thread::sleep(Duration::from_millis(2000));
+                            let elapsed = {
+                                let last = last_inner.lock().unwrap();
+                                last.elapsed()
+                            };
+                            if elapsed >= Duration::from_millis(2000) {
+                                let _ = app_inner.emit("plan-directories-changed", &wt_inner);
+                                let mut f = flag_inner.lock().unwrap();
+                                *f = false;
+                                break;
                             }
                         });
                     }

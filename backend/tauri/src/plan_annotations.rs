@@ -196,10 +196,7 @@ pub fn update_plan_annotation(
 
 pub fn delete_plan_annotation(conn: &Connection, id: &str) -> Result<(), String> {
     let rows_affected = conn
-        .execute(
-            "DELETE FROM plan_annotations WHERE id = ?1",
-            params![id],
-        )
+        .execute("DELETE FROM plan_annotations WHERE id = ?1", params![id])
         .map_err(|e| format!("Failed to delete plan annotation: {}", e))?;
 
     if rows_affected == 0 {

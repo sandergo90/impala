@@ -54,11 +54,11 @@ pub fn read_project_config(project_path: String) -> Result<ProjectConfig, String
     if !path.exists() {
         return Ok(ProjectConfig::default());
     }
-    let contents = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
+    let contents =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {}", e))?;
 
-    let legacy: LegacyProjectConfig = serde_json::from_str(&contents)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
+    let legacy: LegacyProjectConfig =
+        serde_json::from_str(&contents).map_err(|e| format!("Failed to parse config: {}", e))?;
 
     // If the file already has actions[], use it directly. Otherwise convert a
     // legacy `run` field into actions[0] and rewrite to disk so the legacy

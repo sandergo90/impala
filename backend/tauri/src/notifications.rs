@@ -10,7 +10,10 @@ fn resolve_sound_path(app_handle: &tauri::AppHandle, sound_id: &str) -> Result<P
     let filename = format!("{}.mp3", sound_id);
     app_handle
         .path()
-        .resolve(format!("sounds/{}", filename), tauri::path::BaseDirectory::Resource)
+        .resolve(
+            format!("sounds/{}", filename),
+            tauri::path::BaseDirectory::Resource,
+        )
         .map_err(|e| format!("Failed to resolve sound path: {}", e))
 }
 
@@ -50,7 +53,10 @@ pub fn register_notification_icon(app: &tauri::App) {
     );
 
     let _ = std::fs::write(bundle_dir.join("Info.plist"), plist);
-    let _ = std::fs::write(resources_dir.join("icon.icns"), include_bytes!("../icons/icon.icns"));
+    let _ = std::fs::write(
+        resources_dir.join("icon.icns"),
+        include_bytes!("../icons/icon.icns"),
+    );
 
     // Register with Launch Services so set_application() can find our bundle
     let _ = std::process::Command::new(

@@ -48,7 +48,9 @@ pub(crate) fn run_git_with_env(
     args: &[&str],
 ) -> Result<String, String> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(worktree_path).env("PATH", augmented_path());
+    cmd.arg("-C")
+        .arg(worktree_path)
+        .env("PATH", augmented_path());
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
@@ -71,7 +73,10 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
     let mut branch = String::new();
     let mut head = String::new();
 
-    let flush = |path: &mut String, branch: &mut String, head: &mut String, worktrees: &mut Vec<Worktree>| {
+    let flush = |path: &mut String,
+                 branch: &mut String,
+                 head: &mut String,
+                 worktrees: &mut Vec<Worktree>| {
         if !path.is_empty() {
             worktrees.push(Worktree {
                 path: std::mem::take(path),
@@ -188,9 +193,19 @@ pub fn get_diverged_commits(
                 for part in stat_line.split(',') {
                     let part = part.trim();
                     if part.contains("insertion") {
-                        additions = part.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+                        additions = part
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("0")
+                            .parse()
+                            .unwrap_or(0);
                     } else if part.contains("deletion") {
-                        deletions = part.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+                        deletions = part
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("0")
+                            .parse()
+                            .unwrap_or(0);
                     }
                 }
                 break;
@@ -217,7 +232,13 @@ pub fn get_changed_files(
 ) -> Result<Vec<ChangedFile>, String> {
     let output = run_git(
         worktree_path,
-        &["diff-tree", "--no-commit-id", "-r", "--name-status", commit_hash],
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "-r",
+            "--name-status",
+            commit_hash,
+        ],
     )?;
 
     let files = output
@@ -243,10 +264,7 @@ pub fn get_commit_diff(
     run_git(worktree_path, &["diff", &range, "--", file_path])
 }
 
-pub fn get_full_commit_diff(
-    worktree_path: &str,
-    commit_hash: &str,
-) -> Result<String, String> {
+pub fn get_full_commit_diff(worktree_path: &str, commit_hash: &str) -> Result<String, String> {
     let range = format!("{}~1..{}", commit_hash, commit_hash);
     run_git(worktree_path, &["diff", &range])
 }
@@ -263,7 +281,11 @@ pub fn get_full_branch_diff(worktree_path: &str) -> Result<String, String> {
     run_git(worktree_path, &["diff", &range])
 }
 
-pub fn get_file_at_ref(worktree_path: &str, git_ref: &str, file_path: &str) -> Result<String, String> {
+pub fn get_file_at_ref(
+    worktree_path: &str,
+    git_ref: &str,
+    file_path: &str,
+) -> Result<String, String> {
     let spec = format!("{}:{}", git_ref, file_path);
     run_git(worktree_path, &["show", &spec])
 }
@@ -287,7 +309,14 @@ pub fn discard_file_changes(worktree_path: &str, file_path: &str) -> Result<(), 
     if tracked {
         run_git(
             worktree_path,
-            &["restore", "--source=HEAD", "--staged", "--worktree", "--", file_path],
+            &[
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+                "--",
+                file_path,
+            ],
         )?;
     } else {
         let full_path = std::path::Path::new(worktree_path).join(file_path);
@@ -368,7 +397,10 @@ pub fn create_worktree(
     // When the picker returns a remote ref (`origin/foo`), create a local
     // tracking branch so the worktree isn't left in detached-HEAD state.
     let local_branch = if existing {
-        branch_name.strip_prefix("origin/").unwrap_or(branch_name).to_string()
+        branch_name
+            .strip_prefix("origin/")
+            .unwrap_or(branch_name)
+            .to_string()
     } else {
         branch_name.to_string()
     };
@@ -377,7 +409,15 @@ pub fn create_worktree(
         if branch_name.starts_with("origin/") {
             run_git(
                 repo_path,
-                &["worktree", "add", "--track", "-b", &local_branch, wt_path, branch_name],
+                &[
+                    "worktree",
+                    "add",
+                    "--track",
+                    "-b",
+                    &local_branch,
+                    wt_path,
+                    branch_name,
+                ],
             )?;
         } else {
             run_git(repo_path, &["worktree", "add", wt_path, branch_name])?;
@@ -415,7 +455,12 @@ pub fn create_worktree(
     })
 }
 
-pub fn delete_worktree(repo_path: &str, worktree_path: &str, force: bool, delete_branch: bool) -> Result<(), String> {
+pub fn delete_worktree(
+    repo_path: &str,
+    worktree_path: &str,
+    force: bool,
+    delete_branch: bool,
+) -> Result<(), String> {
     let branch = if delete_branch {
         run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])
             .ok()
@@ -437,7 +482,6 @@ pub fn delete_worktree(repo_path: &str, worktree_path: &str, force: bool, delete
 
     Ok(())
 }
-
 
 pub fn fetch_remote(repo_path: &str, remote: &str) -> Result<(), String> {
     // --prune drops local remote-tracking refs that no longer exist on the
@@ -540,7 +584,11 @@ pub fn get_git_user_name() -> Option<String> {
         .ok()?;
     if output.status.success() {
         let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if name.is_empty() { None } else { Some(name) }
+        if name.is_empty() {
+            None
+        } else {
+            Some(name)
+        }
     } else {
         None
     }
@@ -559,11 +607,8 @@ pub fn snapshot_worktree(worktree_path: &str) -> Result<String, String> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let temp_index = std::env::temp_dir().join(format!(
-        "impala-snap-{}-{}",
-        std::process::id(),
-        nanos
-    ));
+    let temp_index =
+        std::env::temp_dir().join(format!("impala-snap-{}-{}", std::process::id(), nanos));
     let temp_index_str = temp_index.to_string_lossy().to_string();
 
     let result = (|| -> Result<String, String> {

@@ -27,8 +27,8 @@ struct GraphQLError {
 }
 
 fn parse_response<T: DeserializeOwned>(raw: &str, context: &str) -> Result<T, String> {
-    let parsed: GraphQLResponse<T> = serde_json::from_str(raw)
-        .map_err(|e| format!("Failed to parse {}: {}", context, e))?;
+    let parsed: GraphQLResponse<T> =
+        serde_json::from_str(raw).map_err(|e| format!("Failed to parse {}: {}", context, e))?;
 
     if let Some(errors) = parsed.errors {
         if !errors.is_empty() {
@@ -36,7 +36,9 @@ fn parse_response<T: DeserializeOwned>(raw: &str, context: &str) -> Result<T, St
         }
     }
 
-    parsed.data.ok_or_else(|| format!("No data in {} response", context))
+    parsed
+        .data
+        .ok_or_else(|| format!("No data in {} response", context))
 }
 
 // --- Viewer's assigned issues (Todo + In Progress) ---
@@ -112,7 +114,13 @@ pub fn get_my_issues(api_key: &str) -> Result<Vec<LinearIssue>, String> {
 
     let response = make_request(api_key, query, &serde_json::json!({}))?;
     let data: MyIssuesData = parse_response(&response, "Linear issues")?;
-    Ok(data.viewer.assigned_issues.nodes.into_iter().map(|n| n.into_linear_issue()).collect())
+    Ok(data
+        .viewer
+        .assigned_issues
+        .nodes
+        .into_iter()
+        .map(|n| n.into_linear_issue())
+        .collect())
 }
 
 // --- Search issues ---
@@ -143,7 +151,12 @@ pub fn search_issues(api_key: &str, query_text: &str) -> Result<Vec<LinearIssue>
     let variables = serde_json::json!({ "term": query_text });
     let response = make_request(api_key, query, &variables)?;
     let data: SearchData = parse_response(&response, "Linear search")?;
-    Ok(data.search_issues.nodes.into_iter().map(|n| n.into_linear_issue()).collect())
+    Ok(data
+        .search_issues
+        .nodes
+        .into_iter()
+        .map(|n| n.into_linear_issue())
+        .collect())
 }
 
 // --- Issue detail (description + comments) ---
@@ -228,11 +241,19 @@ pub fn get_issue_detail(api_key: &str, issue_id: &str) -> Result<LinearIssueDeta
         description: node.description,
         url: node.url,
         status: node.state.name,
-        comments: node.comments.nodes.into_iter().map(|c| LinearComment {
-            author: c.user.map(|u| u.display_name).unwrap_or_else(|| "Unknown".to_string()),
-            body: c.body,
-            created_at: c.created_at,
-        }).collect(),
+        comments: node
+            .comments
+            .nodes
+            .into_iter()
+            .map(|c| LinearComment {
+                author: c
+                    .user
+                    .map(|u| u.display_name)
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                body: c.body,
+                created_at: c.created_at,
+            })
+            .collect(),
     })
 }
 
@@ -286,7 +307,9 @@ pub fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
     let issue_response = make_request(api_key, issue_query, &issue_vars)?;
 
     #[derive(Deserialize)]
-    struct IssueOnlyData { issue: IssueDetail }
+    struct IssueOnlyData {
+        issue: IssueDetail,
+    }
     let issue_data: IssueOnlyData = parse_response(&issue_response, "issue detail")?;
 
     // Already in progress — nothing to do
@@ -316,7 +339,8 @@ pub fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
 
     // Prefer the state named "In Progress"; fall back to first "started" state
     let states = &states_data.workflow_states.nodes;
-    let in_progress_state = states.iter()
+    let in_progress_state = states
+        .iter()
         .find(|s| s.name == "In Progress")
         .or_else(|| states.first())
         .ok_or_else(|| "No 'In Progress' state found for this team".to_string())?;
@@ -357,7 +381,10 @@ pub fn fetch_attachment(api_key: &str, url: &str) -> Result<(String, Vec<u8>), S
         .map_err(|e| format!("Linear attachment request failed: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("Linear attachment returned status {}", response.status()));
+        return Err(format!(
+            "Linear attachment returned status {}",
+            response.status()
+        ));
     }
 
     let content_type = response
@@ -375,7 +402,11 @@ pub fn fetch_attachment(api_key: &str, url: &str) -> Result<(String, Vec<u8>), S
 
 // --- HTTP helper ---
 
-fn make_request(api_key: &str, query: &str, variables: &serde_json::Value) -> Result<String, String> {
+fn make_request(
+    api_key: &str,
+    query: &str,
+    variables: &serde_json::Value,
+) -> Result<String, String> {
     let body = serde_json::json!({ "query": query, "variables": variables });
 
     let response = CLIENT
@@ -390,5 +421,7 @@ fn make_request(api_key: &str, query: &str, variables: &serde_json::Value) -> Re
         return Err(format!("Linear API returned status {}", response.status()));
     }
 
-    response.text().map_err(|e| format!("Failed to read Linear response: {}", e))
+    response
+        .text()
+        .map_err(|e| format!("Failed to read Linear response: {}", e))
 }

@@ -1,8 +1,8 @@
 //! tracing + Sentry init for impala-pty-daemon. Inherits
 //! IMPALA_SESSION_ID from the Tauri host so events stitch.
 
-use std::path::PathBuf;
 use sentry::integrations::tracing as sentry_tracing;
+use std::path::PathBuf;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -26,22 +26,20 @@ pub fn init() -> Guard {
     let file_appender = tracing_appender::rolling::daily(&log_dir, "impala-pty-daemon.log");
     let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
 
-    let sentry_guard = SENTRY_DSN
-        .filter(|dsn| !dsn.is_empty())
-        .map(|dsn| {
-            sentry::init((
-                dsn,
-                sentry::ClientOptions {
-                    release: Some(RELEASE_NAME.into()),
-                    environment: Some(environment().into()),
-                    traces_sample_rate: traces_sample_rate(),
-                    attach_stacktrace: true,
-                    send_default_pii: false,
-                    enable_logs: true,
-                    ..Default::default()
-                },
-            ))
-        });
+    let sentry_guard = SENTRY_DSN.filter(|dsn| !dsn.is_empty()).map(|dsn| {
+        sentry::init((
+            dsn,
+            sentry::ClientOptions {
+                release: Some(RELEASE_NAME.into()),
+                environment: Some(environment().into()),
+                traces_sample_rate: traces_sample_rate(),
+                attach_stacktrace: true,
+                send_default_pii: false,
+                enable_logs: true,
+                ..Default::default()
+            },
+        ))
+    });
 
     if sentry_guard.is_some() {
         sentry::configure_scope(|scope| {
@@ -96,20 +94,31 @@ pub fn init() -> Guard {
 fn log_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("Library").join("Logs").join("be.kodeus.impala")
+        .join("Library")
+        .join("Logs")
+        .join("be.kodeus.impala")
 }
 
 #[cfg(not(target_os = "macos"))]
 fn log_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("be.kodeus.impala").join("logs")
+        .join("be.kodeus.impala")
+        .join("logs")
 }
 
 fn environment() -> &'static str {
-    if cfg!(debug_assertions) { "dev" } else { "production" }
+    if cfg!(debug_assertions) {
+        "dev"
+    } else {
+        "production"
+    }
 }
 
 fn traces_sample_rate() -> f32 {
-    if cfg!(debug_assertions) { 1.0 } else { 0.1 }
+    if cfg!(debug_assertions) {
+        1.0
+    } else {
+        0.1
+    }
 }

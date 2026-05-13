@@ -46,8 +46,7 @@ pub fn read_file_with_revision(absolute_path: String) -> Result<ReadFileWithRevi
 /// scope rules, which trip over nested dotfiles like `.venv/.gitignore`.
 #[tauri::command]
 pub fn stat_file_size(absolute_path: String) -> Result<u64, String> {
-    let meta = fs::metadata(Path::new(&absolute_path))
-        .map_err(|e| format!("stat failed: {e}"))?;
+    let meta = fs::metadata(Path::new(&absolute_path)).map_err(|e| format!("stat failed: {e}"))?;
     Ok(meta.len())
 }
 
@@ -57,12 +56,8 @@ pub fn stat_file_size(absolute_path: String) -> Result<u64, String> {
 #[derive(serde::Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WriteFileResult {
-    Ok {
-        revision: String,
-    },
-    Conflict {
-        current_revision: Option<String>,
-    },
+    Ok { revision: String },
+    Conflict { current_revision: Option<String> },
 }
 
 /// Write atomically iff the file's current revision matches `if_match`.
@@ -114,7 +109,8 @@ pub fn write_file_with_precondition(
         let mut f = fs::File::create(&tmp_path).map_err(|e| format!("create temp failed: {e}"))?;
         f.write_all(content.as_bytes())
             .map_err(|e| format!("write temp failed: {e}"))?;
-        f.sync_all().map_err(|e| format!("fsync temp failed: {e}"))?;
+        f.sync_all()
+            .map_err(|e| format!("fsync temp failed: {e}"))?;
     }
 
     fs::rename(&tmp_path, path).map_err(|e| {

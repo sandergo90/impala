@@ -1,8 +1,6 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
@@ -16,8 +14,7 @@ import {
   selectProject as sharedSelectProject,
   activateGeneralTerminal,
 } from "../hooks/useWorktreeActions";
-import type { Worktree, Project, WorktreeIssue, WorktreeDataState, PrStatus } from "../types";
-import { useAgentNotifications } from "../hooks/useAgentNotifications";
+import type { Worktree, Project, WorktreeIssue, PrStatus } from "../types";
 import { usePrStatusSync } from "../hooks/usePrStatusSync";
 import { PrBadge } from "./PrBadge";
 import { useAppHotkey } from "../hooks/useAppHotkey";
@@ -316,108 +313,7 @@ export function Sidebar() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
 
-  useAgentNotifications();
   usePrStatusSync(worktrees);
-
-  const windowFocusedRef = useRef(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    const window = getCurrentWindow();
-    window.isFocused().then((focused) => {
-      if (!cancelled) windowFocusedRef.current = focused;
-    });
-    const unlisten = window.onFocusChanged(({ payload: focused }) => {
-      windowFocusedRef.current = focused;
-      if (focused) {
-        const selected = useUIStore.getState().selectedWorktree;
-        if (selected) {
-          const state = useDataStore.getState().worktreeDataStates[selected.path];
-          if (state?.hasUnseenResult) {
-            useDataStore.getState().updateWorktreeDataState(selected.path, {
-              hasUnseenResult: false,
-            });
-          }
-        }
-      }
-    });
-    return () => {
-      cancelled = true;
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  // Restore agent statuses from the backend after reload
-  useEffect(() => {
-    invoke<Record<string, string>>("get_agent_statuses").then((statuses) => {
-      for (const [path, status] of Object.entries(statuses)) {
-        if (status === "working" || status === "idle" || status === "permission") {
-          useDataStore.getState().updateWorktreeDataState(path, {
-            agentStatus: status,
-          });
-        }
-      }
-    });
-  }, []);
-
-  // Listen for agent-status events from the backend
-  useEffect(() => {
-    const unlisten = listen<{ worktree_path: string; status: string }>(
-      "agent-status",
-      (event) => {
-        const { worktree_path, status } = event.payload;
-        if (
-          status === "working" ||
-          status === "idle" ||
-          status === "permission"
-        ) {
-          const current =
-            useDataStore.getState().worktreeDataStates[worktree_path];
-          const updates: Partial<WorktreeDataState> = {};
-
-          if (current?.agentStatus !== status) {
-            updates.agentStatus = status;
-          }
-
-          if (status === "idle" || status === "permission") {
-            const selected = useUIStore.getState().selectedWorktree;
-            const isFocused =
-              windowFocusedRef.current && selected?.path === worktree_path;
-            if (!isFocused && !current?.hasUnseenResult) {
-              updates.hasUnseenResult = true;
-            }
-          } else if (status === "working") {
-            if (current?.hasUnseenResult) {
-              updates.hasUnseenResult = false;
-            }
-          }
-
-          if (Object.keys(updates).length > 0) {
-            useDataStore
-              .getState()
-              .updateWorktreeDataState(worktree_path, updates);
-          }
-        }
-      },
-    );
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  // Clear hasUnseenResult when the user selects a worktree
-  const selectedWorktreePath = selectedWorktree?.path;
-  useEffect(() => {
-    if (selectedWorktreePath) {
-      const state =
-        useDataStore.getState().worktreeDataStates[selectedWorktreePath];
-      if (state?.hasUnseenResult) {
-        useDataStore.getState().updateWorktreeDataState(selectedWorktreePath, {
-          hasUnseenResult: false,
-        });
-      }
-    }
-  }, [selectedWorktreePath]);
 
   // Encode as "additions:deletions" strings so useShallow can compare primitives
   const diffStatsRaw = useDataStore(

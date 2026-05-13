@@ -142,13 +142,13 @@ pub async fn list_directory(
             });
         }
 
-        entries.sort_by(|a, b| {
-            match (a.kind == FsKind::Directory, b.kind == FsKind::Directory) {
+        entries.sort_by(
+            |a, b| match (a.kind == FsKind::Directory, b.kind == FsKind::Directory) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
                 _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            }
-        });
+            },
+        );
 
         Ok(entries)
     })

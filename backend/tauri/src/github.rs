@@ -29,11 +29,19 @@ pub struct PrInfo {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum PrState { Open, Closed, Merged }
+pub enum PrState {
+    Open,
+    Closed,
+    Merged,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ReviewDecision { Approved, ChangesRequested, ReviewRequired }
+pub enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +53,11 @@ pub struct ChecksRollup {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum ChecksStatus { Success, Failure, Pending }
+pub enum ChecksStatus {
+    Success,
+    Failure,
+    Pending,
+}
 
 // ---- Schema ---------------------------------------------------------------
 
@@ -138,14 +150,19 @@ pub fn upsert_status(
                     fetched_at=excluded.fetched_at",
                 params![
                     worktree_path,
-                    pr.number, pr.title, pr.url,
+                    pr.number,
+                    pr.title,
+                    pr.url,
                     pr_state_to_str(pr.state),
                     pr.is_draft as i32,
                     pr.review_decision.map(review_decision_to_str),
                     pr.checks.status.map(checks_status_to_str),
-                    pr.checks.passing, pr.checks.total,
-                    pr.additions, pr.deletions,
-                    pr.head_branch, pr.head_sha,
+                    pr.checks.passing,
+                    pr.checks.total,
+                    pr.additions,
+                    pr.deletions,
+                    pr.head_branch,
+                    pr.head_sha,
                     now,
                 ],
             )
@@ -294,8 +311,8 @@ pub fn fetch_pr_status(worktree_path: &str) -> Result<PrStatus, String> {
         ],
     )?;
 
-    let prs: Vec<GhPr> = serde_json::from_str(&json)
-        .map_err(|e| format!("Failed to parse gh output: {}", e))?;
+    let prs: Vec<GhPr> =
+        serde_json::from_str(&json).map_err(|e| format!("Failed to parse gh output: {}", e))?;
 
     Ok(match prs.into_iter().next() {
         None => PrStatus::NoPr,
@@ -372,7 +389,11 @@ fn fetch_cli_status() -> GithubCliStatus {
         .unwrap_or(false);
 
     if !installed {
-        return GithubCliStatus { installed: false, authenticated: false, username: None };
+        return GithubCliStatus {
+            installed: false,
+            authenticated: false,
+            username: None,
+        };
     }
 
     let output = Command::new("gh")
@@ -383,12 +404,24 @@ fn fetch_cli_status() -> GithubCliStatus {
         Ok(out) if out.status.success() => {
             let username = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if username.is_empty() {
-                GithubCliStatus { installed: true, authenticated: false, username: None }
+                GithubCliStatus {
+                    installed: true,
+                    authenticated: false,
+                    username: None,
+                }
             } else {
-                GithubCliStatus { installed: true, authenticated: true, username: Some(username) }
+                GithubCliStatus {
+                    installed: true,
+                    authenticated: true,
+                    username: Some(username),
+                }
             }
         }
-        _ => GithubCliStatus { installed: true, authenticated: false, username: None },
+        _ => GithubCliStatus {
+            installed: true,
+            authenticated: false,
+            username: None,
+        },
     }
 }
 
@@ -453,7 +486,11 @@ impl GhPr {
 
 fn checks_rollup(checks: &[GhCheck]) -> ChecksRollup {
     if checks.is_empty() {
-        return ChecksRollup { status: None, passing: 0, total: 0 };
+        return ChecksRollup {
+            status: None,
+            passing: 0,
+            total: 0,
+        };
     }
     let mut passing = 0;
     let mut any_failure = false;
@@ -525,7 +562,10 @@ mod tests {
     fn roundtrip_unsupported() {
         let c = mem_conn();
         upsert_status(&c, "/wt/a", &PrStatus::Unsupported).unwrap();
-        assert_eq!(read_status(&c, "/wt/a").unwrap(), Some(PrStatus::Unsupported));
+        assert_eq!(
+            read_status(&c, "/wt/a").unwrap(),
+            Some(PrStatus::Unsupported)
+        );
     }
 
     #[test]
@@ -540,7 +580,10 @@ mod tests {
         let c = mem_conn();
         let info = sample_pr();
         upsert_status(&c, "/wt/b", &PrStatus::HasPr(info.clone())).unwrap();
-        assert_eq!(read_status(&c, "/wt/b").unwrap(), Some(PrStatus::HasPr(info)));
+        assert_eq!(
+            read_status(&c, "/wt/b").unwrap(),
+            Some(PrStatus::HasPr(info))
+        );
     }
 
     #[test]
@@ -556,11 +599,18 @@ mod tests {
         let c = mem_conn();
         let info = PrInfo {
             review_decision: None,
-            checks: ChecksRollup { status: None, passing: 0, total: 0 },
+            checks: ChecksRollup {
+                status: None,
+                passing: 0,
+                total: 0,
+            },
             ..sample_pr()
         };
         upsert_status(&c, "/wt/c", &PrStatus::HasPr(info.clone())).unwrap();
-        assert_eq!(read_status(&c, "/wt/c").unwrap(), Some(PrStatus::HasPr(info)));
+        assert_eq!(
+            read_status(&c, "/wt/c").unwrap(),
+            Some(PrStatus::HasPr(info))
+        );
     }
 
     #[test]
@@ -580,7 +630,10 @@ mod tests {
     }
 
     fn check(status: &str, conclusion: &str) -> GhCheck {
-        GhCheck { status: status.into(), conclusion: conclusion.into() }
+        GhCheck {
+            status: status.into(),
+            conclusion: conclusion.into(),
+        }
     }
 
     #[test]
@@ -616,10 +669,7 @@ mod tests {
 
     #[test]
     fn rollup_pending_when_not_all_completed() {
-        let checks = vec![
-            check("COMPLETED", "SUCCESS"),
-            check("IN_PROGRESS", ""),
-        ];
+        let checks = vec![check("COMPLETED", "SUCCESS"), check("IN_PROGRESS", "")];
         let r = checks_rollup(&checks);
         assert_eq!(r.status, Some(ChecksStatus::Pending));
     }

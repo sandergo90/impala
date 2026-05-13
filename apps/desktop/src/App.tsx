@@ -7,6 +7,8 @@ import { CommandPalette } from "./components/CommandPalette";
 import { FileFinder } from "./components/FileFinder";
 import { Toaster } from "./components/ui/sonner";
 import { UpdateChecker } from "./components/UpdateChecker";
+import { useAgentNotifications } from "./hooks/useAgentNotifications";
+import { useAgentStatusSync } from "./hooks/useAgentStatusSync";
 import { useUIStore, useDataStore, useFilteredWorktrees } from "./store";
 import {
   splitNode,
@@ -33,6 +35,9 @@ export function RootLayout() {
 
   const router = useRouter();
   const matchRoute = useMatchRoute();
+
+  useAgentStatusSync();
+  useAgentNotifications();
 
   useEffect(() => {
     useHotkeysStore.getState().load();

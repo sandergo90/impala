@@ -234,9 +234,22 @@ fn codex_config_key_source(config_path: &Path) -> PathBuf {
     }
 }
 
+fn codex_hook_trust_key(
+    hook_source_path: &Path,
+    event_name: &str,
+    group_index: usize,
+) -> Result<String, String> {
+    Ok(format!(
+        "{}:{}:{}:0",
+        codex_config_key_source(hook_source_path).to_string_lossy(),
+        codex_hook_event_key_label(event_name)?,
+        group_index,
+    ))
+}
+
 fn trust_codex_hook(
     hooks: &mut toml::value::Table,
-    config_path: &Path,
+    hook_source_path: &Path,
     event_name: &str,
     group_index: usize,
     command: &str,
@@ -248,12 +261,7 @@ fn trust_codex_hook(
         .or_insert_with(|| Value::Table(toml::value::Table::new()))
         .as_table_mut()
         .ok_or_else(|| "hooks.state in ~/.codex/config.toml is not a table".to_string())?;
-    let key = format!(
-        "{}:{}:{}:0",
-        codex_config_key_source(config_path).to_string_lossy(),
-        codex_hook_event_key_label(event_name)?,
-        group_index,
-    );
+    let key = codex_hook_trust_key(hook_source_path, event_name, group_index)?;
     let mut trust = toml::value::Table::new();
     trust.insert(
         "trusted_hash".into(),
@@ -263,19 +271,158 @@ fn trust_codex_hook(
     Ok(())
 }
 
+fn trust_user_codex_hooks(registrations: &[CodexHookRegistration]) -> Result<(), String> {
+    use toml::Value;
+
+    let user_codex = dirs::home_dir()
+        .ok_or_else(|| "no home dir".to_string())?
+        .join(".codex");
+    fs::create_dir_all(&user_codex).map_err(|e| format!("mkdir ~/.codex: {}", e))?;
+
+    let config_path = user_codex.join("config.toml");
+    let mut root = if config_path.exists() {
+        let contents =
+            fs::read_to_string(&config_path).map_err(|e| format!("read config.toml: {}", e))?;
+        match toml::from_str::<toml::Value>(&contents) {
+            Ok(Value::Table(table)) => table,
+            Ok(_) => toml::value::Table::new(),
+            Err(e) => return Err(format!("parse ~/.codex/config.toml: {}", e)),
+        }
+    } else {
+        toml::value::Table::new()
+    };
+
+    let hooks = root
+        .entry("hooks".to_string())
+        .or_insert_with(|| Value::Table(toml::value::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| "hooks in ~/.codex/config.toml is not a table".to_string())?;
+
+    for registration in registrations {
+        trust_codex_hook(
+            hooks,
+            &registration.source_path,
+            &registration.event_name,
+            registration.group_index,
+            &registration.command,
+        )?;
+    }
+
+    let body = toml::to_string_pretty(&Value::Table(root))
+        .map_err(|e| format!("serialize config.toml: {}", e))?;
+    fs::write(&config_path, body).map_err(|e| format!("write config.toml: {}", e))?;
+
+    Ok(())
+}
+
+struct CodexHookRegistration {
+    event_name: String,
+    group_index: usize,
+    command: String,
+    source_path: PathBuf,
+}
+
+fn ensure_user_codex_hooks() -> Result<Vec<CodexHookRegistration>, String> {
+    let user_codex = dirs::home_dir()
+        .ok_or_else(|| "no home dir".to_string())?
+        .join(".codex");
+    fs::create_dir_all(&user_codex).map_err(|e| format!("mkdir ~/.codex: {}", e))?;
+
+    let hooks_path = user_codex.join("hooks.json");
+    let mut root: serde_json::Value = if hooks_path.exists() {
+        let contents =
+            fs::read_to_string(&hooks_path).map_err(|e| format!("read hooks.json: {}", e))?;
+        serde_json::from_str(&contents).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if !root.is_object() {
+        root = serde_json::json!({});
+    }
+    let hooks = root
+        .as_object_mut()
+        .expect("root was normalized to object")
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    if !hooks.is_object() {
+        *hooks = serde_json::json!({});
+    }
+    let hooks = hooks
+        .as_object_mut()
+        .expect("hooks was normalized to object");
+
+    let mut registrations = Vec::new();
+    for event_name in [
+        "UserPromptSubmit",
+        "Stop",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "PermissionRequest",
+    ] {
+        let cmd = crate::hook_server::hook_command_public(event_name);
+        let groups = hooks
+            .entry(event_name.to_string())
+            .or_insert_with(|| serde_json::json!([]));
+        if !groups.is_array() {
+            *groups = serde_json::json!([]);
+        }
+        let groups = groups
+            .as_array_mut()
+            .expect("event hooks was normalized to array");
+
+        let existing_index = groups.iter().position(|group| {
+            group
+                .get("hooks")
+                .and_then(|hs| hs.as_array())
+                .map(|hs| {
+                    hs.iter().any(|hook| {
+                        hook.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains("IMPALA_HOOK_PORT"))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        });
+
+        let group_index = match existing_index {
+            Some(index) => index,
+            None => {
+                let index = groups.len();
+                groups.push(serde_json::json!({
+                    "hooks": [{ "type": "command", "command": cmd }]
+                }));
+                index
+            }
+        };
+
+        registrations.push(CodexHookRegistration {
+            event_name: event_name.to_string(),
+            group_index,
+            command: cmd,
+            source_path: hooks_path.clone(),
+        });
+    }
+
+    let formatted =
+        serde_json::to_string_pretty(&root).map_err(|e| format!("serialize hooks.json: {}", e))?;
+    fs::write(&hooks_path, formatted).map_err(|e| format!("write hooks.json: {}", e))?;
+
+    Ok(registrations)
+}
+
 /// Build the merged TOML written to <CODEX_HOME>/config.toml. Starts from the
 /// user's ~/.codex/config.toml so settings like `model`, `model_provider`,
 /// `sandbox_mode`, custom MCP servers, etc. carry over. Then layers Impala-
 /// managed sections on top:
 /// - `mcp_servers.impala` — overwritten with the bundled MCP binary
 /// - `projects.<repo_root>.trust_level = "trusted"` — pre-trust the repo
-/// - `hooks.<Event>` — append Impala's hook handler to each event array,
-///    preserving any user-defined hooks. Idempotent on the IMPALA_HOOK_PORT
-///    marker so we never duplicate our own entry across runs.
+/// - `hooks.state` — trusts the Impala handlers written to ~/.codex/hooks.json.
 fn build_codex_config(
     worktree_path: &Path,
     mcp_binary: &str,
-    config_path: &Path,
+    hook_registrations: &[CodexHookRegistration],
 ) -> Result<String, String> {
     use toml::Value;
     let mut root = read_user_codex_config();
@@ -303,53 +450,19 @@ fn build_codex_config(
         projects.insert(repo_root.to_string_lossy().to_string(), Value::Table(trust));
     }
 
-    // hooks.<event> — append Impala's matcher group to whatever the user has.
-    // Codex hooks schema: top-level [hooks] table keyed by PascalCase event
-    // name. Each event holds Vec<MatcherGroup>; each MatcherGroup holds a
-    // Vec<HookHandlerConfig>. Handlers are tagged on `type`; only `command`
-    // is currently useful. See codex-rs/config/src/hook_config.rs.
-    let hook_cmd = crate::hook_server::hook_command_public("PLACEHOLDER");
     let hooks = root
         .entry("hooks".to_string())
         .or_insert_with(|| Value::Table(toml::value::Table::new()))
         .as_table_mut()
         .ok_or_else(|| "hooks in ~/.codex/config.toml is not a table".to_string())?;
-    for event in [
-        "UserPromptSubmit",
-        "Stop",
-        "PostToolUse",
-        "PermissionRequest",
-    ] {
-        let cmd = hook_cmd.replace("PLACEHOLDER", event);
-        let arr = hooks
-            .entry(event.to_string())
-            .or_insert_with(|| Value::Array(vec![]))
-            .as_array_mut()
-            .ok_or_else(|| format!("hooks.{} is not an array", event))?;
-        let already = arr.iter().any(|g| {
-            g.get("hooks")
-                .and_then(|hs| hs.as_array())
-                .map(|hs| {
-                    hs.iter().any(|h| {
-                        h.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(|c| c.contains("IMPALA_HOOK_PORT"))
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false)
-        });
-        if already {
-            continue;
-        }
-        let mut handler = toml::value::Table::new();
-        handler.insert("type".into(), Value::String("command".into()));
-        handler.insert("command".into(), Value::String(cmd.clone()));
-        let mut group = toml::value::Table::new();
-        group.insert("hooks".into(), Value::Array(vec![Value::Table(handler)]));
-        let group_index = arr.len();
-        arr.push(Value::Table(group));
-        trust_codex_hook(hooks, config_path, event, group_index, &cmd)?;
+    for registration in hook_registrations {
+        trust_codex_hook(
+            hooks,
+            &registration.source_path,
+            &registration.event_name,
+            registration.group_index,
+            &registration.command,
+        )?;
     }
 
     let body = toml::to_string_pretty(&Value::Table(root))
@@ -357,7 +470,7 @@ fn build_codex_config(
     Ok(format!(
         "# Managed by Impala — regenerated on each worktree open.\n\
          # Seeded from ~/.codex/config.toml so your global settings carry over.\n\
-         # Impala overrides: mcp_servers.impala, projects.<repo>.trust_level, hooks.*\n\n\
+         # Impala overrides: mcp_servers.impala, projects.<repo>.trust_level, hooks.state\n\n\
          {}",
         body
     ))
@@ -375,7 +488,9 @@ pub fn write_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<Path
     link_codex_auth(&codex_home)?;
 
     let config_path = codex_home.join("config.toml");
-    let toml_out = build_codex_config(worktree_path, mcp_binary, &config_path)?;
+    let hook_registrations = ensure_user_codex_hooks()?;
+    trust_user_codex_hooks(&hook_registrations)?;
+    let toml_out = build_codex_config(worktree_path, mcp_binary, &hook_registrations)?;
 
     fs::write(&config_path, toml_out).map_err(|e| format!("write codex config.toml: {}", e))?;
 

@@ -12,14 +12,14 @@ use impala_daemon_shared::wire::{
 use impala_daemon_shared::PROTOCOL_VERSION;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::collections::HashMap;
+#[allow(unused_imports)]
+use std::convert::TryFrom;
 use std::env;
 use std::io::{Read, Write as IoWrite};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[allow(unused_imports)]
-use std::convert::TryFrom;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::fs;
@@ -197,12 +197,15 @@ fn spawn_session(
         pixel_height: 0,
     }) {
         Ok(p) => p,
-        Err(e) => return Response::Error { message: format!("openpty: {e}") },
+        Err(e) => {
+            return Response::Error {
+                message: format!("openpty: {e}"),
+            }
+        }
     };
 
-    let shell = shell_path.unwrap_or_else(||
-        env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
-    );
+    let shell =
+        shell_path.unwrap_or_else(|| env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
     let default_args = ["-l".to_string()];
     let launch_args: &[String] = shell_args.as_deref().unwrap_or(&default_args);
     let mut cmd = match &command {
@@ -256,17 +259,27 @@ fn spawn_session(
                 session_id: session_id.clone(),
                 message: e.to_string(),
             });
-            return Response::Error { message: format!("spawn: {e}") };
+            return Response::Error {
+                message: format!("spawn: {e}"),
+            };
         }
     };
 
     let reader = match pair.master.try_clone_reader() {
         Ok(r) => r,
-        Err(e) => return Response::Error { message: format!("reader: {e}") },
+        Err(e) => {
+            return Response::Error {
+                message: format!("reader: {e}"),
+            }
+        }
     };
     let writer = match pair.master.take_writer() {
         Ok(w) => w,
-        Err(e) => return Response::Error { message: format!("writer: {e}") },
+        Err(e) => {
+            return Response::Error {
+                message: format!("writer: {e}"),
+            }
+        }
     };
 
     let state: Arc<Mutex<SessionState>> = Arc::new(Mutex::new(SessionState {
@@ -301,7 +314,11 @@ fn spawn_session(
         state: Arc::clone(&state),
         shell_ready_scan: Arc::clone(&shell_ready_scan),
     };
-    registry.sessions.lock().unwrap().insert(session_id.clone(), session);
+    registry
+        .sessions
+        .lock()
+        .unwrap()
+        .insert(session_id.clone(), session);
 
     if !supports_marker {
         registry.broadcast(Event::ShellReady {
@@ -603,20 +620,19 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
             cols,
             rows,
         } => spawn_session(
-            registry,
-            session_id,
-            cwd,
-            command,
-            shell_path,
-            shell_args,
-            env,
-            cols,
-            rows,
+            registry, session_id, cwd, command, shell_path, shell_args, env, cols, rows,
         ),
-        Request::Write { session_id, data_b64 } => {
+        Request::Write {
+            session_id,
+            data_b64,
+        } => {
             let data = match STANDARD.decode(&data_b64) {
                 Ok(d) => d,
-                Err(e) => return Response::Error { message: format!("b64: {e}") },
+                Err(e) => {
+                    return Response::Error {
+                        message: format!("b64: {e}"),
+                    }
+                }
             };
             let mut sessions = registry.sessions.lock().unwrap();
             match sessions.get_mut(&session_id) {
@@ -625,7 +641,9 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
                 },
                 Some(s) => match s.writer.write_all(&data) {
                     Ok(_) => Response::Wrote,
-                    Err(e) => Response::Error { message: format!("write: {e}") },
+                    Err(e) => Response::Error {
+                        message: format!("write: {e}"),
+                    },
                 },
             }
         }
@@ -738,7 +756,14 @@ async fn handle_client(
             ..
         } => {
             if token != &expected_token {
-                write_response(&mut writer, hello.id, Response::Error { message: "bad token".into() }).await?;
+                write_response(
+                    &mut writer,
+                    hello.id,
+                    Response::Error {
+                        message: "bad token".into(),
+                    },
+                )
+                .await?;
                 return Ok(());
             }
             if *protocol_version != PROTOCOL_VERSION {
@@ -770,7 +795,9 @@ async fn handle_client(
             write_response(
                 &mut writer,
                 hello.id,
-                Response::Error { message: "unauthenticated".into() },
+                Response::Error {
+                    message: "unauthenticated".into(),
+                },
             )
             .await?;
             return Ok(());

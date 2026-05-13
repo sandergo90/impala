@@ -39,23 +39,21 @@ pub fn init() -> Guard {
     let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
 
     // Sentry: errors + Sentry Logs + tracing spans. Skip when no DSN.
-    let sentry_guard = SENTRY_DSN
-        .filter(|dsn| !dsn.is_empty())
-        .map(|dsn| {
-            let release_for_init = RELEASE_NAME.to_string();
-            sentry::init((
-                dsn,
-                sentry::ClientOptions {
-                    release: Some(release_for_init.into()),
-                    environment: Some(environment().into()),
-                    traces_sample_rate: traces_sample_rate(),
-                    attach_stacktrace: true,
-                    send_default_pii: false,
-                    enable_logs: true,
-                    ..Default::default()
-                },
-            ))
-        });
+    let sentry_guard = SENTRY_DSN.filter(|dsn| !dsn.is_empty()).map(|dsn| {
+        let release_for_init = RELEASE_NAME.to_string();
+        sentry::init((
+            dsn,
+            sentry::ClientOptions {
+                release: Some(release_for_init.into()),
+                environment: Some(environment().into()),
+                traces_sample_rate: traces_sample_rate(),
+                attach_stacktrace: true,
+                send_default_pii: false,
+                enable_logs: true,
+                ..Default::default()
+            },
+        ))
+    });
 
     if sentry_guard.is_some() {
         sentry::configure_scope(|scope| {
@@ -146,9 +144,17 @@ fn log_dir_for_bundle(bundle_id: &str) -> PathBuf {
 }
 
 fn environment() -> &'static str {
-    if cfg!(debug_assertions) { "dev" } else { "production" }
+    if cfg!(debug_assertions) {
+        "dev"
+    } else {
+        "production"
+    }
 }
 
 fn traces_sample_rate() -> f32 {
-    if cfg!(debug_assertions) { 1.0 } else { 0.1 }
+    if cfg!(debug_assertions) {
+        1.0
+    } else {
+        0.1
+    }
 }

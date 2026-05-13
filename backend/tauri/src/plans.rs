@@ -101,10 +101,7 @@ pub fn create_plan(conn: &Connection, new: NewPlan) -> Result<Plan, String> {
     })
 }
 
-pub fn list_plans(
-    conn: &Connection,
-    worktree_path: &str,
-) -> Result<Vec<Plan>, String> {
+pub fn list_plans(conn: &Connection, worktree_path: &str) -> Result<Vec<Plan>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, plan_path, worktree_path, title, status, version, content, created_at, updated_at
@@ -135,10 +132,7 @@ pub fn list_plans(
     Ok(plans)
 }
 
-pub fn list_plan_version_files(
-    conn: &Connection,
-    plan_id: &str,
-) -> Result<Vec<PlanFile>, String> {
+pub fn list_plan_version_files(conn: &Connection, plan_id: &str) -> Result<Vec<PlanFile>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT file_name, content FROM plan_files
@@ -182,11 +176,7 @@ pub fn get_plan(conn: &Connection, id: &str) -> Result<Plan, String> {
     .map_err(|e| format!("Plan not found: {}", e))
 }
 
-pub fn update_plan(
-    conn: &Connection,
-    id: &str,
-    changes: UpdatePlan,
-) -> Result<Plan, String> {
+pub fn update_plan(conn: &Connection, id: &str, changes: UpdatePlan) -> Result<Plan, String> {
     let now = chrono::Utc::now().to_rfc3339();
 
     let mut sets = vec!["updated_at = ?1".to_string()];
