@@ -153,6 +153,14 @@ export interface WorktreeNavState {
   runStatus: "idle" | "running" | "stopping";
   /** User-added tabs (plus button). Empty when the user hasn't created any. */
   userTabs: UserTab[];
+  /**
+   * Stack of previously-visited tab IDs in this worktree, most recent last.
+   * Maintained automatically by `updateWorktreeNavState` whenever
+   * `activeTerminalsTab` changes (callers can override by passing `tabHistory`
+   * explicitly). Used by `closeUserTab` to jump back to the tab the user was
+   * on before opening the one they just closed.
+   */
+  tabHistory: string[];
   /** Last observed exit code for the Run tab's PTY; null if never exited. */
   runExitCode: number | null;
   /** True when the Run script exited non-zero and the user has not yet viewed the Run tab. */

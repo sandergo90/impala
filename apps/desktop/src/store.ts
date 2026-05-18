@@ -20,6 +20,7 @@ function createDefaultNavState(): WorktreeNavState {
     setupRanAt: null,
     runStatus: "idle",
     userTabs: [],
+    tabHistory: [],
     runExitCode: null,
     hasUnreadRunFailure: false,
     lastUsedActionId: null,
@@ -146,10 +147,24 @@ export const useUIStore = create<UIState>()(
       updateWorktreeNavState: (path: string, updates: Partial<WorktreeNavState>) =>
         set((state) => {
           const current = state.worktreeNavStates[path] ?? { ...createDefaultNavState() };
+          const merged = { ...current, ...updates };
+          // Auto-track tab visit history. Skipped when the caller passes
+          // `tabHistory` explicitly (e.g. closeUserTab needs to strip the
+          // closed tab from history at the same moment it switches active).
+          if (
+            "activeTerminalsTab" in updates &&
+            updates.activeTerminalsTab !== current.activeTerminalsTab &&
+            !("tabHistory" in updates)
+          ) {
+            const nextActive = updates.activeTerminalsTab as string;
+            const existing = current.tabHistory ?? [];
+            const filtered = existing.filter((id) => id !== nextActive);
+            merged.tabHistory = [...filtered, current.activeTerminalsTab].slice(-20);
+          }
           return {
             worktreeNavStates: {
               ...state.worktreeNavStates,
-              [path]: { ...current, ...updates },
+              [path]: merged,
             },
           };
         }),

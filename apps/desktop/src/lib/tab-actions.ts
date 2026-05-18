@@ -123,26 +123,42 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
   }
 
   const remainingTabs = nav.userTabs.filter((t) => t.id !== tabId);
+  const hasRunTab =
+    useDataStore.getState().getWorktreeDataState(worktreePath).paneSessions[
+      RUN_PANE_ID
+    ] !== undefined;
 
-  // If the closed tab wasn't active, leave the active selection alone.
-  // Otherwise jump to the neighbour immediately before this one in tab
-  // order: previous user tab -> Run (if it exists) -> Agent.
+  // The closed tab must never linger in history. Stale IDs (from tabs closed
+  // earlier) also get filtered when we look for the next active below.
+  const trimmedHistory = (nav.tabHistory ?? []).filter((id) => id !== tabId);
+
+  const isResolvable = (id: string): boolean => {
+    if (id === AGENT_PANE_ID) return true;
+    if (id === RUN_PANE_ID) return hasRunTab;
+    return remainingTabs.some((t) => t.id === id);
+  };
+
   let nextActive = nav.activeTerminalsTab;
+  let nextHistory = trimmedHistory;
   if (nav.activeTerminalsTab === tabId) {
-    const prevUserTab = remainingTabs[closedIndex - 1];
-    if (prevUserTab) {
-      nextActive = prevUserTab.id;
-    } else {
-      const hasRunTab = useDataStore
-        .getState()
-        .getWorktreeDataState(worktreePath).paneSessions[RUN_PANE_ID] !== undefined;
-      nextActive = hasRunTab ? RUN_PANE_ID : AGENT_PANE_ID;
+    // Pop the most recent history entry that still points at a visible tab.
+    // Discarded entries are dropped from history at the same time.
+    nextHistory = [...trimmedHistory];
+    let picked: string | null = null;
+    while (nextHistory.length > 0) {
+      const candidate = nextHistory.pop()!;
+      if (isResolvable(candidate)) {
+        picked = candidate;
+        break;
+      }
     }
+    nextActive = picked ?? (hasRunTab ? RUN_PANE_ID : AGENT_PANE_ID);
   }
 
   uiState.updateWorktreeNavState(worktreePath, {
     userTabs: remainingTabs,
     activeTerminalsTab: nextActive,
+    tabHistory: nextHistory,
   });
 
   if (tab.kind === "file" && tab.path) {
