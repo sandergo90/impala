@@ -510,6 +510,18 @@ function XtermTerminalInner({
       entry.onExitHandler = (code) => setExited(code);
       if (entry.exitCode !== null) setExited(entry.exitCode);
 
+      // Apply the current focus state now that entryRef is set. The dedicated
+      // focus effect below bailed earlier (entryRef was null while attach was
+      // still in its microtask), and won't re-run until isFocused/sessionId
+      // change — so without this, newly opened tabs need a click to type in.
+      entry.isFocusedRef.current = isFocused;
+      if (isFocused) {
+        entry.terminal.write(SHOW_CURSOR);
+        entry.terminal.focus();
+      } else {
+        entry.terminal.write(HIDE_CURSOR);
+      }
+
       setLoading(false);
     };
 
