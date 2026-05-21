@@ -272,13 +272,47 @@ fn trust_codex_hook(
     Ok(())
 }
 
-fn trust_user_codex_hooks(registrations: &[CodexHookRegistration]) -> Result<(), String> {
+fn upsert_codex_mcp_server(
+    root: &mut toml::value::Table,
+    mcp_binary: &str,
+) -> Result<(), String> {
+    use toml::Value;
+
+    let mcp_servers = root
+        .entry("mcp_servers".to_string())
+        .or_insert_with(|| Value::Table(toml::value::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| "mcp_servers in ~/.codex/config.toml is not a table".to_string())?;
+    let mut impala_mcp = toml::value::Table::new();
+    impala_mcp.insert("command".into(), Value::String(mcp_binary.to_string()));
+    impala_mcp.insert("args".into(), Value::Array(vec![]));
+    mcp_servers.insert("impala".into(), Value::Table(impala_mcp));
+
+    Ok(())
+}
+
+fn write_codex_commands(codex_home: &Path) -> Result<(), String> {
+    let commands_dir = codex_home.join("commands");
+    fs::create_dir_all(&commands_dir).map_err(|e| format!("mkdir codex commands: {}", e))?;
+    fs::write(commands_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
+        .map_err(|e| format!("write codex impala-review.md: {}", e))?;
+    fs::write(commands_dir.join("impala-plan.md"), IMPALA_PLAN_COMMAND)
+        .map_err(|e| format!("write codex impala-plan.md: {}", e))?;
+
+    Ok(())
+}
+
+fn write_user_codex_config(
+    registrations: &[CodexHookRegistration],
+    mcp_binary: &str,
+) -> Result<(), String> {
     use toml::Value;
 
     let user_codex = dirs::home_dir()
         .ok_or_else(|| "no home dir".to_string())?
         .join(".codex");
     fs::create_dir_all(&user_codex).map_err(|e| format!("mkdir ~/.codex: {}", e))?;
+    write_codex_commands(&user_codex)?;
 
     let config_path = user_codex.join("config.toml");
     let mut root = if config_path.exists() {
@@ -292,6 +326,8 @@ fn trust_user_codex_hooks(registrations: &[CodexHookRegistration]) -> Result<(),
     } else {
         toml::value::Table::new()
     };
+
+    upsert_codex_mcp_server(&mut root, mcp_binary)?;
 
     let hooks = root
         .entry("hooks".to_string())
@@ -429,15 +465,7 @@ fn build_codex_config(
     let mut root = read_user_codex_config();
 
     // mcp_servers.impala — preserve siblings, overwrite our key.
-    let mcp_servers = root
-        .entry("mcp_servers".to_string())
-        .or_insert_with(|| Value::Table(toml::value::Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| "mcp_servers in ~/.codex/config.toml is not a table".to_string())?;
-    let mut impala_mcp = toml::value::Table::new();
-    impala_mcp.insert("command".into(), Value::String(mcp_binary.to_string()));
-    impala_mcp.insert("args".into(), Value::Array(vec![]));
-    mcp_servers.insert("impala".into(), Value::Table(impala_mcp));
+    upsert_codex_mcp_server(&mut root, mcp_binary)?;
 
     // projects.<repo_root>.trust_level — keyed by main repo path.
     if let Some(repo_root) = main_worktree_root(worktree_path) {
@@ -490,19 +518,14 @@ pub fn write_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<Path
 
     let config_path = codex_home.join("config.toml");
     let hook_registrations = ensure_user_codex_hooks()?;
-    trust_user_codex_hooks(&hook_registrations)?;
+    write_user_codex_config(&hook_registrations, mcp_binary)?;
     let toml_out = build_codex_config(worktree_path, mcp_binary, &hook_registrations)?;
 
     fs::write(&config_path, toml_out).map_err(|e| format!("write codex config.toml: {}", e))?;
 
     // Write Codex slash command files inside CODEX_HOME. Codex reads
     // slash commands from <CODEX_HOME>/commands/*.md.
-    let commands_dir = codex_home.join("commands");
-    fs::create_dir_all(&commands_dir).map_err(|e| format!("mkdir codex commands: {}", e))?;
-    fs::write(commands_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
-        .map_err(|e| format!("write codex impala-review.md: {}", e))?;
-    fs::write(commands_dir.join("impala-plan.md"), IMPALA_PLAN_COMMAND)
-        .map_err(|e| format!("write codex impala-plan.md: {}", e))?;
+    write_codex_commands(&codex_home)?;
 
     crate::linear_context::ensure_codex_context(worktree_path)?;
 
@@ -552,6 +575,30 @@ mod tests {
         ] {
             codex_hook_event_key_label(event_name).unwrap();
         }
+    }
+
+    #[test]
+    fn upsert_codex_mcp_server_preserves_other_servers() {
+        use toml::Value;
+
+        let mut root = toml::value::Table::new();
+        let mut mcp_servers = toml::value::Table::new();
+        let mut other = toml::value::Table::new();
+        other.insert("command".into(), Value::String("other-mcp".into()));
+        mcp_servers.insert("other".into(), Value::Table(other));
+        root.insert("mcp_servers".into(), Value::Table(mcp_servers));
+
+        upsert_codex_mcp_server(&mut root, "/Applications/Impala.app/impala-mcp").unwrap();
+
+        let servers = root.get("mcp_servers").unwrap().as_table().unwrap();
+        assert!(servers.contains_key("other"));
+        assert_eq!(
+            servers
+                .get("impala")
+                .and_then(|server| server.get("command"))
+                .and_then(|command| command.as_str()),
+            Some("/Applications/Impala.app/impala-mcp")
+        );
     }
 }
 
