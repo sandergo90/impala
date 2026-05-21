@@ -43,7 +43,7 @@ export function extractCodeContext(
 
     const marker = line[0];
     const text = line.slice(1);
-    if (marker === " " || line === "") {
+    if (marker === " ") {
       hunkLines.push({ lineNumber: wantAdditions ? newLine : oldLine, text });
       oldLine++;
       newLine++;
