@@ -13,6 +13,7 @@ pub struct Annotation {
     pub resolved: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub code_context: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,6 +24,7 @@ pub struct NewAnnotation {
     pub line_number: i64,
     pub side: String,
     pub body: String,
+    pub code_context: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,11 +45,23 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             body TEXT NOT NULL,
             resolved INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            code_context TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_annotations_scope ON annotations(repo_path, file_path, commit_hash);",
     )
-    .map_err(|e| format!("Failed to initialize database: {}", e))
+    .map_err(|e| format!("Failed to initialize database: {}", e))?;
+
+    // Migration: add code_context column if missing (existing DBs)
+    let has_code_context = conn
+        .prepare("SELECT code_context FROM annotations LIMIT 0")
+        .is_ok();
+    if !has_code_context {
+        conn.execute_batch("ALTER TABLE annotations ADD COLUMN code_context TEXT;")
+            .map_err(|e| format!("Failed to add code_context column: {}", e))?;
+    }
+
+    Ok(())
 }
 
 pub fn create_annotation(conn: &Connection, new: NewAnnotation) -> Result<Annotation, String> {
@@ -55,9 +69,9 @@ pub fn create_annotation(conn: &Connection, new: NewAnnotation) -> Result<Annota
     let now = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO annotations (id, repo_path, file_path, commit_hash, line_number, side, body, resolved, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9)",
-        params![id, new.repo_path, new.file_path, new.commit_hash, new.line_number, new.side, new.body, now, now],
+        "INSERT INTO annotations (id, repo_path, file_path, commit_hash, line_number, side, body, resolved, created_at, updated_at, code_context)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10)",
+        params![id, new.repo_path, new.file_path, new.commit_hash, new.line_number, new.side, new.body, now, now, new.code_context],
     )
     .map_err(|e| format!("Failed to create annotation: {}", e))?;
 
@@ -72,6 +86,7 @@ pub fn create_annotation(conn: &Connection, new: NewAnnotation) -> Result<Annota
         resolved: false,
         created_at: now.clone(),
         updated_at: now,
+        code_context: new.code_context,
     })
 }
 
@@ -81,7 +96,7 @@ pub fn list_annotations(
     file_path: Option<&str>,
     commit_hash: Option<&str>,
 ) -> Result<Vec<Annotation>, String> {
-    let mut sql = String::from("SELECT id, repo_path, file_path, commit_hash, line_number, side, body, resolved, created_at, updated_at FROM annotations WHERE repo_path = ?1");
+    let mut sql = String::from("SELECT id, repo_path, file_path, commit_hash, line_number, side, body, resolved, created_at, updated_at, code_context FROM annotations WHERE repo_path = ?1");
     let mut param_index = 2;
 
     if file_path.is_some() {
@@ -123,6 +138,7 @@ pub fn list_annotations(
                 resolved: resolved_int != 0,
                 created_at: row.get(8)?,
                 updated_at: row.get(9)?,
+                code_context: row.get(10)?,
             })
         })
         .map_err(|e| format!("Failed to query annotations: {}", e))?;
@@ -177,7 +193,7 @@ pub fn update_annotation(
 
     // Fetch and return the updated annotation
     conn.query_row(
-        "SELECT id, repo_path, file_path, commit_hash, line_number, side, body, resolved, created_at, updated_at FROM annotations WHERE id = ?1",
+        "SELECT id, repo_path, file_path, commit_hash, line_number, side, body, resolved, created_at, updated_at, code_context FROM annotations WHERE id = ?1",
         params![id],
         |row| {
             let resolved_int: i64 = row.get(7)?;
@@ -192,6 +208,7 @@ pub fn update_annotation(
                 resolved: resolved_int != 0,
                 created_at: row.get(8)?,
                 updated_at: row.get(9)?,
+                code_context: row.get(10)?,
             })
         },
     )

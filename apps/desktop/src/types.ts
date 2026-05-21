@@ -40,6 +40,7 @@ export interface Annotation {
   resolved: boolean;
   created_at: string;
   updated_at: string;
+  code_context?: string;
 }
 
 export interface NewAnnotation {
@@ -49,6 +50,7 @@ export interface NewAnnotation {
   line_number: number;
   side: 'left' | 'right';
   body: string;
+  code_context?: string;
 }
 
 export interface Plan {
