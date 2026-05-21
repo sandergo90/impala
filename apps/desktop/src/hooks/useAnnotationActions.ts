@@ -6,6 +6,7 @@ import { sqliteProvider } from "../providers/sqlite-provider";
 import type { Annotation } from "../types";
 import { AGENT_PANE_ID, agentPtySessionId } from "../lib/pane-ids";
 import { resolveAgent } from "../lib/agent";
+import { extractCodeContext } from "../lib/code-context";
 
 function encodeForPty(text: string): string {
   return btoa(
@@ -57,6 +58,11 @@ export function useAnnotationActions() {
         nav.viewMode === "commit" && nav.selectedCommit
           ? nav.selectedCommit.hash
           : "all-changes";
+      const diffText =
+        useDataStore.getState().getWorktreeDataState(worktreePath).fileDiffs[
+          resolvedFilePath
+        ] ?? "";
+      const context = extractCodeContext(diffText, lineNumber, side);
       const created = await sqliteProvider.create({
         repo_path: worktreePath,
         file_path: resolvedFilePath,
@@ -64,6 +70,7 @@ export function useAnnotationActions() {
         line_number: lineNumber,
         side,
         body,
+        code_context: context.length > 0 ? JSON.stringify(context) : undefined,
       });
       const currentAnnotations = useDataStore.getState().getWorktreeDataState(worktreePath).annotations;
       updateData({ annotations: [...currentAnnotations, created] });
