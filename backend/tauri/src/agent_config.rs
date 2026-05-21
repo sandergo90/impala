@@ -168,6 +168,7 @@ fn codex_hook_event_key_label(event_name: &str) -> Result<&'static str, String> 
         "PreToolUse" => Ok("pre_tool_use"),
         "PermissionRequest" => Ok("permission_request"),
         "PostToolUse" => Ok("post_tool_use"),
+        "PostToolUseFailure" => Ok("post_tool_use_failure"),
         "PreCompact" => Ok("pre_compact"),
         "PostCompact" => Ok("post_compact"),
         "SessionStart" => Ok("session_start"),
@@ -538,6 +539,19 @@ mod tests {
             codex_config_key_source(&config_path),
             fs::canonicalize(dir.path()).unwrap().join("config.toml")
         );
+    }
+
+    #[test]
+    fn codex_hook_event_label_supports_all_registered_events() {
+        for event_name in [
+            "UserPromptSubmit",
+            "Stop",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "PermissionRequest",
+        ] {
+            codex_hook_event_key_label(event_name).unwrap();
+        }
     }
 }
 
