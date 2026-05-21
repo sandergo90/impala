@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { openFileTab } from "../lib/tab-actions";
 import type { Annotation } from "../types";
@@ -27,7 +27,10 @@ export const AnnotationDisplay = memo(function AnnotationDisplay({
   onDelete,
 }: AnnotationDisplayProps) {
   const resolved = annotation.resolved;
-  const context = parseContext(annotation.code_context);
+  const context = useMemo(
+    () => parseContext(annotation.code_context),
+    [annotation.code_context]
+  );
   const sideLabel = annotation.side === "left" ? "L" : "R";
 
   const openLocation = (e: React.MouseEvent) => {
