@@ -13,7 +13,6 @@ export function AnnotationsPanel() {
     selectedFile,
     handleResolve,
     handleDelete,
-    handleSendToAgent,
     handleSendAllToAgent,
   } = useAnnotationActions();
 
@@ -123,14 +122,13 @@ export function AnnotationsPanel() {
           </div>
         ) : selectedFile ? (
           // Single file: flat list
-          <div className="flex flex-col gap-1.5 p-2">
+          <div className="flex flex-col">
             {scoped.map((a) => (
               <div key={a.id} className="cursor-pointer" onClick={() => scrollToLine(a)}>
                 <AnnotationDisplay
                   annotation={a}
                   onResolve={handleResolve}
                   onDelete={handleDelete}
-                  onSendToAgent={handleSendToAgent}
                 />
               </div>
             ))}
@@ -140,17 +138,21 @@ export function AnnotationsPanel() {
           <div className="flex flex-col">
             {[...grouped.entries()].map(([filePath, fileAnnotations]) => (
               <div key={filePath}>
-                <div className="px-3 py-1.5 text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold border-b border-border/50 font-mono normal-case text-sm truncate">
-                  {filePath.split("/").pop()}
+                <div className="flex items-center gap-2 border-b border-border/50 px-3 py-1.5">
+                  <span className="truncate font-mono text-sm font-semibold tracking-[1.2px] text-muted-foreground/60">
+                    {filePath.split("/").pop()}
+                  </span>
+                  <span className="shrink-0 rounded-full bg-muted px-1.5 text-xs text-muted-foreground/70">
+                    {fileAnnotations.length}
+                  </span>
                 </div>
-                <div className="flex flex-col gap-1.5 p-2">
+                <div className="flex flex-col">
                   {fileAnnotations.map((a) => (
                     <div key={a.id} className="cursor-pointer" onClick={() => scrollToLine(a)}>
                       <AnnotationDisplay
                         annotation={a}
                         onResolve={handleResolve}
                         onDelete={handleDelete}
-                        onSendToAgent={handleSendToAgent}
                       />
                     </div>
                   ))}

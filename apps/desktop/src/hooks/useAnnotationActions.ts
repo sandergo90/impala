@@ -117,16 +117,6 @@ export function useAnnotationActions() {
     [worktreePath]
   );
 
-  const handleSendToAgent = useCallback(
-    async (annotation: Annotation) => {
-      if (!worktreePath) return;
-      const agent = await resolveAgent(worktreePath);
-      const prefix = agent === "codex" ? "$" : "/";
-      await sendPromptToAgent(`${prefix}impala-review ${annotation.id}`);
-    },
-    [sendPromptToAgent, worktreePath]
-  );
-
   const handleSendAllToAgent = useCallback(
     async () => {
       if (!worktreePath) return;
@@ -145,7 +135,6 @@ export function useAnnotationActions() {
     handleCreate,
     handleResolve,
     handleDelete,
-    handleSendToAgent,
     handleSendAllToAgent,
   };
 }
