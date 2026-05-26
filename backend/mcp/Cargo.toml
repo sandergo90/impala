@@ -1,6 +1,6 @@
 [package]
 name = "impala-mcp"
-version = "16.0.1"
+version = "0.16.1"
 edition = "2021"
 
 [[bin]]
