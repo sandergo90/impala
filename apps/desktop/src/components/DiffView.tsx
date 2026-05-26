@@ -1,10 +1,11 @@
-import { useEffect, useState, useMemo, useCallback, useRef, memo } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";
-import { PatchDiff, MultiFileDiff } from "@pierre/diffs/react";
+import { PatchDiff, CodeView } from "@pierre/diffs/react";
+import type { CodeViewHandle, CodeViewItem } from "@pierre/diffs/react";
+import { processFile } from "@pierre/diffs";
 import { sqliteProvider } from "../providers/sqlite-provider";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
@@ -22,7 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { DiffLineAnnotation, FileDiffOptions } from "@pierre/diffs";
+import type { DiffLineAnnotation, FileDiffMetadata } from "@pierre/diffs";
 import type { Annotation, WorktreeDataState } from "../types";
 
 // Stable empty references to avoid new object identity on every render
@@ -127,456 +128,6 @@ function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: R
       </span>
       Viewed
     </button>
-  );
-}
-
-function useFileContents(
-  worktreePath: string,
-  filePath: string,
-  commitHash: string | null,
-  viewMode: string,
-  skip = false,
-) {
-  const [contents, setContents] = useState<{ old: string; new: string } | null>(null);
-
-  useEffect(() => {
-    if (skip) {
-      // Force fall-through to PatchDiff (patch-only, no full-file git/disk
-      // read). MultiFileDiff with large file contents is the bottleneck on
-      // the All-Changes tab when many heavy diffs share the viewport.
-      setContents(null);
-      return;
-    }
-    if (!worktreePath || !filePath) return;
-    let cancelled = false;
-
-    async function load() {
-      try {
-        let oldContent = "";
-        let newContent = "";
-
-        if (viewMode === "commit" && commitHash) {
-          // For a commit: old = commit~1:file, new = commit:file
-          const [oldResult, newResult] = await Promise.all([
-            invoke<string>("get_file_at_ref", { worktreePath, gitRef: `${commitHash}~1`, filePath }).catch(() => ""),
-            invoke<string>("get_file_at_ref", { worktreePath, gitRef: commitHash, filePath }).catch(() => ""),
-          ]);
-          oldContent = oldResult;
-          newContent = newResult;
-        } else if (viewMode === "uncommitted") {
-          // For uncommitted: old = HEAD:file, new = working copy
-          const oldResult = await invoke<string>("get_file_at_ref", { worktreePath, gitRef: "HEAD", filePath }).catch(() => "");
-          // Read the working copy from disk. If the file is missing (a legitimate
-          // deletion) newContent is "". If the read fails for any other reason,
-          // let the error propagate so the outer catch falls back to PatchDiff —
-          // otherwise a read failure would render as a full-file deletion.
-          const fullPath = `${worktreePath}/${filePath}`;
-          const { readTextFile, exists } = await import("@tauri-apps/plugin-fs");
-          let workingCopy = "";
-          if (await exists(fullPath)) {
-            workingCopy = await readTextFile(fullPath);
-          }
-          oldContent = oldResult;
-          newContent = workingCopy;
-        } else if (viewMode === "last-turn") {
-          // For last-turn: old = snapshot:file (state at start of turn),
-          // new = working copy. Same disk-read pattern as uncommitted so a
-          // newly-created file shows as added rather than rendered empty.
-          const oldResult = await invoke<string>("get_last_turn_file", { worktreePath, filePath }).catch(() => "");
-          const fullPath = `${worktreePath}/${filePath}`;
-          const { readTextFile, exists } = await import("@tauri-apps/plugin-fs");
-          let workingCopy = "";
-          if (await exists(fullPath)) {
-            workingCopy = await readTextFile(fullPath);
-          }
-          oldContent = oldResult;
-          newContent = workingCopy;
-        } else if (viewMode === "all-changes") {
-          // For all-changes: old = base branch version, new = HEAD version
-          const baseBranch = await invoke<string>("detect_base_branch", { worktreePath }).catch(() => "main");
-          const [oldResult, newResult] = await Promise.all([
-            invoke<string>("get_file_at_ref", { worktreePath, gitRef: baseBranch, filePath }).catch(() => ""),
-            invoke<string>("get_file_at_ref", { worktreePath, gitRef: "HEAD", filePath }).catch(() => ""),
-          ]);
-          oldContent = oldResult;
-          newContent = newResult;
-        }
-
-        if (!cancelled) setContents({ old: oldContent, new: newContent });
-      } catch {
-        if (!cancelled) setContents(null);
-      }
-    }
-
-    load();
-    return () => { cancelled = true; };
-  }, [worktreePath, filePath, commitHash, viewMode, skip]);
-
-  return contents;
-}
-
-const FileDiffItem = memo(function FileDiffItem({
-  file, patch, isViewed, worktreePath, viewMode, selectedCommitHash,
-  collapsedFiles, setCollapsedFiles, generatedFiles, diffOptions, diffViewerStyle,
-  annotationsByFile, pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler,
-  toggleViewed, onRequestDiscard, scrollToFile, virtualRow, measureElement, scrollMargin,
-}: {
-  file: WorktreeDataState["changedFiles"][0];
-  patch: string;
-  isViewed: boolean;
-  worktreePath: string;
-  viewMode: string;
-  selectedCommitHash: string | null;
-  collapsedFiles: Set<string>;
-  setCollapsedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
-  generatedFiles: Set<string>;
-  diffOptions: FileDiffOptions<AnnotationMeta>;
-  diffViewerStyle: React.CSSProperties;
-  annotationsByFile: Map<string, DiffLineAnnotation<AnnotationMeta>[]>;
-  pendingAnnotation: { filePath?: string; lineNumber: number; side: "deletions" | "additions" } | null;
-  renderAnnotation: (annotation: DiffLineAnnotation<AnnotationMeta>) => React.ReactNode;
-  makeGutterUtilityClickHandler: (filePath?: string) => (range: { start: number; side?: "deletions" | "additions"; end: number }) => void;
-  toggleViewed: (path: string) => void;
-  onRequestDiscard: (filePath: string) => void;
-  scrollToFile: (index: number) => void;
-  virtualRow: { index: number; start: number };
-  measureElement: (el: HTMLElement | null) => void;
-  scrollMargin: number;
-}) {
-  const patchSize = (patch ?? "").length;
-  // Auto-collapse threshold (loud diffs the user probably doesn't want to
-  // read inline). Kept separate from the PatchDiff cutoff below so a medium
-  // file can render expanded but still skip the heavy MultiFileDiff path.
-  const isLargeFile = patchSize > 100_000;
-  // PatchDiff cutoff: skip the full-file fetch and render the patch only.
-  // Lower than the collapse threshold so files that *are* shown inline still
-  // bypass MultiFileDiff when they're heavy enough to lag the viewport.
-  const usePatchOnly = patchSize > 50_000;
-  const isGenerated = generatedFiles.has(file.path);
-  const fileContents = useFileContents(worktreePath, file.path, selectedCommitHash, viewMode, usePatchOnly);
-  const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !collapsedFiles.has(`expanded:${file.path}`)) || ((isLargeFile || isGenerated) && !collapsedFiles.has(`expanded:${file.path}`));
-
-  const toggleCollapse = () => {
-    setCollapsedFiles((prev) => {
-      const next = new Set(prev);
-      if (isViewed || isLargeFile || isGenerated) {
-        const expandKey = `expanded:${file.path}`;
-        if (next.has(expandKey)) next.delete(expandKey);
-        else next.add(expandKey);
-      } else if (next.has(file.path)) next.delete(file.path);
-      else next.add(file.path);
-      return next;
-    });
-  };
-
-  const lineAnnotationsForFile = (() => {
-    const saved = annotationsByFile.get(file.path) ?? [];
-    if (pendingAnnotation?.filePath === file.path) {
-      return [...saved, {
-        side: pendingAnnotation.side,
-        lineNumber: pendingAnnotation.lineNumber,
-        metadata: { type: 'form' as const },
-      }];
-    }
-    return saved.length > 0 ? saved : undefined;
-  })();
-
-  const customHeader = (fileDiff: { type: string; name: string; hunks: { additionLines: number; deletionLines: number }[] }) => {
-    let additions = 0, deletions = 0;
-    for (const hunk of fileDiff.hunks) {
-      additions += hunk.additionLines;
-      deletions += hunk.deletionLines;
-    }
-    const lastSlash = fileDiff.name.lastIndexOf("/");
-    const dir = lastSlash >= 0 ? fileDiff.name.slice(0, lastSlash + 1) : "";
-    const basename = lastSlash >= 0 ? fileDiff.name.slice(lastSlash + 1) : fileDiff.name;
-    const nameColor = fileDiff.type === "new" ? "var(--diffs-addition-base, #3fb950)"
-      : fileDiff.type === "deleted" ? "var(--diffs-deletion-base, #f85149)"
-      : "var(--diffs-color, #e6edf3)";
-    const headerInner = (
-      <div
-        className="flex items-center w-full cursor-pointer"
-        style={{ gap: 10 }}
-        onClick={toggleCollapse}
-      >
-        <span className="text-md text-muted-foreground shrink-0">
-          {isCollapsed ? "▶" : "▼"}
-        </span>
-        <ChangeTypeIcon type={fileDiff.type} />
-        <span className="truncate min-w-0 text-start text-[13px]" style={{ direction: "rtl" }}>
-          <bdi>
-            <span className="text-muted-foreground">{dir}</span>
-            <span style={{ color: nameColor, fontWeight: 500 }}>{basename}</span>
-          </bdi>
-        </span>
-        <OpenFileButton
-          onClick={(e) => {
-            if (!worktreePath) return;
-            if (e.metaKey || e.ctrlKey) {
-              openFileInEditor(`${worktreePath}/${file.path}`);
-            } else {
-              openFileTab(worktreePath, file.path);
-            }
-          }}
-        />
-        {viewMode === 'uncommitted' && (
-          <DiscardButton onClick={() => onRequestDiscard(file.path)} />
-        )}
-        <div className="flex-1" />
-        {isGenerated && (
-          <span className="text-md px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
-            Generated
-          </span>
-        )}
-        <ChangeBar additions={additions} deletions={deletions} />
-        <span className="text-muted-foreground text-[11px] font-mono shrink-0">
-          {deletions > 0 && <span style={{ color: "var(--diffs-deletion-base, #f85149)" }}>-{deletions}</span>}
-          {deletions > 0 && additions > 0 && " "}
-          {additions > 0 && <span style={{ color: "var(--diffs-addition-base, #3fb950)" }}>+{additions}</span>}
-        </span>
-        <ViewedButton isViewed={isViewed} onClick={(e) => { e.stopPropagation(); toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
-      </div>
-    );
-    if (!worktreePath) return headerInner;
-    return (
-      <ChangedFileContextMenu worktreePath={worktreePath} filePath={file.path}>
-        {headerInner}
-      </ChangedFileContextMenu>
-    );
-  };
-
-  return (
-    <div
-      ref={measureElement}
-      data-index={virtualRow.index}
-      data-file-path={file.path}
-      className={`absolute left-0 w-full border-b border-border ${isViewed ? "opacity-75" : ""}`}
-      style={{ top: virtualRow.start - scrollMargin }}
-    >
-      {fileContents ? (
-        <MultiFileDiff<AnnotationMeta>
-          oldFile={{ name: file.path, contents: fileContents.old }}
-          newFile={{ name: file.path, contents: fileContents.new }}
-          style={diffViewerStyle}
-          options={{ ...diffOptions, collapsed: isCollapsed, onGutterUtilityClick: makeGutterUtilityClickHandler(file.path) }}
-          lineAnnotations={lineAnnotationsForFile}
-          renderAnnotation={renderAnnotation}
-          renderCustomHeader={customHeader}
-        />
-      ) : (
-        <PatchDiff<AnnotationMeta>
-          style={diffViewerStyle}
-          patch={patch}
-          options={{ ...diffOptions, collapsed: isCollapsed, onGutterUtilityClick: makeGutterUtilityClickHandler(file.path) }}
-          lineAnnotations={lineAnnotationsForFile}
-          renderAnnotation={renderAnnotation}
-          renderCustomHeader={customHeader}
-        />
-      )}
-    </div>
-  );
-});
-
-function VirtualizedCommitView({
-  toolbar, changedFiles, fileDiffs, viewedFiles, collapsedFiles, setCollapsedFiles,
-  generatedFiles, diffOptions, diffViewerStyle, annotationsByFile,
-  pendingAnnotation, renderAnnotation, makeGutterUtilityClickHandler, toggleViewed,
-  onRequestDiscard, worktreePath, viewMode, selectedCommitHash,
-  totalChangedCount, onShowViewed,
-}: {
-  toolbar: React.ReactNode;
-  changedFiles: WorktreeDataState["changedFiles"];
-  fileDiffs: Record<string, string>;
-  viewedFiles: Set<string>;
-  collapsedFiles: Set<string>;
-  setCollapsedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
-  generatedFiles: Set<string>;
-  diffOptions: FileDiffOptions<AnnotationMeta>;
-  diffViewerStyle: React.CSSProperties;
-  annotationsByFile: Map<string, DiffLineAnnotation<AnnotationMeta>[]>;
-  pendingAnnotation: { filePath?: string; lineNumber: number; side: "deletions" | "additions" } | null;
-  renderAnnotation: (annotation: DiffLineAnnotation<AnnotationMeta>) => React.ReactNode;
-  makeGutterUtilityClickHandler: (filePath?: string) => (range: { start: number; side?: "deletions" | "additions"; end: number }) => void;
-  toggleViewed: (path: string) => void;
-  onRequestDiscard: (filePath: string) => void;
-  worktreePath: string;
-  viewMode: string;
-  selectedCommitHash: string | null;
-  totalChangedCount: number;
-  onShowViewed: () => void;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  const virtualizer = useVirtualizer({
-    count: changedFiles.length,
-    getScrollElement: () => scrollRef.current,
-    getItemKey: (index) => changedFiles[index]?.path ?? index,
-    estimateSize: (index) => {
-      const file = changedFiles[index];
-      const patch = fileDiffs[file.path];
-      const isViewed = viewedFiles.has(file.path);
-      const isCollapsed = collapsedFiles.has(file.path) || (isViewed && !collapsedFiles.has(`expanded:${file.path}`));
-      if (!patch || isCollapsed) return 44;
-      const lineCount = patch.split("\n").length;
-      return Math.max(44, lineCount * 20 + 44);
-    },
-    overscan: 2,
-    scrollMargin: listRef.current?.offsetTop ?? 0,
-  });
-
-  // Wrap measureElement to defer synchronous measurements out of React's commit phase.
-  // Without this, each item measurement triggers resizeItem → notify → rerender during
-  // commitAttachRef, cascading into "Maximum update depth exceeded" with many diff files.
-  const deferredMeasureElement = useCallback(
-    (node: HTMLElement | null) => {
-      if (!node) {
-        virtualizer.measureElement(node as any);
-        return;
-      }
-      requestAnimationFrame(() => {
-        if (node.isConnected) {
-          virtualizer.measureElement(node as any);
-        }
-      });
-    },
-    [virtualizer],
-  );
-
-  const items = virtualizer.getVirtualItems();
-
-  const scrollToFile = useCallback((index: number) => {
-    requestAnimationFrame(() => {
-      const container = scrollRef.current;
-      if (!container) return;
-      const item = container.querySelector(`[data-index="${index}"]`);
-      if (!item) return;
-      const containerRect = container.getBoundingClientRect();
-      const itemRect = item.getBoundingClientRect();
-      container.scrollTo({
-        top: itemRect.top - containerRect.top + container.scrollTop,
-        behavior: "smooth",
-      });
-    });
-  }, []);
-
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {toolbar}
-      {changedFiles.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="flex flex-col items-center gap-3 text-center max-w-sm">
-            <div className="w-14 h-14 rounded-full bg-green-500/10 flex items-center justify-center">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-500">
-                <path d="M20 6 9 17l-5-5" />
-              </svg>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-sm font-medium text-foreground">All caught up</div>
-              <div className="text-md text-muted-foreground">
-                {totalChangedCount} {totalChangedCount === 1 ? "file" : "files"} marked as viewed
-              </div>
-            </div>
-            <button
-              onClick={onShowViewed}
-              className="mt-1 px-3 py-1 text-md rounded border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
-            >
-              Show viewed files
-            </button>
-          </div>
-        </div>
-      ) : (
-      <div ref={scrollRef} className="flex-1 overflow-auto show-scrollbar pr-2">
-        <div ref={listRef}>
-        <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-          {items.map((virtualRow) => {
-            const file = changedFiles[virtualRow.index];
-            const patch = fileDiffs[file.path];
-            const isViewed = viewedFiles.has(file.path);
-
-            if (!fileDiffs[file.path]) {
-              const isRenamed = file.status.startsWith("R") || file.status.startsWith("C");
-              const [oldPath, newPath] = isRenamed ? file.path.split("\t") : [null, file.path];
-              const revealPath = isRenamed ? (newPath ?? file.path) : file.path;
-              const rowInner = (
-                <div className="flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground">
-                  {isRenamed ? (
-                    <span className="flex-1 truncate">{oldPath} <span className="text-muted-foreground/90">→</span> {newPath}</span>
-                  ) : (
-                    <span className="flex-1 truncate">{file.path}</span>
-                  )}
-                  <OpenFileButton
-                    onClick={(e) => {
-                      if (!worktreePath) return;
-                      const path = isRenamed ? (newPath ?? file.path) : file.path;
-                      if (e.metaKey || e.ctrlKey) {
-                        openFileInEditor(`${worktreePath}/${path}`);
-                      } else {
-                        openFileTab(worktreePath, path);
-                      }
-                    }}
-                  />
-                  {viewMode === 'uncommitted' && (
-                    <DiscardButton onClick={() => onRequestDiscard(isRenamed ? (newPath ?? file.path) : file.path)} />
-                  )}
-                  <span className="text-md px-1.5 py-0.5 rounded bg-muted">
-                    {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
-                  </span>
-                  <ViewedButton isViewed={isViewed} onClick={() => { toggleViewed(file.path); if (!isViewed) scrollToFile(virtualRow.index); }} />
-                </div>
-              );
-              return (
-                <div
-                  key={file.path}
-                  ref={deferredMeasureElement}
-                  data-index={virtualRow.index}
-                  data-file-path={file.path}
-                  className={`absolute left-0 w-full border-b border-border ${isViewed ? "opacity-75" : ""}`}
-                  style={{ top: virtualRow.start - (virtualizer.options.scrollMargin ?? 0) }}
-                >
-                  {worktreePath ? (
-                    <ChangedFileContextMenu worktreePath={worktreePath} filePath={revealPath}>
-                      {rowInner}
-                    </ChangedFileContextMenu>
-                  ) : (
-                    rowInner
-                  )}
-                </div>
-              );
-            }
-
-            return (
-              <FileDiffItem
-                key={file.path}
-                file={file}
-                patch={patch}
-                isViewed={isViewed}
-                worktreePath={worktreePath}
-                viewMode={viewMode}
-                selectedCommitHash={selectedCommitHash}
-                collapsedFiles={collapsedFiles}
-                setCollapsedFiles={setCollapsedFiles}
-                generatedFiles={generatedFiles}
-                diffOptions={diffOptions}
-                diffViewerStyle={diffViewerStyle}
-                annotationsByFile={annotationsByFile}
-                pendingAnnotation={pendingAnnotation}
-                renderAnnotation={renderAnnotation}
-                makeGutterUtilityClickHandler={makeGutterUtilityClickHandler}
-                toggleViewed={toggleViewed}
-                onRequestDiscard={onRequestDiscard}
-                scrollToFile={scrollToFile}
-                virtualRow={virtualRow}
-                measureElement={deferredMeasureElement}
-                scrollMargin={virtualizer.options.scrollMargin ?? 0}
-              />
-            );
-          })}
-          </div>
-        </div>
-      </div>
-      )}
-    </div>
   );
 }
 
@@ -782,8 +333,17 @@ export function DiffView() {
       });
       map.set(a.file_path, items);
     }
+    if (pendingAnnotation?.filePath) {
+      const items = map.get(pendingAnnotation.filePath) ?? [];
+      items.push({
+        side: pendingAnnotation.side,
+        lineNumber: pendingAnnotation.lineNumber,
+        metadata: { type: 'form' as const },
+      });
+      map.set(pendingAnnotation.filePath, items);
+    }
     return map;
-  }, [contextAnnotations]);
+  }, [contextAnnotations, pendingAnnotation]);
 
   const pendingAnnotationRef = useRef(pendingAnnotation);
   pendingAnnotationRef.current = pendingAnnotation;
@@ -851,6 +411,106 @@ export function DiffView() {
   const showAllFiles = !selectedFile && hasFileDiffs;
   const showSingleFile = selectedFile && diffText;
 
+  // Files split: diffable (have a patch — render in CodeView with fetched
+  // contents) vs no-diff (renamed/copied/binary — render as a small banner
+  // section above CodeView so the user still sees them).
+  const diffableFiles = useMemo(
+    () => visibleChangedFiles.filter((f) => fileDiffs[f.path]),
+    [visibleChangedFiles, fileDiffs]
+  );
+  const noDiffFiles = useMemo(
+    () => visibleChangedFiles.filter((f) => !fileDiffs[f.path]),
+    [visibleChangedFiles, fileDiffs]
+  );
+  const fileByPath = useMemo(() => {
+    const map = new Map<string, WorktreeDataState["changedFiles"][0]>();
+    for (const f of diffableFiles) map.set(f.path, f);
+    return map;
+  }, [diffableFiles]);
+
+  // Parse the patch impala's backend already produced — no per-file I/O,
+  // no diff recomputation. Tradeoff: hunk expansion is unavailable
+  // (isPartial: true), matching the pre-refactor behavior for files over 50KB.
+  const parsedDiffs = useMemo(() => {
+    const map = new Map<string, FileDiffMetadata>();
+    for (const file of diffableFiles) {
+      const patch = fileDiffs[file.path];
+      if (!patch) continue;
+      try {
+        const fileDiff = processFile(patch, {
+          isGitDiff: true,
+          cacheKey: `${file.path}:${patch.length}`,
+        });
+        if (fileDiff) map.set(file.path, fileDiff);
+      } catch {
+        // skip
+      }
+    }
+    return map;
+  }, [diffableFiles, fileDiffs]);
+
+  const items = useMemo((): CodeViewItem<AnnotationMeta>[] => {
+    const result: CodeViewItem<AnnotationMeta>[] = [];
+    for (const file of diffableFiles) {
+      const fileDiff = parsedDiffs.get(file.path);
+      if (!fileDiff) continue;
+      const isViewed = viewedFiles.has(file.path);
+      const isGenerated = generatedFiles.has(file.path);
+      // Auto-collapse huge diffs (>~1000 lines either side) the same way the
+      // pre-refactor 100KB heuristic did, but using parsed line counts which
+      // are more accurate than patch byte size.
+      const lineCount = Math.max(fileDiff.splitLineCount, fileDiff.unifiedLineCount);
+      const isLargeFile = lineCount > 1000;
+      const isExpandedOverride = collapsedFiles.has(`expanded:${file.path}`);
+      const isCollapsed =
+        collapsedFiles.has(file.path) ||
+        ((isViewed || isGenerated || isLargeFile) && !isExpandedOverride);
+      const annotations = annotationsByFile.get(file.path);
+      // Bump version when anything Pierre needs to re-render changes
+      // (annotations, pending form, collapsed) — without this CodeView may
+      // keep the stale rendered item even though we passed a new array.
+      const version =
+        (annotations?.length ?? 0) * 4 +
+        (isCollapsed ? 2 : 0) +
+        (annotations?.some((a) => a.metadata?.type === 'form') ? 1 : 0);
+      result.push({
+        id: file.path,
+        type: 'diff',
+        fileDiff,
+        annotations,
+        collapsed: isCollapsed,
+        version,
+      });
+    }
+    return result;
+  }, [diffableFiles, parsedDiffs, viewedFiles, generatedFiles, collapsedFiles, annotationsByFile]);
+
+  const codeViewRef = useRef<CodeViewHandle<AnnotationMeta>>(null);
+
+  const scrollToFile = useCallback((filePath: string) => {
+    codeViewRef.current?.scrollTo({ type: 'item', id: filePath, align: 'start', behavior: 'smooth' });
+  }, []);
+
+  const isAutoCollapsed = useCallback((filePath: string) => {
+    if (viewedFiles.has(filePath) || generatedFiles.has(filePath)) return true;
+    const fd = parsedDiffs.get(filePath);
+    if (!fd) return false;
+    return Math.max(fd.splitLineCount, fd.unifiedLineCount) > 1000;
+  }, [viewedFiles, generatedFiles, parsedDiffs]);
+
+  const toggleCollapse = useCallback((filePath: string) => {
+    setCollapsedFiles((prev) => {
+      const next = new Set(prev);
+      if (isAutoCollapsed(filePath)) {
+        const expandKey = `expanded:${filePath}`;
+        if (next.has(expandKey)) next.delete(expandKey);
+        else next.add(expandKey);
+      } else if (next.has(filePath)) next.delete(filePath);
+      else next.add(filePath);
+      return next;
+    });
+  }, [isAutoCollapsed]);
+
   if (!showAllFiles && !showSingleFile) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -864,7 +524,7 @@ export function DiffView() {
   const fontSize = editorFontSize ?? globalFontSize;
   const diffViewerStyle = getDiffViewerStyle(activeTheme, fontSize, editorFontFamily);
 
-  const diffOptions = {
+  const baseDiffOptions = {
     theme: impalaTheme,
     themeType: activeTheme.type as "dark" | "light",
     overflow: (wrap ? "wrap" : "scroll") as "wrap" | "scroll",
@@ -873,8 +533,24 @@ export function DiffView() {
     expandUnchanged: false,
     expansionLineCount: 10,
     hunkSeparators: "line-info" as const,
+    // Bound per-file tokenization work so a single huge minified file in a
+    // branch can't stall the worker pool. Files exceeding these caps fall
+    // back to plain text rendering.
+    tokenizeMaxLength: 200_000,
+    tokenizeMaxLineLength: 5_000,
+    maxLineDiffLength: 5_000,
     unsafeCSS: `:host { --diffs-dark-bg: ${activeTheme.terminal.background}; --diffs-light-bg: ${activeTheme.terminal.background}; --diffs-dark: ${activeTheme.terminal.foreground}; --diffs-light: ${activeTheme.terminal.foreground}; --diffs-color: ${activeTheme.terminal.foreground}; } [data-diffs-header] { position: sticky; top: 0; z-index: 10; } [data-diffs-header='custom'] { background-color: var(--diffs-bg); display: flex; align-items: center; min-height: calc(1lh + (var(--diffs-gap-block, var(--diffs-gap-fallback)) * 3)); padding-inline: 16px; font-family: var(--diffs-header-font-family, var(--diffs-header-font-fallback)); } [data-diffs-header='custom'] ::slotted(*) { width: 100%; } [data-code]::-webkit-scrollbar { height: 10px !important; } [data-code]::-webkit-scrollbar-thumb { background-color: var(--diffs-bg-context) !important; border-radius: 5px !important; border: 2px solid transparent !important; background-clip: padding-box !important; } [data-code]::-webkit-scrollbar-thumb:hover { background-color: var(--diffs-fg-number) !important; background-clip: padding-box !important; } [data-code]::-webkit-scrollbar-track { background: transparent !important; }`,
-  } satisfies FileDiffOptions<AnnotationMeta>
+  };
+
+  const codeViewOptions = {
+    ...baseDiffOptions,
+    onGutterUtilityClick: (
+      range: { start: number; side?: 'deletions' | 'additions'; end: number },
+      context: { item: { id: string } },
+    ) => {
+      makeGutterUtilityClickHandler(context.item.id)(range);
+    },
+  };
 
   const toolbar = (
     <div className="flex items-center gap-3 px-3 py-2 border-b shrink-0">
@@ -974,38 +650,193 @@ export function DiffView() {
     </AlertDialog>
   );
 
-  // Full commit view: all files stacked with virtualization
-  if (showAllFiles) {
+  const renderCustomHeader = (item: CodeViewItem<AnnotationMeta>) => {
+    if (item.type !== 'diff') return null;
+    const filePath = item.id;
+    const file = fileByPath.get(filePath);
+    if (!file) return null;
+
+    const fileDiff = item.fileDiff;
+    let additions = 0, deletions = 0;
+    for (const hunk of fileDiff.hunks) {
+      additions += hunk.additionLines;
+      deletions += hunk.deletionLines;
+    }
+
+    const isViewed = viewedFiles.has(filePath);
+    const isGenerated = generatedFiles.has(filePath);
+    const isExpandedOverride = collapsedFiles.has(`expanded:${filePath}`);
+    const isCollapsed =
+      collapsedFiles.has(filePath) ||
+      (isAutoCollapsed(filePath) && !isExpandedOverride);
+
+    const lastSlash = fileDiff.name.lastIndexOf("/");
+    const dir = lastSlash >= 0 ? fileDiff.name.slice(0, lastSlash + 1) : "";
+    const basename = lastSlash >= 0 ? fileDiff.name.slice(lastSlash + 1) : fileDiff.name;
+    const nameColor = fileDiff.type === "new" ? "var(--diffs-addition-base, #3fb950)"
+      : fileDiff.type === "deleted" ? "var(--diffs-deletion-base, #f85149)"
+      : "var(--diffs-color, #e6edf3)";
+
+    const headerInner = (
+      <div
+        className="flex items-center w-full cursor-pointer"
+        style={{ gap: 10 }}
+        onClick={() => toggleCollapse(filePath)}
+      >
+        <span className="text-md text-muted-foreground shrink-0">
+          {isCollapsed ? "▶" : "▼"}
+        </span>
+        <ChangeTypeIcon type={fileDiff.type} />
+        <span className="truncate min-w-0 text-start text-[13px]" style={{ direction: "rtl" }}>
+          <bdi>
+            <span className="text-muted-foreground">{dir}</span>
+            <span style={{ color: nameColor, fontWeight: 500 }}>{basename}</span>
+          </bdi>
+        </span>
+        <OpenFileButton
+          onClick={(e) => {
+            if (!worktreePath) return;
+            if (e.metaKey || e.ctrlKey) {
+              openFileInEditor(`${worktreePath}/${filePath}`);
+            } else {
+              openFileTab(worktreePath, filePath);
+            }
+          }}
+        />
+        {viewMode === 'uncommitted' && (
+          <DiscardButton onClick={() => requestDiscard(filePath)} />
+        )}
+        <div className="flex-1" />
+        {isGenerated && (
+          <span className="text-md px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+            Generated
+          </span>
+        )}
+        <ChangeBar additions={additions} deletions={deletions} />
+        <span className="text-muted-foreground text-[11px] font-mono shrink-0">
+          {deletions > 0 && <span style={{ color: "var(--diffs-deletion-base, #f85149)" }}>-{deletions}</span>}
+          {deletions > 0 && additions > 0 && " "}
+          {additions > 0 && <span style={{ color: "var(--diffs-addition-base, #3fb950)" }}>+{additions}</span>}
+        </span>
+        <ViewedButton
+          isViewed={isViewed}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleViewed(filePath);
+            if (!isViewed) scrollToFile(filePath);
+          }}
+        />
+      </div>
+    );
+
+    if (!worktreePath) return headerInner;
     return (
-      <>
-        <VirtualizedCommitView
-          toolbar={toolbar}
-          changedFiles={visibleChangedFiles}
-          fileDiffs={fileDiffs}
-          viewedFiles={viewedFiles}
-          collapsedFiles={collapsedFiles}
-          setCollapsedFiles={setCollapsedFiles}
-          generatedFiles={generatedFiles}
-          diffOptions={diffOptions}
-          diffViewerStyle={diffViewerStyle}
-          annotationsByFile={annotationsByFile}
-          pendingAnnotation={pendingAnnotation}
+      <ChangedFileContextMenu worktreePath={worktreePath} filePath={filePath}>
+        {headerInner}
+      </ChangedFileContextMenu>
+    );
+  };
+
+  const noDiffRows = noDiffFiles.length > 0 && (
+    <div className="border-b border-border shrink-0">
+      {noDiffFiles.map((file) => {
+        const isRenamed = file.status.startsWith("R") || file.status.startsWith("C");
+        const [oldPath, newPath] = isRenamed ? file.path.split("\t") : [null, file.path];
+        const revealPath = isRenamed ? (newPath ?? file.path) : file.path;
+        const isViewed = viewedFiles.has(file.path);
+        const rowInner = (
+          <div className={`flex items-center gap-2 px-3 py-1.5 text-sm font-mono text-muted-foreground border-b border-border last:border-b-0 ${isViewed ? "opacity-75" : ""}`}>
+            {isRenamed ? (
+              <span className="flex-1 truncate">{oldPath} <span className="text-muted-foreground/90">→</span> {newPath}</span>
+            ) : (
+              <span className="flex-1 truncate">{file.path}</span>
+            )}
+            <OpenFileButton
+              onClick={(e) => {
+                if (!worktreePath) return;
+                if (e.metaKey || e.ctrlKey) {
+                  openFileInEditor(`${worktreePath}/${revealPath}`);
+                } else {
+                  openFileTab(worktreePath, revealPath);
+                }
+              }}
+            />
+            {viewMode === 'uncommitted' && (
+              <DiscardButton onClick={() => requestDiscard(revealPath)} />
+            )}
+            <span className="text-md px-1.5 py-0.5 rounded bg-muted">
+              {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
+            </span>
+            <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+          </div>
+        );
+        return (
+          <div key={file.path}>
+            {worktreePath ? (
+              <ChangedFileContextMenu worktreePath={worktreePath} filePath={revealPath}>
+                {rowInner}
+              </ChangedFileContextMenu>
+            ) : (
+              rowInner
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // Full commit view: CodeView holds all diffable files; no-diff files
+  // (renames/binaries) get a small banner above.
+  if (showAllFiles) {
+    if (visibleChangedFiles.length === 0) {
+      return (
+        <div className="flex flex-col h-full overflow-hidden">
+          {toolbar}
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="flex flex-col items-center gap-3 text-center max-w-sm">
+              <div className="w-14 h-14 rounded-full bg-green-500/10 flex items-center justify-center">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-500">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              </div>
+              <div className="space-y-0.5">
+                <div className="text-sm font-medium text-foreground">All caught up</div>
+                <div className="text-md text-muted-foreground">
+                  {changedFiles.length} {changedFiles.length === 1 ? "file" : "files"} marked as viewed
+                </div>
+              </div>
+              <button
+                onClick={() => setHideViewed(false)}
+                className="mt-1 px-3 py-1 text-md rounded border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+              >
+                Show viewed files
+              </button>
+            </div>
+          </div>
+          {discardDialog}
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        {toolbar}
+        {noDiffRows}
+        <CodeView<AnnotationMeta>
+          ref={codeViewRef}
+          className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-clip overscroll-contain [overflow-anchor:none] show-scrollbar"
+          items={items}
+          style={diffViewerStyle}
+          options={codeViewOptions}
+          renderCustomHeader={renderCustomHeader}
           renderAnnotation={renderAnnotation}
-          makeGutterUtilityClickHandler={makeGutterUtilityClickHandler}
-          toggleViewed={toggleViewed}
-          onRequestDiscard={requestDiscard}
-          worktreePath={worktreePath ?? ""}
-          viewMode={viewMode}
-          selectedCommitHash={selectedCommit?.hash ?? null}
-          totalChangedCount={changedFiles.length}
-          onShowViewed={() => setHideViewed(false)}
         />
         {discardDialog}
-      </>
+      </div>
     );
   }
 
-  // Single file view with annotations
+  // Single file view with annotations — keep PatchDiff on the raw patch
+  // string; the CodeView migration is scoped to the multi-file view.
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
@@ -1015,7 +846,7 @@ export function DiffView() {
           patch={diffText!}
           lineAnnotations={lineAnnotations}
           renderAnnotation={renderAnnotation}
-          options={{ ...diffOptions, onGutterUtilityClick: makeGutterUtilityClickHandler() }}
+          options={{ ...baseDiffOptions, onGutterUtilityClick: makeGutterUtilityClickHandler() }}
         />
       </div>
       {discardDialog}
