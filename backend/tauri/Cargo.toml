@@ -3,7 +3,7 @@ members = ["shared", "daemon"]
 
 [package]
 name = "impala"
-version = "0.16.0"
+version = "16.0.1"
 description = "A Tauri App for reviewing git worktree changes"
 authors = ["you"]
 edition = "2021"
