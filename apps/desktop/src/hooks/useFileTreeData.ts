@@ -19,6 +19,14 @@ interface FsEventPayload {
   isDirectory: boolean | null;
 }
 
+function isSafeRelDir(d: string): boolean {
+  if (d.startsWith("/")) return false;
+  for (const seg of d.split("/")) {
+    if (seg === "..") return false;
+  }
+  return true;
+}
+
 export function useFileTreeData(worktreePath: string | null) {
   const [paths, setPaths] = useState<string[]>([]);
   const [entriesByPath, setEntriesByPath] = useState<Map<string, FsEntry>>(new Map());
@@ -162,7 +170,15 @@ export function useFileTreeData(worktreePath: string | null) {
       return;
     }
     const persisted = useUIStore.getState().worktreeExpandedDirs[worktreePath] ?? [];
-    expandedDirsRef.current = new Set(persisted);
+    // Drop any persisted dir that escapes the worktree. Legacy state seeded
+    // before backend resolve_file_path normalized `..` could contain entries
+    // like "../../var/folders/..." — feeding those into list_directory makes
+    // the tree builder throw on collisions.
+    const cleaned = persisted.filter((d) => isSafeRelDir(d));
+    expandedDirsRef.current = new Set(cleaned);
+    if (cleaned.length !== persisted.length) {
+      useUIStore.getState().setWorktreeExpandedDirs(worktreePath, cleaned);
+    }
     void refetchAll();
   }, [worktreePath, refetchAll]);
 
@@ -182,6 +198,10 @@ export function useFileTreeData(worktreePath: string | null) {
 
   const expand = useCallback(
     async (relDir: string) => {
+      // Refuse paths that escape the worktree. list_directory will happily
+      // walk anywhere on disk if rel_dir contains `..`, and the resulting
+      // entries break the path-store builder. Keep the persisted set clean.
+      if (!isSafeRelDir(relDir)) return;
       // Defer the persisted-store sync to a microtask so it lands AFTER trees
       // finishes its synchronous click handling (selectOnly → focus → toggle).
       // Trees fires a focus emit before the toggle, and FilesPanel's model

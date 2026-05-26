@@ -989,6 +989,36 @@ async fn open_in_editor(
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Lexically collapse `.` and `..` segments without touching the filesystem.
+/// Unlike `std::fs::canonicalize`, this does NOT follow symlinks, so callers
+/// that compare against `base_dir` lexically keep getting strings that share
+/// the same prefix.
+fn lexical_normalize(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out: Vec<Component> = Vec::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => match out.last() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                Some(Component::RootDir | Component::Prefix(_)) => {
+                    // Already at root — drop the `..` so an absolute path
+                    // can never escape above `/`.
+                }
+                _ => out.push(c),
+            },
+            _ => out.push(c),
+        }
+    }
+    if out.is_empty() {
+        std::path::PathBuf::from(".")
+    } else {
+        out.iter().collect()
+    }
+}
+
 #[tauri::command]
 fn resolve_file_path(base_dir: String, candidate: String) -> Result<(String, bool), String> {
     let candidate = candidate.trim();
@@ -1005,6 +1035,14 @@ fn resolve_file_path(base_dir: String, candidate: String) -> Result<(String, boo
         let clean = candidate.strip_prefix("./").unwrap_or(candidate);
         std::path::Path::new(&base_dir).join(clean)
     };
+
+    // Collapse `..` segments lexically so callers can rely on the returned
+    // path's prefix matching `base_dir` iff the file is actually under it.
+    // Without this, a terminal-printed `../../var/folders/.../foo` joined to
+    // `base_dir` keeps the literal `..` components — and the frontend's
+    // `absPath.startsWith(`${baseDir}/`)` check then succeeds for a file
+    // that's nowhere near the worktree.
+    let abs = lexical_normalize(&abs);
 
     let exists = abs.exists();
     Ok((abs.to_string_lossy().to_string(), exists))
@@ -1888,4 +1926,55 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn lexical_normalize_collapses_parent_segments() {
+        assert_eq!(
+            lexical_normalize(Path::new("/work/wt/../../var/foo")),
+            PathBuf::from("/var/foo"),
+        );
+    }
+
+    #[test]
+    fn lexical_normalize_strips_excess_parents_at_root() {
+        assert_eq!(
+            lexical_normalize(Path::new("/../../../etc/passwd")),
+            PathBuf::from("/etc/passwd"),
+        );
+    }
+
+    #[test]
+    fn lexical_normalize_preserves_leading_parents_when_relative() {
+        assert_eq!(
+            lexical_normalize(Path::new("../foo/bar")),
+            PathBuf::from("../foo/bar"),
+        );
+    }
+
+    #[test]
+    fn lexical_normalize_drops_curdir_segments() {
+        assert_eq!(
+            lexical_normalize(Path::new("/work/./wt/./src")),
+            PathBuf::from("/work/wt/src"),
+        );
+    }
+
+    #[test]
+    fn lexical_normalize_returns_dot_for_empty() {
+        assert_eq!(lexical_normalize(Path::new("")), PathBuf::from("."));
+    }
+
+    #[test]
+    fn lexical_normalize_keeps_paths_inside_base_prefix_intact() {
+        assert_eq!(
+            lexical_normalize(Path::new("/work/wt/src/foo.ts")),
+            PathBuf::from("/work/wt/src/foo.ts"),
+        );
+    }
 }
