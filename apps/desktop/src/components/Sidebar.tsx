@@ -466,6 +466,15 @@ export function Sidebar() {
           invoke("delete_pr_status", { worktreePath: wt.path }).catch(() => {}),
         ]);
 
+        // Run the project's teardown script (if any) while the worktree still
+        // exists. Best-effort: a failure is surfaced but never blocks deletion.
+        await invoke("run_teardown_script", {
+          repoPath: selectedProject.path,
+          worktreePath: wt.path,
+        }).catch((e) => {
+          toast.error(`Teardown script failed: ${e}`);
+        });
+
         await invoke("delete_worktree", {
           repoPath: selectedProject.path,
           worktreePath: wt.path,

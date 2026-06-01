@@ -14,6 +14,8 @@ pub struct Action {
 pub struct ProjectConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub setup: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub teardown: Option<String>,
     #[serde(default)]
     pub actions: Vec<Action>,
 }
@@ -24,6 +26,8 @@ pub struct ProjectConfig {
 struct LegacyProjectConfig {
     #[serde(default)]
     setup: Option<String>,
+    #[serde(default)]
+    teardown: Option<String>,
     #[serde(default)]
     run: Option<String>,
     #[serde(default)]
@@ -85,6 +89,7 @@ pub fn read_project_config(project_path: String) -> Result<ProjectConfig, String
 
     let config = ProjectConfig {
         setup: legacy.setup,
+        teardown: legacy.teardown,
         actions,
     };
 

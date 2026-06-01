@@ -483,6 +483,52 @@ pub fn delete_worktree(
     Ok(())
 }
 
+/// Run a user-provided lifecycle script in the worktree directory, exposing the
+/// same `IMPALA_*` env vars as the setup script. Used for the teardown hook,
+/// which must complete before the worktree is removed. Returns the script's
+/// stderr (or stdout) on a non-zero exit.
+pub fn run_worktree_script(
+    repo_path: &str,
+    worktree_path: &str,
+    script: &str,
+) -> Result<(), String> {
+    let branch = run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .ok()
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty() && b != "HEAD")
+        .unwrap_or_default();
+
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+
+    let output = Command::new(&shell)
+        .arg("-c")
+        .arg(script)
+        .current_dir(worktree_path)
+        .env("PATH", augmented_path())
+        .env("IMPALA_PROJECT_PATH", repo_path)
+        .env("IMPALA_WORKTREE_PATH", worktree_path)
+        .env("IMPALA_BRANCH", &branch)
+        .output()
+        .map_err(|e| format!("Failed to run script: {}", e))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let msg = if stderr.trim().is_empty() {
+        stdout.trim()
+    } else {
+        stderr.trim()
+    };
+    Err(if msg.is_empty() {
+        format!("Script exited with status {}", output.status)
+    } else {
+        msg.to_string()
+    })
+}
+
 pub fn fetch_remote(repo_path: &str, remote: &str) -> Result<(), String> {
     // --prune drops local remote-tracking refs that no longer exist on the
     // remote, so the branch picker stays in sync with origin.

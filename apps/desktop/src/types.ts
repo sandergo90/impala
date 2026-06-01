@@ -265,5 +265,6 @@ export interface Action {
 
 export interface ProjectConfig {
   setup: string | null;
+  teardown: string | null;
   actions: Action[];
 }

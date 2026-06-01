@@ -463,6 +463,29 @@ async fn delete_worktree(
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Run the project's teardown script in the worktree before it's removed.
+/// No-op when no teardown script is configured. Errors (non-zero exit) are
+/// returned so the caller can surface them; the caller deletes the worktree
+/// regardless.
+#[tauri::command]
+async fn run_teardown_script(repo_path: String, worktree_path: String) -> Result<(), String> {
+    let script = config::read_project_config(repo_path.clone())
+        .ok()
+        .and_then(|c| c.teardown)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let Some(script) = script else {
+        return Ok(());
+    };
+
+    tokio::task::spawn_blocking(move || {
+        git::run_worktree_script(&repo_path, &worktree_path, &script)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 #[tauri::command]
 async fn list_branches(repo_path: String) -> Result<Vec<git::BranchInfo>, String> {
     tokio::task::spawn_blocking(move || git::list_branches(&repo_path))
@@ -1830,6 +1853,7 @@ pub fn run() {
             discard_file_changes,
             create_worktree,
             delete_worktree,
+            run_teardown_script,
             list_branches,
             fetch_remote,
             load_projects,
@@ -1975,6 +1999,81 @@ mod tests {
         assert_eq!(
             lexical_normalize(Path::new("/work/wt/src/foo.ts")),
             PathBuf::from("/work/wt/src/foo.ts"),
+        );
+    }
+
+    #[test]
+    fn teardown_script_runs_in_worktree_then_surfaces_failure() {
+        // Smoke test for the worktree teardown hook: it must run the configured
+        // script *in the worktree* with the IMPALA_* env vars, return Err on a
+        // non-zero exit (the caller deletes anyway), and no-op when unset.
+        fn git(dir: &Path, args: &[&str]) {
+            let ok = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .status()
+                .expect("spawn git")
+                .success();
+            assert!(ok, "git {:?} failed", args);
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        git(&repo, &["config", "user.name", "Tester"]);
+        std::fs::write(repo.join("README.md"), "hi").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "init"]);
+
+        let wt = tmp.path().join("wt");
+        git(
+            &repo,
+            &["worktree", "add", "-q", "-b", "smoke-branch", wt.to_str().unwrap()],
+        );
+
+        let repo_s = repo.to_str().unwrap().to_string();
+        let wt_s = wt.to_str().unwrap().to_string();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // Success: script runs in the worktree (cwd) with IMPALA_BRANCH set.
+        config::write_project_config(
+            repo_s.clone(),
+            config::ProjectConfig {
+                teardown: Some("printf '%s' \"$IMPALA_BRANCH\" > ran.txt".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let res = rt.block_on(run_teardown_script(repo_s.clone(), wt_s.clone()));
+        assert!(res.is_ok(), "teardown should succeed: {res:?}");
+        assert_eq!(
+            std::fs::read_to_string(wt.join("ran.txt")).unwrap(),
+            "smoke-branch",
+            "teardown must run in the worktree with IMPALA_BRANCH set",
+        );
+
+        // Failure: a non-zero exit is surfaced so the caller can toast it.
+        config::write_project_config(
+            repo_s.clone(),
+            config::ProjectConfig {
+                teardown: Some("echo boom >&2; exit 3".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            rt.block_on(run_teardown_script(repo_s.clone(), wt_s.clone()))
+                .is_err(),
+            "non-zero teardown must return Err",
+        );
+
+        // No teardown configured: no-op success.
+        config::write_project_config(repo_s.clone(), config::ProjectConfig::default()).unwrap();
+        assert!(
+            rt.block_on(run_teardown_script(repo_s, wt_s)).is_ok(),
+            "missing teardown is a no-op",
         );
     }
 }
