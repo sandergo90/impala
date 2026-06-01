@@ -20,12 +20,15 @@ export function ProjectSettingsRoute() {
     projectPath;
 
   const [setup, setSetup] = useState("");
+  const [teardown, setTeardown] = useState("");
   const [actions, setActions] = useState<Action[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const loadedRef = useRef(false);
   const setupRef = useRef(setup);
+  const teardownRef = useRef(teardown);
   const actionsRef = useRef(actions);
   setupRef.current = setup;
+  teardownRef.current = teardown;
   actionsRef.current = actions;
 
   const [claudeFlags, handleClaudeFlagsChange] = useDebouncedSetting("claudeFlags", projectPath);
@@ -43,6 +46,7 @@ export function ProjectSettingsRoute() {
   useInvoke<ProjectConfig>("read_project_config", { projectPath }, {
     onSuccess: (config) => {
       setSetup(config.setup ?? "");
+      setTeardown(config.teardown ?? "");
       setActions(config.actions ?? []);
       loadedRef.current = true;
     },
@@ -53,7 +57,7 @@ export function ProjectSettingsRoute() {
   });
 
   const saveConfig = useCallback(
-    (nextSetup: string, nextActions: Action[]) => {
+    (nextSetup: string, nextTeardown: string, nextActions: Action[]) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
       debounceRef.current = setTimeout(async () => {
@@ -62,6 +66,7 @@ export function ProjectSettingsRoute() {
             projectPath,
             config: {
               setup: nextSetup.trim() || null,
+              teardown: nextTeardown.trim() || null,
               actions: nextActions,
             },
           });
@@ -76,7 +81,14 @@ export function ProjectSettingsRoute() {
 
   const handleSetupChange = (value: string) => {
     setSetup(value);
-    if (loadedRef.current) saveConfig(value, actionsRef.current);
+    if (loadedRef.current)
+      saveConfig(value, teardownRef.current, actionsRef.current);
+  };
+
+  const handleTeardownChange = (value: string) => {
+    setTeardown(value);
+    if (loadedRef.current)
+      saveConfig(setupRef.current, value, actionsRef.current);
   };
 
   return (
@@ -102,6 +114,20 @@ export function ProjectSettingsRoute() {
             placeholder="npm install"
           />
         </div>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Teardown</label>
+          <p className="text-md text-muted-foreground">
+            Runs in the worktree just before it's deleted.
+          </p>
+          <textarea
+            value={teardown}
+            onChange={(e) => handleTeardownChange(e.target.value)}
+            rows={4}
+            className="w-full px-3 py-2 rounded border border-border bg-background font-mono text-sm resize-y"
+            placeholder="docker compose down"
+          />
+        </div>
       </div>
 
       <div className="p-4 rounded-lg border border-border bg-card">
@@ -109,7 +135,8 @@ export function ProjectSettingsRoute() {
           actions={actions}
           onChange={(next) => {
             setActions(next);
-            if (loadedRef.current) saveConfig(setupRef.current, next);
+            if (loadedRef.current)
+              saveConfig(setupRef.current, teardownRef.current, next);
           }}
         />
       </div>
