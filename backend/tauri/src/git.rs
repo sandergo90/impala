@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
 #[derive(Debug, Serialize)]
@@ -498,13 +498,24 @@ pub fn run_worktree_script(
         .filter(|b| !b.is_empty() && b != "HEAD")
         .unwrap_or_default();
 
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+
+    // `-i` so PATH matches the terminal — bun/nvm live in ~/.zshrc, which only
+    // an interactive shell sources. The leading `cd` undoes any directory
+    // change made by a sourced rc file (the path comes via env, not the script
+    // text, so no quoting is needed).
+    let wrapped = format!("cd \"$IMPALA_WORKTREE_PATH\" || exit 1\n{script}");
 
     let output = Command::new(&shell)
+        .arg("-l")
+        .arg("-i")
         .arg("-c")
-        .arg(script)
+        .arg(&wrapped)
         .current_dir(worktree_path)
+        .stdin(Stdio::null())
         .env("PATH", augmented_path())
+        // Defuses rc blocks gated on a specific terminal emulator.
+        .env("TERM_PROGRAM", "Impala")
         .env("IMPALA_PROJECT_PATH", repo_path)
         .env("IMPALA_WORKTREE_PATH", worktree_path)
         .env("IMPALA_BRANCH", &branch)
