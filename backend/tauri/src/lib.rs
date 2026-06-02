@@ -2037,7 +2037,7 @@ mod tests {
         let wt_s = wt.to_str().unwrap().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
 
-        // Success: script runs in the worktree (cwd) with IMPALA_BRANCH set.
+        // Success: relative-path write proves cwd is the worktree; $IMPALA_BRANCH proves env.
         config::write_project_config(
             repo_s.clone(),
             config::ProjectConfig {
