@@ -36,6 +36,14 @@ _Avoid_: Default action (the project has no notion of a globally "default" Actio
 An inline review comment anchored to a file and line range in a **Worktree**. Surfaced via the in-app reviewer and the `impala` MCP server.
 _Avoid_: Comment, note (Annotation is the canonical term).
 
+**Remote provider**:
+The hosting service backing a **Project**'s git remote — currently GitHub or Bitbucket Cloud. Determines whether Impala can surface a **Pull request status** for the Project's **Worktrees**; a Project whose remote matches no known provider is unsupported.
+_Avoid_: Remote (the bare git origin URL is not the provider), host, forge, integration.
+
+**Pull request status**:
+The state of the pull request associated with a **Worktree**'s branch, surfaced in the sidebar: whether a pull request exists and, if so, whether it is open, merged, or closed, along with its review decision and checks rollup. Provider-neutral — the same concept regardless of **Remote provider**. A **Worktree** whose branch has no pull request — including a Project's mainline branches — has no Pull request status.
+_Avoid_: Check status (the checks rollup is only one component), merge status.
+
 ## Relationships
 
 - A **Project** has one **Setup script** and zero-or-more **Actions**.
@@ -44,6 +52,8 @@ _Avoid_: Comment, note (Annotation is the canonical term).
 - A **Worktree** has one **Run pane**, in which at most one **Action** runs at a time.
 - A **Worktree** has one **Last-used action** pointer (may be unset on cold start).
 - A **Worktree** has zero-or-more **Annotations**.
+- A **Project**'s git remote has one **Remote provider**, or none when the remote is unsupported.
+- A **Worktree** has zero-or-one **Pull request status** (none when its branch has no pull request, or the **Remote provider** is unsupported).
 
 ## Example dialogue
 
