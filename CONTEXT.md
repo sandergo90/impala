@@ -12,6 +12,10 @@ _Avoid_: Repo, repository (use Project when referring to the Impala-tracked enti
 A git worktree of a **Project**, owning its own branch and working directory. The unit of review and the unit of script execution.
 _Avoid_: Branch, checkout (a Worktree has a branch but is not the branch itself).
 
+**Base branch**:
+The branch a new **Worktree** is forked from at creation, configured per **Project**.
+_Avoid_: Start point, source branch; do not reuse for the diff-comparison base (see Flagged ambiguities).
+
 **Setup script**:
 A single shell script stored on the **Project** that runs once, automatically, after a **Worktree** is created. Lifecycle is "fire-and-forget on creation."
 _Avoid_: Init script, bootstrap script.
@@ -35,6 +39,7 @@ _Avoid_: Comment, note (Annotation is the canonical term).
 ## Relationships
 
 - A **Project** has one **Setup script** and zero-or-more **Actions**.
+- A **Project** has one **Base branch** (the fork point for new **Worktrees**; may be unset).
 - A **Project** has one-or-more **Worktrees**.
 - A **Worktree** has one **Run pane**, in which at most one **Action** runs at a time.
 - A **Worktree** has one **Last-used action** pointer (may be unset on cold start).
@@ -49,4 +54,5 @@ _Avoid_: Comment, note (Annotation is the canonical term).
 
 ## Flagged ambiguities
 
+- "Base branch" is overloaded. As a domain term it means the **Base branch** above — the per-**Project** fork point for new **Worktrees**. A separate branch is auto-detected per-**Worktree** as the _comparison base_ for computing that Worktree's diff and diverged commits; despite sharing the name in code (`baseBranch`), it is not the **Base branch** setting.
 - "Run script" (singular) was the pre-Actions term for the only on-demand script a Project could have. After the Actions feature lands, "the run script" no longer exists as a domain concept — there are only **Actions**, of which there may be many. The migrated legacy `run` field is imported as one **Action** named "Run."

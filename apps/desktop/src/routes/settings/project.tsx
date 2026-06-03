@@ -33,6 +33,73 @@ export function ProjectSettingsRoute() {
 
   const [claudeFlags, handleClaudeFlagsChange] = useDebouncedSetting("claudeFlags", projectPath);
   const [codexFlags, handleCodexFlagsChange] = useDebouncedSetting("codexFlags", projectPath);
+  // Base branch is a per-project setting with three storage states: no row =
+  // never configured (seed it from the repo's detected default), a stored
+  // branch = fork from there, and an explicit empty string = the user
+  // deliberately cleared it (fork from HEAD). Persisting "" on clear — rather
+  // than deleting the row — is what stops a clear from being re-seeded later.
+  const [baseBranch, setBaseBranch] = useState("");
+  const [baseBranchLoaded, setBaseBranchLoaded] = useState(false);
+  const baseBranchDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    setBaseBranchLoaded(false);
+    let cancelled = false;
+    (async () => {
+      const stored = await invoke<string | null>("get_setting", {
+        key: "baseBranch",
+        scope: projectPath,
+      });
+      if (cancelled) return;
+      if (stored !== null) {
+        setBaseBranch(stored);
+        setBaseBranchLoaded(true);
+        return;
+      }
+      // First time for this project — seed from the detected default. Strip the
+      // origin/ prefix (create_worktree re-adds it) and skip the commit-hash
+      // fallback, which isn't a fetchable base.
+      let seed = "";
+      try {
+        const detected = await invoke<string>("detect_base_branch", {
+          worktreePath: projectPath,
+        });
+        const stripped = detected.replace(/^origin\//, "");
+        const isSha =
+          /^[0-9a-f]{40}$/i.test(stripped) || /^[0-9a-f]{64}$/i.test(stripped);
+        seed = stripped && !isSha ? stripped : "";
+      } catch {
+        seed = "";
+      }
+      if (cancelled) return;
+      setBaseBranch(seed);
+      setBaseBranchLoaded(true);
+      invoke("set_setting", {
+        key: "baseBranch",
+        scope: projectPath,
+        value: seed,
+      }).catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+      if (baseBranchDebounceRef.current)
+        clearTimeout(baseBranchDebounceRef.current);
+    };
+  }, [projectPath]);
+
+  const handleBaseBranchChange = (value: string) => {
+    setBaseBranch(value);
+    if (!baseBranchLoaded) return;
+    if (baseBranchDebounceRef.current)
+      clearTimeout(baseBranchDebounceRef.current);
+    baseBranchDebounceRef.current = setTimeout(() => {
+      invoke("set_setting", {
+        key: "baseBranch",
+        scope: projectPath,
+        value: value.trim(),
+      }).catch((e) => toast.error(`Failed to save setting: ${e}`));
+    }, 500);
+  };
 
   // Reset loaded flag and clean up timers when projectPath changes
   useEffect(() => {
@@ -128,6 +195,22 @@ export function ProjectSettingsRoute() {
             placeholder="docker compose down"
           />
         </div>
+      </div>
+
+      <div className="p-4 rounded-lg border border-border bg-card space-y-3">
+        <h3 className="text-sm font-medium">Base branch</h3>
+        <p className="text-md text-muted-foreground">
+          New worktrees are forked from this branch. Auto-detected from your
+          repo — clear it to fork from the current HEAD instead.
+        </p>
+        <input
+          type="text"
+          value={baseBranch}
+          onChange={(e) => handleBaseBranchChange(e.target.value)}
+          placeholder="develop"
+          className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
+          spellCheck={false}
+        />
       </div>
 
       <div className="p-4 rounded-lg border border-border bg-card">

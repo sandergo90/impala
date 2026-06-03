@@ -29,7 +29,7 @@ export function NewWorktreeDialog({
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("new");
   const [branchName, setBranchName] = useState("");
-  const [baseBranch, setBaseBranch] = useState("develop");
+  const [projectBaseBranch, setProjectBaseBranch] = useState<string | null>(null);
   const [selectedBranch, setSelectedBranch] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +38,6 @@ export function NewWorktreeDialog({
   const [linearQuery, setLinearQuery] = useState("");
   const [selectedIssue, setSelectedIssue] = useState<LinearIssue | null>(null);
   const [linearBranchName, setLinearBranchName] = useState("");
-  const [linearBaseBranch, setLinearBaseBranch] = useState("develop");
   const [comboboxOpen, setComboboxOpen] = useState(false);
   const [branchPrefix, setBranchPrefix] = useState("");
   const [existingQuery, setExistingQuery] = useState("");
@@ -55,6 +54,15 @@ export function NewWorktreeDialog({
     }).then((v) => {
       if (v === "codex") setAgent("codex");
     });
+  }, [repoPath]);
+
+  // Base branch is a per-project setting (configured on the project settings
+  // page), no longer chosen per-creation. Empty/unset → backend forks from HEAD.
+  useEffect(() => {
+    invoke<string | null>("get_setting", {
+      key: "baseBranch",
+      scope: repoPath,
+    }).then((v) => setProjectBaseBranch(v?.trim() || null));
   }, [repoPath]);
 
   useEffect(() => {
@@ -181,7 +189,7 @@ export function NewWorktreeDialog({
         return;
       }
       name = linearBranchName.trim();
-      base = linearBaseBranch.trim() || null;
+      base = projectBaseBranch;
     } else if (tab === "existing") {
       if (!selectedBranch) {
         toast.error("Please specify a branch name");
@@ -196,7 +204,7 @@ export function NewWorktreeDialog({
         return;
       }
       name = branchName.trim();
-      base = baseBranch.trim() || null;
+      base = projectBaseBranch;
     }
 
     setLoading(true);
@@ -314,19 +322,6 @@ export function NewWorktreeDialog({
                   spellCheck={false}
                 />
               </div>
-            </div>
-            <div>
-              <label className="block text-md text-muted-foreground mb-1">
-                Base branch (optional, defaults to HEAD)
-              </label>
-              <input
-                type="text"
-                value={baseBranch}
-                onChange={(e) => setBaseBranch(e.target.value)}
-                placeholder="develop"
-                className="w-full px-3 py-1.5 border rounded text-sm bg-popover"
-                spellCheck={false}
-              />
             </div>
           </div>
         )}
@@ -516,20 +511,6 @@ export function NewWorktreeDialog({
                       spellCheck={false}
                     />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-md text-muted-foreground mb-1">
-                    Base branch (optional, defaults to HEAD)
-                  </label>
-                  <input
-                    type="text"
-                    value={linearBaseBranch}
-                    onChange={(e) => setLinearBaseBranch(e.target.value)}
-                    placeholder="develop"
-                    className="w-full px-3 py-1.5 border rounded text-sm bg-popover"
-                    spellCheck={false}
-                  />
                 </div>
               </>
             )}
