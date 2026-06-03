@@ -18,7 +18,7 @@ Diff viewer over git worktrees, inline annotations (resolvable, surfaced via MCP
 
 ### Tooling
 
-- **Package manager:** Bun (`bun@1.2.10`), Turborepo for the JS workspace
+- **Package manager:** Bun (`bun@1.3.13`), Turborepo for the JS workspace
 - **Patched deps:** `@pierre/diffs@1.1.7` (see `patches/`)
 - **Rust:** Tauri 2, rusqlite (bundled), tokio, notify, portable-pty
 - **Frontend libs of note:** `@base-ui/react`, `@pierre/diffs`, `@plannotator/web-highlighter`, `cmdk`, `react-resizable-panels`, `@xterm/*`

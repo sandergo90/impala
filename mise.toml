@@ -1,0 +1,6 @@
+[tools]
+# Keep in sync with the `packageManager` field in package.json.
+bun = "1.3.13"
+# Rust toolchain for the Tauri backend. CI uses dtolnay/rust-toolchain@stable,
+# so we track stable here too.
+rust = "stable"

@@ -1,0 +1,6 @@
+# Use a hoisted node_modules layout (npm/yarn-style), matching CI and what the
+# tooling expects. Bun's isolated linker leaves workspace bins (e.g. the
+# `tauri` CLI from apps/desktop) and transitive deps (e.g. @lezer/highlight)
+# unresolvable from the repo root, which breaks `bun run dev`.
+[install]
+linker = "hoisted"

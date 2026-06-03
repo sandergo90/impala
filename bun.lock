@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "differ",
@@ -9,7 +10,7 @@
     },
     "apps/desktop": {
       "name": "@impala/desktop",
-      "version": "0.15.6",
+      "version": "0.16.3",
       "dependencies": {
         "@base-ui/react": "1.3.0",
         "@codemirror/commands": "^6.10.2",
@@ -37,6 +38,7 @@
         "@dnd-kit/sortable": "^10.0.0",
         "@dnd-kit/utilities": "^3.2.2",
         "@fontsource-variable/geist": "5.2.8",
+        "@lezer/highlight": "^1.2.3",
         "@lezer/markdown": "^1.6.1",
         "@pierre/diffs": "1.2.3",
         "@pierre/trees": "^1.0.0-beta.4",
