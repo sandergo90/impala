@@ -62,8 +62,13 @@ pub enum ChecksStatus {
 // ---- Schema ---------------------------------------------------------------
 
 pub fn init_db(conn: &Connection) -> Result<(), String> {
+    // The cache was GitHub-only (`github_pr_status`); it now holds a
+    // provider-neutral Pull request status for GitHub or Bitbucket Cloud.
+    // The table is a pure cache, so the old one is dropped rather than migrated
+    // — it repopulates on the next refresh. See docs/adr/0006.
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS github_pr_status (
+        "DROP TABLE IF EXISTS github_pr_status;
+         CREATE TABLE IF NOT EXISTS pr_status (
             worktree_path   TEXT PRIMARY KEY,
             kind            TEXT NOT NULL,
             pr_number       INTEGER,
@@ -82,7 +87,7 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             fetched_at      INTEGER NOT NULL
         );",
     )
-    .map_err(|e| format!("Failed to initialize github_pr_status table: {}", e))
+    .map_err(|e| format!("Failed to initialize pr_status table: {}", e))
 }
 
 // ---- Storage --------------------------------------------------------------
@@ -93,7 +98,7 @@ pub fn read_status(conn: &Connection, worktree_path: &str) -> Result<Option<PrSt
             "SELECT kind, pr_number, title, url, state, is_draft, review_decision,
                     checks_status, checks_passing, checks_total, additions, deletions,
                     head_branch, head_sha
-             FROM github_pr_status WHERE worktree_path = ?1",
+             FROM pr_status WHERE worktree_path = ?1",
         )
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
@@ -117,7 +122,7 @@ pub fn upsert_status(
                 _ => unreachable!(),
             };
             conn.execute(
-                "INSERT INTO github_pr_status (worktree_path, kind, fetched_at)
+                "INSERT INTO pr_status (worktree_path, kind, fetched_at)
                  VALUES (?1, ?2, ?3)
                  ON CONFLICT(worktree_path) DO UPDATE SET
                     kind=excluded.kind,
@@ -132,7 +137,7 @@ pub fn upsert_status(
         }
         PrStatus::HasPr(pr) => {
             conn.execute(
-                "INSERT INTO github_pr_status
+                "INSERT INTO pr_status
                     (worktree_path, kind, pr_number, title, url, state, is_draft,
                      review_decision, checks_status, checks_passing, checks_total,
                      additions, deletions, head_branch, head_sha, fetched_at)
@@ -174,7 +179,7 @@ pub fn upsert_status(
 
 pub(crate) fn delete_status(conn: &Connection, worktree_path: &str) -> Result<(), String> {
     conn.execute(
-        "DELETE FROM github_pr_status WHERE worktree_path = ?1",
+        "DELETE FROM pr_status WHERE worktree_path = ?1",
         params![worktree_path],
     )
     .map_err(|e| format!("Failed to delete status: {}", e))?;
@@ -334,7 +339,7 @@ fn run_gh(cwd: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn is_github_remote(remote_url: &str) -> bool {
+pub(crate) fn is_github_remote(remote_url: &str) -> bool {
     let t = remote_url.trim();
     t.starts_with("https://github.com/")
         || t.starts_with("http://github.com/")

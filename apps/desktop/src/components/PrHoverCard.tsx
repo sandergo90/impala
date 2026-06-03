@@ -3,6 +3,7 @@ import type { ChecksStatus, PrInfo, ReviewDecision } from "../types";
 
 export function PrHoverCard({ pr }: { pr: PrInfo }) {
   const effectiveState = pr.isDraft && pr.state === "open" ? "draft" : pr.state;
+  const providerName = pr.url.includes("bitbucket.org") ? "Bitbucket" : "GitHub";
 
   return (
     <>
@@ -30,10 +31,12 @@ export function PrHoverCard({ pr }: { pr: PrInfo }) {
           </div>
         )}
         {pr.reviewDecision && <div>{reviewLabel(pr.reviewDecision)}</div>}
-        <div className="font-mono">
-          <span className="text-green-500">+{pr.additions}</span>{" "}
-          <span className="text-red-500">-{pr.deletions}</span>
-        </div>
+        {(pr.additions > 0 || pr.deletions > 0) && (
+          <div className="font-mono">
+            <span className="text-green-500">+{pr.additions}</span>{" "}
+            <span className="text-red-500">-{pr.deletions}</span>
+          </div>
+        )}
       </div>
       <button
         onClick={(e) => {
@@ -42,7 +45,7 @@ export function PrHoverCard({ pr }: { pr: PrInfo }) {
         }}
         className="w-full text-xs font-medium px-2.5 py-1.5 rounded bg-accent hover:bg-accent/80 text-foreground transition-colors"
       >
-        View on GitHub
+        View on {providerName}
       </button>
     </>
   );

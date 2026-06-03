@@ -1,4 +1,5 @@
 import { AgentIntegrationPane } from "../../components/settings/AgentIntegrationPane";
+import { BitbucketPane } from "../../components/settings/BitbucketPane";
 import { GithubPane } from "../../components/settings/GithubPane";
 import { LinearPane } from "../../components/settings/LinearPane";
 
@@ -7,6 +8,7 @@ export function IntegrationsRoute() {
     <div className="space-y-8">
       <AgentIntegrationPane />
       <GithubPane />
+      <BitbucketPane />
       <LinearPane />
     </div>
   );

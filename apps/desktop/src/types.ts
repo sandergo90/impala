@@ -257,6 +257,14 @@ export interface GithubCliStatus {
   username: string | null;
 }
 
+export interface BitbucketCliStatus {
+  installed: boolean;
+  authenticated: boolean;
+  username: string | null;
+  authMethod: string | null;
+  expires: string | null;
+}
+
 export interface Action {
   id: string;
   name: string;

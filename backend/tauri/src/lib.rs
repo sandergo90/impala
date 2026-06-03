@@ -6,6 +6,7 @@ mod file_io;
 mod file_tree;
 mod fonts;
 mod git;
+mod bitbucket;
 mod github;
 mod hook_server;
 mod hotkeys;
@@ -1228,6 +1229,38 @@ struct PrStatusUpdated {
     status: github::PrStatus,
 }
 
+/// Which hosting provider backs a worktree's `origin` remote. Determines how
+/// Pull request status is fetched; `Unsupported` short-circuits to no status.
+enum RemoteProvider {
+    GitHub,
+    BitbucketCloud,
+    Unsupported,
+}
+
+fn detect_remote_provider(remote_url: &str) -> RemoteProvider {
+    if github::is_github_remote(remote_url) {
+        RemoteProvider::GitHub
+    } else if bitbucket::is_bitbucket_remote(remote_url) {
+        RemoteProvider::BitbucketCloud
+    } else {
+        RemoteProvider::Unsupported
+    }
+}
+
+/// Detect the worktree's remote provider and dispatch to the matching
+/// populator; both fill the same provider-neutral `PrStatus`.
+fn fetch_pr_status_for(worktree_path: &str) -> Result<github::PrStatus, String> {
+    let remote = match git::run_git(worktree_path, &["remote", "get-url", "origin"]) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => return Ok(github::PrStatus::Unsupported),
+    };
+    match detect_remote_provider(&remote) {
+        RemoteProvider::GitHub => github::fetch_pr_status(worktree_path),
+        RemoteProvider::BitbucketCloud => bitbucket::fetch_pr_status(worktree_path),
+        RemoteProvider::Unsupported => Ok(github::PrStatus::Unsupported),
+    }
+}
+
 #[tauri::command]
 async fn refresh_pr_status(
     app: tauri::AppHandle,
@@ -1235,7 +1268,7 @@ async fn refresh_pr_status(
     worktree_path: String,
 ) -> Result<(), String> {
     let wt_for_task = worktree_path.clone();
-    let fetched = tokio::task::spawn_blocking(move || github::fetch_pr_status(&wt_for_task))
+    let fetched = tokio::task::spawn_blocking(move || fetch_pr_status_for(&wt_for_task))
         .await
         .map_err(|e| format!("Task join error: {}", e))?;
 
@@ -1279,6 +1312,16 @@ async fn get_github_cli_status() -> Result<github::GithubCliStatus, String> {
     tokio::task::spawn_blocking(|| {
         github::invalidate_cli_status_cache();
         github::cli_status()
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+}
+
+#[tauri::command]
+async fn get_bitbucket_cli_status() -> Result<bitbucket::BitbucketCliStatus, String> {
+    tokio::task::spawn_blocking(|| {
+        bitbucket::invalidate_cli_status_cache();
+        bitbucket::cli_status()
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))
@@ -1664,7 +1707,7 @@ pub fn run() {
             plan_annotations::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize plan_annotations table: {}", e))?;
             github::init_db(&conn)
-                .map_err(|e| format!("Failed to initialize github_pr_status table: {}", e))?;
+                .map_err(|e| format!("Failed to initialize pr_status table: {}", e))?;
 
             let _ = fs::create_dir_all(default_worktree_base_dir());
 
@@ -1869,6 +1912,7 @@ pub fn run() {
             refresh_pr_status,
             delete_pr_status,
             get_github_cli_status,
+            get_bitbucket_cli_status,
             list_plan_version_files,
             update_plan,
             create_plan_annotation,
