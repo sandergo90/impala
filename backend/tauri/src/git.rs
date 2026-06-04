@@ -442,6 +442,15 @@ pub fn create_worktree(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| wt_path.to_string());
 
+    // A worktree is a clean checkout, so gitignored files like `.env` are
+    // absent. Copy in the ones the project opts into via `.worktreeinclude`.
+    // Best-effort: a copy problem must never abort worktree creation.
+    match copy_worktree_includes(repo_path, &canonical_path) {
+        Ok(n) if n > 0 => tracing::info!(count = n, "copied .worktreeinclude files into worktree"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "failed to process .worktreeinclude"),
+    }
+
     let head = run_git(&canonical_path, &["rev-parse", "HEAD"])
         .unwrap_or_default()
         .trim()
@@ -453,6 +462,83 @@ pub fn create_worktree(
         head_commit: head,
         title: None,
     })
+}
+
+/// Copy the gitignored files a project opts into via `.worktreeinclude` from the
+/// main checkout into a freshly created worktree. The file uses `.gitignore`
+/// syntax; a path is copied only when it matches a pattern *and* is itself
+/// gitignored, so tracked files are never duplicated (git already checks those
+/// out). No-op when `.worktreeinclude` is absent. Returns the number of files
+/// copied; per-file failures are logged and skipped.
+fn copy_worktree_includes(repo_path: &str, worktree_path: &str) -> Result<usize, String> {
+    let repo = std::path::Path::new(repo_path);
+    if !repo.join(".worktreeinclude").exists() {
+        return Ok(0);
+    }
+
+    // Untracked files matched by the `.worktreeinclude` patterns. `-z` keeps
+    // paths NUL-separated so names with spaces survive intact.
+    let matched = run_git(
+        repo_path,
+        &[
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-from",
+            ".worktreeinclude",
+        ],
+    )?;
+    // Untracked files git actually ignores. Intersecting with this drops paths
+    // that match a pattern but aren't gitignored (e.g. a file the user forgot
+    // to add to `.gitignore`), matching documented `.worktreeinclude` behavior.
+    let gitignored = run_git(
+        repo_path,
+        &[
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+        ],
+    )?;
+    let ignored: std::collections::HashSet<&str> =
+        gitignored.split('\0').filter(|s| !s.is_empty()).collect();
+
+    let mut copied = 0;
+    for rel in matched.split('\0').filter(|s| !s.is_empty()) {
+        if !ignored.contains(rel) {
+            continue;
+        }
+        // git appends a trailing slash to entirely-ignored directories.
+        let rel = rel.trim_end_matches('/');
+        let src = repo.join(rel);
+        let dst = std::path::Path::new(worktree_path).join(rel);
+        match copy_recursive(&src, &dst) {
+            Ok(n) => copied += n,
+            Err(e) => tracing::warn!(file = rel, error = %e, "worktreeinclude: copy failed"),
+        }
+    }
+    Ok(copied)
+}
+
+/// Copy a file, or recursively copy a directory's contents, creating parent
+/// directories as needed. Returns the number of files written.
+fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<usize> {
+    if src.is_dir() {
+        let mut n = 0;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            n += copy_recursive(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+        Ok(n)
+    } else {
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(src, dst)?;
+        Ok(1)
+    }
 }
 
 pub fn delete_worktree(
@@ -791,4 +877,95 @@ pub fn get_all_changed_files(worktree_path: &str) -> Result<Vec<ChangedFile>, St
         })
         .collect();
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .expect("spawn git")
+            .success();
+        assert!(ok, "git {:?} failed", args);
+    }
+
+    #[test]
+    fn worktree_include_copies_only_matched_and_gitignored_files() {
+        // create_worktree must bring gitignored files listed in `.worktreeinclude`
+        // into the fresh checkout, while leaving alone: gitignored files that
+        // aren't listed, listed files that aren't gitignored, and tracked files.
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        git(&repo, &["config", "user.name", "Tester"]);
+
+        std::fs::write(repo.join(".gitignore"), ".env\nconfig/secrets.json\n*.log\n").unwrap();
+        std::fs::write(
+            repo.join(".worktreeinclude"),
+            ".env\nconfig/secrets.json\nnotes.txt\n",
+        )
+        .unwrap();
+        std::fs::write(repo.join("README.md"), "tracked").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "init"]);
+
+        // Created after the commit so they stay untracked.
+        std::fs::write(repo.join(".env"), "SECRET=1").unwrap();
+        std::fs::create_dir_all(repo.join("config")).unwrap();
+        std::fs::write(repo.join("config/secrets.json"), "{}").unwrap();
+        std::fs::write(repo.join("debug.log"), "noise").unwrap(); // gitignored, not listed
+        std::fs::write(repo.join("notes.txt"), "todo").unwrap(); // listed, not gitignored
+
+        let wt = tmp.path().join("wt");
+        create_worktree(
+            repo.to_str().unwrap(),
+            "feature",
+            None,
+            false,
+            wt.to_str().unwrap(),
+        )
+        .unwrap();
+
+        // Matched + gitignored → copied.
+        assert_eq!(std::fs::read_to_string(wt.join(".env")).unwrap(), "SECRET=1");
+        assert_eq!(
+            std::fs::read_to_string(wt.join("config/secrets.json")).unwrap(),
+            "{}",
+            "nested gitignored file is copied with its directory",
+        );
+        // Gitignored but not listed → skipped.
+        assert!(!wt.join("debug.log").exists(), "unlisted file must not copy");
+        // Listed but not gitignored → skipped (and never tracked, so absent).
+        assert!(
+            !wt.join("notes.txt").exists(),
+            "non-gitignored file must not copy",
+        );
+        // Tracked file is present via the normal checkout.
+        assert!(wt.join("README.md").exists());
+    }
+
+    #[test]
+    fn worktree_include_absent_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        git(&repo, &["config", "user.name", "Tester"]);
+        std::fs::write(repo.join("README.md"), "hi").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "init"]);
+
+        assert_eq!(
+            copy_worktree_includes(repo.to_str().unwrap(), repo.to_str().unwrap()).unwrap(),
+            0,
+        );
+    }
 }
