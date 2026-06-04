@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { invoke } from "@/lib/invoke";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
@@ -15,6 +16,12 @@ const statusColor: Record<string, string> = {
 
 const AUTO_REFRESH_DELAY_MS = 750;
 const WORKING_AGENT_AUTO_REFRESH_DELAY_MS = 2500;
+
+// Stable empty/default references so the per-field store selectors below don't
+// return a fresh value (and force a re-render) when a field is absent.
+const EMPTY_COMMITS: CommitInfo[] = [];
+const EMPTY_CHANGED_FILES: ChangedFile[] = [];
+const ZERO_STATS = { additions: 0, deletions: 0 };
 
 function countDiffStats(diff: string): { additions: number; deletions: number } {
   let additions = 0;
@@ -75,25 +82,41 @@ function statsKeyForMode(
 export function CommitPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path;
-  const navState = useUIStore((s) => wtPath ? (s.worktreeNavStates[wtPath] ?? null) : null);
-  const dataState = useDataStore((s) => wtPath ? (s.worktreeDataStates[wtPath] ?? null) : null);
+
+  // Subscribe to each field individually so unrelated nav/data updates
+  // (e.g. agentStatus toggling while the agent works) don't re-render the whole
+  // panel. Selecting the parent object would create a new reference on every
+  // updateWorktreeDataState call. Mirrors the pattern in DiffView.
+  const baseBranch = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.baseBranch ?? null : null);
+  const commits = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.commits ?? EMPTY_COMMITS : EMPTY_COMMITS);
+  const selectedCommit = useUIStore((s) => wtPath ? s.worktreeNavStates[wtPath]?.selectedCommit ?? null : null);
+  const changedFiles = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.changedFiles ?? EMPTY_CHANGED_FILES : EMPTY_CHANGED_FILES);
+  const selectedFile = useUIStore((s) => wtPath ? s.worktreeNavStates[wtPath]?.selectedFile ?? null : null);
+  const viewMode = useUIStore((s) => wtPath ? s.worktreeNavStates[wtPath]?.viewMode ?? 'commit' : 'commit');
+  const uncommittedStats = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.uncommittedStats ?? ZERO_STATS : ZERO_STATS);
+  const allChangesStats = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.allChangesStats ?? ZERO_STATS : ZERO_STATS);
+  const lastTurnStats = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.lastTurnStats ?? ZERO_STATS : ZERO_STATS);
+  const hasLastTurnSnapshot = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.hasLastTurnSnapshot ?? false : false);
+  const hasWorktreeState = useUIStore((s) => wtPath ? s.worktreeNavStates[wtPath] != null : false);
+  const hasWorktreeData = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath] != null : false);
 
   const cmdHeld = useCmdHeld();
   const worktreePath = wtPath ?? "";
-  const baseBranch = dataState?.baseBranch ?? null;
-  const commits = dataState?.commits ?? [];
-  const selectedCommit = navState?.selectedCommit ?? null;
-  const changedFiles = dataState?.changedFiles ?? [];
-  const selectedFile = navState?.selectedFile ?? null;
-  const viewMode = navState?.viewMode ?? 'commit';
-  const uncommittedStats = dataState?.uncommittedStats ?? { additions: 0, deletions: 0 };
-  const allChangesStats = dataState?.allChangesStats ?? { additions: 0, deletions: 0 };
-  const lastTurnStats = dataState?.lastTurnStats ?? { additions: 0, deletions: 0 };
-  const hasLastTurnSnapshot = dataState?.hasLastTurnSnapshot ?? false;
   const autoRefreshTimerRef = useRef<number | null>(null);
   const autoRefreshInFlightRef = useRef(false);
   const autoRefreshQueuedRef = useRef(false);
   const selectionRequestRef = useRef(0);
+
+  // Virtualize the changed-files list: a large diff can have hundreds of files,
+  // and rendering them all (each wrapped in a context menu) is the slowest part
+  // of this panel. Only the rows in view plus a small buffer hit the DOM.
+  const filesScrollRef = useRef<HTMLDivElement>(null);
+  const filesVirtualizer = useVirtualizer({
+    count: changedFiles.length,
+    getScrollElement: () => filesScrollRef.current,
+    estimateSize: () => 30,
+    overscan: 12,
+  });
 
   const updateNav = useCallback((updates: Partial<WorktreeNavState>) =>
     useUIStore.getState().updateWorktreeNavState(worktreePath, updates),
@@ -207,7 +230,7 @@ export function CommitPanel() {
   const selectAllChanges = async () => {
     const requestId = ++selectionRequestRef.current;
     clearScheduledAutoRefresh();
-    const currentTab = navState?.activeTab ?? 'diff';
+    const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
     updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
@@ -222,7 +245,7 @@ export function CommitPanel() {
   const selectLastTurn = async () => {
     const requestId = ++selectionRequestRef.current;
     clearScheduledAutoRefresh();
-    const currentTab = navState?.activeTab ?? 'diff';
+    const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
     updateNav({ viewMode: 'last-turn', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
@@ -237,7 +260,7 @@ export function CommitPanel() {
   const selectUncommitted = async () => {
     const requestId = ++selectionRequestRef.current;
     clearScheduledAutoRefresh();
-    const currentTab = navState?.activeTab ?? 'diff';
+    const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
     updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
@@ -252,7 +275,7 @@ export function CommitPanel() {
   const selectCommit = async (commit: CommitInfo) => {
     const requestId = ++selectionRequestRef.current;
     clearScheduledAutoRefresh();
-    const currentTab = navState?.activeTab ?? 'diff';
+    const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
     updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
@@ -396,7 +419,7 @@ export function CommitPanel() {
     return () => { unlisten?.(); };
   }, [worktreePath, scheduleAutoRefresh, updateData]);
 
-  if (!selectedWorktree || (!navState && !dataState)) {
+  if (!selectedWorktree || (!hasWorktreeState && !hasWorktreeData)) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
         Select a worktree
@@ -532,8 +555,10 @@ export function CommitPanel() {
             <span className="ml-auto text-sm bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{changedFiles.length}</span>
           )}
         </div>
-        <div className="overflow-y-auto flex-1 min-h-0">
-          {changedFiles.map((file) => {
+        <div ref={filesScrollRef} className="overflow-y-auto flex-1 min-h-0">
+          <div style={{ height: filesVirtualizer.getTotalSize(), position: "relative" }}>
+          {filesVirtualizer.getVirtualItems().map((virtualRow) => {
+            const file = changedFiles[virtualRow.index];
             const isSelected = selectedFile?.path === file.path;
             const button = (
               <button
@@ -556,19 +581,30 @@ export function CommitPanel() {
                 {basename(file.path)}
               </button>
             );
-            if (!worktreePath) {
-              return <div key={file.path}>{button}</div>;
-            }
             return (
-              <ChangedFileContextMenu
+              <div
                 key={file.path}
-                worktreePath={worktreePath}
-                filePath={file.path}
+                data-index={virtualRow.index}
+                ref={filesVirtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
               >
-                {button}
-              </ChangedFileContextMenu>
+                {worktreePath ? (
+                  <ChangedFileContextMenu worktreePath={worktreePath} filePath={file.path}>
+                    {button}
+                  </ChangedFileContextMenu>
+                ) : (
+                  button
+                )}
+              </div>
             );
           })}
+          </div>
         </div>
       </div>
     </div>
