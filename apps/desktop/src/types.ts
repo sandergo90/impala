@@ -204,7 +204,7 @@ export interface CommentProvider {
   delete(id: string): Promise<void>;
 }
 
-export interface LinearIssue {
+export interface Issue {
   id: string;
   identifier: string;
   title: string;
@@ -213,10 +213,19 @@ export interface LinearIssue {
   url: string;
 }
 
+export type IssueTrackerKind = "linear" | "jira" | "none";
+
+export interface IssueTrackerInfo {
+  tracker: IssueTrackerKind;
+  configured: boolean;
+}
+
 export interface WorktreeIssue {
   worktree_path: string;
   issue_id: string;
   identifier: string;
+  provider: string;
+  url: string;
   created_at: string;
 }
 

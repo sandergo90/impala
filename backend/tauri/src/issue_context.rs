@@ -1,11 +1,11 @@
-use crate::linear;
+use crate::issue_tracker::{IssueDetail, IssueTracker};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
 
-/// Path to the Linear issue context file inside a worktree:
+/// Path to the Issue context file inside a worktree:
 /// `<worktree>/docs/issues/<IDENTIFIER>.md`. The agent is pointed at this
 /// path on first launch via an `@`-mention so the issue context is loaded
 /// on demand instead of stuffed into CLAUDE.local.md / AGENTS.md.
@@ -48,10 +48,12 @@ pub fn ensure_codex_context(worktree_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Render the issue body written to docs/issues/<IDENTIFIER>.md.
-fn format_issue(detail: &linear::LinearIssueDetail) -> String {
+/// Render the issue body written to docs/issues/<IDENTIFIER>.md. Provider-
+/// neutral: the detail is already normalized (Jira's ADF is converted to
+/// markdown before it reaches here).
+fn format_issue(detail: &IssueDetail) -> String {
     let mut s = String::new();
-    s.push_str("# Linear Issue Context\n\n");
+    s.push_str("# Issue Context\n\n");
     s.push_str(&format!("**[{}] {}**\n", detail.identifier, detail.title));
     s.push_str(&format!("Status: {}\n", detail.status));
     s.push_str(&format!("URL: {}\n", detail.url));
@@ -81,15 +83,16 @@ fn format_issue(detail: &linear::LinearIssueDetail) -> String {
     s
 }
 
-/// Write Linear issue context to <worktree>/docs/issues/<IDENTIFIER>.md.
-/// If `force` is false, skips when the file was updated within REFRESH_INTERVAL.
+/// Write Issue context to <worktree>/docs/issues/<IDENTIFIER>.md using the
+/// project's resolved tracker. If `force` is false, skips when the file was
+/// updated within REFRESH_INTERVAL.
 pub fn write_context(
-    api_key: &str,
+    tracker: &dyn IssueTracker,
     issue_id: &str,
     worktree_path: &str,
     force: bool,
 ) -> Result<(), String> {
-    let detail = linear::get_issue_detail(api_key, issue_id)?;
+    let detail = tracker.issue_detail(issue_id)?;
     let path = issue_doc_path(worktree_path, &detail.identifier);
 
     if !force {

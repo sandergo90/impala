@@ -5,7 +5,12 @@ import { projectSettingsRoute } from "../../router";
 import { useDataStore } from "../../store";
 import { useDebouncedSetting } from "../../hooks/useDebouncedSetting";
 import { useInvoke } from "../../hooks/useInvoke";
-import type { Action, ProjectConfig } from "../../types";
+import type {
+  Action,
+  ProjectConfig,
+  IssueTrackerInfo,
+  IssueTrackerKind,
+} from "../../types";
 import { ActionsList } from "../../components/settings/ActionsList";
 
 export function ProjectSettingsRoute() {
@@ -33,6 +38,27 @@ export function ProjectSettingsRoute() {
 
   const [claudeFlags, handleClaudeFlagsChange] = useDebouncedSetting("claudeFlags", projectPath);
   const [codexFlags, handleCodexFlagsChange] = useDebouncedSetting("codexFlags", projectPath);
+
+  // Issue tracker is a per-project choice. The selector seeds from the
+  // effective tracker (read-time default rule), and Jira's connection is
+  // stored per-project (site/email/token). Linear stays global — see ADR 0007.
+  const [issueTracker, setIssueTracker] = useState<IssueTrackerKind>("none");
+  const [jiraSiteUrl, handleJiraSiteUrlChange] = useDebouncedSetting("jiraSiteUrl", projectPath);
+  const [jiraEmail, handleJiraEmailChange] = useDebouncedSetting("jiraEmail", projectPath);
+  const [jiraApiToken, handleJiraApiTokenChange] = useDebouncedSetting("jiraApiToken", projectPath);
+
+  useEffect(() => {
+    invoke<IssueTrackerInfo>("get_project_issue_tracker", { projectPath })
+      .then((info) => setIssueTracker(info.tracker))
+      .catch(() => setIssueTracker("none"));
+  }, [projectPath]);
+
+  const handleTrackerChange = (value: IssueTrackerKind) => {
+    setIssueTracker(value);
+    invoke("set_setting", { key: "issueTracker", scope: projectPath, value }).catch((e) =>
+      toast.error(`Failed to save setting: ${e}`),
+    );
+  };
   // Base branch is a per-project setting with three storage states: no row =
   // never configured (seed it from the repo's detected default), a stored
   // branch = fork from there, and an explicit empty string = the user
@@ -211,6 +237,75 @@ export function ProjectSettingsRoute() {
           className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
           spellCheck={false}
         />
+      </div>
+
+      <div className="p-4 rounded-lg border border-border bg-card space-y-3">
+        <h3 className="text-sm font-medium">Issue tracker</h3>
+        <p className="text-md text-muted-foreground">
+          Choose where this project's issues live. New worktrees can be created
+          from issues in the selected tracker.
+        </p>
+        <select
+          value={issueTracker}
+          onChange={(e) => handleTrackerChange(e.target.value as IssueTrackerKind)}
+          className="w-full px-3 py-1.5 border rounded text-sm bg-background"
+        >
+          <option value="none">None</option>
+          <option value="linear">Linear</option>
+          <option value="jira">Jira</option>
+        </select>
+
+        {issueTracker === "linear" && (
+          <p className="text-md text-muted-foreground">
+            Linear is connected with a global API key in{" "}
+            <span className="font-mono text-foreground">Settings &gt; Integrations</span>.
+          </p>
+        )}
+
+        {issueTracker === "jira" && (
+          <div className="space-y-3 pt-1">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Site URL</label>
+              <input
+                type="text"
+                value={jiraSiteUrl}
+                onChange={(e) => handleJiraSiteUrlChange(e.target.value)}
+                placeholder="yourcompany.atlassian.net"
+                className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
+                spellCheck={false}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Account email</label>
+              <input
+                type="text"
+                value={jiraEmail}
+                onChange={(e) => handleJiraEmailChange(e.target.value)}
+                placeholder="you@company.com"
+                className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
+                spellCheck={false}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">API token</label>
+              <input
+                type="password"
+                value={jiraApiToken}
+                onChange={(e) => handleJiraApiTokenChange(e.target.value)}
+                placeholder="Atlassian API token"
+                className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
+                spellCheck={false}
+              />
+              <p className="text-md text-muted-foreground">
+                Create one at{" "}
+                <span className="font-mono text-foreground">
+                  id.atlassian.com &gt; Security &gt; API tokens
+                </span>
+                .
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="p-4 rounded-lg border border-border bg-card">

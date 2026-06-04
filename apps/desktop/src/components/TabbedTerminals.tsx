@@ -553,9 +553,9 @@ const TabBody = memo(function TabBody({
     if (sessionId || spawningRef.current) return;
     spawningRef.current = true;
 
-    // Look up the linked Linear issue in parallel with pty_spawn. Its
-    // identifier feeds the agent's initial prompt on a fresh launch, and
-    // its issue_id feeds the context-file refresh.
+    // Look up the linked issue in parallel with pty_spawn. Its identifier
+    // feeds the agent's initial prompt on a fresh launch, and its issue_id
+    // feeds the context-file refresh.
     const issuePromise: Promise<WorktreeIssue | null> =
       kind === "agent" && useContinueFlag
         ? invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath }).catch(
@@ -563,19 +563,19 @@ const TabBody = memo(function TabBody({
           )
         : Promise.resolve(null);
 
-    // Kick off the linear context refresh in parallel. 5-min rate-limited
+    // Kick off the issue context refresh in parallel. 5-min rate-limited
     // backend-side, so usually a no-op. We await it later before building
     // the launch command so the file is current when the agent reads it.
     const refreshPromise: Promise<void> = (async () => {
       if (kind !== "agent" || !useContinueFlag) return;
-      const linearApiKey = useUIStore.getState().linearApiKey;
-      if (!linearApiKey) return;
+      const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
       const issue = await issuePromise;
       if (!issue) return;
-      await invoke("refresh_linear_context", {
-        apiKey: linearApiKey,
+      await invoke("write_issue_context", {
+        projectPath,
         issueId: issue.issue_id,
         worktreePath,
+        force: false,
       }).catch(() => {});
     })();
 

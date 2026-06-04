@@ -928,9 +928,7 @@ export function Sidebar() {
                             <span
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openUrl(
-                                  `https://linear.app/issue/${worktreeIssues[wt.path].identifier}`,
-                                );
+                                openUrl(worktreeIssues[wt.path].url);
                               }}
                               className="font-mono text-[10px] bg-blue-500/15 text-blue-400 hover:text-blue-300 rounded px-1.5 py-0.5 cursor-pointer"
                             >

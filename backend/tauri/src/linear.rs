@@ -1,18 +1,36 @@
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use crate::issue_tracker::{Issue, IssueComment, IssueDetail, IssueTracker};
+use serde::{de::DeserializeOwned, Deserialize};
 use std::sync::LazyLock;
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 
 static CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(reqwest::blocking::Client::new);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LinearIssue {
-    pub id: String,
-    pub identifier: String,
-    pub title: String,
-    pub branch_name: String,
-    pub status: String,
-    pub url: String,
+/// Linear-backed `IssueTracker`. Holds the global Linear API key resolved from
+/// settings; all calls hit Linear's GraphQL API.
+pub struct LinearTracker {
+    api_key: String,
+}
+
+impl LinearTracker {
+    pub fn new(api_key: String) -> Self {
+        Self { api_key }
+    }
+}
+
+impl IssueTracker for LinearTracker {
+    fn my_issues(&self) -> Result<Vec<Issue>, String> {
+        get_my_issues(&self.api_key)
+    }
+    fn search(&self, query: &str) -> Result<Vec<Issue>, String> {
+        search_issues(&self.api_key, query)
+    }
+    fn issue_detail(&self, issue_id: &str) -> Result<IssueDetail, String> {
+        get_issue_detail(&self.api_key, issue_id)
+    }
+    fn start(&self, issue_id: &str) -> Result<(), String> {
+        start_issue(&self.api_key, issue_id)
+    }
 }
 
 #[derive(Deserialize)]
@@ -78,8 +96,8 @@ struct IssueState {
 }
 
 impl IssueNode {
-    fn into_linear_issue(self) -> LinearIssue {
-        LinearIssue {
+    fn into_issue(self) -> Issue {
+        Issue {
             id: self.id,
             identifier: self.identifier,
             title: self.title,
@@ -90,7 +108,7 @@ impl IssueNode {
     }
 }
 
-pub fn get_my_issues(api_key: &str) -> Result<Vec<LinearIssue>, String> {
+fn get_my_issues(api_key: &str) -> Result<Vec<Issue>, String> {
     let query = r#"{
         viewer {
             assignedIssues(
@@ -119,7 +137,7 @@ pub fn get_my_issues(api_key: &str) -> Result<Vec<LinearIssue>, String> {
         .assigned_issues
         .nodes
         .into_iter()
-        .map(|n| n.into_linear_issue())
+        .map(|n| n.into_issue())
         .collect())
 }
 
@@ -131,7 +149,7 @@ struct SearchData {
     search_issues: IssueConnection,
 }
 
-pub fn search_issues(api_key: &str, query_text: &str) -> Result<Vec<LinearIssue>, String> {
+fn search_issues(api_key: &str, query_text: &str) -> Result<Vec<Issue>, String> {
     let query = r#"query($term: String!) {
         searchIssues(
             term: $term
@@ -155,28 +173,11 @@ pub fn search_issues(api_key: &str, query_text: &str) -> Result<Vec<LinearIssue>
         .search_issues
         .nodes
         .into_iter()
-        .map(|n| n.into_linear_issue())
+        .map(|n| n.into_issue())
         .collect())
 }
 
 // --- Issue detail (description + comments) ---
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LinearIssueDetail {
-    pub identifier: String,
-    pub title: String,
-    pub description: Option<String>,
-    pub url: String,
-    pub status: String,
-    pub comments: Vec<LinearComment>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LinearComment {
-    pub author: String,
-    pub body: String,
-    pub created_at: String,
-}
 
 #[derive(Deserialize)]
 struct IssueDetailData {
@@ -212,7 +213,7 @@ struct CommentUser {
     display_name: String,
 }
 
-pub fn get_issue_detail(api_key: &str, issue_id: &str) -> Result<LinearIssueDetail, String> {
+fn get_issue_detail(api_key: &str, issue_id: &str) -> Result<IssueDetail, String> {
     let query = r#"query($issueId: String!) {
         issue(id: $issueId) {
             identifier
@@ -235,7 +236,7 @@ pub fn get_issue_detail(api_key: &str, issue_id: &str) -> Result<LinearIssueDeta
     let data: IssueDetailData = parse_response(&response, "issue detail")?;
 
     let node = data.issue;
-    Ok(LinearIssueDetail {
+    Ok(IssueDetail {
         identifier: node.identifier,
         title: node.title,
         description: node.description,
@@ -245,7 +246,7 @@ pub fn get_issue_detail(api_key: &str, issue_id: &str) -> Result<LinearIssueDeta
             .comments
             .nodes
             .into_iter()
-            .map(|c| LinearComment {
+            .map(|c| IssueComment {
                 author: c
                     .user
                     .map(|u| u.display_name)
@@ -274,7 +275,7 @@ struct WorkflowStateNode {
 }
 
 #[derive(Deserialize)]
-struct IssueDetail {
+struct IssueTeamState {
     team: TeamRef,
     state: IssueState,
 }
@@ -295,7 +296,7 @@ struct IssueUpdatePayload {
     success: bool,
 }
 
-pub fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
+fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
     // Step 1: get issue's team and current state
     let issue_query = r#"query($issueId: String!) {
         issue(id: $issueId) {
@@ -308,7 +309,7 @@ pub fn start_issue(api_key: &str, issue_id: &str) -> Result<(), String> {
 
     #[derive(Deserialize)]
     struct IssueOnlyData {
-        issue: IssueDetail,
+        issue: IssueTeamState,
     }
     let issue_data: IssueOnlyData = parse_response(&issue_response, "issue detail")?;
 

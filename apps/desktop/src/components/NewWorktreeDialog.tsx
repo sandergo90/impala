@@ -2,9 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
-import { useUIStore } from "../store";
 import { useInvoke } from "../hooks/useInvoke";
-import type { BranchInfo, Worktree, LinearIssue } from "../types";
+import type { BranchInfo, Worktree, Issue, IssueTrackerInfo } from "../types";
 import type { Agent } from "../lib/agent";
 
 interface NewWorktreeDialogProps {
@@ -13,13 +12,12 @@ interface NewWorktreeDialogProps {
   onCancel: () => void;
 }
 
-type Tab = "new" | "existing" | "linear";
+type Tab = "new" | "existing" | "tracker";
 
-const tabs: { id: Tab; label: string }[] = [
-  { id: "new", label: "New branch" },
-  { id: "existing", label: "Existing branch" },
-  { id: "linear", label: "Linear" },
-];
+const TRACKER_LABELS: Record<string, string> = {
+  linear: "Linear",
+  jira: "Jira",
+};
 
 export function NewWorktreeDialog({
   repoPath,
@@ -33,11 +31,11 @@ export function NewWorktreeDialog({
   const [selectedBranch, setSelectedBranch] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const linearApiKey = useUIStore((s) => s.linearApiKey);
-  const [searchResults, setSearchResults] = useState<LinearIssue[]>([]);
-  const [linearQuery, setLinearQuery] = useState("");
-  const [selectedIssue, setSelectedIssue] = useState<LinearIssue | null>(null);
-  const [linearBranchName, setLinearBranchName] = useState("");
+  const [trackerInfo, setTrackerInfo] = useState<IssueTrackerInfo | null>(null);
+  const [searchResults, setSearchResults] = useState<Issue[]>([]);
+  const [issueQuery, setIssueQuery] = useState("");
+  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  const [issueBranchName, setIssueBranchName] = useState("");
   const [comboboxOpen, setComboboxOpen] = useState(false);
   const [branchPrefix, setBranchPrefix] = useState("");
   const [existingQuery, setExistingQuery] = useState("");
@@ -47,6 +45,9 @@ export function NewWorktreeDialog({
   const comboboxRef = useRef<HTMLDivElement>(null);
   const existingComboboxRef = useRef<HTMLDivElement>(null);
 
+  const tracker = trackerInfo?.tracker ?? "none";
+  const trackerLabel = TRACKER_LABELS[tracker] ?? "Issues";
+
   useEffect(() => {
     invoke<string | null>("get_setting", {
       key: "lastAgentForProject",
@@ -54,6 +55,14 @@ export function NewWorktreeDialog({
     }).then((v) => {
       if (v === "codex") setAgent("codex");
     });
+  }, [repoPath]);
+
+  // The Project's chosen Issue tracker decides whether (and which) tracker tab
+  // shows. Not gated on credentials — `configured` drives the in-tab hint.
+  useEffect(() => {
+    invoke<IssueTrackerInfo>("get_project_issue_tracker", { projectPath: repoPath })
+      .then(setTrackerInfo)
+      .catch(() => setTrackerInfo({ tracker: "none", configured: false }));
   }, [repoPath]);
 
   // Base branch is a per-project setting (configured on the project settings
@@ -108,17 +117,17 @@ export function NewWorktreeDialog({
     b.name.toLowerCase().includes(existingQuery.toLowerCase()),
   );
 
-  const { data: myIssues, loading: linearLoading } = useInvoke<LinearIssue[]>(
-    "get_my_linear_issues",
-    { apiKey: linearApiKey },
+  const { data: myIssues, loading: issuesLoading } = useInvoke<Issue[]>(
+    "list_my_issues",
+    { projectPath: repoPath },
     {
-      enabled: tab === "linear" && !!linearApiKey,
-      onError: (e) => toast.error(`Failed to load Linear issues: ${e}`),
+      enabled: tab === "tracker" && !!trackerInfo?.configured,
+      onError: (e) => toast.error(`Failed to load ${trackerLabel} issues: ${e}`),
     },
   );
 
-  const handleLinearSearch = useCallback((query: string) => {
-    setLinearQuery(query);
+  const handleIssueSearch = useCallback((query: string) => {
+    setIssueQuery(query);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!query.trim()) {
       setSearchResults([]);
@@ -126,16 +135,16 @@ export function NewWorktreeDialog({
     }
     debounceRef.current = setTimeout(async () => {
       try {
-        const results = await invoke<LinearIssue[]>("search_linear_issues", {
-          apiKey: linearApiKey,
+        const results = await invoke<Issue[]>("search_issues", {
+          projectPath: repoPath,
           query: query.trim(),
         });
         setSearchResults(results);
       } catch (e) {
-        console.error("Linear search failed:", e);
+        console.error("Issue search failed:", e);
       }
     }, 300);
-  }, [linearApiKey]);
+  }, [repoPath]);
 
   // Clean up debounce timer on unmount
   useEffect(() => {
@@ -161,34 +170,40 @@ export function NewWorktreeDialog({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const selectIssue = (issue: LinearIssue) => {
+  const selectIssue = (issue: Issue) => {
     setSelectedIssue(issue);
     const name =
       branchPrefix && issue.branch_name.startsWith(branchPrefix)
         ? issue.branch_name.slice(branchPrefix.length)
         : issue.branch_name;
-    setLinearBranchName(name);
+    setIssueBranchName(name);
     setComboboxOpen(false);
-    setLinearQuery("");
+    setIssueQuery("");
   };
 
-  const displayedIssues = linearQuery.trim() ? searchResults : (myIssues ?? []);
+  const displayedIssues = issueQuery.trim() ? searchResults : (myIssues ?? []);
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "new", label: "New branch" },
+    { id: "existing", label: "Existing branch" },
+    ...(tracker !== "none" ? [{ id: "tracker" as Tab, label: trackerLabel }] : []),
+  ];
 
   const handleCreate = async () => {
     let name: string;
     let base: string | null;
     let existing = false;
 
-    if (tab === "linear") {
+    if (tab === "tracker") {
       if (!selectedIssue) {
-        toast.error("Please select a Linear issue");
+        toast.error(`Please select a ${trackerLabel} issue`);
         return;
       }
-      if (!linearBranchName.trim()) {
+      if (!issueBranchName.trim()) {
         toast.error("Please specify a branch name");
         return;
       }
-      name = linearBranchName.trim();
+      name = issueBranchName.trim();
       base = projectBaseBranch;
     } else if (tab === "existing") {
       if (!selectedBranch) {
@@ -214,24 +229,29 @@ export function NewWorktreeDialog({
         branchName: name,
         baseBranch: base,
         existing,
-        initialTitle: tab === "linear" && selectedIssue ? selectedIssue.title : null,
+        initialTitle: tab === "tracker" && selectedIssue ? selectedIssue.title : null,
         agent,
       });
-      // Best-effort: link to Linear issue and move to In Progress (fire-and-forget)
-      if (tab === "linear" && selectedIssue) {
+      // Best-effort: link to the issue, move it to In Progress, and write its
+      // context file (fire-and-forget). The backend resolves the project's
+      // tracker, so this works for Linear and Jira alike.
+      if (tab === "tracker" && selectedIssue) {
         invoke("link_worktree_issue", {
           worktreePath: worktree.path,
           issueId: selectedIssue.id,
           identifier: selectedIssue.identifier,
+          provider: tracker,
+          url: selectedIssue.url,
         }).catch(() => {});
-        invoke("start_linear_issue", {
-          apiKey: linearApiKey,
+        invoke("start_issue", {
+          projectPath: repoPath,
           issueId: selectedIssue.id,
         }).catch(() => {});
-        invoke("write_linear_context", {
-          apiKey: linearApiKey,
+        invoke("write_issue_context", {
+          projectPath: repoPath,
           issueId: selectedIssue.id,
           worktreePath: worktree.path,
+          force: true,
         }).catch(() => {});
       }
       onCreated(worktree);
@@ -404,23 +424,46 @@ export function NewWorktreeDialog({
           </div>
         )}
 
-        {tab === "linear" && (
+        {tab === "tracker" && (
           <div className="space-y-3">
-            {!linearApiKey ? (
+            {!trackerInfo?.configured ? (
               <div className="p-4 rounded border border-border bg-card text-center space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  Add your Linear API key in Settings to use this feature.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onCancel();
-                    navigate({ to: "/settings" });
-                  }}
-                  className="text-md text-blue-400 hover:text-blue-300"
-                >
-                  Open Settings
-                </button>
+                {tracker === "jira" ? (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Configure this project's Jira connection to use this feature.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCancel();
+                        navigate({
+                          to: "/settings/project/$projectId",
+                          params: { projectId: encodeURIComponent(repoPath) },
+                        });
+                      }}
+                      className="text-md text-blue-400 hover:text-blue-300"
+                    >
+                      Open Project Settings
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Add your Linear API key in Settings to use this feature.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCancel();
+                        navigate({ to: "/settings" });
+                      }}
+                      className="text-md text-blue-400 hover:text-blue-300"
+                    >
+                      Open Settings
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <>
@@ -439,7 +482,7 @@ export function NewWorktreeDialog({
                           type="button"
                           onClick={() => {
                             setSelectedIssue(null);
-                            setLinearBranchName("");
+                            setIssueBranchName("");
                           }}
                           className="text-muted-foreground hover:text-foreground text-md shrink-0"
                         >
@@ -449,15 +492,15 @@ export function NewWorktreeDialog({
                     ) : (
                       <input
                         type="text"
-                        value={linearQuery}
-                        onChange={(e) => handleLinearSearch(e.target.value)}
+                        value={issueQuery}
+                        onChange={(e) => handleIssueSearch(e.target.value)}
                         onFocus={() => setComboboxOpen(true)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && comboboxOpen) {
                             e.preventDefault();
                           }
                         }}
-                        placeholder={linearLoading ? "Loading issues..." : "Search issues..."}
+                        placeholder={issuesLoading ? "Loading issues..." : "Search issues..."}
                         className="w-full px-3 py-1.5 border rounded text-sm bg-popover"
                         autoFocus
                         spellCheck={false}
@@ -467,7 +510,7 @@ export function NewWorktreeDialog({
                       <div className="absolute z-10 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto border rounded bg-popover shadow-lg">
                         {displayedIssues.length === 0 ? (
                           <div className="px-3 py-2 text-md text-muted-foreground">
-                            {linearLoading ? "Loading..." : linearQuery ? "No results" : "No issues found"}
+                            {issuesLoading ? "Loading..." : issueQuery ? "No results" : "No issues found"}
                           </div>
                         ) : (
                           displayedIssues.map((issue) => (
@@ -504,8 +547,8 @@ export function NewWorktreeDialog({
                     )}
                     <input
                       type="text"
-                      value={linearBranchName}
-                      onChange={(e) => setLinearBranchName(e.target.value)}
+                      value={issueBranchName}
+                      onChange={(e) => setIssueBranchName(e.target.value)}
                       placeholder="Select an issue to auto-fill"
                       className="flex-1 px-3 py-1.5 text-sm bg-transparent outline-none"
                       spellCheck={false}
@@ -527,7 +570,7 @@ export function NewWorktreeDialog({
           </button>
           <button
             type="submit"
-            disabled={loading || (tab === "linear" && !linearApiKey)}
+            disabled={loading || (tab === "tracker" && !trackerInfo?.configured)}
             className="px-3 py-1.5 text-sm border rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {loading ? "Creating..." : "Create"}

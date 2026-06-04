@@ -176,21 +176,21 @@ function LeafPane({
     spawningRef.current = true;
 
     if (!isGenericTerminal) {
-      // Best-effort refresh of Linear context for the agent
-      const linearApiKey = useUIStore.getState().linearApiKey;
-      if (linearApiKey) {
-        invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
-          .then((issue) => {
-            if (issue) {
-              invoke("refresh_linear_context", {
-                apiKey: linearApiKey,
-                issueId: issue.issue_id,
-                worktreePath,
-              }).catch(() => {});
-            }
-          })
-          .catch(() => {});
-      }
+      // Best-effort refresh of the linked issue's context for the agent. The
+      // backend resolves the project's tracker, so this covers Linear and Jira.
+      const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
+      invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
+        .then((issue) => {
+          if (issue) {
+            invoke("write_issue_context", {
+              projectPath,
+              issueId: issue.issue_id,
+              worktreePath,
+              force: false,
+            }).catch(() => {});
+          }
+        })
+        .catch(() => {});
     }
 
     const ptyId = paneSessionId(paneId);

@@ -527,7 +527,7 @@ pub fn write_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<Path
     // slash commands from <CODEX_HOME>/commands/*.md.
     write_codex_commands(&codex_home)?;
 
-    crate::linear_context::ensure_codex_context(worktree_path)?;
+    crate::issue_context::ensure_codex_context(worktree_path)?;
 
     add_git_excludes(worktree_path, CODEX_EXCLUDE_LINES)?;
     Ok(codex_home)

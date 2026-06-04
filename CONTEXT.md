@@ -44,6 +44,14 @@ _Avoid_: Remote (the bare git origin URL is not the provider), host, forge, inte
 The state of the pull request associated with a **Worktree**'s branch, surfaced in the sidebar: whether a pull request exists and, if so, whether it is open, merged, or closed, along with its review decision and checks rollup. Provider-neutral — the same concept regardless of **Remote provider**. A **Worktree** whose branch has no pull request — including a Project's mainline branches — has no Pull request status.
 _Avoid_: Check status (the checks rollup is only one component), merge status.
 
+**Issue tracker**:
+The external system backing a **Project**'s tickets — currently Linear or Jira, or none. A per-**Project**, user-selected attribute. Unlike **Remote provider**, it is _not_ inferable from the git remote (Linear and Jira are independent of where the code is hosted), so the user picks it explicitly per Project. Determines which backend powers issue search and the **Issue**-to-**Worktree** flow.
+_Avoid_: Integration, issue source, issue provider.
+
+**Issue**:
+A single ticket in a **Project**'s **Issue tracker**, identified by a human-readable key (Linear `ENG-123`, Jira `RAC-45`). The thing a **Worktree** can be created from and linked to; its description and comments are surfaced to the agent as context.
+_Avoid_: Ticket, task, story.
+
 ## Relationships
 
 - A **Project** has one **Setup script** and zero-or-more **Actions**.
@@ -54,6 +62,8 @@ _Avoid_: Check status (the checks rollup is only one component), merge status.
 - A **Worktree** has zero-or-more **Annotations**.
 - A **Project**'s git remote has one **Remote provider**, or none when the remote is unsupported.
 - A **Worktree** has zero-or-one **Pull request status** (none when its branch has no pull request, or the **Remote provider** is unsupported).
+- A **Project** has zero-or-one **Issue tracker** (Linear, Jira, or none), chosen explicitly by the user.
+- A **Worktree** is created from and linked to zero-or-one **Issue** from its **Project**'s **Issue tracker**.
 
 ## Example dialogue
 

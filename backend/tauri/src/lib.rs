@@ -10,8 +10,10 @@ mod bitbucket;
 mod github;
 mod hook_server;
 mod hotkeys;
+mod issue_context;
+mod issue_tracker;
+mod jira;
 mod linear;
-mod linear_context;
 mod notifications;
 mod observability;
 mod plan_annotations;
@@ -1094,28 +1096,74 @@ async fn check_generated_files(
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Read a project's resolved tracker config, holding the DB lock only briefly.
+/// Returned config owns its credentials so it can move into `spawn_blocking`.
+fn tracker_config_for(
+    state: &tauri::State<'_, DbState>,
+    project_path: &str,
+) -> Result<issue_tracker::TrackerConfig, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    issue_tracker::read_tracker_config(&conn, project_path)
+}
+
+/// Which Issue tracker a Project resolves to, for the New Worktree dialog tab.
 #[tauri::command]
-async fn get_my_linear_issues(api_key: String) -> Result<Vec<linear::LinearIssue>, String> {
-    tokio::task::spawn_blocking(move || linear::get_my_issues(&api_key))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+fn get_project_issue_tracker(
+    state: tauri::State<'_, DbState>,
+    project_path: String,
+) -> Result<issue_tracker::IssueTrackerInfo, String> {
+    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    issue_tracker::tracker_info(&conn, &project_path)
 }
 
 #[tauri::command]
-async fn search_linear_issues(
-    api_key: String,
+async fn list_my_issues(
+    state: tauri::State<'_, DbState>,
+    project_path: String,
+) -> Result<Vec<issue_tracker::Issue>, String> {
+    let config = tracker_config_for(&state, &project_path)?;
+    tokio::task::spawn_blocking(move || {
+        let tracker = config
+            .into_tracker()
+            .ok_or_else(|| "No issue tracker configured for this project".to_string())?;
+        tracker.my_issues()
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+async fn search_issues(
+    state: tauri::State<'_, DbState>,
+    project_path: String,
     query: String,
-) -> Result<Vec<linear::LinearIssue>, String> {
-    tokio::task::spawn_blocking(move || linear::search_issues(&api_key, &query))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+) -> Result<Vec<issue_tracker::Issue>, String> {
+    let config = tracker_config_for(&state, &project_path)?;
+    tokio::task::spawn_blocking(move || {
+        let tracker = config
+            .into_tracker()
+            .ok_or_else(|| "No issue tracker configured for this project".to_string())?;
+        tracker.search(&query)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-async fn start_linear_issue(api_key: String, issue_id: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || linear::start_issue(&api_key, &issue_id))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+async fn start_issue(
+    state: tauri::State<'_, DbState>,
+    project_path: String,
+    issue_id: String,
+) -> Result<(), String> {
+    let config = tracker_config_for(&state, &project_path)?;
+    tokio::task::spawn_blocking(move || {
+        let Some(tracker) = config.into_tracker() else {
+            return Ok(()); // best-effort: nothing to do without a tracker
+        };
+        tracker.start(&issue_id)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -1138,12 +1186,14 @@ fn link_worktree_issue(
     worktree_path: String,
     issue_id: String,
     identifier: String,
+    provider: String,
+    url: String,
 ) -> Result<worktree_issues::WorktreeIssue, String> {
     let conn = state
         .0
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
-    worktree_issues::link_worktree(&conn, &worktree_path, &issue_id, &identifier)
+    worktree_issues::link_worktree(&conn, &worktree_path, &issue_id, &identifier, &provider, &url)
 }
 
 #[tauri::command]
@@ -1434,27 +1484,24 @@ fn get_default_worktree_base_dir() -> String {
     default_worktree_base_dir().to_string_lossy().to_string()
 }
 
+/// Write the Issue context file for a linked worktree. `force` writes
+/// unconditionally (worktree creation); without it the write is rate-limited
+/// (background refresh on agent launch). Resolves the project's tracker so it
+/// works for whichever provider the Project uses.
 #[tauri::command]
-async fn write_linear_context(
-    api_key: String,
+async fn write_issue_context(
+    state: tauri::State<'_, DbState>,
+    project_path: String,
     issue_id: String,
     worktree_path: String,
+    force: bool,
 ) -> Result<(), String> {
+    let config = tracker_config_for(&state, &project_path)?;
     tokio::task::spawn_blocking(move || {
-        linear_context::write_context(&api_key, &issue_id, &worktree_path, true)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-}
-
-#[tauri::command]
-async fn refresh_linear_context(
-    api_key: String,
-    issue_id: String,
-    worktree_path: String,
-) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        linear_context::write_context(&api_key, &issue_id, &worktree_path, false)
+        let Some(tracker) = config.into_tracker() else {
+            return Ok(()); // best-effort: nothing to write without a tracker
+        };
+        issue_context::write_context(tracker.as_ref(), &issue_id, &worktree_path, force)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -1927,9 +1974,10 @@ pub fn run() {
             check_viewed_files,
             clear_viewed_files,
             prepare_agent_config,
-            get_my_linear_issues,
-            search_linear_issues,
-            start_linear_issue,
+            get_project_issue_tracker,
+            list_my_issues,
+            search_issues,
+            start_issue,
             fetch_linear_attachment,
             link_worktree_issue,
             get_worktree_issue,
@@ -1943,8 +1991,7 @@ pub fn run() {
             set_window_vibrancy,
             get_git_info,
             get_default_worktree_base_dir,
-            write_linear_context,
-            refresh_linear_context,
+            write_issue_context,
             pty::pty_spawn,
             pty::pty_get_buffer,
             pty::pty_write,
