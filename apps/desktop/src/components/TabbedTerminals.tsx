@@ -55,6 +55,7 @@ type TabKind = "terminal" | "agent" | "file";
 // a new reference every call, breaking Zustand's useSyncExternalStore snapshot
 // equality and triggering an infinite re-render loop.
 const EMPTY_USER_TABS: UserTab[] = [];
+const EMPTY_PANE_SESSIONS: Record<string, string> = {};
 
 interface TabDescriptor {
   id: string;
@@ -90,8 +91,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   const userTabs = useUIStore(
     (s) => s.worktreeNavStates[worktreePath]?.userTabs ?? EMPTY_USER_TABS,
   );
-  const dataState = useDataStore((s) => s.worktreeDataStates[worktreePath]);
-  const paneSessions = dataState?.paneSessions ?? {};
+  // Subscribe to just paneSessions, not the whole data-state object, so
+  // unrelated field updates (agentStatus, commits, ...) don't re-render the
+  // terminal tree.
+  const paneSessions = useDataStore(
+    (s) => s.worktreeDataStates[worktreePath]?.paneSessions ?? EMPTY_PANE_SESSIONS,
+  );
 
   const [config, setConfig] = useState<ProjectConfig | null>(null);
   useEffect(() => {
