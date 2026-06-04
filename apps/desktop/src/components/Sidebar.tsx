@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";

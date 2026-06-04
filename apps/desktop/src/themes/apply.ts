@@ -1,6 +1,6 @@
 import { registerCustomTheme } from "@pierre/diffs";
 import type { DiffsThemeNames } from "@pierre/diffs/react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import type { CSSProperties } from "react";
 import type { Theme, ResolvedCSS, VibrancyMaterial } from "./types";
 import { getBuiltInTheme, defaultDark } from "./built-in";

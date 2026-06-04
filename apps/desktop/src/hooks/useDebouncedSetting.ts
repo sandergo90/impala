@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { toast } from "sonner";
 
 export function useDebouncedSetting(key: string, scope: string) {

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import type { Plan, PlanAnnotation, NewPlanAnnotation, PlanFile } from "../types";
 
 export const planSqliteProvider = {

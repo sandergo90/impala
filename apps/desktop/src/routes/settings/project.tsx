@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { toast } from "sonner";
 import { projectSettingsRoute } from "../../router";
 import { useDataStore } from "../../store";

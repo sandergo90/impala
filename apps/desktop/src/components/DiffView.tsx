@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { resolveThemeById, getDiffsTheme, getDiffViewerStyle } from "../themes/apply";

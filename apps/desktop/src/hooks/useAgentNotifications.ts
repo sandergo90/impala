@@ -6,7 +6,7 @@ import {
   requestPermission,
   onAction,
 } from "@tauri-apps/plugin-notification";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { useUIStore, useDataStore } from "../store";
 import { selectWorktree } from "./useWorktreeActions";
 

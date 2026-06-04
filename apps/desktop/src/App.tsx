@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { Outlet, useRouter, useMatchRoute } from "@tanstack/react-router";
 import { useInvoke } from "./hooks/useInvoke";
 import { useAppHotkey } from "./hooks/useAppHotkey";

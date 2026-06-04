@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 
 const LINEAR_PREFIX = "https://uploads.linear.app/";
 

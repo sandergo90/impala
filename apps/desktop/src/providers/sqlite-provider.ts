@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import type { Annotation, CommentProvider } from "../types";
 
 export const sqliteProvider: CommentProvider = {

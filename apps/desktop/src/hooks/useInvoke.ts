@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 
 interface UseInvokeOptions<T> {
   /** Skip the invoke call when false. Defaults to true. */

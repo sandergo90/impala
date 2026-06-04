@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import {
   ResizablePanelGroup,
   ResizablePanel,

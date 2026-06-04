@@ -18,7 +18,7 @@ const DEFAULT_RIGHT_SIDEBAR_WIDTH = 300;
 const MIN_RIGHT_SIDEBAR_WIDTH = 220;
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { OpenInEditorButton } from "../components/OpenInEditorButton";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { listen } from "@tauri-apps/api/event";
 import { useUIStore } from "../store";
 import { useEditorDocsStore, type SaveOutcome } from "../stores/editor-docs";

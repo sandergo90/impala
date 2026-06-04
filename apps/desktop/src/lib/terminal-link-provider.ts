@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import type { Terminal, ILinkProvider, ILink } from "@xterm/xterm";
 import { parseFileLinks } from "./file-link-parser";
 import { openFileInEditor } from "./open-file-in-editor";

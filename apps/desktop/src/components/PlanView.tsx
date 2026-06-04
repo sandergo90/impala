@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useUIStore } from "../store";

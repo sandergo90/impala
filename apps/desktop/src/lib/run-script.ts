@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { encodePtyInput } from "./encode-pty";

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { useUIStore, useDataStore } from "../store";
 import { AGENT_PANE_ID, RUN_PANE_ID, userTabPaneId } from "./pane-ids";
 import { releaseCachedTerminal } from "../components/XtermTerminal";
