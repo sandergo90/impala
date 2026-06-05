@@ -6,17 +6,10 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
-import type { SplitNode, WorktreeIssue } from "../types";
+import type { SplitNode } from "../types";
 import { paneSessionId } from "../lib/split-tree";
-import { getHookPort } from "../lib/get-hook-port";
-import { useUIStore, useDataStore } from "../store";
+import { useDataStore } from "../store";
 import { useAppHotkey } from "../hooks/useAppHotkey";
-import {
-  resolveAgent,
-  resolveFlags,
-  buildLaunchCommand,
-} from "../lib/agent";
-import { awaitShellReady, markShellReady } from "../lib/pty-ready";
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -26,10 +19,8 @@ interface SplitTreeRendererProps {
   paneSessions: Record<string, string>;
   onFocusPane: (paneId: string) => void;
   onSessionSpawned: (paneId: string, sessionId: string) => void;
-  /** Override cwd for PTY spawn (used by generic terminal) */
+  /** Override cwd for PTY spawn */
   cwd?: string;
-  /** When true, skip worktree-specific behavior (Linear context, env vars, agent auto-launch) */
-  isGenericTerminal?: boolean;
 }
 
 export function SplitTreeRenderer({
@@ -40,7 +31,6 @@ export function SplitTreeRenderer({
   onFocusPane,
   onSessionSpawned,
   cwd,
-  isGenericTerminal,
 }: SplitTreeRendererProps) {
   return (
     <SplitNodeRenderer
@@ -51,7 +41,6 @@ export function SplitTreeRenderer({
       onFocusPane={onFocusPane}
       onSessionSpawned={onSessionSpawned}
       cwd={cwd}
-      isGenericTerminal={isGenericTerminal}
     />
   );
 }
@@ -64,7 +53,6 @@ function SplitNodeRenderer({
   onFocusPane,
   onSessionSpawned,
   cwd,
-  isGenericTerminal,
 }: {
   node: SplitNode;
   worktreePath: string;
@@ -73,7 +61,6 @@ function SplitNodeRenderer({
   onFocusPane: (paneId: string) => void;
   onSessionSpawned: (paneId: string, sessionId: string) => void;
   cwd?: string;
-  isGenericTerminal?: boolean;
 }) {
   if (node.type === "leaf") {
     return (
@@ -86,7 +73,6 @@ function SplitNodeRenderer({
         onFocus={() => onFocusPane(node.id)}
         onSessionSpawned={(sessionId) => onSessionSpawned(node.id, sessionId)}
         cwd={cwd}
-        isGenericTerminal={isGenericTerminal}
       />
     );
   }
@@ -111,7 +97,6 @@ function SplitNodeRenderer({
           onFocusPane={onFocusPane}
           onSessionSpawned={onSessionSpawned}
           cwd={cwd}
-          isGenericTerminal={isGenericTerminal}
         />
       </ResizablePanel>
       <ResizableHandle withHandle />
@@ -124,7 +109,6 @@ function SplitNodeRenderer({
           onFocusPane={onFocusPane}
           onSessionSpawned={onSessionSpawned}
           cwd={cwd}
-          isGenericTerminal={isGenericTerminal}
         />
       </ResizablePanel>
     </ResizablePanelGroup>
@@ -140,7 +124,6 @@ function LeafPane({
   onFocus,
   onSessionSpawned,
   cwd,
-  isGenericTerminal,
 }: {
   paneId: string;
   paneType: "agent" | "shell";
@@ -150,129 +133,42 @@ function LeafPane({
   onFocus: () => void;
   onSessionSpawned: (sessionId: string) => void;
   cwd?: string;
-  isGenericTerminal?: boolean;
 }) {
   const handleRestart = useCallback(() => {
     if (!sessionId) return;
     invoke("pty_kill", { sessionId }).catch(() => {});
     releaseCachedTerminal(sessionId);
-    if (isGenericTerminal) {
-      const { [paneId]: _, ...remaining } = useDataStore.getState().generalTerminalPaneSessions;
-      useDataStore.getState().setGeneralTerminalPaneSessions(remaining);
-    } else {
-      const data = useDataStore.getState().getWorktreeDataState(worktreePath);
-      const { [paneId]: _, ...remaining } = data.paneSessions;
-      useDataStore.getState().updateWorktreeDataState(worktreePath, { paneSessions: remaining });
-    }
-  }, [sessionId, paneId, worktreePath, isGenericTerminal]);
+    const { [paneId]: _, ...remaining } =
+      useDataStore.getState().generalTerminalPaneSessions;
+    useDataStore.getState().setGeneralTerminalPaneSessions(remaining);
+  }, [sessionId, paneId]);
 
   useAppHotkey("RESTART_SESSION", handleRestart, { enabled: isFocused }, [handleRestart]);
 
-  // Auto-spawn PTY session when leaf has no session
+  // Auto-spawn PTY session when leaf has no session. This renderer backs the
+  // generic terminal only: no worktree env vars and no agent auto-launch.
   const spawningRef = useRef(false);
   const spawnCwd = cwd ?? worktreePath;
   useEffect(() => {
     if (sessionId || spawningRef.current) return;
     spawningRef.current = true;
 
-    if (!isGenericTerminal) {
-      // Best-effort refresh of the linked issue's context for the agent. The
-      // backend resolves the project's tracker, so this covers Linear and Jira.
-      const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
-      invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath })
-        .then((issue) => {
-          if (issue) {
-            invoke("write_issue_context", {
-              projectPath,
-              issueId: issue.issue_id,
-              worktreePath,
-              force: false,
-            }).catch(() => {});
-          }
-        })
-        .catch(() => {});
-    }
-
     const ptyId = paneSessionId(paneId);
-
-    if (isGenericTerminal) {
-      // Generic terminal: no worktree-specific env vars, no agent auto-launch
-      invoke<boolean>("pty_spawn", {
-        sessionId: ptyId,
-        cwd: spawnCwd,
-        command: null,
-        envVars: {},
+    invoke<boolean>("pty_spawn", {
+      sessionId: ptyId,
+      cwd: spawnCwd,
+      command: null,
+      envVars: {},
+    })
+      .then(() => {
+        onSessionSpawned(ptyId);
       })
-        .then(() => {
-          onSessionSpawned(ptyId);
-        })
-        .catch((err) => {
-          console.error("Failed to spawn PTY:", err);
-          spawningRef.current = false;
-        });
-    } else {
-      getHookPort().then(async (hookPort) => {
-        const agent = await resolveAgent(worktreePath);
-        let extraEnv: Record<string, string> = {};
-        try {
-          extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
-            worktreePath,
-            agent,
-          });
-        } catch (err) {
-          console.warn("Failed to prepare agent config:", err);
-        }
-        invoke<boolean>("pty_spawn", {
-          sessionId: ptyId,
-          cwd: spawnCwd,
-          command: null,
-          envVars: {
-            IMPALA_HOOK_PORT: String(hookPort),
-            IMPALA_WORKTREE_PATH: worktreePath,
-            ...extraEnv,
-          },
-        })
-          .then(async (isNew) => {
-            onSessionSpawned(ptyId);
-            if (!isNew) {
-              // Re-attaching to a PTY that survived restart — its shell is past
-              // prompt-1 by now, so don't wait on a marker that won't arrive.
-              markShellReady(ptyId);
-            }
-            if (paneType === "agent" && isNew) {
-              const launched = useUIStore.getState().getWorktreeNavState(worktreePath).agentLaunched;
-              const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
-              const flags = await resolveFlags(agent, projectPath);
-              const cmd = buildLaunchCommand(agent, flags, launched);
-              const encoded = btoa(
-                Array.from(new TextEncoder().encode(cmd), (b) =>
-                  String.fromCharCode(b)
-                ).join("")
-              );
-
-              // Wait for the shell to finish sourcing rc files before writing.
-              // In release builds, pty_spawn resolves before zsh is interactive,
-              // and writing immediately would dump raw bytes into the pre-prompt
-              // input buffer.
-              const reason = await awaitShellReady(ptyId);
-              if (reason === "timed_out") {
-                console.warn(
-                  `[pty] shell readiness timed out for ${ptyId}; writing anyway`,
-                );
-              }
-
-              invoke("pty_write", { sessionId: ptyId, data: encoded }).catch(() => {});
-              useUIStore.getState().updateWorktreeNavState(worktreePath, { agentLaunched: true });
-            }
-          })
-          .catch((err) => {
-            console.error("Failed to spawn PTY:", err);
-            spawningRef.current = false;
-          });
+      .catch((err) => {
+        console.error("Failed to spawn PTY:", err);
+        spawningRef.current = false;
       });
-    }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: backend deduplicates spawns
-  }, [paneId, paneType, worktreePath, sessionId, isGenericTerminal, spawnCwd]);
+  }, [paneId, sessionId, spawnCwd]);
 
   return (
     <div
@@ -314,4 +210,3 @@ function LeafPane({
     </div>
   );
 }
-

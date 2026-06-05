@@ -314,7 +314,6 @@ export function MainView() {
                   tree={generalTerminalSplitTree}
                   worktreePath={homeDirPath}
                   cwd={homeDirPath}
-                  isGenericTerminal
                   focusedPaneId={generalTerminalFocusedPaneId}
                   paneSessions={generalTerminalPaneSessions}
                   onFocusPane={handleGeneralTerminalFocusPane}

@@ -60,7 +60,7 @@ interface TabDescriptor {
   id: string;
   label: string;
   kind: TabKind;
-  useContinueFlag: boolean;
+  isPrimaryAgent: boolean;
   paneId: string;
   isSystem: boolean;
 }
@@ -153,7 +153,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         id: RUN_PANE_ID,
         label: "Run",
         kind: "terminal",
-        useContinueFlag: false,
+        isPrimaryAgent: false,
         paneId: RUN_PANE_ID,
         isSystem: true,
       });
@@ -162,7 +162,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       id: AGENT_PANE_ID,
       label: "Agent",
       kind: "agent",
-      useContinueFlag: true,
+      isPrimaryAgent: true,
       paneId: AGENT_PANE_ID,
       isSystem: true,
     });
@@ -171,7 +171,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         id: t.id,
         label: t.label,
         kind: t.kind,
-        useContinueFlag: false,
+        isPrimaryAgent: false,
         paneId: userTabPaneId(t.id),
         isSystem: false,
       });
@@ -312,7 +312,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         <TabBody
           paneId={AGENT_PANE_ID}
           kind="agent"
-          useContinueFlag
+          isPrimaryAgent
           worktreePath={worktreePath}
           sessionId={paneSessions[AGENT_PANE_ID] ?? null}
           isActive={isActive}
@@ -512,7 +512,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                 <TabBody
                   paneId={t.paneId}
                   kind={t.kind === "agent" ? "agent" : "terminal"}
-                  useContinueFlag={t.useContinueFlag}
+                  isPrimaryAgent={t.isPrimaryAgent}
                   worktreePath={worktreePath}
                   sessionId={paneSessions[t.paneId] ?? null}
                   isActive={isActive}
@@ -529,20 +529,21 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 /**
  * Renders one tab body. Lazy-spawns the PTY on first mount.
  * Agent tabs additionally write the agent's launch command on first spawn.
- * `useContinueFlag` controls whether the primary Agent tab resumes the
- * prior session.
+ * `isPrimaryAgent` marks the worktree's main Agent tab — the one auto-launched
+ * once (on first open) and given the linked issue's initial prompt. Secondary
+ * agent panes always launch bare.
  */
 const TabBody = memo(function TabBody({
   paneId,
   kind,
-  useContinueFlag,
+  isPrimaryAgent,
   worktreePath,
   sessionId,
   isActive,
 }: {
   paneId: string;
   kind: "terminal" | "agent";
-  useContinueFlag: boolean;
+  isPrimaryAgent: boolean;
   worktreePath: string;
   sessionId: string | null;
   isActive: boolean;
@@ -557,7 +558,7 @@ const TabBody = memo(function TabBody({
     // feeds the agent's initial prompt on a fresh launch, and its issue_id
     // feeds the context-file refresh.
     const issuePromise: Promise<WorktreeIssue | null> =
-      kind === "agent" && useContinueFlag
+      kind === "agent" && isPrimaryAgent
         ? invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath }).catch(
             () => null,
           )
@@ -567,7 +568,7 @@ const TabBody = memo(function TabBody({
     // backend-side, so usually a no-op. We await it later before building
     // the launch command so the file is current when the agent reads it.
     const refreshPromise: Promise<void> = (async () => {
-      if (kind !== "agent" || !useContinueFlag) return;
+      if (kind !== "agent" || !isPrimaryAgent) return;
       const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
       const issue = await issuePromise;
       if (!issue) return;
@@ -626,22 +627,28 @@ const TabBody = memo(function TabBody({
 
           if (kind === "agent" && isNew) {
             const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
-            const agentLaunched = nav.agentLaunched;
+
+            // The PTY daemon keeps live agent sessions across normal app
+            // restarts (isNew=false → reattach above). A fresh PTY for the
+            // primary agent that was already launched means the daemon lost
+            // the session (crash / reboot / version upgrade); leave the shell
+            // bare rather than relaunching. The agent is auto-launched exactly
+            // once per worktree — on first open.
+            if (isPrimaryAgent && nav.agentLaunched) return;
 
             const flags = await resolveFlags(agent, projectPath);
-            const launched = useContinueFlag && agentLaunched;
 
-            // On a fresh launch with a linked Linear issue, point the agent
-            // at the issue context file via its initial prompt so it reads
-            // the issue body on demand instead of relying on autoloaded
+            // On first launch with a linked issue, point the agent at the
+            // issue context file via its initial prompt so it reads the issue
+            // body on demand instead of relying on autoloaded
             // CLAUDE.local.md / AGENTS.md.
             await refreshPromise;
-            const issue = !launched ? await issuePromise : null;
+            const issue = await issuePromise;
             const initialPrompt = issue
               ? `Read the linear issue from @docs/issues/${issue.identifier}.md`
               : undefined;
 
-            const cmd = buildLaunchCommand(agent, flags, launched, initialPrompt);
+            const cmd = buildLaunchCommand(agent, flags, initialPrompt);
             const encoded = encodePtyInput(cmd);
 
             // Wait for the shell to finish sourcing rc files before writing.
@@ -659,7 +666,7 @@ const TabBody = memo(function TabBody({
               () => {},
             );
 
-            if (useContinueFlag && !agentLaunched) {
+            if (isPrimaryAgent) {
               useUIStore
                 .getState()
                 .updateWorktreeNavState(worktreePath, { agentLaunched: true });
@@ -671,7 +678,7 @@ const TabBody = memo(function TabBody({
           spawningRef.current = false;
         });
     });
-  }, [paneId, kind, useContinueFlag, worktreePath, sessionId]);
+  }, [paneId, kind, isPrimaryAgent, worktreePath, sessionId]);
 
   const handleRestart = useCallback(() => {
     if (!sessionId) return;
@@ -761,7 +768,7 @@ function SplitNodeRenderer({
         <TabBody
           paneId={node.id}
           kind={paneKind}
-          useContinueFlag={false}
+          isPrimaryAgent={false}
           worktreePath={worktreePath}
           sessionId={paneSessions[node.id] ?? null}
           isActive={isActive && isFocused}

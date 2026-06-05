@@ -17,30 +17,15 @@ export async function resolveAgent(worktreePath: string): Promise<Agent> {
 
 /**
  * Build the shell command string written to the PTY to launch the agent.
- * `initialPrompt`, when provided on a fresh launch, is shell-quoted and
- * passed as the agent's positional `[prompt]` argument so it becomes the
- * first user message. Resume paths (--continue / resume --last) ignore it.
+ * `initialPrompt`, when provided, is shell-quoted and passed as the agent's
+ * positional `[prompt]` argument so it becomes the first user message.
  */
 export function buildLaunchCommand(
   agent: Agent,
   flags: string,
-  launched: boolean,
   initialPrompt?: string,
 ): string {
-  if (agent === "claude") {
-    const parts = ["claude"];
-    if (flags.trim()) parts.push(flags.trim());
-    if (launched) parts.push("--continue");
-    else if (initialPrompt) parts.push(shellQuote(initialPrompt));
-    return parts.join(" ") + "\n";
-  }
-  // codex
-  if (launched) {
-    const parts = ["codex", "resume", "--last"];
-    if (flags.trim()) parts.push(flags.trim());
-    return parts.join(" ") + "\n";
-  }
-  const parts = ["codex"];
+  const parts: string[] = [agent];
   if (flags.trim()) parts.push(flags.trim());
   if (initialPrompt) parts.push(shellQuote(initialPrompt));
   return parts.join(" ") + "\n";
