@@ -124,10 +124,23 @@ impl IssueTracker for JiraTracker {
 
     fn search(&self, query: &str) -> Result<Vec<Issue>, String> {
         let sanitized = query.replace('\\', "").replace('"', "");
-        if sanitized.trim().is_empty() {
+        let trimmed = sanitized.trim();
+        if trimmed.is_empty() {
             return Ok(Vec::new());
         }
-        let jql = format!("text ~ \"{}*\" ORDER BY updated DESC", sanitized.trim());
+        // `text ~` only searches summary/description/comments, so a bare issue
+        // key like "SBSTR-7" finds nothing. When the query is key-shaped, try an
+        // exact key lookup first; fall back to text search if it's not a real key
+        // (`key = ...` 400s on a nonexistent key, so swallow that and degrade).
+        if looks_like_issue_key(trimmed) {
+            let jql = format!("key = \"{}\" ORDER BY updated DESC", trimmed.to_uppercase());
+            if let Ok(issues) = self.search_jql(&jql, "summary,status", 20) {
+                if !issues.is_empty() {
+                    return Ok(issues);
+                }
+            }
+        }
+        let jql = format!("text ~ \"{}*\" ORDER BY updated DESC", trimmed);
         self.search_jql(&jql, "summary,status", 20)
     }
 
@@ -271,6 +284,19 @@ fn first_error(body: &str) -> String {
         }
     }
     body.chars().take(200).collect()
+}
+
+/// True for a bare Jira issue key like `SBSTR-7`: a project key (a letter then
+/// letters/digits), a hyphen, then digits. These are matched by `key =`, not the
+/// `text ~` operator used for free-text search.
+fn looks_like_issue_key(s: &str) -> bool {
+    let Some((project, number)) = s.split_once('-') else {
+        return false;
+    };
+    !number.is_empty()
+        && number.chars().all(|c| c.is_ascii_digit())
+        && project.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && project.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// Percent-encode a query-string value (Jira JQL contains spaces, quotes, `=`).
@@ -519,6 +545,19 @@ mod tests {
         );
         // No usable title → key only.
         assert_eq!(derive_branch_name("RAC-9", "***"), "RAC-9");
+    }
+
+    #[test]
+    fn recognizes_bare_issue_keys() {
+        assert!(looks_like_issue_key("SBSTR-7"));
+        assert!(looks_like_issue_key("sbstr-7")); // uppercased before the JQL
+        assert!(looks_like_issue_key("RAC2-45")); // digits allowed in project key
+        // Free text, partial keys, and malformed keys fall through to text search.
+        assert!(!looks_like_issue_key("opname start"));
+        assert!(!looks_like_issue_key("SBSTR-"));
+        assert!(!looks_like_issue_key("SBSTR"));
+        assert!(!looks_like_issue_key("7-SBSTR"));
+        assert!(!looks_like_issue_key("SBSTR-7a"));
     }
 
     #[test]
