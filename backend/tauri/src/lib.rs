@@ -244,25 +244,37 @@ async fn get_full_branch_diff(
     cache: tauri::State<'_, DiffCache>,
     worktree_path: String,
 ) -> Result<String, String> {
-    let key = format!("branch:{}", worktree_path);
+    // Probe the cache with a cheap base/HEAD token so the cached diff can't lag
+    // behind the (uncached) changed-files list: a moved HEAD (new commit) yields
+    // a new key and forces a fresh diff instead of serving a stale one — which
+    // is what made freshly committed files render as "New file" with no content.
+    let token = {
+        let wp = worktree_path.clone();
+        tokio::task::spawn_blocking(move || git::branch_diff_token(&wp))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))??
+    };
     {
         let mut c = cache
             .0
             .lock()
             .map_err(|e| format!("Cache lock error: {}", e))?;
-        if let Some(cached) = c.get(&key) {
+        if let Some(cached) = c.get(&format!("branch:{}:{}", worktree_path, token)) {
             return Ok(cached.clone());
         }
     }
-    let result = tokio::task::spawn_blocking(move || git::get_full_branch_diff(&worktree_path))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))??;
+    let (token, result) = {
+        let wp = worktree_path.clone();
+        tokio::task::spawn_blocking(move || git::get_full_branch_diff(&wp))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))??
+    };
     {
         let mut c = cache
             .0
             .lock()
             .map_err(|e| format!("Cache lock error: {}", e))?;
-        c.put(key, result.clone());
+        c.put(format!("branch:{}:{}", worktree_path, token), result.clone());
     }
     Ok(result)
 }
@@ -276,8 +288,17 @@ fn invalidate_branch_cache(
         .0
         .lock()
         .map_err(|e| format!("Cache lock error: {}", e))?;
-    let key = format!("branch:{}", worktree_path);
-    c.pop(&key);
+    // Branch-diff entries are keyed `branch:{worktree}:{token}`; drop every
+    // token variant for this worktree.
+    let prefix = format!("branch:{}:", worktree_path);
+    let stale: Vec<String> = c
+        .iter()
+        .filter(|(k, _)| k.starts_with(&prefix))
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in stale {
+        c.pop(&k);
+    }
     Ok(())
 }
 

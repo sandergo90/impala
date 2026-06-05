@@ -275,10 +275,38 @@ pub fn get_branch_diff(worktree_path: &str, file_path: &str) -> Result<String, S
     run_git(worktree_path, &["diff", &range, "--", file_path])
 }
 
-pub fn get_full_branch_diff(worktree_path: &str) -> Result<String, String> {
+/// Resolve the base-branch and HEAD commit shas for the current worktree.
+/// Cheap (a base-branch lookup plus two rev-parses); used both to compute the
+/// branch diff and to key its cache so the cache tracks the repo state.
+fn resolve_branch_shas(worktree_path: &str) -> Result<(String, String), String> {
     let base = detect_base_branch(worktree_path)?;
-    let range = format!("{}...HEAD", base);
-    run_git(worktree_path, &["diff", &range])
+    let base_sha = run_git(worktree_path, &["rev-parse", &base])?
+        .trim()
+        .to_string();
+    let head_sha = run_git(worktree_path, &["rev-parse", "HEAD"])?
+        .trim()
+        .to_string();
+    Ok((base_sha, head_sha))
+}
+
+/// Cache token pinning the branch diff to the current base/HEAD state. It
+/// changes whenever HEAD moves (a new commit) or the base advances, so a cache
+/// keyed by it can never serve a diff that lags behind the (uncached)
+/// changed-files list — the lag that made freshly committed files render as
+/// "New file" with no content.
+pub fn branch_diff_token(worktree_path: &str) -> Result<String, String> {
+    let (base_sha, head_sha) = resolve_branch_shas(worktree_path)?;
+    Ok(format!("{base_sha}...{head_sha}"))
+}
+
+/// Full `base...HEAD` diff alongside its cache token (see [`branch_diff_token`]).
+/// Both derive from one sha resolution so the returned diff and token always
+/// describe the same snapshot.
+pub fn get_full_branch_diff(worktree_path: &str) -> Result<(String, String), String> {
+    let (base_sha, head_sha) = resolve_branch_shas(worktree_path)?;
+    let range = format!("{base_sha}...{head_sha}");
+    let diff = run_git(worktree_path, &["diff", &range])?;
+    Ok((format!("{base_sha}...{head_sha}"), diff))
 }
 
 pub fn get_file_at_ref(
@@ -966,6 +994,46 @@ mod tests {
         assert_eq!(
             copy_worktree_includes(repo.to_str().unwrap(), repo.to_str().unwrap()).unwrap(),
             0,
+        );
+    }
+
+    #[test]
+    fn branch_diff_token_changes_when_head_moves() {
+        // The branch-diff cache is keyed by this token. A new commit must change
+        // it so the cache misses and recomputes — otherwise a freshly committed
+        // file appears in the (uncached) changed-files list with no patch and
+        // renders as "New file" with no content.
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        git(repo, &["init", "-q", "-b", "main"]);
+        git(repo, &["config", "user.email", "t@example.com"]);
+        git(repo, &["config", "user.name", "Tester"]);
+        git(repo, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.txt"), "1\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "base"]);
+        git(repo, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.join("b.txt"), "2\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "c1"]);
+
+        let path = repo.to_str().unwrap();
+        let (token1, diff1) = get_full_branch_diff(path).unwrap();
+        assert!(diff1.contains("b.txt"));
+
+        // New commit adds a file: the token must change and the fresh diff must
+        // include the new file (the regression we're guarding against).
+        std::fs::write(repo.join("c.txt"), "3\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "c2"]);
+
+        let token2 = branch_diff_token(path).unwrap();
+        assert_ne!(token1, token2, "token must change after a commit");
+
+        let (_token3, diff2) = get_full_branch_diff(path).unwrap();
+        assert!(
+            diff2.contains("c.txt"),
+            "fresh diff must include the newly committed file",
         );
     }
 }
