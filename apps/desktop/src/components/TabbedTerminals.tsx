@@ -650,7 +650,7 @@ const TabBody = memo(function TabBody({
             await refreshPromise;
             const issue = await issuePromise;
             const initialPrompt = issue
-              ? `Read the linear issue from @docs/issues/${issue.identifier}.md`
+              ? `Read the ${issue.provider} issue from @docs/issues/${issue.identifier}.md`
               : undefined;
 
             const cmd = buildLaunchCommand(agent, flags, initialPrompt);
