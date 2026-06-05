@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>🐴 Impala (browser dev)</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--
+      Stand in for the entire Tauri bridge so the real client boots in plain
+      Chrome, where the React DevTools + Chrome performance profiler work (they
+      cannot run in Tauri's WKWebView). This classic inline script runs BEFORE
+      the deferred module below, so __TAURI_INTERNALS__ exists before any app or
+      @tauri-apps/api code touches it. invoke() is routed to dev/mock-backend.ts;
+      window/event/notification APIs become harmless stubs. See dev/README.md.
+    -->
+    <script>
+      (function () {
+        var MOCK = "http://localhost:8787/"; // must match dev/mock-backend.ts PORT
+        var cbId = 0;
+        window.__TAURI_INTERNALS__ = {
+          metadata: {
+            currentWindow: { label: "main" },
+            currentWebview: { label: "main", windowLabel: "main" },
+          },
+          invoke: function (cmd, args) {
+            return fetch(MOCK + cmd, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(args || {}),
+            }).then(function (r) { return r.json(); });
+          },
+          transformCallback: function (cb, once) {
+            var id = ++cbId;
+            Object.defineProperty(window, "_" + id, {
+              value: function (result) {
+                if (once) Reflect.deleteProperty(window, "_" + id);
+                return cb && cb(result);
+              },
+              writable: false,
+              configurable: true,
+            });
+            return id;
+          },
+          convertFileSrc: function (path) { return path; },
+          unregisterCallback: function () {},
+        };
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
