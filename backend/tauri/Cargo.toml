@@ -18,27 +18,27 @@ devtools = ["tauri/devtools"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-toml = "0.8"
+toml = "1"
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api", "protocol-asset", "image-png"] }
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 tauri-plugin-dialog = "2.7.1"
-rusqlite = { version = "0.39.0", features = ["bundled"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
 uuid = { version = "1.22.0", features = ["v4"] }
 chrono = "0.4.44"
 portable-pty = "0.9.0"
 base64 = "0.22.1"
-lru = "0.16.3"
+lru = "0.18.0"
 tauri-plugin-window-state = "2.4.1"
 notify = { version = "8.2.0", features = ["macos_fsevent"] }
 tauri-plugin-fs = "2"
 dirs = "6"
 ignore = "0.4"
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "fs", "macros", "time", "sync"] }
 tiny_http = "0.12"
 urlencoding = "2"
@@ -46,7 +46,7 @@ tauri-plugin-notification = "2"
 impala-daemon-shared = { path = "shared" }
 anyhow = "1"
 libc = "0.2"
-toml = "0.8"
+toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "registry"] }
 tracing-appender = "0.2"

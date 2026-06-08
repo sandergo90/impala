@@ -218,7 +218,8 @@ fn codex_hook_trusted_hash(event_name: &str, command: &str) -> Result<String, St
     let bytes = serde_json::to_vec(&canonical)
         .map_err(|e| format!("serialize hook identity json: {}", e))?;
     let digest = Sha256::digest(bytes);
-    Ok(format!("sha256:{:x}", digest))
+    let hex: String = digest.iter().map(|b| format!("{:02x}", b)).collect();
+    Ok(format!("sha256:{}", hex))
 }
 
 fn codex_config_key_source(config_path: &Path) -> PathBuf {

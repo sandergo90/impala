@@ -661,7 +661,12 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
                     // Resize the parser first so subsequent snapshots
                     // reflect the new grid; vt100 rewraps the current
                     // screen under the hood.
-                    s.state.lock().unwrap().parser.set_size(rows, cols);
+                    s.state
+                        .lock()
+                        .unwrap()
+                        .parser
+                        .screen_mut()
+                        .set_size(rows, cols);
                     let master = s.master.lock().unwrap();
                     match master.resize(PtySize {
                         rows,
