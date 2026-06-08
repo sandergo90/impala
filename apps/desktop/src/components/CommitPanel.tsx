@@ -345,6 +345,40 @@ export function CommitPanel() {
     }
   }, [applyDiffPayload, loadDiffPayload, updateData, worktreePath]);
 
+  // Keep the +/- counts on the section buttons (Last Turn, Uncommitted, All
+  // Changes) fresh for the sections that aren't currently selected —
+  // refreshCurrentView only updates the active one. Without this, a section's
+  // stats stay stale until it's clicked.
+  const refreshSectionStats = useCallback(async () => {
+    if (!worktreePath) return;
+    const mode = useUIStore.getState().getWorktreeNavState(worktreePath).viewMode;
+    const hasSnapshot = useDataStore.getState().getWorktreeDataState(worktreePath).hasLastTurnSnapshot;
+
+    const fetchStat = async (
+      command: string,
+      key: "uncommittedStats" | "allChangesStats" | "lastTurnStats",
+    ): Promise<void> => {
+      try {
+        const diff = await invoke<string>(command, { worktreePath });
+        const stats = countDiffStats(diff);
+        const current = useDataStore.getState().getWorktreeDataState(worktreePath);
+        if (!sameStats(current[key], stats)) {
+          const updates: Partial<WorktreeDataState> = {};
+          updates[key] = stats;
+          updateData(updates);
+        }
+      } catch {
+        // Silently fail on auto-refresh
+      }
+    };
+
+    const jobs: Promise<void>[] = [];
+    if (mode !== "uncommitted") jobs.push(fetchStat("get_uncommitted_diff", "uncommittedStats"));
+    if (mode !== "all-changes") jobs.push(fetchStat("get_full_branch_diff", "allChangesStats"));
+    if (mode !== "last-turn" && hasSnapshot) jobs.push(fetchStat("get_last_turn_diff", "lastTurnStats"));
+    await Promise.all(jobs);
+  }, [worktreePath, updateData]);
+
   const runAutoRefresh = useCallback(async () => {
     if (autoRefreshInFlightRef.current) {
       autoRefreshQueuedRef.current = true;
@@ -355,12 +389,12 @@ export function CommitPanel() {
     try {
       do {
         autoRefreshQueuedRef.current = false;
-        await refreshCurrentView();
+        await Promise.all([refreshCurrentView(), refreshSectionStats()]);
       } while (autoRefreshQueuedRef.current);
     } finally {
       autoRefreshInFlightRef.current = false;
     }
-  }, [refreshCurrentView]);
+  }, [refreshCurrentView, refreshSectionStats]);
 
   const scheduleAutoRefresh = useCallback((delay = AUTO_REFRESH_DELAY_MS) => {
     if (autoRefreshTimerRef.current !== null) {
