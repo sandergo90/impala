@@ -364,9 +364,16 @@ fn ensure_user_codex_hooks() -> Result<Vec<CodexHookRegistration>, String> {
     let user_codex = dirs::home_dir()
         .ok_or_else(|| "no home dir".to_string())?
         .join(".codex");
-    fs::create_dir_all(&user_codex).map_err(|e| format!("mkdir ~/.codex: {}", e))?;
+    ensure_codex_hooks_in(&user_codex)
+}
 
-    let hooks_path = user_codex.join("hooks.json");
+/// Write/merge Impala's status hooks into <codex_dir>/hooks.json, returning
+/// registrations keyed to that file.
+fn ensure_codex_hooks_in(codex_dir: &Path) -> Result<Vec<CodexHookRegistration>, String> {
+    fs::create_dir_all(codex_dir)
+        .map_err(|e| format!("mkdir {}: {}", codex_dir.display(), e))?;
+
+    let hooks_path = codex_dir.join("hooks.json");
     let mut root: serde_json::Value = if hooks_path.exists() {
         let contents =
             fs::read_to_string(&hooks_path).map_err(|e| format!("read hooks.json: {}", e))?;
@@ -485,6 +492,8 @@ fn build_codex_config(
         .or_insert_with(|| Value::Table(toml::value::Table::new()))
         .as_table_mut()
         .ok_or_else(|| "hooks in ~/.codex/config.toml is not a table".to_string())?;
+    // Seeded ~/.codex trust keys a hooks.json Codex won't load here; re-trust ours below.
+    hooks.remove("state");
     for registration in hook_registrations {
         trust_codex_hook(
             hooks,
@@ -518,9 +527,11 @@ pub fn write_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<Path
     link_codex_auth(&codex_home)?;
 
     let config_path = codex_home.join("config.toml");
-    let hook_registrations = ensure_user_codex_hooks()?;
-    write_user_codex_config(&hook_registrations, mcp_binary)?;
-    let toml_out = build_codex_config(worktree_path, mcp_binary, &hook_registrations)?;
+    // Codex loads hooks from <CODEX_HOME>/hooks.json, so write+trust them there too.
+    let user_registrations = ensure_user_codex_hooks()?;
+    write_user_codex_config(&user_registrations, mcp_binary)?;
+    let worktree_registrations = ensure_codex_hooks_in(&codex_home)?;
+    let toml_out = build_codex_config(worktree_path, mcp_binary, &worktree_registrations)?;
 
     fs::write(&config_path, toml_out).map_err(|e| format!("write codex config.toml: {}", e))?;
 
