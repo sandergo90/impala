@@ -115,13 +115,11 @@
   }
 }
 
-/* Plan markdown rendering */
-.plan-markdown,
+/* Markdown preview rendering */
 .markdown-preview {
   color: var(--foreground);
 }
 
-.plan-markdown h1,
 .markdown-preview h1 {
   font-size: 2.25rem;
   font-weight: 700;
@@ -131,7 +129,6 @@
   letter-spacing: -0.025em;
 }
 
-.plan-markdown h2,
 .markdown-preview h2 {
   font-size: 1.5rem;
   font-weight: 600;
@@ -142,7 +139,6 @@
   border-bottom: 1px solid var(--border);
 }
 
-.plan-markdown h3,
 .markdown-preview h3 {
   font-size: 1.25rem;
   font-weight: 600;
@@ -151,9 +147,6 @@
   margin-bottom: 0.5rem;
 }
 
-.plan-markdown h4,
-.plan-markdown h5,
-.plan-markdown h6,
 .markdown-preview h4,
 .markdown-preview h5,
 .markdown-preview h6 {
@@ -164,15 +157,12 @@
   margin-bottom: 0.5rem;
 }
 
-.plan-markdown p,
 .markdown-preview p {
   margin-top: 0;
   margin-bottom: 1rem;
   line-height: 1.7;
 }
 
-.plan-markdown ul,
-.plan-markdown ol,
 .markdown-preview ul,
 .markdown-preview ol {
   margin-top: 0;
@@ -180,66 +170,36 @@
   padding-left: 1.5rem;
 }
 
-.plan-markdown li,
 .markdown-preview li {
   margin-bottom: 0.25rem;
   line-height: 1.7;
 }
 
-.plan-markdown ul,
 .markdown-preview ul {
   list-style-type: disc;
 }
 
-.plan-markdown ol,
 .markdown-preview ol {
   list-style-type: decimal;
 }
 
-.plan-markdown li > ul,
-.plan-markdown li > ol,
 .markdown-preview li > ul,
 .markdown-preview li > ol {
   margin-top: 0.25rem;
   margin-bottom: 0;
 }
 
-.plan-markdown strong,
 .markdown-preview strong {
   font-weight: 600;
 }
 
-.plan-markdown em,
 .markdown-preview em {
   font-style: italic;
 }
 
-.plan-markdown del,
 .markdown-preview del {
   text-decoration: line-through;
   opacity: 0.7;
-}
-
-.plan-annotation-highlight {
-  background-color: var(--highlight-active);
-  border-bottom: 2px solid var(--sidebar-primary);
-  cursor: pointer;
-  border-radius: 2px;
-  transition: background-color 0.15s;
-}
-
-.plan-annotation-highlight:hover {
-  background-color: color-mix(in srgb, var(--sidebar-primary) 40%, transparent);
-}
-
-.plan-annotation-highlight.focused {
-  background-color: color-mix(in srgb, var(--sidebar-primary) 50%, transparent);
-  border-bottom-width: 3px;
-}
-
-.plan-annotation-highlight.comment {
-  background-color: var(--highlight-active);
-  border-bottom-color: var(--sidebar-primary);
 }
 
 .annotation-highlight {

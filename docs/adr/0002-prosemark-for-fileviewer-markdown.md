@@ -2,7 +2,7 @@
 
 `FileViewer` previously offered a `Rendered` / `Raw` toggle: rendered markdown went through `react-markdown` + `remark-gfm` + `react-syntax-highlighter`; raw markdown went through impala's existing CodeMirror-based `CodeEditor`. We are replacing both modes with a single CodeMirror 6 view built on `@prosemark/core`, modeled on `joelbqz/writer-computer`'s editor. The same view both renders the markdown (headings styled, tables rendered as `<table>` widgets, mermaid blocks rendered, fenced code highlighted via `@codemirror/language-data`) and lets the user edit it; markdown syntax marks (`#`, `**`, `-`) collapse into rendered output, and reappear at the caret. Edits flow through the existing `useEditorDocsStore` save/dirty/watcher plumbing, so save semantics for markdown match every other editable file in `FileViewer`.
 
-This applies only to `FileViewer`. `PlanView` and `PlanBrowser` keep `react-markdown` because their `usePlanHighlighter` annotation overlay walks the rendered React DOM via `@plannotator/web-highlighter` — a model fundamentally incompatible with CodeMirror widget decorations. Migrating those is a separate, larger project.
+This applies only to `FileViewer`.
 
 ## Why
 
@@ -15,9 +15,7 @@ This applies only to `FileViewer`. `PlanView` and `PlanBrowser` keep `react-mark
 
 - **New `@prosemark/core` dependency at v0.0.7** — pre-1.0 single-maintainer package. Pinned to the exact version; breaking changes between 0.0.x releases are expected and we'll evaluate each upgrade.
 - **Two CodeMirror configurations live side-by-side.** `CodeEditor.tsx` continues to handle non-markdown text files; the new prosemark editor handles `.md` / `.mdx` / `.markdown`. They share no code by design — different concerns, different decorations.
-- **Fenced code blocks look different in `FileViewer` (CodeMirror highlight) than in `PlanView` (Prism).** Acceptable because the surfaces are visually distinct already, but it is a real inconsistency a future reader will notice.
 - **New theme tokens** — `--color-link`, `--color-code-background`, `--color-editor-selection`, and a small set of prosemark-syntax tokens — are added to impala's theme system. Default-light and default-dark themes ship values for them; user `customThemes` fall back to the default values when they don't define their own.
 - **Linear attachment images in worktree `.md` files now render via a `WidgetType` instead of a React component.** Same `fetch_linear_attachment` Tauri command, but the loading/error states are rendered imperatively into the widget DOM. Behavior is preserved.
 - **Relative non-markdown links improve.** Today, clicking a relative `.pdf` or `.png` link in a worktree `.md` does nothing useful. The new editor routes those through `openPath` (system default app), markdown links through `openFileTab`, externals through `openUrl`.
 - **Frontmatter lands as a follow-up.** PR 1 ships the renderer swap; PR 2 adds writer-computer's `FrontmatterPanel` above the editor and splits the document buffer into frontmatter + body. Sequencing keeps the buffer-model change isolated from the renderer change.
-- **`PlanView` / `PlanBrowser` still depend on `react-markdown`, `remark-gfm`, `react-syntax-highlighter`, and `markdownComponents.tsx`.** No bundle wins from this change for those surfaces.

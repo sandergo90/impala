@@ -75,8 +75,7 @@ function smartDefault(cmd: string): unknown {
     cmd.startsWith("check_") ||
     cmd.endsWith("_files") ||
     cmd.endsWith("_commits") ||
-    cmd.endsWith("_annotations") ||
-    cmd.endsWith("_plans")
+    cmd.endsWith("_annotations")
   ) {
     return [];
   }

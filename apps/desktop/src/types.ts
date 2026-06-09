@@ -53,45 +53,6 @@ export interface NewAnnotation {
   code_context?: string;
 }
 
-export interface Plan {
-  id: string;
-  plan_path: string;
-  worktree_path: string;
-  title: string | null;
-  status: "pending" | "approved" | "changes_requested" | "completed";
-  version: number;
-  content: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PlanFile {
-  file_name: string;
-  content: string;
-}
-
-export interface PlanAnnotation {
-  id: string;
-  plan_path: string;
-  worktree_path: string;
-  file_name: string | null;
-  original_text: string;
-  highlight_source: string | null;
-  body: string;
-  resolved: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface NewPlanAnnotation {
-  plan_path: string;
-  worktree_path: string;
-  file_name: string | null;
-  original_text: string;
-  highlight_source: string | null;
-  body: string;
-}
-
 export type SplitNode =
   | { type: "leaf"; id: string; paneType: "agent" | "shell" }
   | {
@@ -134,13 +95,11 @@ export interface UserTab {
 }
 
 export interface WorktreeNavState {
-  activeTab: "terminal" | "diff" | "split" | "plan";
+  activeTab: "terminal" | "diff" | "split";
   agentLaunched: boolean;
   viewMode: "commit" | "all-changes" | "uncommitted" | "last-turn";
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
-  activePlanId: string | null;
-  selectedPlanAnnotationId: string | null;
   /**
    * ID of the currently active tab inside the terminals pane.
    * `"tab-agent"` and `"tab-run"` refer to the system tabs. Any other
@@ -188,9 +147,6 @@ export interface WorktreeDataState {
   lastTurnStats: { additions: number; deletions: number };
   hasLastTurnSnapshot: boolean;
   annotations: Annotation[];
-  plans: Plan[];
-  planAnnotations: PlanAnnotation[];
-  hasPendingPlan: boolean;
   agentStatus: "idle" | "working" | "permission";
   hasUnseenResult: boolean;
   /** GitHub PR status for this worktree's branch. Undefined until first fetched. */

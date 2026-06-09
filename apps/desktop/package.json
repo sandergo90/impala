@@ -40,7 +40,6 @@
     "@lezer/highlight": "^1.2.3",
     "@pierre/diffs": "1.2.7",
     "@pierre/trees": "^1.0.0-beta.4",
-    "@plannotator/web-highlighter": "^0.8.1",
     "@sentry/react": "^10.56.0",
     "@streamdown/mermaid": "^1.0.2",
     "@tanstack/react-router": "^1.170.15",

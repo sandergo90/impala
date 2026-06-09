@@ -297,8 +297,6 @@ fn write_codex_commands(codex_home: &Path) -> Result<(), String> {
     fs::create_dir_all(&commands_dir).map_err(|e| format!("mkdir codex commands: {}", e))?;
     fs::write(commands_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
         .map_err(|e| format!("write codex impala-review.md: {}", e))?;
-    fs::write(commands_dir.join("impala-plan.md"), IMPALA_PLAN_COMMAND)
-        .map_err(|e| format!("write codex impala-plan.md: {}", e))?;
 
     Ok(())
 }
@@ -647,32 +645,6 @@ After all annotations are addressed, run the project's typecheck and lint to mak
 ## Phase 5: Summary
 
 Report fixed / already addressed / discussion resolved counts and a per-file change summary.
-"#;
-
-const IMPALA_PLAN_COMMAND: &str = r#"---
-description: Submit an implementation plan to Impala's Plan tab for user review, wait for the decision, and loop on annotations until approved.
-argument-hint: "<plan-path>"
----
-
-Run the full plan-review loop with Impala: register the plan, wait for the user's decision, handle annotations, loop until approved.
-
-## Phase 1: Register
-
-Call `mcp__impala__submit_plan_for_review` with `plan_path` (absolute path to overview.md or single task file), `title` (the feature name), and `worktree_path` (current working directory). Capture the returned `signal_path`.
-
-## Phase 2: Wait
-
-Start a background watcher on the signal file:
-
-```bash
-until [ -f "<signal_path>" ]; do sleep 2; done; cat "<signal_path>"
-```
-
-Tell the user the plan is submitted and end your turn. You'll be notified when the watcher fires.
-
-## Phase 3: Handle the Decision
-
-Call `mcp__impala__get_plan_decision`. If `approved`, stop. Otherwise: read each annotation, revise the plan in-place, call `mcp__impala__resolve_annotation` for each, then loop back to Phase 1 (auto-increments version).
 "#;
 
 /// Append entries to <worktree>/.git/info/exclude (the per-worktree

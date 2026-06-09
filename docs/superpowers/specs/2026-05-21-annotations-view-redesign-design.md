@@ -24,7 +24,7 @@ In scope: `AnnotationsPanel.tsx`, `AnnotationDisplay.tsx`, the `annotations` tab
 its create path, and the `Annotation` / `NewAnnotation` types.
 
 Out of scope: DiffView's inline annotation rendering (the comment shown inside the diff
-itself), and all PlanAnnotation components — they are unchanged.
+itself).
 
 ## Data layer
 

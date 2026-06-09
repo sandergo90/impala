@@ -7,14 +7,14 @@ A desktop app for reviewing git worktree changes. Tauri 2 + React 19 + Rust, wit
 ### Layout
 
 - `apps/desktop/` — React frontend (Vite, Tailwind v4, TanStack Router, Zustand, shadcn/ui, xterm)
-- `backend/tauri/` — Tauri backend (Rust). Workspace members in `shared/` and `daemon/`. Source files under `src/` cover annotations, git, github, linear, plans, pty, hotkeys, watcher, worktrees, etc.
+- `backend/tauri/` — Tauri backend (Rust). Workspace members in `shared/` and `daemon/`. Source files under `src/` cover annotations, git, github, linear, pty, hotkeys, watcher, worktrees, etc.
 - `backend/mcp/` — Standalone `impala-mcp` binary (stdio MCP server, bundled as a Tauri sidecar)
 - `scripts/` — `create-release.sh`, `build-mcp-sidecar.sh`, `build-pty-daemon-sidecar.sh`, `dev-sign.sh`
 - `docs/`, `plans/`, `patches/` — design docs, in-flight plans, dependency patches
 
 ### Key features
 
-Diff viewer over git worktrees, inline annotations (resolvable, surfaced via MCP), integrated terminal with split view, command palette, themes, auto-updater, plan review flow.
+Diff viewer over git worktrees, inline annotations (resolvable, surfaced via MCP), integrated terminal with split view, command palette, themes, auto-updater.
 
 ### Tooling
 
