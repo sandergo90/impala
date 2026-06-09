@@ -52,6 +52,8 @@ interface CodeEditorProps {
   value: string;
   language: string;
   readOnly?: boolean;
+  /** Render markdown as a raw source editor (no live-preview prose styling). */
+  plain?: boolean;
   className?: string;
   editorRef?: MutableRefObject<CodeEditorHandle | null>;
   onChange?: (value: string) => void;
@@ -59,7 +61,7 @@ interface CodeEditorProps {
 }
 
 export function CodeEditor({
-  value, language, readOnly = false, className, editorRef, onChange, onSave,
+  value, language, readOnly = false, plain = false, className, editorRef, onChange, onSave,
 }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -117,7 +119,7 @@ export function CodeEditor({
         ]),
         keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         saveKeymap,
-        themeCompartment.of(createCodeMirrorTheme(activeTheme, fontSize, fontFamily, language)),
+        themeCompartment.of(createCodeMirrorTheme(activeTheme, fontSize, fontFamily, language, plain)),
         languageCompartment.of([]),
         updateListener,
       ],
@@ -174,10 +176,10 @@ export function CodeEditor({
     if (!view) return;
     view.dispatch({
       effects: themeCompartment.reconfigure(
-        createCodeMirrorTheme(activeTheme, fontSize, fontFamily, language),
+        createCodeMirrorTheme(activeTheme, fontSize, fontFamily, language, plain),
       ),
     });
-  }, [activeTheme, fontSize, fontFamily, language, themeCompartment]);
+  }, [activeTheme, fontSize, fontFamily, language, plain, themeCompartment]);
 
   useEffect(() => {
     const view = viewRef.current;

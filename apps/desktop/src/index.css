@@ -2,6 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "streamdown/styles.css";
+
+/* Streamdown ships its component classes in its bundled JS; Tailwind v4 skips
+   node_modules by default, so scan it explicitly to generate those utilities
+   (used by the mermaid block rendered in the markdown preview). */
+@source "../../../node_modules/streamdown/dist/*.js";
 
 /* Force xterm's internal elements to fill the cached wrapper. Without this
    the viewport/screen can lag behind container resizes during drag, briefly
@@ -110,11 +116,13 @@
 }
 
 /* Plan markdown rendering */
-.plan-markdown {
+.plan-markdown,
+.markdown-preview {
   color: var(--foreground);
 }
 
-.plan-markdown h1 {
+.plan-markdown h1,
+.markdown-preview h1 {
   font-size: 2.25rem;
   font-weight: 700;
   line-height: 1.2;
@@ -123,7 +131,8 @@
   letter-spacing: -0.025em;
 }
 
-.plan-markdown h2 {
+.plan-markdown h2,
+.markdown-preview h2 {
   font-size: 1.5rem;
   font-weight: 600;
   line-height: 1.3;
@@ -133,7 +142,8 @@
   border-bottom: 1px solid var(--border);
 }
 
-.plan-markdown h3 {
+.plan-markdown h3,
+.markdown-preview h3 {
   font-size: 1.25rem;
   font-weight: 600;
   line-height: 1.4;
@@ -143,7 +153,10 @@
 
 .plan-markdown h4,
 .plan-markdown h5,
-.plan-markdown h6 {
+.plan-markdown h6,
+.markdown-preview h4,
+.markdown-preview h5,
+.markdown-preview h6 {
   font-size: 1rem;
   font-weight: 600;
   line-height: 1.5;
@@ -151,47 +164,58 @@
   margin-bottom: 0.5rem;
 }
 
-.plan-markdown p {
+.plan-markdown p,
+.markdown-preview p {
   margin-top: 0;
   margin-bottom: 1rem;
   line-height: 1.7;
 }
 
 .plan-markdown ul,
-.plan-markdown ol {
+.plan-markdown ol,
+.markdown-preview ul,
+.markdown-preview ol {
   margin-top: 0;
   margin-bottom: 1rem;
   padding-left: 1.5rem;
 }
 
-.plan-markdown li {
+.plan-markdown li,
+.markdown-preview li {
   margin-bottom: 0.25rem;
   line-height: 1.7;
 }
 
-.plan-markdown ul {
+.plan-markdown ul,
+.markdown-preview ul {
   list-style-type: disc;
 }
 
-.plan-markdown ol {
+.plan-markdown ol,
+.markdown-preview ol {
   list-style-type: decimal;
 }
 
 .plan-markdown li > ul,
-.plan-markdown li > ol {
+.plan-markdown li > ol,
+.markdown-preview li > ul,
+.markdown-preview li > ol {
   margin-top: 0.25rem;
   margin-bottom: 0;
 }
 
-.plan-markdown strong {
+.plan-markdown strong,
+.markdown-preview strong {
   font-weight: 600;
 }
 
-.plan-markdown em {
+.plan-markdown em,
+.markdown-preview em {
   font-style: italic;
 }
 
-.plan-markdown del {
+.plan-markdown del,
+.markdown-preview del {
   text-decoration: line-through;
   opacity: 0.7;
 }

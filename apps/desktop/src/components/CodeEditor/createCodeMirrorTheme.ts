@@ -10,13 +10,16 @@ export function createCodeMirrorTheme(
   fontSize: number,
   fontFamily: string | null,
   language?: string,
+  plain = false,
 ): Extension {
   const term = theme.terminal;
   const ui = resolveTheme(theme);
   const isDark = theme.type === "dark";
   const family = fontFamily ?? DEFAULT_DIFF_FONT_FAMILY;
   const lineHeight = `${Math.round(fontSize * 1.5)}px`;
-  const isMarkdown = language === "markdown";
+  // `plain` renders markdown as a raw source editor (no live-preview prose
+  // styling): visible gutter, no centered column, headings not resized.
+  const markdownProse = language === "markdown" && !plain;
   const muted = isDark ? term.brightBlack : term.white;
   const codeAccent = isDark ? term.brightBlue : term.blue;
   // The "brand" color of a theme — orange in Absolutely, blue in light,
@@ -40,7 +43,7 @@ export function createCodeMirrorTheme(
         fontFamily: family,
       },
       ".cm-scroller": { fontFamily: family, lineHeight, overflow: "auto" },
-      ".cm-content": isMarkdown
+      ".cm-content": markdownProse
         ? {
             caretColor: term.foreground,
             padding: "1em 1.25em",
@@ -59,7 +62,7 @@ export function createCodeMirrorTheme(
         backgroundColor: term.background,
         color: muted,
         border: "none",
-        ...(isMarkdown ? { display: "none" } : {}),
+        ...(markdownProse ? { display: "none" } : {}),
       },
       // Same hue as the selection, half the alpha — keeps the editor's
       // highlight palette cohesive (active line reads as a faint preview of
@@ -91,10 +94,11 @@ export function createCodeMirrorTheme(
     { tag: [t.invalid], color: isDark ? term.brightRed : term.red },
 
     // Markdown — inert on non-markdown languages because these tags never fire there.
-    { tag: t.heading1, fontSize: "1.6em", fontWeight: "700", color: brandColor },
-    { tag: t.heading2, fontSize: "1.35em", fontWeight: "700", color: term.foreground },
-    { tag: t.heading3, fontSize: "1.2em", fontWeight: "700", color: term.foreground },
-    { tag: [t.heading4, t.heading5, t.heading6], fontSize: "1.05em", fontWeight: "700", color: term.foreground },
+    // Heading font-sizes only apply in prose mode; the raw editor keeps uniform text.
+    { tag: t.heading1, ...(markdownProse ? { fontSize: "1.6em" } : {}), fontWeight: "700", color: brandColor },
+    { tag: t.heading2, ...(markdownProse ? { fontSize: "1.35em" } : {}), fontWeight: "700", color: term.foreground },
+    { tag: t.heading3, ...(markdownProse ? { fontSize: "1.2em" } : {}), fontWeight: "700", color: term.foreground },
+    { tag: [t.heading4, t.heading5, t.heading6], ...(markdownProse ? { fontSize: "1.05em" } : {}), fontWeight: "700", color: term.foreground },
     { tag: t.strong, fontWeight: "700", color: term.foreground },
     { tag: t.emphasis, fontStyle: "italic" },
     { tag: t.strikethrough, textDecoration: "line-through" },

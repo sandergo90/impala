@@ -6,6 +6,8 @@ import {
   oneLight,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Check, Copy } from "lucide-react";
+import { Streamdown } from "streamdown";
+import { mermaid } from "@streamdown/mermaid";
 import { useUIStore } from "../store";
 import { resolveThemeById } from "../themes/apply";
 import { isExternalHref } from "../lib/path-utils";
@@ -54,6 +56,22 @@ function CodeBlock({
       // ignore
     }
   };
+
+  // Render mermaid diagrams (matches Superset: streamdown's static renderer
+  // with the mermaid plugin) rather than syntax-highlighting the source.
+  if (language === "mermaid") {
+    return (
+      <div className="my-4">
+        <Streamdown
+          mode="static"
+          plugins={{ mermaid }}
+          mermaid={{ config: { theme: isDark ? "dark" : "default" } }}
+        >
+          {`\`\`\`mermaid\n${code}\n\`\`\``}
+        </Streamdown>
+      </div>
+    );
+  }
 
   return (
     <div className="relative group my-4">

@@ -10,7 +10,7 @@ import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { OpenInEditorButton } from "./OpenInEditorButton";
 import { RevealInFinderButton } from "./RevealInFinderButton";
 import { CodeEditor, detectLanguage, type CodeEditorHandle } from "./CodeEditor";
-import { ProseMarkEditor } from "./markdown-editor";
+import { MarkdownPreview } from "./MarkdownPreview";
 
 function isMarkdownPath(path: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(path);
@@ -55,6 +55,12 @@ export function FileViewer() {
 
   const [svgSourceMode, setSvgSourceMode] = useState(false);
   const [htmlSourceMode, setHtmlSourceMode] = useState(false);
+  // Per-file markdown view choice (rendered "preview" vs raw "source"),
+  // defaulting to preview. Keyed by docKey so switching files remembers it
+  // for the session.
+  const [markdownViewModes, setMarkdownViewModes] = useState<
+    Record<string, "preview" | "source">
+  >({});
   const [forceLoadLarge, setForceLoadLarge] = useState(false);
   const [htmlContent, setHtmlContent] = useState<string | null>(null);
   const [htmlError, setHtmlError] = useState<string | null>(null);
@@ -312,6 +318,10 @@ export function FileViewer() {
   const language = detectLanguage(selectedFilePath);
   const bufferContent = getCurrent(docKey!);
   const isMarkdown = isMarkdownPath(selectedFilePath);
+  const markdownView = docKey ? markdownViewModes[docKey] ?? "preview" : "preview";
+  const setMarkdownView = (mode: "preview" | "source") => {
+    if (docKey) setMarkdownViewModes((m) => ({ ...m, [docKey]: mode }));
+  };
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -322,6 +332,30 @@ export function FileViewer() {
             {selectedFilePath}
           </span>
           <div className="flex items-center gap-1 shrink-0 ml-2">
+            {isMarkdown && (
+              <div className="flex items-center rounded border border-border overflow-hidden mr-1">
+                <button
+                  onClick={() => setMarkdownView("preview")}
+                  className={`px-2 py-0.5 ${
+                    markdownView === "preview"
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:bg-accent/50"
+                  }`}
+                >
+                  Preview
+                </button>
+                <button
+                  onClick={() => setMarkdownView("source")}
+                  className={`px-2 py-0.5 border-l border-border ${
+                    markdownView === "source"
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:bg-accent/50"
+                  }`}
+                >
+                  Markdown
+                </button>
+              </div>
+            )}
             <OpenInEditorButton worktreePath={wtPath} filePath={selectedFilePath} />
             <RevealInFinderButton worktreePath={wtPath} filePath={selectedFilePath} />
           </div>
@@ -346,16 +380,13 @@ export function FileViewer() {
           </div>
         </div>
       )}
-      {isMarkdown ? (
-        <ProseMarkEditor
+      {isMarkdown && markdownView === "preview" ? (
+        <MarkdownPreview
           key={docKey}
-          value={bufferContent}
-          onChange={(next) => updateDraft(docKey!, next)}
-          onSave={() => void handleSave()}
+          content={bufferContent}
           filePath={selectedFilePath}
           worktreePath={wtPath!}
-          autoFocus
-          className="flex-1 min-h-0 overflow-auto"
+          className="flex-1 min-h-0"
         />
       ) : (
         <CodeEditor
@@ -363,6 +394,7 @@ export function FileViewer() {
           editorRef={editorRef}
           value={bufferContent}
           language={language}
+          plain={isMarkdown}
           onChange={(next) => updateDraft(docKey!, next)}
           onSave={handleSave}
           className="flex-1 min-h-0"
