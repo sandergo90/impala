@@ -14,8 +14,6 @@ function createDefaultNavState(): WorktreeNavState {
     viewMode: "commit",
     selectedCommit: null,
     selectedFile: null,
-    activePlanId: null,
-    selectedPlanAnnotationId: null,
     activeTerminalsTab: "tab-agent",
     setupRanAt: null,
     runStatus: "idle",
@@ -42,9 +40,6 @@ const defaultDataState: WorktreeDataState = {
   lastTurnStats: { additions: 0, deletions: 0 },
   hasLastTurnSnapshot: false,
   annotations: [],
-  plans: [],
-  planAnnotations: [],
-  hasPendingPlan: false,
   agentStatus: "idle" as const,
   hasUnseenResult: false,
 };

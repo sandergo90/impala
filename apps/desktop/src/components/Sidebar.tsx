@@ -153,16 +153,6 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
     }),
   );
 
-  const pendingPlans = useDataStore(
-    useShallow((s) => {
-      const pending: Record<string, boolean> = {};
-      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
-        pending[path] = state.hasPendingPlan ?? false;
-      }
-      return pending;
-    }),
-  );
-
   const runFailures = useUIStore(
     useShallow((s) => {
       const out: Record<string, boolean> = {};
@@ -227,7 +217,6 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
           const isActive = agentStatuses[wt.path] === "working";
           const hasUnseen = unseenResults[wt.path];
           const isPermission = agentStatuses[wt.path] === "permission";
-          const hasPendingPlan = pendingPlans[wt.path];
           const hasRunFailure = runFailures[wt.path] ?? false;
           return (
             <button
@@ -245,10 +234,6 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
               ) : hasUnseen ? (
                 <span className="w-3.5 h-3.5 flex items-center justify-center">
                   <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
-                </span>
-              ) : hasPendingPlan ? (
-                <span className="w-3.5 h-3.5 flex items-center justify-center">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
                 </span>
               ) : (
                 <BranchIcon active={isSelected} />
@@ -355,16 +340,6 @@ export function Sidebar() {
         unseen[path] = state.hasUnseenResult ?? false;
       }
       return unseen;
-    }),
-  );
-
-  const pendingPlans = useDataStore(
-    useShallow((s) => {
-      const pending: Record<string, boolean> = {};
-      for (const [path, state] of Object.entries(s.worktreeDataStates)) {
-        pending[path] = state.hasPendingPlan ?? false;
-      }
-      return pending;
     }),
   );
 
@@ -810,7 +785,6 @@ export function Sidebar() {
               const hasUnseen = unseenResults[wt.path];
               const prStatus = prStatuses[wt.path];
               const isPermission = agentStatuses[wt.path] === "permission";
-              const hasPendingPlan = pendingPlans[wt.path];
 
               const cardBorder = isMain
                 ? ""
@@ -834,10 +808,6 @@ export function Sidebar() {
                       ) : hasUnseen ? (
                         <span className="w-4 h-4 flex items-center justify-center">
                           <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
-                        </span>
-                      ) : hasPendingPlan ? (
-                        <span className="w-4 h-4 flex items-center justify-center">
-                          <span className="w-2 h-2 rounded-full bg-blue-500" />
                         </span>
                       ) : (
                         <BranchIcon active={isSelected} />

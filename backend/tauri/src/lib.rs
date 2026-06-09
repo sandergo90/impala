@@ -16,9 +16,6 @@ mod jira;
 mod linear;
 mod notifications;
 mod observability;
-mod plan_annotations;
-mod plan_scanner;
-mod plans;
 mod pty;
 mod settings;
 mod shell_wrappers;
@@ -571,198 +568,6 @@ fn delete_annotation(state: tauri::State<'_, DbState>, id: String) -> Result<(),
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
     annotations::delete_annotation(&conn, &id)
-}
-
-#[tauri::command]
-fn create_plan(
-    state: tauri::State<'_, DbState>,
-    plan: plans::NewPlan,
-) -> Result<plans::Plan, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    plans::create_plan(&conn, plan)
-}
-
-#[tauri::command]
-fn list_plans(
-    state: tauri::State<'_, DbState>,
-    worktree_path: String,
-) -> Result<Vec<plans::Plan>, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    plans::list_plans(&conn, &worktree_path)
-}
-
-#[tauri::command]
-fn get_plan(state: tauri::State<'_, DbState>, id: String) -> Result<plans::Plan, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    plans::get_plan(&conn, &id)
-}
-
-#[tauri::command]
-fn list_plan_version_files(
-    state: tauri::State<'_, DbState>,
-    plan_id: String,
-) -> Result<Vec<plans::PlanFile>, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    plans::list_plan_version_files(&conn, &plan_id)
-}
-
-#[tauri::command]
-fn update_plan(
-    state: tauri::State<'_, DbState>,
-    id: String,
-    changes: plans::UpdatePlan,
-) -> Result<plans::Plan, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    let updated = plans::update_plan(&conn, &id, changes)?;
-
-    if updated.status != "pending" {
-        let signal_path = format!("/tmp/impala-plan-{}.decided", id);
-        let _ = std::fs::write(&signal_path, &updated.status);
-    }
-
-    Ok(updated)
-}
-
-#[tauri::command]
-fn create_plan_annotation(
-    state: tauri::State<'_, DbState>,
-    annotation: plan_annotations::NewPlanAnnotation,
-) -> Result<plan_annotations::PlanAnnotation, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    plan_annotations::create_plan_annotation(&conn, annotation)
-}
-
-#[tauri::command]
-fn list_plan_annotations(
-    state: tauri::State<'_, DbState>,
-    plan_path: String,
-    worktree_path: Option<String>,
-) -> Result<Vec<plan_annotations::PlanAnnotation>, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    plan_annotations::list_plan_annotations(&conn, &plan_path, worktree_path.as_deref())
-}
-
-#[tauri::command]
-fn update_plan_annotation(
-    state: tauri::State<'_, DbState>,
-    id: String,
-    changes: plan_annotations::UpdatePlanAnnotation,
-) -> Result<plan_annotations::PlanAnnotation, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    plan_annotations::update_plan_annotation(&conn, &id, changes)
-}
-
-#[tauri::command]
-fn delete_plan_annotation(state: tauri::State<'_, DbState>, id: String) -> Result<(), String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    plan_annotations::delete_plan_annotation(&conn, &id)
-}
-
-#[tauri::command]
-async fn read_plan_file(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
-        let p = std::path::Path::new(&path);
-        // If path is a directory, try overview.md inside it
-        let file_path = if p.is_dir() {
-            p.join("overview.md")
-        } else {
-            p.to_path_buf()
-        };
-        std::fs::read_to_string(&file_path)
-            .map_err(|e| format!("Failed to read {}: {}", file_path.display(), e))
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-}
-
-#[tauri::command]
-async fn list_plan_files(path: String) -> Result<Vec<String>, String> {
-    tokio::task::spawn_blocking(move || {
-        let p = std::path::Path::new(&path);
-        // Resolve to directory: if path is a file, use its parent
-        let dir = if p.is_dir() {
-            p.to_path_buf()
-        } else if let Some(parent) = p.parent() {
-            if parent.is_dir() {
-                parent.to_path_buf()
-            } else {
-                return Ok(vec![]);
-            }
-        } else {
-            return Ok(vec![]);
-        };
-
-        // Only show file tabs for plan directories (those containing overview.md)
-        if !dir.join("overview.md").exists() {
-            return Ok(vec![]);
-        }
-
-        let mut files: Vec<String> = std::fs::read_dir(&dir)
-            .map_err(|e| format!("Failed to read directory: {}", e))?
-            .flatten()
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md") && e.path().is_file())
-            .map(|e| e.path().to_string_lossy().to_string())
-            .collect();
-
-        // Sort: overview.md first, then task-N.md in order, then rest
-        files.sort_by(|a, b| {
-            let a_name = std::path::Path::new(a)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy();
-            let b_name = std::path::Path::new(b)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy();
-            let rank = |name: &str| -> u32 {
-                if name == "overview.md" {
-                    0
-                } else if name.starts_with("task-") {
-                    1
-                } else {
-                    2
-                }
-            };
-            let ra = rank(&a_name);
-            let rb = rank(&b_name);
-            if ra != rb {
-                ra.cmp(&rb)
-            } else {
-                a_name.cmp(&b_name)
-            }
-        });
-
-        Ok(files)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -1770,12 +1575,17 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize worktrees table: {}", e))?;
             settings::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize settings tables: {}", e))?;
-            plans::init_db(&conn)
-                .map_err(|e| format!("Failed to initialize plans table: {}", e))?;
-            plan_annotations::init_db(&conn)
-                .map_err(|e| format!("Failed to initialize plan_annotations table: {}", e))?;
             github::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize pr_status table: {}", e))?;
+
+            // The plan-review feature was removed. Drop its legacy tables so
+            // they don't linger in existing databases.
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS plan_files;
+                 DROP TABLE IF EXISTS plan_annotations;
+                 DROP TABLE IF EXISTS plans;",
+            )
+            .map_err(|e| format!("Failed to drop legacy plan tables: {}", e))?;
 
             let _ = fs::create_dir_all(default_worktree_base_dir());
 
@@ -1820,8 +1630,6 @@ pub fn run() {
             app.manage(daemon_client::DaemonState::new());
             app.manage(watcher::WatcherState::new());
             app.manage(file_tree::GitignoreCache::new());
-            app.manage(plan_scanner::PlanScanCache::new());
-            app.manage(plan_scanner::PlanWatcherState::new());
             app.manage(DiffCache(Mutex::new(lru::LruCache::new(
                 std::num::NonZeroUsize::new(50).unwrap(),
             ))));
@@ -1874,7 +1682,6 @@ pub fn run() {
             }
 
             hook_server::install_impala_review_skill();
-            hook_server::install_impala_plan_skill();
 
             // Poll annotations DB for external changes (e.g. MCP server) using data_version.
             // File watchers are unreliable with SQLite WAL mode on macOS.
@@ -1973,20 +1780,11 @@ pub fn run() {
             list_annotations,
             update_annotation,
             delete_annotation,
-            create_plan,
-            list_plans,
-            get_plan,
             get_pr_status,
             refresh_pr_status,
             delete_pr_status,
             get_github_cli_status,
             get_bitbucket_cli_status,
-            list_plan_version_files,
-            update_plan,
-            create_plan_annotation,
-            list_plan_annotations,
-            update_plan_annotation,
-            delete_plan_annotation,
             set_file_viewed,
             get_file_diff_since_commit,
             unset_file_viewed,
@@ -2022,8 +1820,6 @@ pub fn run() {
             pty::prepare_shell_launch,
             check_generated_files,
             open_in_editor,
-            read_plan_file,
-            list_plan_files,
             resolve_file_path,
             get_hook_port,
             get_agent_statuses,
@@ -2046,9 +1842,6 @@ pub fn run() {
             hotkeys::read_hotkey_overrides,
             hotkeys::write_hotkey_overrides,
             fonts::list_system_fonts,
-            plan_scanner::scan_plan_directories,
-            plan_scanner::watch_plan_directories,
-            plan_scanner::unwatch_plan_directories,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

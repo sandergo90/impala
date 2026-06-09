@@ -3,7 +3,6 @@ import { homeDir } from "@tauri-apps/api/path";
 import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
 import { RightSidebar } from "../components/RightSidebar";
 import { DiffView } from "../components/DiffView";
-import { PlanView } from "../components/PlanView";
 import { SplitTreeRenderer } from "../components/SplitTreeRenderer";
 import {
   ResizablePanelGroup,
@@ -27,7 +26,6 @@ import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 import { RunActionsButton } from "../components/RunActionsButton";
 import { TabPill } from "../components/TabPill";
 import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
-import { usePlanNotifications } from "../hooks/usePlanNotifications";
 import { createUserTab, stepActiveTab } from "../lib/tab-actions";
 
 let cachedHomeDir: string | null = null;
@@ -68,12 +66,10 @@ export function MainView() {
     wtPath ? s.worktreeNavStates[wtPath]?.hasUnreadRunFailure ?? false : false,
   );
 
-  usePlanNotifications();
-
   const sidebarTooltip = useHotkeyTooltip("TOGGLE_SIDEBAR", sidebarCollapsed ? "Show sidebar" : "Hide sidebar");
   const openInEditorTooltip = useHotkeyTooltip("OPEN_IN_EDITOR", "Open in editor");
 
-  const setTab = (tab: "diff" | "terminal" | "split" | "plan") => {
+  const setTab = (tab: "diff" | "terminal" | "split") => {
     if (!selectedWorktree) return;
     useUIStore
       .getState()
@@ -84,7 +80,6 @@ export function MainView() {
   useAppHotkey("SWITCH_TAB_TERMINAL", () => setTab("terminal"));
   useAppHotkey("SWITCH_TAB_DIFF", () => setTab("diff"));
   useAppHotkey("SWITCH_TAB_SPLIT", () => setTab("split"));
-  useAppHotkey("SWITCH_TAB_PLAN", () => setTab("plan"));
 
   const isWorktreeTerminalActive = Boolean(wtPath) && activeTab === "terminal";
 
@@ -242,7 +237,6 @@ export function MainView() {
                 { tab: "terminal" as const, label: "Terminal", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
                 { tab: "diff" as const, label: "Diff", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M3 12h18"/></svg> },
                 { tab: "split" as const, label: "Split", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg> },
-                { tab: "plan" as const, label: "Plan", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
               ]).map(({ tab, label, icon }) => (
                 <button
                   key={tab}
@@ -324,10 +318,6 @@ export function MainView() {
                   Select a worktree
                 </div>
               )
-            ) : activeTab === "plan" ? (
-              <div className="flex-1 min-w-0">
-                <PlanView />
-              </div>
             ) : activeTab === "split" ? (
               <ResizablePanelGroup orientation="horizontal">
                 <RrpResizablePanel defaultSize="50%" minSize={200}>

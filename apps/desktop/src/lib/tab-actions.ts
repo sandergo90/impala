@@ -388,8 +388,7 @@ export function openFileTab(
   // Only force the top-level tab area to "terminal" when the user is on a
   // mode where TabbedTerminals isn't visible. "terminal" and "split" already
   // show terminal content; flipping them would collapse the user's layout.
-  const needsTabAreaSwitch =
-    nav.activeTab === "diff" || nav.activeTab === "plan";
+  const needsTabAreaSwitch = nav.activeTab === "diff";
 
   const parkPendingTarget = (): void => {
     if (line === undefined) return;
