@@ -37,7 +37,7 @@ export interface ThemeUI {
   highlightMatch?: string;
   highlightActive?: string;
 
-  // Markdown editor (FileViewer prosemark) — optional, derived if absent
+  // Markdown/code editor theming — optional, derived if absent
   link?: string;
   codeBackground?: string;
   editorSelection?: string;
