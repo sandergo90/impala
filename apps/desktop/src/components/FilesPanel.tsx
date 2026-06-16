@@ -44,6 +44,12 @@ function stripTrailingSlash(p: string): string {
   return p.endsWith("/") ? p.slice(0, -1) : p;
 }
 
+function fullWorktreePath(wtPath: string, rel: string): string {
+  if (!rel) return wtPath;
+  if (wtPath.endsWith("/")) return `${wtPath}${rel}`;
+  return `${wtPath}/${rel}`;
+}
+
 export function FilesPanel() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path ?? null;
@@ -344,7 +350,7 @@ export function FilesPanel() {
           label: "Open in Editor",
           onSelect: () => {
             close();
-            void openFileInEditor(`${wtPath}/${rel}`);
+            void openFileInEditor(fullWorktreePath(wtPath, rel));
           },
         });
       }
@@ -382,9 +388,9 @@ export function FilesPanel() {
         onSelect: () => {
           close();
           const target = isDirectory
-            ? `${wtPath}/${rel}`
+            ? fullWorktreePath(wtPath, rel)
             : rel
-            ? `${wtPath}/${dirname(rel)}`
+            ? fullWorktreePath(wtPath, dirname(rel))
             : wtPath;
           void openInShell(target).catch((e) => toast.error(`Reveal failed: ${e}`));
         },
@@ -394,6 +400,13 @@ export function FilesPanel() {
         onSelect: () => {
           close();
           void navigator.clipboard.writeText(rel);
+        },
+      });
+      items.push({
+        label: "Copy Full Path",
+        onSelect: () => {
+          close();
+          void navigator.clipboard.writeText(fullWorktreePath(wtPath, rel));
         },
       });
       items.push({
