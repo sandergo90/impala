@@ -148,6 +148,27 @@ pub fn detect_base_branch(worktree_path: &str) -> Result<String, String> {
     Ok(first_commit.trim().to_string())
 }
 
+/// Number of recent commits to surface for a base/trunk worktree, where
+/// `base..HEAD` is empty because HEAD *is* the base branch. Caps an otherwise
+/// unbounded history walk.
+const BASE_BRANCH_LOG_LIMIT: usize = 50;
+
+/// True when the worktree's checked-out branch is the base branch itself — the
+/// trunk worktree, where comparing against the base surfaces nothing. `base`
+/// may be a remote-tracking ref (e.g. `origin/main`); the `origin/` prefix is
+/// stripped before comparing against the local branch name.
+fn head_is_base_branch(worktree_path: &str, base: &str) -> bool {
+    let head = match run_git(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        Ok(b) => b.trim().to_string(),
+        Err(_) => return false,
+    };
+    if head.is_empty() || head == "HEAD" {
+        return false; // detached HEAD — fall back to the range comparison
+    }
+    let base_name = base.strip_prefix("origin/").unwrap_or(base);
+    head == base_name
+}
+
 pub fn get_diverged_commits(
     worktree_path: &str,
     base_branch: Option<String>,
@@ -157,11 +178,16 @@ pub fn get_diverged_commits(
         None => detect_base_branch(worktree_path)?,
     };
 
+    // On the trunk worktree `base..HEAD` is empty (HEAD *is* the base branch),
+    // so show the branch's own recent history instead of a blank panel.
     let range = format!("{}..HEAD", base);
-    let output = run_git(
-        worktree_path,
-        &["log", &range, "--shortstat", "--format=%H%n%s%n%an%n%aI"],
-    )?;
+    let limit = format!("-{}", BASE_BRANCH_LOG_LIMIT);
+    let log_args: Vec<&str> = if head_is_base_branch(worktree_path, &base) {
+        vec!["log", &limit, "HEAD", "--shortstat", "--format=%H%n%s%n%an%n%aI"]
+    } else {
+        vec!["log", &range, "--shortstat", "--format=%H%n%s%n%an%n%aI"]
+    };
+    let output = run_git(worktree_path, &log_args)?;
 
     let mut commits = Vec::new();
     let mut lines = output.lines().peekable();
@@ -1035,5 +1061,61 @@ mod tests {
             diff2.contains("c.txt"),
             "fresh diff must include the newly committed file",
         );
+    }
+
+    #[test]
+    fn head_is_base_branch_matches_trunk_with_or_without_origin_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        git(repo, &["init", "-q", "-b", "main"]);
+        git(repo, &["config", "user.email", "t@example.com"]);
+        git(repo, &["config", "user.name", "Tester"]);
+        git(repo, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.txt"), "1\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "base"]);
+
+        let path = repo.to_str().unwrap();
+        // On main, both the local and remote-tracking base name resolve to trunk.
+        assert!(head_is_base_branch(path, "main"));
+        assert!(head_is_base_branch(path, "origin/main"));
+
+        // On a feature branch the worktree is no longer the trunk.
+        git(repo, &["checkout", "-q", "-b", "feature"]);
+        assert!(!head_is_base_branch(path, "main"));
+        assert!(!head_is_base_branch(path, "origin/main"));
+    }
+
+    #[test]
+    fn diverged_commits_falls_back_to_history_on_base_branch() {
+        // On the trunk worktree `base..HEAD` is empty, so the panel must fall
+        // back to the branch's own recent history rather than show nothing.
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        git(repo, &["init", "-q", "-b", "main"]);
+        git(repo, &["config", "user.email", "t@example.com"]);
+        git(repo, &["config", "user.name", "Tester"]);
+        git(repo, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.txt"), "1\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "c1"]);
+        std::fs::write(repo.join("b.txt"), "2\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "c2"]);
+
+        let path = repo.to_str().unwrap();
+        // Base == current branch: history, not an empty "commits ahead" list.
+        let on_base = get_diverged_commits(path, Some("main".to_string())).unwrap();
+        let messages: Vec<&str> = on_base.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(messages, vec!["c2", "c1"]);
+
+        // A feature branch still shows only what it adds on top of the base.
+        git(repo, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.join("c.txt"), "3\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "f1"]);
+        let diverged = get_diverged_commits(path, Some("main".to_string())).unwrap();
+        let messages: Vec<&str> = diverged.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(messages, vec!["f1"]);
     }
 }

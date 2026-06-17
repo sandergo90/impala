@@ -200,7 +200,7 @@ export function MainView() {
             const metaParts: string[] = [];
             if (selectedProject?.name) metaParts.push(selectedProject.name);
             if (!isMain) metaParts.push(branch);
-            if (dataState?.baseBranch && aheadCount > 0) {
+            if (!isMain && dataState?.baseBranch && aheadCount > 0) {
               metaParts.push(`${aheadCount} ahead of ${dataState.baseBranch}`);
             }
             return (
