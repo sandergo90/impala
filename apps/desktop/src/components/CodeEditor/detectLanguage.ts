@@ -33,6 +33,7 @@ export function detectLanguage(path: string): string {
   const slash = path.lastIndexOf("/");
   const name = slash === -1 ? path : path.slice(slash + 1);
   if (FILENAME_TO_LANG[name]) return FILENAME_TO_LANG[name];
+  if (name === ".env" || name.startsWith(".env.") || name.endsWith(".env")) return "dotenv";
   const dot = name.lastIndexOf(".");
   if (dot === -1 || dot === name.length - 1) return "plaintext";
   const ext = name.slice(dot + 1).toLowerCase();

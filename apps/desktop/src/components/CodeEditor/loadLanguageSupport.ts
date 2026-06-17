@@ -85,6 +85,32 @@ export async function loadLanguageSupport(
       return loadLegacyLanguage(() => import("@codemirror/legacy-modes/mode/clike"), "csharp");
     case "kotlin":
       return loadLegacyLanguage(() => import("@codemirror/legacy-modes/mode/clike"), "kotlin");
+    case "dotenv":
+      return StreamLanguage.define({
+        name: "dotenv",
+        startState: () => ({ afterEquals: false }),
+        token(stream, state) {
+          if (stream.sol()) {
+            state.afterEquals = false;
+            stream.eatSpace();
+            if (stream.peek() === "#") {
+              stream.skipToEnd();
+              return "comment";
+            }
+          }
+          if (state.afterEquals) {
+            stream.skipToEnd();
+            return "string";
+          }
+          if (stream.eat("=")) {
+            state.afterEquals = true;
+            return "operator";
+          }
+          if (stream.eatWhile(/[^=\s]/)) return "property";
+          stream.next();
+          return null;
+        },
+      });
     case "plaintext":
     default:
       return null;
