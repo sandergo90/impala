@@ -218,9 +218,13 @@ export function reorderUserTabs(
   uiState.updateWorktreeNavState(worktreePath, { userTabs: next });
 }
 
+// Mirrors the tab order rendered by TabbedTerminals: Run (if present), then
+// Agent, then user tabs left-to-right. Keep in sync so Cmd+Left/Right cycle
+// matches the visible tab strip.
 export function getTabOrder(userTabs: UserTab[], hasRunTab: boolean): string[] {
-  const order: string[] = [AGENT_PANE_ID];
+  const order: string[] = [];
   if (hasRunTab) order.push(RUN_PANE_ID);
+  order.push(AGENT_PANE_ID);
   for (const t of userTabs) order.push(t.id);
   return order;
 }
