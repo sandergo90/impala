@@ -544,6 +544,12 @@ export function DiffView() {
 
   const codeViewOptions = {
     ...baseDiffOptions,
+    // CodeView sizes its scroll container from a per-file height ESTIMATE of
+    // lineCount * lineHeight (default 20px) and, in scroll mode, never corrects
+    // it against the DOM. Our real line height is round(fontSize * 1.5), so the
+    // per-line deficit accumulates down the list and clips the last file's
+    // bottom out of reach. Feed the real line height so the estimate is exact.
+    itemMetrics: { lineHeight: Math.round(fontSize * 1.5) },
     onGutterUtilityClick: (
       range: { start: number; side?: 'deletions' | 'additions'; end: number },
       context: { item: { id: string } },
