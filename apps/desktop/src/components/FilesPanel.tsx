@@ -217,21 +217,51 @@ export function FilesPanel() {
     });
   }, [model, wtPath]);
 
-  // Single-select a path in the model: deselect anything else, select target.
-  // The trees model only exposes `getItem(path).select()/.deselect()`.
-  const selectOnly = (path: string) => {
-    for (const p of model.getSelectedPaths()) {
-      if (p !== path) model.getItem(p)?.deselect();
-    }
-    model.getItem(path)?.select();
-  };
+  // The path the most recent reveal wants selected, plus the worktree it
+  // belongs to. A reveal stays pending here until the row actually exists in
+  // the model, then is applied once and cleared. A newer reveal overwrites it,
+  // and the worktree tag lets a stale reveal (worktree switched mid-flight) be
+  // dropped — so a superseded reveal never clobbers the current selection.
+  const revealTargetRef = useRef<{ path: string; wt: string | null } | null>(
+    null,
+  );
 
-  // Expand ancestors, single-select the path, and focus it (which scrolls
-  // the row into view). Callers gate on `getSelectedPaths().includes(path)`
-  // so this is idempotent — re-running just retries the select once tree
-  // data has loaded.
+  // Single-select the pending reveal target and scroll it into view, but only
+  // once it's in the model. `getItem` is null until the row's ancestors have
+  // loaded, so this is a safe no-op until the data lands; the moment it's
+  // present we select it and clear the target. resetPaths preserves selection
+  // for paths that still exist, so the highlight then survives later tree
+  // updates.
+  //
+  // scrollToPath (not focusPath) is what actually scrolls — focusPath only
+  // moves the focus index, while scrollToPath also emits the scroll request the
+  // view consumes. It focuses too, so it covers both.
+  //
+  // This is driven from two places (see below) instead of a requestAnimationFrame
+  // because rAF races React's effect flush: it could fire before resetPaths
+  // rebuilds the model, select nothing, and silently drop the reveal — which is
+  // why opening a file (terminal link, ⌘P, …) only highlighted intermittently.
+  const applyRevealSelection = useCallback(() => {
+    const target = revealTargetRef.current;
+    if (!target || target.wt !== wtPathRef.current) return;
+    const item = model.getItem(target.path);
+    if (!item) return;
+    for (const p of model.getSelectedPaths()) {
+      if (p !== target.path) model.getItem(p)?.deselect();
+    }
+    item.select();
+    model.scrollToPath(target.path);
+    revealTargetRef.current = null;
+  }, [model]);
+
+  // Set the reveal target and expand its ancestors so the row becomes
+  // reachable. Selection itself is applied by applyRevealSelection: directly
+  // here for ancestors that were already loaded (no treePaths change, so the
+  // post-resetPaths effect won't fire), and via that effect when the expand
+  // loads new dirs (the model is only rebuilt on the next commit).
   const revealPath = useCallback(
-    (path: string, signal: { cancelled: boolean }) => {
+    (path: string) => {
+      revealTargetRef.current = { path, wt: wtPathRef.current };
       void (async () => {
         const segments = path.split("/");
         const ancestors: string[] = [];
@@ -239,18 +269,10 @@ export function FilesPanel() {
           ancestors.push(segments.slice(0, i).join("/"));
         }
         await Promise.all(ancestors.map((a) => expand(a)));
-        if (signal.cancelled) return;
-        // Defer to next frame so resetPaths from the expand() batch flushes
-        // into the model before we look up the item.
-        requestAnimationFrame(() => {
-          if (signal.cancelled) return;
-          selectOnly(path);
-          model.focusPath(path);
-        });
+        applyRevealSelection();
       })();
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [expand, model],
+    [expand, applyRevealSelection],
   );
 
   // treePaths is a dep on both reveal effects so the first attempt retries
@@ -270,11 +292,7 @@ export function FilesPanel() {
     }
     if (treePaths.length === 0) return;
     lastRevealedNonceRef.current = pendingReveal.nonce;
-    const signal = { cancelled: false };
-    revealPath(pendingReveal.path, signal);
-    return () => {
-      signal.cancelled = true;
-    };
+    revealPath(pendingReveal.path);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingReveal?.nonce, wtPath, revealPath, treePaths]);
 
@@ -294,13 +312,19 @@ export function FilesPanel() {
     }
     if (treePaths.length === 0) return;
     lastRevealedActiveFileRef.current = activeFileTabPath;
-    const signal = { cancelled: false };
-    revealPath(activeFileTabPath, signal);
-    return () => {
-      signal.cancelled = true;
-    };
+    revealPath(activeFileTabPath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFileTabPath, revealPath, treePaths]);
+
+  // Re-apply the pending reveal selection after every treePaths change. The
+  // resetPaths effect (declared above) rebuilds the model on the same change,
+  // and effects run in declaration order, so by the time this runs the model
+  // already reflects the new paths — making the select deterministic. Declared
+  // after the active-file effect so its select also lands after that effect's
+  // deselect-all branch within a commit.
+  useEffect(() => {
+    applyRevealSelection();
+  }, [treePaths, applyRevealSelection]);
 
   const [pendingDelete, setPendingDelete] = useState<{
     path: string;
