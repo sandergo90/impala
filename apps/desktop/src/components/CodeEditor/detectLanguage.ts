@@ -21,6 +21,7 @@ const EXT_TO_LANG: Record<string, string> = {
   swift: "swift",
   cs: "csharp",
   kt: "kotlin", kts: "kotlin",
+  bicep: "bicep", bicepparam: "bicep",
 };
 
 const FILENAME_TO_LANG: Record<string, string> = {

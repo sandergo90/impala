@@ -1,6 +1,15 @@
 import { StreamLanguage, type StreamParser } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 
+// Bicep / .bicepparam keywords (declaration + contextual). There is no
+// CodeMirror lang package for Bicep, so it's tokenized with a StreamLanguage
+// like the `dotenv` case below.
+const BICEP_KEYWORDS = new Set([
+  "resource", "module", "param", "var", "output", "targetScope", "metadata",
+  "type", "func", "import", "using", "provider", "existing", "if", "for",
+  "in", "assert", "extends", "with", "as",
+]);
+
 async function loadLegacyLanguage(
   loader: () => Promise<Record<string, unknown>>,
   key: string,
@@ -107,6 +116,84 @@ export async function loadLanguageSupport(
             return "operator";
           }
           if (stream.eatWhile(/[^=\s]/)) return "property";
+          stream.next();
+          return null;
+        },
+      });
+    case "bicep":
+      return StreamLanguage.define({
+        name: "bicep",
+        startState: () => ({ inComment: false, inString: false }),
+        token(stream, state) {
+          // Continue a block comment opened on a previous line.
+          if (state.inComment) {
+            if (stream.skipTo("*/")) {
+              stream.match("*/");
+              state.inComment = false;
+            } else {
+              stream.skipToEnd();
+            }
+            return "comment";
+          }
+          // Continue a multi-line string ('''...''') opened earlier.
+          if (state.inString) {
+            if (stream.skipTo("'''")) {
+              stream.match("'''");
+              state.inString = false;
+            } else {
+              stream.skipToEnd();
+            }
+            return "string";
+          }
+          if (stream.eatSpace()) return null;
+
+          if (stream.match("//")) {
+            stream.skipToEnd();
+            return "comment";
+          }
+          if (stream.match("/*")) {
+            if (stream.skipTo("*/")) stream.match("*/");
+            else {
+              stream.skipToEnd();
+              state.inComment = true;
+            }
+            return "comment";
+          }
+
+          if (stream.match("'''")) {
+            if (stream.skipTo("'''")) stream.match("'''");
+            else {
+              stream.skipToEnd();
+              state.inString = true;
+            }
+            return "string";
+          }
+          if (stream.eat("'")) {
+            let escaped = false;
+            while (!stream.eol()) {
+              const ch = stream.next();
+              if (ch === "'" && !escaped) break;
+              escaped = ch === "\\" && !escaped;
+            }
+            return "string";
+          }
+
+          // Decorators: @secure(), @description('...'), ...
+          if (stream.match(/^@[A-Za-z_]\w*/)) return "variableName.function";
+
+          if (stream.match(/^\d+/)) return "number";
+
+          const first = stream.peek();
+          if (first && /[A-Za-z_]/.test(first)) {
+            const start = stream.pos;
+            stream.eatWhile(/[A-Za-z0-9_]/);
+            const word = stream.string.slice(start, stream.pos);
+            if (BICEP_KEYWORDS.has(word)) return "keyword";
+            if (word === "true" || word === "false") return "bool";
+            if (word === "null") return "null";
+            return null;
+          }
+
           stream.next();
           return null;
         },
