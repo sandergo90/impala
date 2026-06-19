@@ -139,13 +139,13 @@ export const HOTKEYS = {
   NEXT_TAB: {
     label: "Next Tab",
     description: "Switch to the next terminal tab",
-    default: "meta+shift+]",
+    default: "meta+arrowright",
     category: "Terminal",
   },
   PREV_TAB: {
     label: "Previous Tab",
     description: "Switch to the previous terminal tab",
-    default: "meta+shift+[",
+    default: "meta+arrowleft",
     category: "Terminal",
   },
 
