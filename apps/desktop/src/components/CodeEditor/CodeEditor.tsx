@@ -1,5 +1,5 @@
 import {
-  defaultKeymap, history, historyKeymap, indentWithTab,
+  defaultKeymap, deleteLine, history, historyKeymap, indentWithTab,
 } from "@codemirror/commands";
 import { bracketMatching, indentOnInput } from "@codemirror/language";
 import { highlightSelectionMatches, openSearchPanel, searchKeymap } from "@codemirror/search";
@@ -96,6 +96,7 @@ export function CodeEditor({
 
     const saveKeymap = keymap.of([
       { key: "Mod-s", preventDefault: true, run: () => { onSaveRef.current?.(); return true; } },
+      { key: "Mod-e", preventDefault: true, run: deleteLine },
     ]);
 
     const state = EditorState.create({
