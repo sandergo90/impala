@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { invoke } from "@/lib/invoke";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -128,6 +129,17 @@ async function createCachedTerminal(
     fontWeight: "300",
     theme: getTerminalTheme(),
     allowProposedApi: true,
+    // OSC 8 hyperlinks (e.g. URLs in the agent's markdown output) are claimed
+    // by xterm's built-in OscLinkProvider, which suppresses our custom URL
+    // link provider for those cells. Without a linkHandler, xterm falls back to
+    // a default handler that no-ops inside the Tauri webview. Route OSC links
+    // through the same Tauri shell `open()` as plain-text URLs so they open in
+    // the system browser.
+    linkHandler: {
+      activate(_event, text) {
+        openUrl(text).catch(() => {});
+      },
+    },
   });
 
   // xterm 6.1.0-beta.207 has a parser bug in `requestMode` that throws
