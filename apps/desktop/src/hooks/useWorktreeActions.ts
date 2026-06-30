@@ -5,6 +5,10 @@ import type { Worktree, CommitInfo, ChangedFile, Project } from "../types";
 
 export async function selectWorktree(wt: Worktree) {
   useUIStore.getState().setSelectedWorktree(wt);
+  const projectPath = useUIStore.getState().selectedProject?.path;
+  if (projectPath) {
+    useUIStore.getState().setLastWorktreeForProject(projectPath, wt.path);
+  }
   try {
     const [, base] = await Promise.all([
       invoke("watch_worktree", { worktreePath: wt.path }),
@@ -56,6 +60,10 @@ export function activateGeneralTerminal() {
 }
 
 export async function selectProject(project: Project) {
+  const current = useUIStore.getState().selectedProject;
+  if (current && current.path !== project.path) {
+    useUIStore.getState().setPreviousProject(current);
+  }
   useUIStore.getState().setSelectedProject(project);
   useUIStore.getState().setSelectedWorktree(null);
   useDataStore.getState().setWorktrees([]);
@@ -64,6 +72,15 @@ export async function selectProject(project: Project) {
       repoPath: project.path,
     });
     useDataStore.getState().setWorktrees(wts);
+
+    // Auto-select the worktree the user was last on in this project, if it
+    // still exists.
+    const lastPath = useUIStore.getState().lastWorktreeByProject[project.path];
+    const lastWorktree = lastPath ? wts.find((wt) => wt.path === lastPath) : undefined;
+    if (lastWorktree) {
+      useUIStore.getState().setGeneralTerminalActive(false);
+      await selectWorktree(lastWorktree);
+    }
   } catch (e) {
     toast.error("Failed to load worktrees");
   }

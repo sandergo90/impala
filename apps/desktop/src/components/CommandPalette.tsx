@@ -17,6 +17,7 @@ export function CommandPalette({
   const worktrees = useFilteredWorktrees();
   const selectedProject = useUIStore((s) => s.selectedProject);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
+  const previousProject = useUIStore((s) => s.previousProject);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -47,6 +48,16 @@ export function CommandPalette({
       case "keyboard-shortcuts":
         navigate({ to: "/settings/keyboard" });
         break;
+      case "previous-project": {
+        const prev = useUIStore.getState().previousProject;
+        if (prev) {
+          const project = useDataStore
+            .getState()
+            .projects.find((p) => p.path === prev.path);
+          if (project) selectProject(project);
+        }
+        break;
+      }
       case "diff-tab":
         if (selectedWorktree) {
           useUIStore.getState().updateWorktreeNavState(selectedWorktree.path, { activeTab: "diff" });
@@ -154,6 +165,21 @@ export function CommandPalette({
 
             {/* Actions */}
             <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-md [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[1.2px] [&_[cmdk-group-heading]]:text-muted-foreground/60 [&_[cmdk-group-heading]]:font-semibold">
+              {previousProject && previousProject.path !== selectedProject?.path && (
+                <Command.Item
+                  value={`Switch to Previous Project ${previousProject.name}`}
+                  onSelect={() => handleAction("previous-project")}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
+                    <path d="M9 14 4 9l5-5"/>
+                    <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>
+                  </svg>
+                  Switch to Previous Project
+                  <span className="text-muted-foreground/60">{previousProject.name}</span>
+                  <HotkeyDisplay id="SWITCH_TO_PREVIOUS_PROJECT" className="ml-auto text-muted-foreground/90" />
+                </Command.Item>
+              )}
               {selectedWorktree && (
                 <>
                   <Command.Item

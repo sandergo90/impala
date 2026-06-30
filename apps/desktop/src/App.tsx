@@ -18,7 +18,7 @@ import {
 } from "./lib/split-tree";
 import { toggleRunScript } from "./lib/run-script";
 import { useHotkeysStore } from "./stores/hotkeys";
-import { selectWorktree } from "./hooks/useWorktreeActions";
+import { selectWorktree, selectProject } from "./hooks/useWorktreeActions";
 import {
   splitUserTabPane,
   closeUserTabFocusedPane,
@@ -240,6 +240,16 @@ export function RootLayout() {
   useAppHotkey("JUMP_TO_WORKTREE_7", () => jumpTo(6));
   useAppHotkey("JUMP_TO_WORKTREE_8", () => jumpTo(7));
   useAppHotkey("JUMP_TO_WORKTREE_9", () => jumpTo(8));
+
+  // -- Switch to previous project (toggles between the two most recent) --
+  useAppHotkey("SWITCH_TO_PREVIOUS_PROJECT", () => {
+    const prev = useUIStore.getState().previousProject;
+    if (!prev) return;
+    const project = useDataStore
+      .getState()
+      .projects.find((p) => p.path === prev.path);
+    if (project) selectProject(project);
+  });
 
   if (checking) return null;
 

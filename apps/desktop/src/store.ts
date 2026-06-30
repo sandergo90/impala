@@ -47,8 +47,16 @@ const defaultDataState: WorktreeDataState = {
 interface UIState {
   selectedProject: Project | null;
   setSelectedProject: (project: Project | null) => void;
+  // The project the user was on before the current one, so they can quickly
+  // toggle back. Not persisted (session-only, mirrors previousWorktree).
+  previousProject: Project | null;
+  setPreviousProject: (project: Project | null) => void;
   selectedWorktree: Worktree | null;
   setSelectedWorktree: (worktree: Worktree | null) => void;
+  // Last selected worktree path per project path, so switching projects can
+  // restore the worktree the user was last on in that project. Persisted.
+  lastWorktreeByProject: Record<string, string>;
+  setLastWorktreeForProject: (projectPath: string, worktreePath: string) => void;
   diffStyle: 'split' | 'unified';
   setDiffStyle: (style: 'split' | 'unified') => void;
   wrap: boolean;
@@ -121,8 +129,18 @@ export const useUIStore = create<UIState>()(
     (set, get) => ({
       selectedProject: null,
       setSelectedProject: (project) => set({ selectedProject: project }),
+      previousProject: null,
+      setPreviousProject: (project) => set({ previousProject: project }),
       selectedWorktree: null,
       setSelectedWorktree: (worktree) => set({ selectedWorktree: worktree }),
+      lastWorktreeByProject: {},
+      setLastWorktreeForProject: (projectPath, worktreePath) =>
+        set((state) => ({
+          lastWorktreeByProject: {
+            ...state.lastWorktreeByProject,
+            [projectPath]: worktreePath,
+          },
+        })),
       diffStyle: 'split',
       setDiffStyle: (style) => set({ diffStyle: style }),
       wrap: false,
@@ -300,6 +318,7 @@ export const useUIStore = create<UIState>()(
         const {
           showResolved,
           generalTerminalActive,
+          previousProject,
           previousWorktree,
           generalTerminalSplitTree,
           generalTerminalFocusedPaneId,

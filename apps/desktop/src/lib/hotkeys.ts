@@ -49,6 +49,12 @@ export const HOTKEYS = {
     default: "meta+o",
     category: "Navigation",
   },
+  SWITCH_TO_PREVIOUS_PROJECT: {
+    label: "Switch to Previous Project",
+    description: "Toggle back to the project you were on before the current one",
+    default: "meta+alt+p",
+    category: "Navigation",
+  },
 
   // -- Layout --
   TOGGLE_SIDEBAR: {
@@ -264,16 +270,26 @@ const CODE_TO_KEY: Record<string, string> = {
   Backquote: "`", Space: "space",
 };
 
+/** Resolve a KeyboardEvent.code to a canonical key name, including letters. */
+function codeToCanonical(code: string | undefined): string | undefined {
+  if (!code) return undefined;
+  if (CODE_TO_KEY[code]) return CODE_TO_KEY[code];
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return letter[1].toLowerCase();
+  return undefined;
+}
+
 /** Map KeyboardEvent.key values to canonical key names */
 function eventKeyToCanonical(e: KeyboardEvent): string {
   const k = e.key.toLowerCase();
   const fromKey = KEY_ALIASES[k] ?? k;
-  // When Cmd/Ctrl is held, macOS may report a shifted character for the key
-  // (e.g., "&" instead of "1"). Fall back to event.code for reliable matching.
-  if ((e.metaKey || e.ctrlKey) && e.code && CODE_TO_KEY[e.code]) {
-    const fromCode = CODE_TO_KEY[e.code];
+  // When Cmd/Ctrl/Alt is held, the OS may report a layout- or option-shifted
+  // character instead of the physical key (e.g. "&" for Cmd+1 on AZERTY, or
+  // "π" for Alt+P on macOS). Fall back to event.code for reliable matching.
+  if (e.metaKey || e.ctrlKey || e.altKey) {
+    const fromCode = codeToCanonical(e.code);
     // Prefer event.key if it's a simple alphanumeric, else use code mapping
-    if (fromKey.length > 1 || !/^[a-z0-9]$/.test(fromKey)) {
+    if (fromCode && (fromKey.length > 1 || !/^[a-z0-9]$/.test(fromKey))) {
       return fromCode;
     }
   }
