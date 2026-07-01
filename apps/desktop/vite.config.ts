@@ -29,6 +29,22 @@ export default defineConfig(async () => ({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // CodeMirror breaks (silently loses syntax highlighting) when more than one
+    // copy of its core packages is bundled, because it relies on facet /
+    // NodeProp identity. Package bumps left the direct deps ahead of the
+    // @codemirror/lang-* transitive pins, so force a single copy of each.
+    // https://codemirror.net/docs/faq/#multiple-instances
+    dedupe: [
+      "@codemirror/state",
+      "@codemirror/view",
+      "@codemirror/language",
+      "@codemirror/commands",
+      "@codemirror/search",
+      "@codemirror/autocomplete",
+      "@lezer/common",
+      "@lezer/highlight",
+      "@lezer/lr",
+    ],
   },
   worker: {
     format: "es",
