@@ -16,3 +16,8 @@ export function userTabPaneId(tabId: string): string {
 export function userTabPtySessionId(worktreePath: string, tabId: string): string {
   return `pty-${userTabPaneId(tabId)}-${worktreePath}`;
 }
+
+/** Session id for any pane (incl. split leaves) — mirrors TabbedTerminals' spawn convention. */
+export function panePtySessionId(worktreePath: string, paneId: string): string {
+  return `pty-${paneId}-${worktreePath}`;
+}

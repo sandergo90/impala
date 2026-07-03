@@ -34,7 +34,14 @@ import { ContextMenu } from "@/components/ui/context-menu";
 
 import { projectColor } from "../lib/utils";
 import { encodePtyInput } from "../lib/encode-pty";
-import { RUN_PANE_ID, runPtySessionId } from "../lib/pane-ids";
+import {
+  RUN_PANE_ID,
+  agentPtySessionId,
+  panePtySessionId,
+  runPtySessionId,
+} from "../lib/pane-ids";
+import { getEffectiveUserTabSplitTree } from "../lib/tab-actions";
+import { getLeaves } from "../lib/split-tree";
 
 function ProjectBadge({ name, iconUrl }: { name: string; iconUrl?: string }) {
   const [iconError, setIconError] = useState(false);
@@ -422,12 +429,27 @@ export function Sidebar() {
     (async () => {
       try {
         const dataState = useDataStore.getState().worktreeDataStates[wt.path];
-        const ptyKills = dataState?.paneSessions
-          ? Object.values(dataState.paneSessions).map((sessionId) => {
-              releaseCachedTerminal(sessionId);
-              return invoke("pty_kill", { sessionId }).catch(() => {});
-            })
-          : [];
+        // paneSessions is in-memory only, but the PTY daemon (and any
+        // processes running in the tabs) survives app restarts — so sessions
+        // may exist without being tracked. Session ids are deterministic per
+        // pane, so reconstruct and kill them all: Run, Agent, and every pane
+        // of every persisted user tab.
+        const sessionIds = new Set(
+          Object.values(dataState?.paneSessions ?? {}),
+        );
+        sessionIds.add(runPtySessionId(wt.path));
+        sessionIds.add(agentPtySessionId(wt.path));
+        const nav = useUIStore.getState().getWorktreeNavState(wt.path);
+        for (const tab of nav.userTabs) {
+          if (tab.kind === "file") continue;
+          for (const leaf of getLeaves(getEffectiveUserTabSplitTree(tab))) {
+            sessionIds.add(panePtySessionId(wt.path, leaf.id));
+          }
+        }
+        const ptyKills = [...sessionIds].map((sessionId) => {
+          releaseCachedTerminal(sessionId);
+          return invoke("pty_kill", { sessionId }).catch(() => {});
+        });
         await Promise.all([
           ...ptyKills,
           invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
