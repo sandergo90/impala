@@ -160,14 +160,34 @@ pub async fn list_directory(
 pub async fn list_all_files(worktree_path: String) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || {
         let root = PathBuf::from(&worktree_path);
-        // Use the parallel walker with gitignore enabled so the Cmd+P palette
-        // doesn't have to fzf through node_modules / target / dist. Hidden
-        // files stay visible (dotfiles like .agents are real worktree
-        // content), but the .git directory is always skipped.
+        // Gitignored files stay findable in the Cmd+P palette (local specs/
+        // plans folders are real worktree content), so don't use gitignore
+        // filtering. Instead skip the well-known heavy directories — keep this
+        // list in sync with is_dominated_by_ignore in watcher.rs. Hidden files
+        // stay visible (dotfiles like .agents are real worktree content), but
+        // the .git directory is always skipped.
+        const SKIP_DIRS: &[&str] = &[
+            "node_modules",
+            "target",
+            "dist",
+            ".next",
+            ".turbo",
+            ".nuxt",
+            ".output",
+            ".vite",
+        ];
         let walker = WalkBuilder::new(&root)
-            .standard_filters(true)
+            .standard_filters(false)
             .hidden(false)
-            .filter_entry(|e| e.file_name().to_string_lossy() != ".git")
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                // .git is skipped whether dir (main repo) or file (linked worktree).
+                if name == ".git" {
+                    return false;
+                }
+                let is_dir = e.file_type().is_some_and(|ft| ft.is_dir());
+                !(is_dir && SKIP_DIRS.contains(&name.as_ref()))
+            })
             .build_parallel();
 
         let paths: std::sync::Arc<std::sync::Mutex<Vec<String>>> =

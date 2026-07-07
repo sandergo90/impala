@@ -125,6 +125,27 @@ export function FileViewer() {
     };
   }, [effectiveKind, fullPath, size, forceLoadLarge, htmlContent, htmlError]);
 
+  // Keep the HTML preview in sync with disk: the load effect above only runs
+  // while htmlContent is null, so reset it when the watcher reports a change
+  // to the open file. Deletes are skipped — keep showing the last content,
+  // matching refreshIfClean's behavior for text docs.
+  useEffect(() => {
+    if (effectiveKind !== "html" || !wtPath || !selectedFilePath) return;
+    let cancelled = false;
+    const eventName = `fs-event-${sanitizeEventId(wtPath)}`;
+    const unlistenPromise = listen<FsEvent>(eventName, (event) => {
+      if (cancelled) return;
+      const { kind, path } = event.payload;
+      if (kind === "delete" || (kind !== "overflow" && path !== selectedFilePath)) return;
+      setHtmlContent(null);
+      setHtmlError(null);
+    });
+    return () => {
+      cancelled = true;
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [effectiveKind, wtPath, selectedFilePath]);
+
   const docKey = wtPath && selectedFilePath ? buildDocumentKey(wtPath, selectedFilePath) : null;
   const doc = useEditorDocsStore((s) => (docKey ? s.docs[docKey] : undefined));
   const loadDoc = useEditorDocsStore((s) => s.loadDoc);
@@ -156,6 +177,7 @@ export function FileViewer() {
   }, [shouldLoadText, wtPath, selectedFilePath, doc?.status, doc?.loadError, loadDoc]);
 
   const setExternalChange = useEditorDocsStore((s) => s.setExternalChange);
+  const refreshIfClean = useEditorDocsStore((s) => s.refreshIfClean);
 
   useEffect(() => {
     if (!wtPath) return;
@@ -167,16 +189,22 @@ export function FileViewer() {
       if (payload.kind === "overflow") {
         const docs = useEditorDocsStore.getState().docs;
         for (const d of Object.values(docs)) {
-          if (d.worktreePath === wtPath && d.dirty) {
-            setExternalChange(d.key, true);
-          }
+          if (d.worktreePath !== wtPath) continue;
+          if (d.dirty) setExternalChange(d.key, true);
+          else void refreshIfClean(d.key);
         }
         return;
       }
       if (!payload.path) return;
       const key = buildDocumentKey(wtPath, payload.path);
       const target = useEditorDocsStore.getState().docs[key];
-      if (!target || !target.dirty) return;
+      if (!target) return;
+      // Clean docs follow the disk: reload silently so an open file being
+      // rewritten externally (e.g. an agent updating a plan) stays fresh.
+      if (!target.dirty) {
+        void refreshIfClean(key);
+        return;
+      }
       // Don't flag changes we caused ourselves: if the registry's baseline
       // already matches its current (i.e. no draft ahead of disk), skip.
       if (getBaseline(key) === getCurrent(key)) return;
@@ -186,7 +214,7 @@ export function FileViewer() {
       cancelled = true;
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [wtPath, setExternalChange]);
+  }, [wtPath, setExternalChange, refreshIfClean]);
 
   if (!selectedFilePath) {
     return <Placeholder>Select a file in the Files tab to view its contents</Placeholder>;

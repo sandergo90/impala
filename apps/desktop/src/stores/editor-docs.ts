@@ -40,6 +40,7 @@ interface EditorDocsState {
   discardDoc: (key: string) => void;
   setExternalChange: (key: string, value: boolean) => void;
   reloadFromDisk: (key: string) => Promise<void>;
+  refreshIfClean: (key: string) => Promise<void>;
   removeDoc: (key: string) => void;
   setPendingTarget: (key: string, target: { line: number; col?: number }) => void;
   clearPendingTarget: (key: string) => void;
@@ -189,6 +190,31 @@ export const useEditorDocsStore = create<EditorDocsState>((set, get) => ({
       });
     } catch (e) {
       patch(set, key, { loadError: String(e) });
+    }
+  },
+
+  // Watcher-driven reload for docs without unsaved edits: clean docs just
+  // follow the disk. Dirty docs are left alone — they get the external-change
+  // banner instead. Re-checks dirtiness after the async read so a draft the
+  // user started mid-read is never clobbered.
+  async refreshIfClean(key) {
+    const doc = get().docs[key];
+    if (!doc || doc.dirty || doc.status !== "ready") return;
+    try {
+      const result = await invoke<ReadFileResult>("read_file_with_revision", {
+        absolutePath: `${doc.worktreePath}/${doc.filePath}`,
+      });
+      const latest = get().docs[key];
+      if (!latest || latest.dirty || latest.status !== "ready") return;
+      if (latest.baselineRevision === result.revision) return;
+      setLoaded(key, result.content);
+      patch(set, key, {
+        dirty: false,
+        baselineRevision: result.revision,
+        hasExternalDiskChange: false,
+      });
+    } catch {
+      // File may be mid-rename or deleted — keep showing the last content.
     }
   },
 
