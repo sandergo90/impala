@@ -103,6 +103,7 @@ export function CommitPanel() {
   const cmdHeld = useCmdHeld();
   const worktreePath = wtPath ?? "";
   const autoRefreshTimerRef = useRef<number | null>(null);
+  const autoRefreshDeadlineRef = useRef(Infinity);
   const autoRefreshInFlightRef = useRef(false);
   const autoRefreshQueuedRef = useRef(false);
   const selectionRequestRef = useRef(0);
@@ -132,6 +133,7 @@ export function CommitPanel() {
     if (autoRefreshTimerRef.current !== null) {
       window.clearTimeout(autoRefreshTimerRef.current);
       autoRefreshTimerRef.current = null;
+      autoRefreshDeadlineRef.current = Infinity;
     }
   }, []);
 
@@ -397,11 +399,18 @@ export function CommitPanel() {
   }, [refreshCurrentView, refreshSectionStats]);
 
   const scheduleAutoRefresh = useCallback((delay = AUTO_REFRESH_DELAY_MS) => {
+    // Earliest deadline wins: a later event must not push back an already
+    // scheduled refresh, or sustained fs churn (an agent writing files) would
+    // starve the panel until the activity pauses.
+    const deadline = Date.now() + delay;
     if (autoRefreshTimerRef.current !== null) {
+      if (deadline >= autoRefreshDeadlineRef.current) return;
       window.clearTimeout(autoRefreshTimerRef.current);
     }
+    autoRefreshDeadlineRef.current = deadline;
     autoRefreshTimerRef.current = window.setTimeout(() => {
       autoRefreshTimerRef.current = null;
+      autoRefreshDeadlineRef.current = Infinity;
       void runAutoRefresh();
     }, delay);
   }, [runAutoRefresh]);
@@ -422,12 +431,16 @@ export function CommitPanel() {
     listen(`fs-changed-${safeId}`, () => {
       // Invalidate branch cache so next "All Changes" fetch is fresh
       void invoke("invalidate_branch_cache", { worktreePath });
-      // Only refresh diffs if viewing diffs — skip heavy git operations when on terminal/split tab
+      // This panel only mounts while the sidebar's Changes tab is visible, so
+      // always refresh — even on the terminal tab, the commit list and stats
+      // shown here would otherwise go stale. But relax the cadence when the
+      // diff view is hidden (terminal tab) or an agent is churning files.
       const tab = useUIStore.getState().getWorktreeNavState(worktreePath)?.activeTab;
-      if (tab === "terminal") return;
       const agentStatus = useDataStore.getState().getWorktreeDataState(worktreePath).agentStatus;
       scheduleAutoRefresh(
-        agentStatus === "working" ? WORKING_AGENT_AUTO_REFRESH_DELAY_MS : AUTO_REFRESH_DELAY_MS,
+        agentStatus === "working" || tab === "terminal"
+          ? WORKING_AGENT_AUTO_REFRESH_DELAY_MS
+          : AUTO_REFRESH_DELAY_MS,
       );
     }).then((fn) => {
       unlisten = fn;
