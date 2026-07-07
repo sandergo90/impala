@@ -179,6 +179,15 @@ export function FileViewer() {
   const setExternalChange = useEditorDocsStore((s) => s.setExternalChange);
   const refreshIfClean = useEditorDocsStore((s) => s.refreshIfClean);
 
+  // Catch up with disk when this viewer (re)mounts. TabbedTerminals mounts
+  // only the active tab, so the fs-event listener below doesn't exist while
+  // the file tab is backgrounded — external changes from that period were
+  // never seen. No-ops when the on-disk revision matches the baseline.
+  useEffect(() => {
+    if (!shouldLoadText || !docKey) return;
+    void refreshIfClean(docKey);
+  }, [shouldLoadText, docKey, refreshIfClean]);
+
   useEffect(() => {
     if (!wtPath) return;
     let cancelled = false;
