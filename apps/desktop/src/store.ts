@@ -122,6 +122,16 @@ interface UIState {
   setWorktreeBaseDirOverride: (path: string | null) => void;
   worktreeDefaultBaseDir: string | null;
   setWorktreeDefaultBaseDir: (path: string) => void;
+  // Companion mode: Impala as a review-only surface next to an external agent
+  // app. Hides the terminal surface and worktree management. Persisted.
+  companionMode: boolean;
+  setCompanionMode: (on: boolean) => void;
+  // The single-file preview shown in place of the diff while in Companion
+  // mode. Session-only.
+  companionFilePreview: { worktreePath: string; path: string } | null;
+  setCompanionFilePreview: (
+    preview: { worktreePath: string; path: string } | null,
+  ) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -260,6 +270,10 @@ export const useUIStore = create<UIState>()(
       setWorktreeBaseDirOverride: (path) => set({ worktreeBaseDirOverride: path }),
       worktreeDefaultBaseDir: null,
       setWorktreeDefaultBaseDir: (path) => set({ worktreeDefaultBaseDir: path }),
+      companionMode: false,
+      setCompanionMode: (on) => set({ companionMode: on }),
+      companionFilePreview: null,
+      setCompanionFilePreview: (preview) => set({ companionFilePreview: preview }),
     }),
     {
       name: "impala-ui-state",
@@ -325,6 +339,7 @@ export const useUIStore = create<UIState>()(
           linearApiKey,
           pendingTreeReveal,
           fileFinderOpen,
+          companionFilePreview,
           worktreeNavStates,
           worktreeBaseDirOverride,
           worktreeDefaultBaseDir,
@@ -431,22 +446,31 @@ export const useDataStore = create<DataState>()(
 /**
  * Worktrees as the user wants to see them.
  *
- * When `worktreeFilterEnabled` is on, hides any worktree whose path doesn't
- * sit under the configured base directory. Main worktrees (the repo root —
- * identified by `title === null`, set in lib.rs::list_worktrees) are always
- * kept so the user never loses access to the primary checkout.
+ * When `enabled` is on, hides any worktree whose path doesn't sit under the
+ * configured base directory. Main worktrees (the repo root — identified by
+ * `title === null`, set in lib.rs::list_worktrees) are always kept so the
+ * user never loses access to the primary checkout.
  */
+export function filterWorktreesForDisplay(
+  worktrees: Worktree[],
+  enabled: boolean,
+  baseDir: string | null,
+): Worktree[] {
+  if (!enabled || !baseDir) return worktrees;
+  const prefix = baseDir.endsWith("/") ? baseDir : `${baseDir}/`;
+  return worktrees.filter(
+    (w) => w.title === null || w.path === baseDir || w.path.startsWith(prefix),
+  );
+}
+
 export function useFilteredWorktrees(): Worktree[] {
   const worktrees = useDataStore((s) => s.worktrees);
   const enabled = useUIStore((s) => s.worktreeFilterEnabled);
   const override = useUIStore((s) => s.worktreeBaseDirOverride);
   const defaultDir = useUIStore((s) => s.worktreeDefaultBaseDir);
   const baseDir = override ?? defaultDir;
-  return useMemo(() => {
-    if (!enabled || !baseDir) return worktrees;
-    const prefix = baseDir.endsWith("/") ? baseDir : `${baseDir}/`;
-    return worktrees.filter(
-      (w) => w.title === null || w.path === baseDir || w.path.startsWith(prefix),
-    );
-  }, [worktrees, enabled, baseDir]);
+  return useMemo(
+    () => filterWorktreesForDisplay(worktrees, enabled, baseDir),
+    [worktrees, enabled, baseDir],
+  );
 }

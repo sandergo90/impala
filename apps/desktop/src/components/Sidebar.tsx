@@ -13,6 +13,7 @@ import {
   selectWorktree as sharedSelectWorktree,
   selectProject as sharedSelectProject,
   activateGeneralTerminal,
+  bootProjects,
 } from "../hooks/useWorktreeActions";
 import type { Worktree, Project, WorktreeIssue, PrStatus } from "../types";
 import { usePrStatusSync } from "../hooks/usePrStatusSync";
@@ -519,59 +520,7 @@ export function Sidebar() {
 
   // Load persisted projects on mount and restore selections
   useEffect(() => {
-    (async () => {
-      try {
-        const paths = await invoke<string[]>("load_projects");
-        const loaded: Project[] = paths.map((p) => ({
-          path: p,
-          name: p.split("/").pop() || p,
-        }));
-        useDataStore.getState().setProjects(loaded);
-
-        // Discover icons for all projects in parallel
-        for (const project of loaded) {
-          invoke<string | null>("discover_project_icon", {
-            projectPath: project.path,
-          })
-            .then((icon) => {
-              if (icon)
-                useDataStore.getState().setProjectIcon(project.path, icon);
-            })
-            .catch(() => {});
-        }
-
-        const persistedProject = useUIStore.getState().selectedProject;
-        if (
-          persistedProject &&
-          loaded.some((p) => p.path === persistedProject.path)
-        ) {
-          try {
-            const wts = await invoke<Worktree[]>("list_worktrees", {
-              repoPath: persistedProject.path,
-            });
-            useDataStore.getState().setWorktrees(wts);
-
-            const persistedWorktree = useUIStore.getState().selectedWorktree;
-            if (
-              persistedWorktree &&
-              wts.some((wt) => wt.path === persistedWorktree.path)
-            ) {
-              await selectWorktree(persistedWorktree);
-            } else {
-              useUIStore.getState().setSelectedWorktree(null);
-            }
-          } catch {
-            useUIStore.getState().setSelectedProject(null);
-            useUIStore.getState().setSelectedWorktree(null);
-          }
-        } else if (persistedProject) {
-          useUIStore.getState().setSelectedProject(null);
-          useUIStore.getState().setSelectedWorktree(null);
-        }
-      } catch (e) {
-        toast.error("Failed to load projects");
-      }
-    })();
+    void bootProjects();
   }, []);
 
   const [worktreeIssues, setWorktreeIssues] = useState<

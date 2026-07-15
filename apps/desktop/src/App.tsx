@@ -91,9 +91,16 @@ export function RootLayout() {
     setFileFinderOpen(!useUIStore.getState().fileFinderOpen);
   });
 
-  useAppHotkey("RUN_SCRIPT", () => {
-    toggleRunScript();
-  });
+  const companionMode = useUIStore((s) => s.companionMode);
+
+  useAppHotkey(
+    "RUN_SCRIPT",
+    () => {
+      toggleRunScript();
+    },
+    { enabled: !companionMode },
+    [companionMode],
+  );
 
   useAppHotkey("SHOW_KEYBOARD_SHORTCUTS", () => {
     router.navigate({ to: "/settings/keyboard" });
@@ -149,40 +156,44 @@ export function RootLayout() {
     }
   };
 
+  // The nav-state activeTab may still say "terminal" while Companion mode
+  // forces the diff, so the terminal pane hotkeys must be gated off too.
   const splitEnabled =
-    generalTerminalActive ||
-    (selectedWorktreePath !== null &&
-      worktreeActiveTab === "terminal" &&
-      worktreeActiveTabIsUser);
+    !companionMode &&
+    (generalTerminalActive ||
+      (selectedWorktreePath !== null &&
+        worktreeActiveTab === "terminal" &&
+        worktreeActiveTabIsUser));
 
   useAppHotkey(
     "SPLIT_VERTICAL",
     () => handleSplit("vertical"),
     { enabled: splitEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser, companionMode],
   );
   useAppHotkey(
     "SPLIT_HORIZONTAL",
     () => handleSplit("horizontal"),
     { enabled: splitEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser, companionMode],
   );
   useAppHotkey(
     "NEXT_PANE",
     () => handleFocusAdjacentPane(1),
     { enabled: splitEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser, companionMode],
   );
   useAppHotkey(
     "PREV_PANE",
     () => handleFocusAdjacentPane(-1),
     { enabled: splitEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser, companionMode],
   );
 
   const closePaneEnabled =
-    generalTerminalActive ||
-    (selectedWorktreePath !== null && worktreeActiveTab === "terminal");
+    !companionMode &&
+    (generalTerminalActive ||
+      (selectedWorktreePath !== null && worktreeActiveTab === "terminal"));
 
   useAppHotkey(
     "CLOSE_PANE",
@@ -222,7 +233,7 @@ export function RootLayout() {
       }
     },
     { enabled: closePaneEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, companionMode],
   );
 
   // -- Worktree jump shortcuts (always active) --

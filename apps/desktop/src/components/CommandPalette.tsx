@@ -18,6 +18,7 @@ export function CommandPalette({
   const selectedProject = useUIStore((s) => s.selectedProject);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const previousProject = useUIStore((s) => s.previousProject);
+  const companionMode = useUIStore((s) => s.companionMode);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -73,6 +74,16 @@ export function CommandPalette({
           useUIStore.getState().updateWorktreeNavState(selectedWorktree.path, { activeTab: "split" });
         }
         break;
+      case "companion-mode": {
+        const uiState = useUIStore.getState();
+        const next = !uiState.companionMode;
+        uiState.setCompanionMode(next);
+        // The mode has no terminal surface; drop the general terminal so
+        // entering never lands on it. The preview is session-scoped either way.
+        if (next) uiState.setGeneralTerminalActive(false);
+        uiState.setCompanionFilePreview(null);
+        break;
+      }
     }
     onClose();
   };
@@ -180,7 +191,7 @@ export function CommandPalette({
                   <HotkeyDisplay id="SWITCH_TO_PREVIOUS_PROJECT" className="ml-auto text-muted-foreground/90" />
                 </Command.Item>
               )}
-              {selectedWorktree && (
+              {selectedWorktree && !companionMode && (
                 <>
                   <Command.Item
                     value="Switch to Diff view"
@@ -217,6 +228,17 @@ export function CommandPalette({
                   </Command.Item>
                 </>
               )}
+              <Command.Item
+                value={companionMode ? "Exit Companion Mode" : "Switch to Companion Mode"}
+                onSelect={() => handleAction("companion-mode")}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+                {companionMode ? "Exit Companion Mode" : "Switch to Companion Mode"}
+              </Command.Item>
               <Command.Item
                 value="Open Settings"
                 onSelect={() => handleAction("settings")}
