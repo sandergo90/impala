@@ -111,6 +111,11 @@ export interface UserTab {
 
 export interface WorktreeNavState {
   activeTab: "terminal" | "diff" | "split";
+  /**
+   * What the right panel of the top-level Split mode shows: the diff or the
+   * worktree's browser tab. Persisted; defaults to "diff".
+   */
+  splitRightPane?: "diff" | "browser";
   agentLaunched: boolean;
   viewMode: "commit" | "all-changes" | "uncommitted" | "last-turn";
   selectedCommit: CommitInfo | null;

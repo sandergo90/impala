@@ -26,7 +26,8 @@ import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 import { RunActionsButton } from "../components/RunActionsButton";
 import { TabPill } from "../components/TabPill";
 import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
-import { createUserTab, stepActiveTab } from "../lib/tab-actions";
+import { createUserTab, createBrowserTab, stepActiveTab } from "../lib/tab-actions";
+import { BrowserPane } from "../components/BrowserPane";
 
 let cachedHomeDir: string | null = null;
 
@@ -48,10 +49,45 @@ export function MainView() {
     setIsRightSidebarResizing(resizing);
     useUIStore.getState().setPanelDragActive(resizing);
   }, []);
+  // Split-divider drags need the same webview parking as sidebar drags now
+  // that a browser pane can sit beside the divider. react-resizable-panels v4
+  // exposes no dragging callback, so bracket it with pointer events.
+  const handleSplitDividerPointerDown = useCallback(() => {
+    useUIStore.getState().setPanelDragActive(true);
+    const end = () => {
+      useUIStore.getState().setPanelDragActive(false);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  }, []);
 
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const selectedProject = useUIStore((s) => s.selectedProject);
   const wtPath = selectedWorktree?.path;
+
+  const splitRightPane = useUIStore(
+    (s) =>
+      (wtPath ? s.worktreeNavStates[wtPath]?.splitRightPane : undefined) ??
+      "diff",
+  );
+  const splitBrowserTab = useUIStore((s) =>
+    wtPath
+      ? ((s.worktreeNavStates[wtPath]?.userTabs ?? []).find(
+          (t) => t.kind === "browser",
+        ) ?? null)
+      : null,
+  );
+  const setSplitRightPane = useCallback(
+    (pane: "diff" | "browser") => {
+      if (!wtPath) return;
+      useUIStore
+        .getState()
+        .updateWorktreeNavState(wtPath, { splitRightPane: pane });
+    },
+    [wtPath],
+  );
 
   // General terminal state
   const [homeDirPath, setHomeDirPath] = useState<string | null>(cachedHomeDir);
@@ -333,9 +369,48 @@ export function MainView() {
                 <RrpResizablePanel defaultSize="50%" minSize={200}>
                   <WorktreeTerminals activeWorktreePath={wtPath!} agentOnly />
                 </RrpResizablePanel>
-                <ResizableHandle withHandle />
+                <ResizableHandle
+                  withHandle
+                  onPointerDown={handleSplitDividerPointerDown}
+                />
                 <RrpResizablePanel defaultSize="50%" minSize={200}>
-                  <DiffView />
+                  <div className="flex h-full flex-col">
+                    <div className="flex shrink-0 items-center gap-0.5 px-2 py-1 border-b border-border/40">
+                      <TabPill
+                        label="Diff"
+                        isActive={splitRightPane === "diff"}
+                        onClick={() => setSplitRightPane("diff")}
+                      />
+                      <TabPill
+                        label="Browser"
+                        isActive={splitRightPane === "browser"}
+                        onClick={() => setSplitRightPane("browser")}
+                      />
+                    </div>
+                    <div className="relative flex-1 min-h-0">
+                      {splitRightPane === "browser" ? (
+                        splitBrowserTab ? (
+                          <BrowserPane
+                            tab={splitBrowserTab}
+                            worktreePath={wtPath!}
+                            isActive
+                          />
+                        ) : (
+                          <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+                            <span>No browser tab yet</span>
+                            <button
+                              onClick={() => createBrowserTab(wtPath!)}
+                              className="px-3 py-1.5 rounded border border-border hover:bg-accent hover:text-foreground"
+                            >
+                              Open a browser
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <DiffView />
+                      )}
+                    </div>
+                  </div>
                 </RrpResizablePanel>
               </ResizablePanelGroup>
             ) : (

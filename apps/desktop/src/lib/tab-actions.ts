@@ -132,6 +132,11 @@ export function createBrowserTab(worktreePath: string, url?: string): UserTab {
 export function openBrowserTabAt(worktreePath: string, url: string): void {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
+  // Split mode with the browser pane showing already displays the tab —
+  // don't yank the user into terminal mode.
+  const browserVisibleInSplit =
+    nav.activeTab === "split" && (nav.splitRightPane ?? "diff") === "browser";
+  const targetTab = browserVisibleInSplit ? nav.activeTab : "terminal";
   const existing = nav.userTabs.find((t) => t.kind === "browser");
   if (existing) {
     // No-ops if the webview doesn't exist yet; the updated tab url seeds
@@ -142,11 +147,11 @@ export function openBrowserTabAt(worktreePath: string, url: string): void {
         t.id === existing.id ? { ...t, url } : t,
       ),
       activeTerminalsTab: existing.id,
-      activeTab: "terminal",
+      activeTab: targetTab,
     });
   } else {
     createBrowserTab(worktreePath, url);
-    uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
+    uiState.updateWorktreeNavState(worktreePath, { activeTab: targetTab });
   }
 }
 
