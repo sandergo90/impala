@@ -112,6 +112,7 @@ export const BrowserPane = memo(function BrowserPane({
     const r = el.getBoundingClientRect();
     invoke("browser_open", {
       id: tab.id,
+      worktreePath,
       // hasUrl guards this effect; on the flip from empty state this closure
       // re-runs with the freshly navigated tab.url.
       url: tab.url,

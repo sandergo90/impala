@@ -1,6 +1,52 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Duration;
+
 use tauri::webview::{PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl};
 use tracing::{debug, info, warn};
+
+/// tabId -> worktreePath for every live browser webview. Lets worktree-scoped
+/// callers (hook-server endpoints, MCP tools) find "the browser pane of this
+/// worktree" without knowing frontend tab state.
+#[derive(Default)]
+pub struct BrowserRegistry(pub Mutex<HashMap<String, String>>);
+
+/// Console capture: shims console.*, window.onerror, and unhandledrejection
+/// into a capped window.__IMPALA_LOGS__ ring buffer. Runs per navigation
+/// (fresh window each time), so logs are per-page. The captured `logs` var is
+/// the same array as window.__IMPALA_LOGS__ and is never reassigned — drains
+/// must clear via length = 0, not by replacing the array.
+const CONSOLE_SHIM: &str = r#"
+(function () {
+  if (window.__IMPALA_CONSOLE_SHIM__) return;
+  window.__IMPALA_CONSOLE_SHIM__ = true;
+  var logs = (window.__IMPALA_LOGS__ = []);
+  var MAX = 500;
+  function push(level, args) {
+    var msg = Array.prototype.map.call(args, function (a) {
+      if (typeof a === "string") return a;
+      try { return JSON.stringify(a); } catch (e) { return String(a); }
+    }).join(" ");
+    logs.push({ level: level, msg: msg, ts: Date.now() });
+    if (logs.length > MAX) logs.shift();
+  }
+  ["log", "info", "warn", "error", "debug"].forEach(function (level) {
+    var orig = console[level];
+    console[level] = function () {
+      push(level, arguments);
+      return orig.apply(console, arguments);
+    };
+  });
+  window.addEventListener("error", function (e) {
+    push("error", [e.message + " (" + (e.filename || "") + ":" + (e.lineno || 0) + ")"]);
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason;
+    push("error", ["Unhandled rejection: " + (r && r.stack ? r.stack : String(r))]);
+  });
+})();
+"#;
 
 // Webview labels must stay within tauri's allowed charset; tab ids are
 // frontend-generated (`browser-{slot}-{timestamp}`) but sanitize anyway.
@@ -31,12 +77,19 @@ fn get_webview(app: &AppHandle, id: &str) -> Result<Webview, String> {
 pub async fn browser_open(
     app: AppHandle,
     id: String,
+    worktree_path: String,
     url: String,
     x: f64,
     y: f64,
     width: f64,
     height: f64,
 ) -> Result<(), String> {
+    app.state::<BrowserRegistry>()
+        .0
+        .lock()
+        .unwrap()
+        .insert(id.clone(), worktree_path);
+
     if let Ok(wv) = get_webview(&app, &id) {
         info!(id = %id, x, y, width, height, "browser_open: reshow existing webview");
         wv.set_position(LogicalPosition::new(x, y))
@@ -55,6 +108,7 @@ pub async fn browser_open(
     let load_app = app.clone();
     let load_id = id.clone();
     let builder = WebviewBuilder::new(label_for(&id), WebviewUrl::External(parsed))
+        .initialization_script(CONSOLE_SHIM)
         .on_navigation(move |url| {
             debug!(id = %nav_id, url = %url, "browser on_navigation");
             let _ = nav_app.emit_to("main", &format!("browser-nav-{nav_id}"), url.to_string());
@@ -150,8 +204,173 @@ pub fn browser_reload(app: AppHandle, id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn browser_close(app: AppHandle, id: String) -> Result<(), String> {
+    app.state::<BrowserRegistry>().0.lock().unwrap().remove(&id);
     if let Ok(wv) = get_webview(&app, &id) {
         wv.close().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Agent hooks: JS-with-result + screenshot via the native WKWebView, exposed
+// as commands (and, via hook-server endpoints, to impala-mcp).
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn browser_screenshot(app: AppHandle, id: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let wv = get_webview(&app, &id)?;
+    let png = native::take_screenshot(&wv, Duration::from_secs(5))?;
+    debug!(id = %id, bytes = png.len(), "browser_screenshot");
+    Ok(STANDARD.encode(png))
+}
+
+#[tauri::command]
+pub async fn browser_console_logs(
+    app: AppHandle,
+    id: String,
+    clear: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let wv = get_webview(&app, &id)?;
+    // The shim pushes into the same array forever; draining must clear with
+    // length = 0 (see CONSOLE_SHIM), and stringify before clearing.
+    let js = if clear.unwrap_or(false) {
+        "(function(){var l=window.__IMPALA_LOGS__||[];var s=JSON.stringify(l);l.length=0;return s;})()"
+    } else {
+        "JSON.stringify(window.__IMPALA_LOGS__||[])"
+    };
+    let raw = native::eval_js(&wv, js, Duration::from_secs(3))?;
+    serde_json::from_str(&raw).map_err(|e| format!("bad console payload: {e}"))
+}
+
+#[tauri::command]
+pub async fn browser_page_info(app: AppHandle, id: String) -> Result<serde_json::Value, String> {
+    let wv = get_webview(&app, &id)?;
+    let raw = native::eval_js(
+        &wv,
+        "JSON.stringify({url:location.href,title:document.title,readyState:document.readyState})",
+        Duration::from_secs(3),
+    )?;
+    serde_json::from_str(&raw).map_err(|e| format!("bad page info payload: {e}"))
+}
+
+#[cfg(target_os = "macos")]
+mod native {
+    use std::sync::{mpsc, Mutex};
+    use std::time::Duration;
+
+    use block2::RcBlock;
+    use objc2::runtime::AnyObject;
+    use objc2::rc::Retained;
+    use objc2_app_kit::{
+        NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSImage,
+    };
+    use objc2_foundation::{NSDictionary, NSError, NSString};
+    use objc2_web_kit::WKWebView;
+    use tauri::Webview;
+
+    /// Run JS in the page's main frame and return its result. Always send
+    /// JSON.stringify(...)-shaped JS so the result is a string.
+    ///
+    /// `with_webview` dispatches to the main thread and the completion block
+    /// answers over a channel — never call this ON the main thread (async
+    /// commands and the hook-server thread are fine; both run elsewhere).
+    pub fn eval_js(webview: &Webview, js: &str, timeout: Duration) -> Result<String, String> {
+        let (tx, rx) = mpsc::channel::<Result<String, String>>();
+        let tx = Mutex::new(Some(tx));
+        let js = js.to_string();
+        webview
+            .with_webview(move |pw| {
+                let wk = unsafe { &*(pw.inner() as *const WKWebView) };
+                let block = RcBlock::new(move |result: *mut AnyObject, error: *mut NSError| {
+                    let Some(tx) = tx.lock().unwrap().take() else {
+                        return;
+                    };
+                    if !error.is_null() {
+                        let desc = unsafe { (*error).localizedDescription() };
+                        let _ = tx.send(Err(desc.to_string()));
+                        return;
+                    }
+                    if result.is_null() {
+                        let _ = tx.send(Ok(String::new()));
+                        return;
+                    }
+                    let obj = unsafe { &*result };
+                    let text = match obj.downcast_ref::<NSString>() {
+                        Some(s) => s.to_string(),
+                        None => format!("{obj:?}"),
+                    };
+                    let _ = tx.send(Ok(text));
+                });
+                unsafe {
+                    wk.evaluateJavaScript_completionHandler(
+                        &NSString::from_str(&js),
+                        Some(&block),
+                    );
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(timeout)
+            .map_err(|_| "timed out waiting for the page to respond".to_string())?
+    }
+
+    pub fn take_screenshot(webview: &Webview, timeout: Duration) -> Result<Vec<u8>, String> {
+        let (tx, rx) = mpsc::channel::<Result<Vec<u8>, String>>();
+        let tx = Mutex::new(Some(tx));
+        webview
+            .with_webview(move |pw| {
+                let wk = unsafe { &*(pw.inner() as *const WKWebView) };
+                let block = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
+                    let Some(tx) = tx.lock().unwrap().take() else {
+                        return;
+                    };
+                    if !error.is_null() {
+                        let desc = unsafe { (*error).localizedDescription() };
+                        let _ = tx.send(Err(desc.to_string()));
+                        return;
+                    }
+                    if image.is_null() {
+                        let _ = tx.send(Err("snapshot returned no image".to_string()));
+                        return;
+                    }
+                    let image = unsafe { &*image };
+                    let _ = tx.send(encode_png(image));
+                });
+                unsafe {
+                    wk.takeSnapshotWithConfiguration_completionHandler(None, &block);
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(timeout)
+            .map_err(|_| "timed out waiting for the snapshot".to_string())?
+    }
+
+    fn encode_png(image: &NSImage) -> Result<Vec<u8>, String> {
+        let tiff = image
+            .TIFFRepresentation()
+            .ok_or("no TIFF representation")?;
+        let rep =
+            NSBitmapImageRep::imageRepWithData(&tiff).ok_or("could not read bitmap data")?;
+        let props: Retained<NSDictionary<NSBitmapImageRepPropertyKey, AnyObject>> =
+            NSDictionary::new();
+        let png = unsafe {
+            rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props)
+        }
+        .ok_or("PNG encoding failed")?;
+        Ok(png.to_vec())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod native {
+    use std::time::Duration;
+    use tauri::Webview;
+
+    pub fn eval_js(_wv: &Webview, _js: &str, _t: Duration) -> Result<String, String> {
+        Err("browser agent hooks are only supported on macOS".to_string())
+    }
+
+    pub fn take_screenshot(_wv: &Webview, _t: Duration) -> Result<Vec<u8>, String> {
+        Err("browser agent hooks are only supported on macOS".to_string())
+    }
 }

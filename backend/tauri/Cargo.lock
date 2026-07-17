@@ -2129,6 +2129,7 @@ version = "0.19.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "block2",
  "chrono",
  "dirs",
  "ignore",
@@ -2140,6 +2141,7 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+ "objc2-web-kit",
  "portable-pty",
  "reqwest 0.13.4",
  "rusqlite",

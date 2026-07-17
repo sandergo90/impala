@@ -1629,6 +1629,7 @@ pub fn run() {
 
             app.manage(DbState(Mutex::new(conn)));
             app.manage(daemon_client::DaemonState::new());
+            app.manage(browser::BrowserRegistry::default());
             app.manage(watcher::WatcherState::new());
             app.manage(file_tree::GitignoreCache::new());
             app.manage(DiffCache(Mutex::new(lru::LruCache::new(
@@ -1850,6 +1851,9 @@ pub fn run() {
             browser::browser_history,
             browser::browser_reload,
             browser::browser_close,
+            browser::browser_screenshot,
+            browser::browser_console_logs,
+            browser::browser_page_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
