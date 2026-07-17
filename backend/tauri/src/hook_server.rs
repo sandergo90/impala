@@ -419,6 +419,24 @@ pub fn start(
                 _ => "",
             };
 
+            // The agent finishing a turn completes any launched automation
+            // run in that worktree.
+            if event_type == "Stop" && !worktree_path.is_empty() {
+                use tauri::Manager;
+                let state = app_handle.state::<crate::DbState>();
+                let completed = state
+                    .0
+                    .lock()
+                    .ok()
+                    .and_then(|conn| {
+                        crate::automations::complete_run_for_worktree(&conn, &worktree_path).ok()
+                    })
+                    .unwrap_or(false);
+                if completed {
+                    let _ = app_handle.emit("automation-runs-changed", ());
+                }
+            }
+
             if !status.is_empty() && !worktree_path.is_empty() {
                 if let Ok(mut map) = statuses.0.lock() {
                     map.insert(worktree_path.clone(), status.to_string());

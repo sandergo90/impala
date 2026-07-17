@@ -1,5 +1,6 @@
 mod agent_config;
 mod annotations;
+mod automations;
 mod browser;
 mod config;
 mod daemon_client;
@@ -1662,6 +1663,8 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize settings tables: {}", e))?;
             github::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize pr_status table: {}", e))?;
+            automations::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize automations tables: {}", e))?;
 
             // The plan-review feature was removed. Drop its legacy tables so
             // they don't linger in existing databases.
@@ -1734,6 +1737,8 @@ pub fn run() {
             app.manage(agent_statuses);
             app.manage(last_turn_snapshots);
             app.manage(caffeinators);
+
+            automations::start_scheduler(app.handle().clone());
 
             // Bring up the detached PTY daemon in the background. Until it
             // lands, pty_* commands return "pty daemon not ready". The
@@ -1870,6 +1875,15 @@ pub fn run() {
             list_browser_annotations,
             resolve_browser_annotation,
             delete_browser_annotation,
+            automations::list_automations,
+            automations::create_automation,
+            automations::update_automation,
+            automations::delete_automation,
+            automations::set_automation_enabled,
+            automations::run_automation_now,
+            automations::list_automation_runs,
+            automations::report_automation_run,
+            automations::cron_next_occurrences,
             get_pr_status,
             refresh_pr_status,
             delete_pr_status,
