@@ -601,6 +601,25 @@ fn resolve_browser_annotation(
 }
 
 #[tauri::command]
+fn delete_browser_annotation(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let screenshot_path = annotations::delete_browser_annotation(&conn, &id)?;
+    // Best-effort: a missing file must not fail the row deletion.
+    if let Some(path) = screenshot_path {
+        let _ = fs::remove_file(path);
+    }
+    let _ = app.emit("annotations-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
 fn list_annotations(
     state: tauri::State<'_, DbState>,
     repo: String,
@@ -1850,6 +1869,7 @@ pub fn run() {
             create_browser_annotation,
             list_browser_annotations,
             resolve_browser_annotation,
+            delete_browser_annotation,
             get_pr_status,
             refresh_pr_status,
             delete_pr_status,

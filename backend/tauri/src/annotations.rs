@@ -193,6 +193,24 @@ pub fn resolve_browser_annotation(conn: &Connection, id: &str) -> Result<(), Str
     Ok(())
 }
 
+/// Delete the row and hand back its screenshot_path so the caller can
+/// remove the file — the DB layer has no filesystem access.
+pub fn delete_browser_annotation(conn: &Connection, id: &str) -> Result<Option<String>, String> {
+    let screenshot_path: Option<String> = conn
+        .query_row(
+            "SELECT screenshot_path FROM browser_annotations WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|_| format!("Browser annotation not found: {}", id))?;
+    conn.execute(
+        "DELETE FROM browser_annotations WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("Failed to delete browser annotation: {}", e))?;
+    Ok(screenshot_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,6 +251,15 @@ mod tests {
         assert!(all[0].resolved);
 
         assert!(resolve_browser_annotation(&conn, "missing").is_err());
+
+        assert_eq!(
+            delete_browser_annotation(&conn, &created.id).unwrap().as_deref(),
+            Some("/tmp/shot.png")
+        );
+        assert!(list_browser_annotations(&conn, "/wt", true)
+            .unwrap()
+            .is_empty());
+        assert!(delete_browser_annotation(&conn, &created.id).is_err());
     }
 }
 

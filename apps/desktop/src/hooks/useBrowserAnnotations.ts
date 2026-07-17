@@ -45,5 +45,14 @@ export function useBrowserAnnotations() {
     );
   }, []);
 
-  return { browserAnnotations, resolveBrowserAnnotation };
+  const deleteBrowserAnnotation = useCallback(async (id: string) => {
+    await invoke("delete_browser_annotation", { id });
+    setBrowserAnnotations((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  return {
+    browserAnnotations,
+    resolveBrowserAnnotation,
+    deleteBrowserAnnotation,
+  };
 }

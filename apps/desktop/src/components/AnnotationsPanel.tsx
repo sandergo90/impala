@@ -18,7 +18,7 @@ export function AnnotationsPanel() {
     handleDelete,
     handleSendAllToAgent,
   } = useAnnotationActions();
-  const { browserAnnotations, resolveBrowserAnnotation } =
+  const { browserAnnotations, resolveBrowserAnnotation, deleteBrowserAnnotation } =
     useBrowserAnnotations();
 
   const visibleBrowser = useMemo(
@@ -215,18 +215,30 @@ export function AnnotationsPanel() {
                       {a.body}
                     </div>
                   </div>
-                  {!a.resolved && (
+                  <div className="flex shrink-0 gap-0.5 self-start">
+                    {!a.resolved && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          resolveBrowserAnnotation(a.id).catch(() => {});
+                        }}
+                        className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                        title="Resolve"
+                      >
+                        ✓
+                      </button>
+                    )}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        resolveBrowserAnnotation(a.id).catch(() => {});
+                        deleteBrowserAnnotation(a.id).catch(() => {});
                       }}
-                      className="shrink-0 self-start rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                      title="Resolve"
+                      className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                      title="Delete (removes screenshot)"
                     >
-                      ✓
+                      ✕
                     </button>
-                  )}
+                  </div>
                 </div>
               ))}
             </div>
