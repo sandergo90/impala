@@ -536,6 +536,71 @@ fn create_annotation(
 }
 
 #[tauri::command]
+fn create_browser_annotation(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DbState>,
+    annotation: annotations::NewBrowserAnnotation,
+    screenshot_base64: Option<String>,
+) -> Result<annotations::BrowserAnnotation, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let screenshot_path = match screenshot_base64 {
+        Some(b64) => {
+            let bytes = STANDARD
+                .decode(b64)
+                .map_err(|e| format!("bad screenshot data: {}", e))?;
+            let dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?
+                .join("browser-annotation-screenshots");
+            fs::create_dir_all(&dir)
+                .map_err(|e| format!("Failed to create screenshot dir: {}", e))?;
+            let path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
+            fs::write(&path, bytes).map_err(|e| format!("Failed to write screenshot: {}", e))?;
+            Some(path.to_string_lossy().to_string())
+        }
+        None => None,
+    };
+
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let created = annotations::create_browser_annotation(&conn, annotation, screenshot_path)?;
+    let _ = app.emit("annotations-changed", ());
+    Ok(created)
+}
+
+#[tauri::command]
+fn list_browser_annotations(
+    state: tauri::State<'_, DbState>,
+    repo: String,
+    include_resolved: Option<bool>,
+) -> Result<Vec<annotations::BrowserAnnotation>, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    annotations::list_browser_annotations(&conn, &repo, include_resolved.unwrap_or(false))
+}
+
+#[tauri::command]
+fn resolve_browser_annotation(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    annotations::resolve_browser_annotation(&conn, &id)?;
+    let _ = app.emit("annotations-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
 fn list_annotations(
     state: tauri::State<'_, DbState>,
     repo: String,
@@ -1782,6 +1847,9 @@ pub fn run() {
             list_annotations,
             update_annotation,
             delete_annotation,
+            create_browser_annotation,
+            list_browser_annotations,
+            resolve_browser_annotation,
             get_pr_status,
             refresh_pr_status,
             delete_pr_status,
