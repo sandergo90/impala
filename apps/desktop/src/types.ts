@@ -53,6 +53,19 @@ export interface NewAnnotation {
   code_context?: string;
 }
 
+export interface BrowserAnnotation {
+  id: string;
+  repo_path: string;
+  url: string;
+  selector: string;
+  element: string;
+  body: string;
+  screenshot_path?: string | null;
+  resolved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export type SplitNode =
   | { type: "leaf"; id: string; paneType: "agent" | "shell" }
   | {

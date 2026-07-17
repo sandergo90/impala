@@ -1,7 +1,10 @@
 import { useMemo } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { useUIStore, useDataStore } from "../store";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
+import { useBrowserAnnotations } from "../hooks/useBrowserAnnotations";
 import { AnnotationDisplay } from "./AnnotationDisplay";
+import { openBrowserTabAt } from "../lib/tab-actions";
 import type { Annotation } from "../types";
 
 export function AnnotationsPanel() {
@@ -15,6 +18,13 @@ export function AnnotationsPanel() {
     handleDelete,
     handleSendAllToAgent,
   } = useAnnotationActions();
+  const { browserAnnotations, resolveBrowserAnnotation } =
+    useBrowserAnnotations();
+
+  const visibleBrowser = useMemo(
+    () => browserAnnotations.filter((a) => showResolved || !a.resolved),
+    [browserAnnotations, showResolved],
+  );
 
   // Filter, scope, sort, and group in a single pass
   const { scoped, grouped } = useMemo(() => {
@@ -34,8 +44,10 @@ export function AnnotationsPanel() {
     return { scoped: scopedItems, grouped: groupedMap };
   }, [annotations, showResolved, selectedFile]);
 
-  const hasAnnotations = annotations.length > 0;
-  const hasUnresolved = annotations.some((a) => !a.resolved);
+  const hasAnnotations = annotations.length > 0 || browserAnnotations.length > 0;
+  const hasUnresolved =
+    annotations.some((a) => !a.resolved) ||
+    browserAnnotations.some((a) => !a.resolved);
 
   const scrollToLine = (annotation: Annotation) => {
     // Select the file if not already selected
@@ -116,11 +128,11 @@ export function AnnotationsPanel() {
 
       {/* Annotations list */}
       <div className="overflow-y-auto flex-1 min-h-0">
-        {scoped.length === 0 ? (
+        {scoped.length === 0 && visibleBrowser.length === 0 ? (
           <div className="px-3 py-4 text-sm text-muted-foreground/90 text-center">
             {showResolved ? "No annotations" : "No unresolved annotations"}
           </div>
-        ) : selectedFile ? (
+        ) : scoped.length === 0 ? null : selectedFile ? (
           // Single file: flat list
           <div className="flex flex-col">
             {scoped.map((a) => (
@@ -159,6 +171,65 @@ export function AnnotationsPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {visibleBrowser.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 border-b border-border/50 px-3 py-1.5">
+              <span className="truncate font-mono text-sm font-semibold tracking-[1.2px] text-muted-foreground/60">
+                Browser
+              </span>
+              <span className="shrink-0 rounded-full bg-muted px-1.5 text-xs text-muted-foreground/70">
+                {visibleBrowser.length}
+              </span>
+            </div>
+            <div className="flex flex-col">
+              {visibleBrowser.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex gap-2 px-3 py-2 border-b border-border/30 cursor-pointer hover:bg-accent/30"
+                  onClick={() => openBrowserTabAt(a.repo_path, a.url)}
+                  title={a.url}
+                >
+                  {a.screenshot_path && (
+                    <img
+                      src={convertFileSrc(a.screenshot_path)}
+                      alt=""
+                      className="h-10 w-14 shrink-0 rounded border border-border/50 object-cover"
+                    />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className="truncate font-mono text-xs text-muted-foreground/70"
+                      title={a.selector}
+                    >
+                      {a.selector}
+                    </div>
+                    <div
+                      className={`text-sm ${
+                        a.resolved
+                          ? "line-through text-muted-foreground/60"
+                          : ""
+                      }`}
+                    >
+                      {a.body}
+                    </div>
+                  </div>
+                  {!a.resolved && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        resolveBrowserAnnotation(a.id).catch(() => {});
+                      }}
+                      className="shrink-0 self-start rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                      title="Resolve"
+                    >
+                      ✓
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

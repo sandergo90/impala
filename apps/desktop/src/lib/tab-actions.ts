@@ -128,6 +128,28 @@ export function createBrowserTab(worktreePath: string, url?: string): UserTab {
   return newTab;
 }
 
+/** Open (or reuse) the worktree's browser tab at a URL and bring it on screen. */
+export function openBrowserTabAt(worktreePath: string, url: string): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const existing = nav.userTabs.find((t) => t.kind === "browser");
+  if (existing) {
+    // No-ops if the webview doesn't exist yet; the updated tab url seeds
+    // browser_open on mount instead.
+    invoke("browser_navigate", { id: existing.id, url }).catch(() => {});
+    uiState.updateWorktreeNavState(worktreePath, {
+      userTabs: nav.userTabs.map((t) =>
+        t.id === existing.id ? { ...t, url } : t,
+      ),
+      activeTerminalsTab: existing.id,
+      activeTab: "terminal",
+    });
+  } else {
+    createBrowserTab(worktreePath, url);
+    uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
+  }
+}
+
 export function closeUserTab(worktreePath: string, tabId: string): void {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
