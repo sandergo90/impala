@@ -52,6 +52,9 @@ export const BrowserPane = memo(function BrowserPane({
   const [inputValue, setInputValue] = useState(tab.url ?? "");
   const [loading, setLoading] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  // Last failed browser_* invoke, shown as a strip under the toolbar. Cleared
+  // on the next successful navigation event.
+  const [lastError, setLastError] = useState<string | null>(null);
 
   // The native webview is created lazily on the first real URL. A webview at
   // about:blank is invisible anyway (tauri-runtime-wry skips with_url for
@@ -173,6 +176,7 @@ export const BrowserPane = memo(function BrowserPane({
     let cancelled = false;
     listen<string>(`browser-nav-${tab.id}`, (event) => {
       persistUrl(event.payload);
+      setLastError(null);
       if (!inputFocusedRef.current) setInputValue(event.payload);
     }).then((fn) => {
       if (cancelled) fn();
@@ -200,7 +204,9 @@ export const BrowserPane = memo(function BrowserPane({
       // First navigation from the empty state: the webview doesn't exist yet;
       // persisting the URL flips `hasUrl` and the layout effect creates it.
       if (createdRef.current) {
-        invoke("browser_navigate", { id: tab.id, url }).catch(() => {});
+        invoke("browser_navigate", { id: tab.id, url }).catch((e) =>
+          setLastError(String(e)),
+        );
       }
     },
     [tab.id, persistUrl],
@@ -254,7 +260,9 @@ export const BrowserPane = memo(function BrowserPane({
         </button>
         <button
           onClick={() =>
-            invoke("browser_reload", { id: tab.id }).catch(() => {})
+            invoke("browser_reload", { id: tab.id }).catch((e) =>
+              setLastError(String(e)),
+            )
           }
           className={`p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent ${
             loading ? "animate-pulse" : ""
@@ -281,7 +289,14 @@ export const BrowserPane = memo(function BrowserPane({
           }}
           onBlur={() => {
             inputFocusedRef.current = false;
-            setInputValue(currentUrl === DEFAULT_URL ? "" : currentUrl);
+            // Read the latest persisted URL from the store — the render
+            // closure's tab.url is stale right after an Enter-triggered
+            // navigate, which would visibly revert the bar to the old URL.
+            const latest = useUIStore
+              .getState()
+              .getWorktreeNavState(worktreePath)
+              .userTabs.find((t) => t.id === tab.id)?.url;
+            setInputValue(latest ?? "");
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -320,6 +335,11 @@ export const BrowserPane = memo(function BrowserPane({
           </svg>
         </button>
       </div>
+      {lastError && (
+        <div className="shrink-0 px-2 py-1 text-xs text-destructive border-b border-border/40 bg-sidebar truncate">
+          {lastError}
+        </div>
+      )}
       <div ref={placeholderRef} className="relative flex-1 min-h-0 bg-background">
         {/* The native webview floats over this div. Content here is only
             visible before creation, on error, or while the webview is hidden. */}

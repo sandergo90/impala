@@ -1,5 +1,6 @@
 use tauri::webview::{PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl};
+use tracing::{debug, info, warn};
 
 // Webview labels must stay within tauri's allowed charset; tab ids are
 // frontend-generated (`browser-{slot}-{timestamp}`) but sanitize anyway.
@@ -37,6 +38,7 @@ pub async fn browser_open(
     height: f64,
 ) -> Result<(), String> {
     if let Ok(wv) = get_webview(&app, &id) {
+        info!(id = %id, x, y, width, height, "browser_open: reshow existing webview");
         wv.set_position(LogicalPosition::new(x, y))
             .map_err(|e| e.to_string())?;
         wv.set_size(LogicalSize::new(width, height))
@@ -45,6 +47,7 @@ pub async fn browser_open(
         return Ok(());
     }
 
+    info!(id = %id, url = %url, x, y, width, height, "browser_open: creating webview");
     let parsed = Url::parse(&url).map_err(|e| e.to_string())?;
     let window = app.get_window("main").ok_or("main window not found")?;
     let nav_app = app.clone();
@@ -53,11 +56,13 @@ pub async fn browser_open(
     let load_id = id.clone();
     let builder = WebviewBuilder::new(label_for(&id), WebviewUrl::External(parsed))
         .on_navigation(move |url| {
+            debug!(id = %nav_id, url = %url, "browser on_navigation");
             let _ = nav_app.emit_to("main", &format!("browser-nav-{nav_id}"), url.to_string());
             true
         })
         .on_page_load(move |_wv, payload| {
             let loading = matches!(payload.event(), PageLoadEvent::Started);
+            debug!(id = %load_id, url = %payload.url(), loading, "browser on_page_load");
             let _ = load_app.emit_to("main", &format!("browser-loading-{load_id}"), loading);
         });
     window
@@ -66,7 +71,10 @@ pub async fn browser_open(
             LogicalPosition::new(x, y),
             LogicalSize::new(width, height),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            warn!(id = %id, error = %e, "browser_open: add_child failed");
+            e.to_string()
+        })?;
     Ok(())
 }
 
@@ -88,6 +96,7 @@ pub fn browser_set_bounds(
 
 #[tauri::command]
 pub fn browser_set_visible(app: AppHandle, id: String, visible: bool) -> Result<(), String> {
+    debug!(id = %id, visible, "browser_set_visible");
     let wv = get_webview(&app, &id)?;
     if visible {
         wv.show().map_err(|e| e.to_string())
@@ -98,9 +107,16 @@ pub fn browser_set_visible(app: AppHandle, id: String, visible: bool) -> Result<
 
 #[tauri::command]
 pub fn browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
-    let wv = get_webview(&app, &id)?;
+    info!(id = %id, url = %url, "browser_navigate");
+    let wv = get_webview(&app, &id).map_err(|e| {
+        warn!(id = %id, error = %e, "browser_navigate: webview missing");
+        e
+    })?;
     let parsed = Url::parse(&url).map_err(|e| e.to_string())?;
-    wv.navigate(parsed).map_err(|e| e.to_string())
+    wv.navigate(parsed).map_err(|e| {
+        warn!(id = %id, error = %e, "browser_navigate: navigate failed");
+        e.to_string()
+    })
 }
 
 /// Back/forward via JS — the multiwebview surface has no native history API
