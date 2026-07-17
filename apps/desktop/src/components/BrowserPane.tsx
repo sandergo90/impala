@@ -53,6 +53,15 @@ export const BrowserPane = memo(function BrowserPane({
   const [loading, setLoading] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
 
+  // The native webview is created lazily on the first real URL. A webview at
+  // about:blank is invisible anyway (tauri-runtime-wry skips with_url for
+  // about:blank, and wry webviews draw no background), so an empty tab
+  // renders a DOM empty state instead of a transparent native view.
+  const hasUrl = Boolean(tab.url);
+  const detectedDevServerUrl = useUIStore(
+    (s) => s.worktreeNavStates[worktreePath]?.detectedDevServerUrl ?? null,
+  );
+
   // Occlusion: the native webview composites ABOVE the entire DOM, so
   // anything that must draw over the pane region hides it instead. Diff
   // mode and worktree switches are already encoded in `isActive`
@@ -96,13 +105,16 @@ export const BrowserPane = memo(function BrowserPane({
   }, [tab.id]);
 
   useLayoutEffect(() => {
+    if (!hasUrl) return;
     const el = placeholderRef.current;
     if (!el) return;
     let disposed = false;
     const r = el.getBoundingClientRect();
     invoke("browser_open", {
       id: tab.id,
-      url: tab.url ?? DEFAULT_URL,
+      // hasUrl guards this effect; on the flip from empty state this closure
+      // re-runs with the freshly navigated tab.url.
+      url: tab.url,
       x: r.x,
       y: r.y,
       width: Math.max(r.width, 1),
@@ -144,9 +156,10 @@ export const BrowserPane = memo(function BrowserPane({
       );
     };
     // tab.url intentionally omitted: it changes on every navigation, but the
-    // webview is created once and navigates itself from then on.
+    // webview is created once (hasUrl only ever flips false -> true) and
+    // navigates itself from then on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.id, syncBounds]);
+  }, [tab.id, hasUrl, syncBounds]);
 
   useEffect(() => {
     if (!createdRef.current) return;
@@ -181,9 +194,14 @@ export const BrowserPane = memo(function BrowserPane({
   const navigate = useCallback(
     (raw: string) => {
       const url = sanitizeUrl(raw);
-      setInputValue(url === DEFAULT_URL ? "" : url);
+      if (url === DEFAULT_URL) return;
+      setInputValue(url);
       persistUrl(url);
-      invoke("browser_navigate", { id: tab.id, url }).catch(() => {});
+      // First navigation from the empty state: the webview doesn't exist yet;
+      // persisting the URL flips `hasUrl` and the layout effect creates it.
+      if (createdRef.current) {
+        invoke("browser_navigate", { id: tab.id, url }).catch(() => {});
+      }
     },
     [tab.id, persistUrl],
   );
@@ -305,14 +323,26 @@ export const BrowserPane = memo(function BrowserPane({
       <div ref={placeholderRef} className="relative flex-1 min-h-0 bg-background">
         {/* The native webview floats over this div. Content here is only
             visible before creation, on error, or while the webview is hidden. */}
-        <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
           {openError ? (
             <span className="px-4 text-center">
               Failed to open browser view: {openError}
             </span>
-          ) : (
+          ) : !hasUrl ? (
+            <>
+              <span>Enter a URL above to preview</span>
+              {detectedDevServerUrl && (
+                <button
+                  onClick={() => navigate(detectedDevServerUrl)}
+                  className="px-3 py-1.5 rounded border border-border font-mono text-[13px] hover:bg-accent hover:text-foreground"
+                >
+                  Open {detectedDevServerUrl}
+                </button>
+              )}
+            </>
+          ) : loading ? (
             <span>Loading…</span>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

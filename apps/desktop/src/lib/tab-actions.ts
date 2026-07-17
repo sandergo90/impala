@@ -117,7 +117,9 @@ export function createBrowserTab(worktreePath: string, url?: string): UserTab {
     kind: "browser",
     label: `Browser ${slot}`,
     createdAt: Date.now(),
-    url,
+    // A fresh tab starts at the worktree's detected dev server when one is
+    // running — the common case for "open a browser here".
+    url: url ?? nav.detectedDevServerUrl ?? undefined,
   };
 
   uiState.updateWorktreeNavState(worktreePath, {
