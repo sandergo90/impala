@@ -294,6 +294,14 @@ pub async fn browser_screenshot(app: AppHandle, id: String) -> Result<String, St
     screenshot_png_base64(&wv)
 }
 
+/// Frontend-only (deliberately NOT exposed through the hook server — agents
+/// get the scoped tools, not arbitrary JS). Powers the element picker.
+#[tauri::command]
+pub async fn browser_eval(app: AppHandle, id: String, js: String) -> Result<String, String> {
+    let wv = get_webview(&app, &id)?;
+    native::eval_js(&wv, &js, Duration::from_secs(3))
+}
+
 #[tauri::command]
 pub async fn browser_console_logs(
     app: AppHandle,

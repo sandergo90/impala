@@ -179,15 +179,6 @@ pub fn list_browser_annotations(
     Ok(annotations)
 }
 
-pub fn get_browser_annotation(conn: &Connection, id: &str) -> Result<BrowserAnnotation, String> {
-    conn.query_row(
-        &format!("SELECT {BROWSER_ANNOTATION_COLS} FROM browser_annotations WHERE id = ?1"),
-        params![id],
-        row_to_browser_annotation,
-    )
-    .map_err(|e| format!("Browser annotation not found: {}", e))
-}
-
 pub fn resolve_browser_annotation(conn: &Connection, id: &str) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     let rows_affected = conn
@@ -237,8 +228,9 @@ mod tests {
         assert!(list_browser_annotations(&conn, "/wt", false)
             .unwrap()
             .is_empty());
-        assert_eq!(list_browser_annotations(&conn, "/wt", true).unwrap().len(), 1);
-        assert!(get_browser_annotation(&conn, &created.id).unwrap().resolved);
+        let all = list_browser_annotations(&conn, "/wt", true).unwrap();
+        assert_eq!(all.len(), 1);
+        assert!(all[0].resolved);
 
         assert!(resolve_browser_annotation(&conn, "missing").is_err());
     }

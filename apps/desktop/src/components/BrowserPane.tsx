@@ -11,6 +11,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInSystemBrowser } from "@tauri-apps/plugin-shell";
 import { useUIStore } from "../store";
 import type { UserTab } from "../types";
+import {
+  PICKER_ARM,
+  PICKER_DISARM,
+  PICKER_POLL,
+  cropScreenshot,
+  type BrowserPick,
+} from "../lib/browser-picker";
 
 const DEFAULT_URL = "about:blank";
 
@@ -55,6 +62,11 @@ export const BrowserPane = memo(function BrowserPane({
   // Last failed browser_* invoke, shown as a strip under the toolbar. Cleared
   // on the next successful navigation event.
   const [lastError, setLastError] = useState<string | null>(null);
+  // Element annotation mode: armed picker in the page -> pick -> comment strip.
+  const [annotating, setAnnotating] = useState(false);
+  const [pendingPick, setPendingPick] = useState<BrowserPick | null>(null);
+  const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // The native webview is created lazily on the first real URL. A webview at
   // about:blank is invisible anyway (tauri-runtime-wry skips with_url for
@@ -175,6 +187,9 @@ export const BrowserPane = memo(function BrowserPane({
     listen<string>(`browser-nav-${tab.id}`, (event) => {
       persistUrl(event.payload);
       setLastError(null);
+      // The picker dies with the old page; drop any in-progress annotation.
+      setAnnotating(false);
+      setPendingPick(null);
       if (!inputFocusedRef.current) setInputValue(event.payload);
     }).then((fn) => {
       if (cancelled) fn();
@@ -209,6 +224,73 @@ export const BrowserPane = memo(function BrowserPane({
     },
     [tab.id, persistUrl],
   );
+
+  const toggleAnnotate = useCallback(() => {
+    if (annotating) {
+      setAnnotating(false); // the polling effect's cleanup sends the disarm
+      return;
+    }
+    invoke("browser_eval", { id: tab.id, js: PICKER_ARM })
+      .then(() => setAnnotating(true))
+      .catch((e) => setLastError(String(e)));
+  }, [annotating, tab.id]);
+
+  useEffect(() => {
+    if (!annotating) return;
+    const iv = setInterval(() => {
+      invoke<string>("browser_eval", { id: tab.id, js: PICKER_POLL })
+        .then((raw) => {
+          const pick = JSON.parse(raw) as BrowserPick | null;
+          if (!pick) return;
+          setAnnotating(false);
+          if (!pick.cancelled) setPendingPick(pick);
+        })
+        .catch(() => {});
+    }, 200);
+    return () => {
+      clearInterval(iv);
+      // Harmless if the picker already self-disarmed on pick/Escape; covers
+      // toggle-off, tab unmount, and navigation.
+      invoke("browser_eval", { id: tab.id, js: PICKER_DISARM }).catch(() => {});
+    };
+  }, [annotating, tab.id]);
+
+  const cancelPendingPick = useCallback(() => {
+    setPendingPick(null);
+    setComment("");
+  }, []);
+
+  const savePendingPick = useCallback(async () => {
+    if (!pendingPick || !comment.trim() || saving) return;
+    setSaving(true);
+    try {
+      let screenshotBase64: string | undefined;
+      try {
+        const full = await invoke<string>("browser_screenshot", { id: tab.id });
+        const width = placeholderRef.current?.getBoundingClientRect().width ?? 0;
+        screenshotBase64 = await cropScreenshot(full, pendingPick.rect, width);
+      } catch {
+        // Annotation without a screenshot beats no annotation.
+        screenshotBase64 = undefined;
+      }
+      await invoke("create_browser_annotation", {
+        annotation: {
+          repo_path: worktreePath,
+          url: pendingPick.url,
+          selector: pendingPick.selector,
+          element: pendingPick.element,
+          body: comment.trim(),
+        },
+        screenshotBase64,
+      });
+      setPendingPick(null);
+      setComment("");
+    } catch (e) {
+      setLastError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [pendingPick, comment, saving, tab.id, worktreePath]);
 
   const currentUrl = tab.url ?? DEFAULT_URL;
 
@@ -332,7 +414,67 @@ export const BrowserPane = memo(function BrowserPane({
             />
           </svg>
         </button>
+        <button
+          onClick={toggleAnnotate}
+          disabled={!hasUrl}
+          className={`p-1 rounded hover:bg-accent disabled:opacity-40 ${
+            annotating
+              ? "text-primary"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          aria-label="Annotate an element"
+          title="Annotate an element — click one in the page, Esc to cancel"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="4.5" stroke="currentColor" strokeWidth="1.4" />
+            <path
+              d="M8 1v3M8 12v3M1 8h3M12 8h3"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
       </div>
+      {pendingPick && (
+        <div className="flex shrink-0 items-center gap-2 px-2 py-1.5 border-b border-border/40 bg-sidebar">
+          <span
+            className="shrink-0 max-w-[220px] truncate text-xs font-mono text-muted-foreground"
+            title={pendingPick.selector}
+          >
+            {pendingPick.selector}
+          </span>
+          <input
+            autoFocus
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                savePendingPick();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelPendingPick();
+              }
+            }}
+            placeholder="Annotate this element…"
+            className="flex-1 min-w-0 bg-background border border-border rounded px-2 py-1 text-[13px] outline-none focus:ring-1 focus:ring-primary"
+          />
+          <button
+            onClick={savePendingPick}
+            disabled={!comment.trim() || saving}
+            className="px-2 py-1 text-[13px] rounded bg-primary text-primary-foreground disabled:opacity-50"
+          >
+            Save
+          </button>
+          <button
+            onClick={cancelPendingPick}
+            className="px-2 py-1 text-[13px] text-muted-foreground hover:text-foreground rounded hover:bg-accent"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {lastError && (
         <div className="shrink-0 px-2 py-1 text-xs text-destructive border-b border-border/40 bg-sidebar truncate">
           {lastError}

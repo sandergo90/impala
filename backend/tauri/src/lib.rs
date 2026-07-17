@@ -1922,6 +1922,7 @@ pub fn run() {
             browser::browser_screenshot,
             browser::browser_console_logs,
             browser::browser_page_info,
+            browser::browser_eval,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
