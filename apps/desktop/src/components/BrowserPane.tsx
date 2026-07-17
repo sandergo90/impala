@@ -186,6 +186,17 @@ export const BrowserPane = memo(function BrowserPane({
     if (visible) syncBounds();
   }, [visible, tab.id, syncBounds]);
 
+  // Self-heal: attaching the docked Web Inspector (right-click → Inspect
+  // Element) makes WebKit resize the child webview to fill the window, and
+  // nothing observable fires when it does. Re-assert the placeholder bounds
+  // on a slow cadence while visible so the webview snaps back into its pane.
+  // Never runs while hidden — that would un-park an offscreen webview.
+  useEffect(() => {
+    if (!visible || !hasUrl) return;
+    const t = setInterval(syncBounds, 1000);
+    return () => clearInterval(t);
+  }, [visible, hasUrl, syncBounds]);
+
   useEffect(() => {
     let unlistenNav: UnlistenFn | undefined;
     let unlistenLoading: UnlistenFn | undefined;
