@@ -94,14 +94,24 @@ pub fn browser_set_bounds(
         .map_err(|e| e.to_string())
 }
 
+// "Hiding" is implemented by parking the view far offscreen: WKWebView comes
+// back BLACK from a setHidden(true)/setHidden(false) cycle (the layer's
+// contents are dropped and not repainted), so hide()/show() are unusable for
+// tab switching. The real position is restored by the frontend's next
+// browser_set_bounds / browser_open call, which always follows a show.
+const PARK_OFFSET: f64 = -20000.0;
+
 #[tauri::command]
 pub fn browser_set_visible(app: AppHandle, id: String, visible: bool) -> Result<(), String> {
     debug!(id = %id, visible, "browser_set_visible");
     let wv = get_webview(&app, &id)?;
     if visible {
+        // Defensive: un-hide webviews that a previous build's hide() left
+        // hidden. Position is restored by the caller's bounds sync.
         wv.show().map_err(|e| e.to_string())
     } else {
-        wv.hide().map_err(|e| e.to_string())
+        wv.set_position(LogicalPosition::new(PARK_OFFSET, PARK_OFFSET))
+            .map_err(|e| e.to_string())
     }
 }
 
