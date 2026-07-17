@@ -64,11 +64,11 @@ fn hook_command(event_type: &str) -> String {
 const IMPALA_REVIEW_SKILL: &str = r#"---
 name: impala-review
 description: Review and address code review annotations from Impala. Use when asked to review annotations, or when invoked as /impala-review.
-allowed-tools: mcp__impala__list_annotations, mcp__impala__resolve_annotation, mcp__impala__list_files_with_annotations, Read, Edit, Write, Grep, Glob
+allowed-tools: mcp__impala__list_annotations, mcp__impala__resolve_annotation, mcp__impala__list_files_with_annotations, mcp__impala__get_browser_annotation_screenshot, mcp__impala__browser_navigate, mcp__impala__browser_screenshot, mcp__impala__browser_console, mcp__impala__browser_page_info, Read, Edit, Write, Grep, Glob
 argument-hint: "[annotation-id]"
 ---
 
-Review and address code review annotations from Impala using the MCP server tools. These are human-written review comments anchored to specific lines in the code.
+Review and address review annotations from Impala using the MCP server tools. These are human-written review comments. They come in two kinds (the `kind` field): `code` annotations anchored to specific lines in the code, and `browser` annotations anchored to an element in the rendered app (URL + CSS selector + screenshot), created by the reviewer clicking an element in Impala's browser pane.
 
 ARGUMENTS: If an annotation ID is provided as an argument, address only that annotation. Otherwise, address all unresolved annotations.
 
@@ -125,6 +125,16 @@ Apply their decision, then resolve the annotation.
 
 Keep fixes minimal and focused — don't refactor unrelated code. If a reviewer suggests a specific code change, prefer their version unless it introduces issues.
 
+## Browser Annotations (kind: "browser")
+
+These point at a rendered element, not a source line. For each one:
+
+1. If `has_screenshot` is true, call `mcp__impala__get_browser_annotation_screenshot` with the annotation id to SEE the element the reviewer picked.
+2. Locate the source: grep for the selector's distinctive parts (ids, class names, data-testids from `selector` and the `element` HTML snippet), and use the `url` path to identify the route/page component.
+3. Make the change like any ACTIONABLE annotation.
+4. **Verify visually**: call `mcp__impala__browser_navigate` to the annotation's `url` (the dev server must be running), then `mcp__impala__browser_screenshot` and confirm the change looks right. Check `mcp__impala__browser_console` if the page misbehaves.
+5. Resolve the annotation.
+
 ## Phase 4: Verify
 
 After all annotations are addressed, run the project's typecheck and lint to make sure nothing is broken. Fix any issues introduced by the changes.
@@ -149,11 +159,13 @@ Report a structured summary:
 ## Annotation Fields
 
 - `id` — unique identifier, used for resolving
-- `file_path` — the file the annotation is on
-- `line_number` — the line number in the file
-- `side` — `left` means the annotation is on the old/deleted code, `right` means new/added code
+- `kind` — `code` or `browser`
 - `body` — the reviewer's comment text
 - `resolved` — boolean, only unresolved annotations are returned
+
+Code annotations: `file_path`, `line_number`, and `side` (`left` = old/deleted code, `right` = new/added code).
+
+Browser annotations: `url` (the page), `selector` (CSS path to the element), `element` (truncated outerHTML), `has_screenshot` (fetch it via `get_browser_annotation_screenshot`).
 
 ## Important Notes
 

@@ -733,6 +733,7 @@ dependencies = [
 name = "impala-mcp"
 version = "0.19.11"
 dependencies = [
+ "base64",
  "chrono",
  "dirs",
  "reqwest 0.13.4",

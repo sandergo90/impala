@@ -81,7 +81,9 @@ fn tool_list_annotations(conn: &Connection, params: &Value) -> Result<Value, Str
 
     let repo_path = param_or_cwd(params, "repo_path")?;
     sql.push_str(&format!(" AND repo_path = ?{}", bind_values.len() + 1));
-    bind_values.push(repo_path);
+    bind_values.push(repo_path.clone());
+    let file_scoped = params.get("file_path").and_then(|v| v.as_str()).is_some()
+        || params.get("commit_hash").and_then(|v| v.as_str()).is_some();
     if let Some(v) = params.get("file_path").and_then(|v| v.as_str()) {
         sql.push_str(&format!(" AND file_path = ?{}", bind_values.len() + 1));
         bind_values.push(v.to_string());
@@ -103,12 +105,49 @@ fn tool_list_annotations(conn: &Connection, params: &Value) -> Result<Value, Str
         .query_map(params_refs.as_slice(), row_to_annotation)
         .map_err(|e| e.to_string())?;
 
-    let mut annotations = Vec::new();
+    let mut items: Vec<Value> = Vec::new();
     for row in rows {
-        annotations.push(row.map_err(|e| e.to_string())?);
+        let annotation = row.map_err(|e| e.to_string())?;
+        let mut value = json!(annotation);
+        value["kind"] = json!("code");
+        items.push(value);
     }
 
-    Ok(json!(annotations))
+    // Browser annotations aren't file- or commit-scoped; include them only in
+    // unfiltered listings. Tolerate a missing table (DB from an app version
+    // that predates browser annotations).
+    if !file_scoped {
+        items.extend(list_browser_annotation_values(conn, &repo_path));
+    }
+
+    Ok(json!(items))
+}
+
+fn list_browser_annotation_values(conn: &Connection, repo_path: &str) -> Vec<Value> {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, repo_path, url, selector, element, body, screenshot_path, resolved, created_at, updated_at
+         FROM browser_annotations WHERE resolved = 0 AND repo_path = ?1 ORDER BY created_at DESC",
+    ) else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map(rusqlite::params![repo_path], |row| {
+        Ok(json!({
+            "kind": "browser",
+            "id": row.get::<_, String>(0)?,
+            "repo_path": row.get::<_, String>(1)?,
+            "url": row.get::<_, String>(2)?,
+            "selector": row.get::<_, String>(3)?,
+            "element": row.get::<_, String>(4)?,
+            "body": row.get::<_, String>(5)?,
+            "has_screenshot": row.get::<_, Option<String>>(6)?.is_some(),
+            "resolved": row.get::<_, i64>(7)? != 0,
+            "created_at": row.get::<_, String>(8)?,
+            "updated_at": row.get::<_, String>(9)?,
+        }))
+    }) else {
+        return Vec::new();
+    };
+    rows.filter_map(|r| r.ok()).collect()
 }
 
 fn tool_resolve_annotation(conn: &Connection, params: &Value) -> Result<Value, String> {
@@ -126,7 +165,17 @@ fn tool_resolve_annotation(conn: &Connection, params: &Value) -> Result<Value, S
         .map_err(|e| e.to_string())?;
 
     if updated == 0 {
-        return Err(format!("annotation not found: {id}"));
+        // Not a code annotation — try the browser table before failing.
+        let browser_updated = conn
+            .execute(
+                "UPDATE browser_annotations SET resolved = 1, updated_at = ?1 WHERE id = ?2",
+                rusqlite::params![now, id],
+            )
+            .unwrap_or(0);
+        if browser_updated == 0 {
+            return Err(format!("annotation not found: {id}"));
+        }
+        return Ok(json!({ "kind": "browser", "id": id, "resolved": true }));
     }
 
     let mut stmt = conn
@@ -142,6 +191,25 @@ fn tool_resolve_annotation(conn: &Connection, params: &Value) -> Result<Value, S
     Ok(json!(annotation))
 }
 
+fn tool_browser_annotation_screenshot(conn: &Connection, params: &Value) -> Result<String, String> {
+    let id = params
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or("missing required parameter: id")?;
+    let path: Option<String> = conn
+        .query_row(
+            "SELECT screenshot_path FROM browser_annotations WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .map_err(|_| format!("browser annotation not found: {id}"))?;
+    let path = path.ok_or("this annotation has no screenshot")?;
+    let bytes =
+        std::fs::read(&path).map_err(|e| format!("could not read screenshot: {e}"))?;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    Ok(STANDARD.encode(bytes))
+}
+
 fn tool_list_files_with_annotations(conn: &Connection, params: &Value) -> Result<Value, String> {
     let mut sql = String::from(
         "SELECT file_path, COUNT(*) as count FROM annotations WHERE resolved = 0",
@@ -150,7 +218,7 @@ fn tool_list_files_with_annotations(conn: &Connection, params: &Value) -> Result
 
     let repo_path = param_or_cwd(params, "repo_path")?;
     sql.push_str(&format!(" AND repo_path = ?{}", bind_values.len() + 1));
-    bind_values.push(repo_path);
+    bind_values.push(repo_path.clone());
     if let Some(v) = params.get("commit_hash").and_then(|v| v.as_str()) {
         sql.push_str(&format!(" AND commit_hash = ?{}", bind_values.len() + 1));
         bind_values.push(v.to_string());
@@ -178,7 +246,17 @@ fn tool_list_files_with_annotations(conn: &Connection, params: &Value) -> Result
         files.push(row.map_err(|e| e.to_string())?);
     }
 
-    Ok(json!(files))
+    // Not file-scoped, but the overview should mention them (0 when the table
+    // doesn't exist yet).
+    let browser_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM browser_annotations WHERE resolved = 0 AND repo_path = ?1",
+            rusqlite::params![repo_path],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    Ok(json!({ "files": files, "browser_annotation_count": browser_count }))
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +349,7 @@ fn tool_definitions() -> Value {
         "tools": [
             {
                 "name": "list_annotations",
-                "description": "List unresolved code review annotations for the current worktree. Defaults to the current working directory; pass repo_path to query a different worktree.",
+                "description": "List unresolved review annotations for the current worktree — both code annotations (kind: \"code\", anchored to file/line) and browser annotations (kind: \"browser\", anchored to a URL + CSS selector in the Impala browser pane; fetch their screenshot with get_browser_annotation_screenshot). Defaults to the current working directory; pass repo_path to query a different worktree.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -292,13 +370,27 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "resolve_annotation",
-                "description": "Mark an annotation as resolved.",
+                "description": "Mark an annotation (code or browser) as resolved.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "id": {
                             "type": "string",
                             "description": "The annotation ID to resolve"
+                        }
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
+                "name": "get_browser_annotation_screenshot",
+                "description": "Fetch the stored screenshot crop of a browser annotation (the element the reviewer picked), as an image.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "The browser annotation ID"
                         }
                     },
                     "required": ["id"]
@@ -473,9 +565,15 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
             };
             let tool_args = params.get("arguments").cloned().unwrap_or(json!({}));
 
-            // Screenshot returns an MCP image content block, not JSON text.
-            if tool_name == "browser_screenshot" {
-                return Some(match tool_browser_screenshot(&tool_args) {
+            // Screenshot tools return MCP image content blocks, not JSON text.
+            if tool_name == "browser_screenshot" || tool_name == "get_browser_annotation_screenshot"
+            {
+                let shot = if tool_name == "browser_screenshot" {
+                    tool_browser_screenshot(&tool_args)
+                } else {
+                    tool_browser_annotation_screenshot(conn, &tool_args)
+                };
+                return Some(match shot {
                     Ok(b64) => make_response(
                         id,
                         json!({
