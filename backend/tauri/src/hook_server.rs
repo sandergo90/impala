@@ -64,7 +64,7 @@ fn hook_command(event_type: &str) -> String {
 const IMPALA_REVIEW_SKILL: &str = r#"---
 name: impala-review
 description: Review and address code review annotations from Impala. Use when asked to review annotations, or when invoked as /impala-review.
-allowed-tools: mcp__impala__list_annotations, mcp__impala__resolve_annotation, mcp__impala__list_files_with_annotations, mcp__impala__get_browser_annotation_screenshot, mcp__impala__browser_navigate, mcp__impala__browser_screenshot, mcp__impala__browser_console, mcp__impala__browser_page_info, Read, Edit, Write, Grep, Glob
+allowed-tools: mcp__impala__list_annotations, mcp__impala__resolve_annotation, mcp__impala__list_files_with_annotations, mcp__impala__get_browser_annotation_screenshot, mcp__impala__browser_navigate, mcp__impala__browser_click, mcp__impala__browser_type, mcp__impala__browser_screenshot, mcp__impala__browser_console, mcp__impala__browser_page_info, Read, Edit, Write, Grep, Glob
 argument-hint: "[annotation-id]"
 ---
 
@@ -179,7 +179,7 @@ Browser annotations: `url` (the page), `selector` (CSS path to the element), `el
 const IMPALA_BROWSER_SKILL: &str = r#"---
 name: impala-browser
 description: Verify or diagnose the running app in Impala's built-in browser. Use when the user wants to check something in the browser, verify a UI or frontend change works, see what a page looks like, or when diagnosing blank pages, console errors, or layout issues in a web app.
-allowed-tools: mcp__impala__browser_page_info, mcp__impala__browser_navigate, mcp__impala__browser_screenshot, mcp__impala__browser_console
+allowed-tools: mcp__impala__browser_page_info, mcp__impala__browser_navigate, mcp__impala__browser_click, mcp__impala__browser_type, mcp__impala__browser_screenshot, mcp__impala__browser_console
 ---
 
 Impala (the desktop app this worktree is open in) has a built-in browser pane next to the code, driven by the `mcp__impala__browser_*` tools. Prefer them over curl, Playwright, or headless browsers for anything the rendered page can answer — the user watches the same pane you're testing, so what you verify is what they see.
@@ -188,8 +188,10 @@ Impala (the desktop app this worktree is open in) has a built-in browser pane ne
 
 1. `mcp__impala__browser_page_info` — is a browser pane open, and what page is it on?
 2. `mcp__impala__browser_navigate` — go to the page you need (e.g. the dev-server route you changed). If the response has `created: true`, a new browser tab was created; its webview loads once the pane is visible in Impala, so tell the user to open it rather than retrying screenshots in a loop.
-3. `mcp__impala__browser_screenshot` — SEE the rendered page. This is the ground truth for visual verification.
-4. `mcp__impala__browser_console` — read console output, window errors, and unhandled rejections when the page misbehaves. Pass `clear: true` to drain, navigate again to reproduce, then read for a clean signal.
+3. `mcp__impala__browser_click` — click a button, link, or tab by CSS selector when the flow needs interaction. Events are synthesized (isTrusted: false): fine for app UI, ignored by native controls like file pickers. Screenshot after to confirm what happened.
+4. `mcp__impala__browser_type` — set the value of an input/textarea by CSS selector (native setter + input/change events, so React/Vue register it; replaces the whole value, empty string clears).
+5. `mcp__impala__browser_screenshot` — SEE the rendered page. This is the ground truth for visual verification.
+6. `mcp__impala__browser_console` — read console output, window errors, and unhandled rejections when the page misbehaves. Pass `clear: true` to drain, navigate again to reproduce, then read for a clean signal.
 
 After making a fix, navigate again and screenshot — verify visually before declaring success.
 
@@ -311,6 +313,24 @@ fn handle_browser_request(
                     .filter(|u| !u.is_empty())
                     .ok_or("missing url")?;
                 crate::browser::navigate_worktree(app, worktree_path, url)
+            }
+            "/browser/click" => {
+                let wv = crate::browser::webview_for_worktree(app, worktree_path)?;
+                let selector = params
+                    .get("selector")
+                    .filter(|s| !s.is_empty())
+                    .ok_or("missing selector")?;
+                crate::browser::click_selector(&wv, selector)
+            }
+            "/browser/type" => {
+                let wv = crate::browser::webview_for_worktree(app, worktree_path)?;
+                let selector = params
+                    .get("selector")
+                    .filter(|s| !s.is_empty())
+                    .ok_or("missing selector")?;
+                // Empty text is legal — it clears the field.
+                let text = params.get("text").map(|s| s.as_str()).unwrap_or("");
+                crate::browser::type_into_selector(&wv, selector, text)
             }
             _ => Err(format!("unknown browser endpoint: {path}")),
         }

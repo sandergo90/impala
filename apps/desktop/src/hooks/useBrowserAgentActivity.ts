@@ -6,6 +6,8 @@ export const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   console: "reading the console",
   navigate: "navigating",
   page_info: "checking the page",
+  click: "clicking",
+  type: "typing",
 };
 
 /**

@@ -331,6 +331,36 @@ fn tool_browser_navigate(args: &Value) -> Result<Value, String> {
     browser_get("/browser/navigate", &[("worktree_path", &wt), ("url", url)]).map(strip_ok)
 }
 
+fn tool_browser_click(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let selector = args
+        .get("selector")
+        .and_then(|s| s.as_str())
+        .ok_or("missing required parameter: selector")?;
+    browser_get(
+        "/browser/click",
+        &[("worktree_path", &wt), ("selector", selector)],
+    )
+    .map(strip_ok)
+}
+
+fn tool_browser_type(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let selector = args
+        .get("selector")
+        .and_then(|s| s.as_str())
+        .ok_or("missing required parameter: selector")?;
+    let text = args
+        .get("text")
+        .and_then(|t| t.as_str())
+        .ok_or("missing required parameter: text")?;
+    browser_get(
+        "/browser/type",
+        &[("worktree_path", &wt), ("selector", selector), ("text", text)],
+    )
+    .map(strip_ok)
+}
+
 fn tool_browser_screenshot(args: &Value) -> Result<String, String> {
     let wt = param_or_cwd(args, "worktree_path")?;
     let body = browser_get("/browser/screenshot", &[("worktree_path", &wt)])?;
@@ -455,6 +485,46 @@ fn tool_definitions() -> Value {
                         }
                     },
                     "required": ["url"]
+                }
+            },
+            {
+                "name": "browser_click",
+                "description": "Click an element in this worktree's Impala browser pane by CSS selector (from a browser annotation, or found via browser_console/page inspection). Dispatches a full pointer/mouse sequence plus click. Events are synthesized (isTrusted: false) — fine for app buttons/links/tabs, but native controls like file pickers won't respond. Take a browser_screenshot afterwards to verify the result.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        },
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector of the element to click; the first match is used"
+                        }
+                    },
+                    "required": ["selector"]
+                }
+            },
+            {
+                "name": "browser_type",
+                "description": "Type into an input, textarea, or contenteditable in this worktree's Impala browser pane by CSS selector. Sets the value through the native setter and fires input/change events so frameworks (React, Vue) register it. Replaces the whole current value — pass an empty string to clear. No key events are synthesized, so keystroke-shortcut handlers won't fire. Take a browser_screenshot afterwards to verify.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        },
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector of the field to type into; the first match is used"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "The text to set (replaces the current value; empty clears)"
+                        }
+                    },
+                    "required": ["selector", "text"]
                 }
             },
             {
@@ -592,6 +662,8 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_console" => tool_browser_console(&tool_args),
                 "browser_page_info" => tool_browser_page_info(&tool_args),
                 "browser_navigate" => tool_browser_navigate(&tool_args),
+                "browser_click" => tool_browser_click(&tool_args),
+                "browser_type" => tool_browser_type(&tool_args),
                 "list_files_with_annotations" => {
                     tool_list_files_with_annotations(conn, &tool_args)
                 }

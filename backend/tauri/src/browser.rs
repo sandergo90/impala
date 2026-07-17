@@ -262,6 +262,111 @@ pub fn page_info(wv: &Webview) -> Result<serde_json::Value, String> {
     serde_json::from_str(&raw).map_err(|e| format!("bad page info payload: {e}"))
 }
 
+// Selector-scoped click for agents (deliberately NOT arbitrary JS — that
+// stays frontend-only via browser_eval). Full pointer/mouse sequence plus
+// native .click() activation; events are synthesized (isTrusted: false), so
+// native controls (file pickers, some selects) won't respond.
+const CLICK_JS: &str = r#"
+(function () {
+  var el = document.querySelector(__IMPALA_SELECTOR__);
+  if (!el) return JSON.stringify({ ok: false, error: "no element matches selector" });
+  el.scrollIntoView({ block: "center", inline: "center" });
+  var r = el.getBoundingClientRect();
+  var opts = {
+    bubbles: true, cancelable: true, composed: true, view: window,
+    clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0
+  };
+  ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach(function (type) {
+    var ev = type.indexOf("pointer") === 0 ? new PointerEvent(type, opts) : new MouseEvent(type, opts);
+    el.dispatchEvent(ev);
+  });
+  if (el.focus) try { el.focus(); } catch (e) {}
+  if (el.click) el.click();
+  else el.dispatchEvent(new MouseEvent("click", opts));
+  return JSON.stringify({
+    ok: true,
+    tag: el.tagName.toLowerCase(),
+    text: (el.innerText || el.value || "").trim().slice(0, 80)
+  });
+})()
+"#;
+
+pub fn click_selector(wv: &Webview, selector: &str) -> Result<serde_json::Value, String> {
+    // JSON-encode the selector so it lands as a safe JS string literal.
+    let sel_js = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+    let js = CLICK_JS.replace("__IMPALA_SELECTOR__", &sel_js);
+    info!(selector = %selector, "browser click");
+    let raw = native::eval_js(wv, &js, Duration::from_secs(3))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("bad click payload: {e}"))?;
+    if v.get("ok").and_then(|b| b.as_bool()) == Some(true) {
+        Ok(serde_json::json!({
+            "clicked": { "tag": v.get("tag"), "text": v.get("text") }
+        }))
+    } else {
+        let err = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("click failed");
+        Err(format!("{err}: {selector}"))
+    }
+}
+
+// Value is set through the native prototype setter so framework value
+// trackers (React/Vue controlled inputs) register the change — a direct
+// `.value =` write is invisible to them. Replaces the whole value; no key
+// events are synthesized, so keystroke-level handlers won't fire.
+const TYPE_JS: &str = r#"
+(function () {
+  var el = document.querySelector(__IMPALA_SELECTOR__);
+  if (!el) return JSON.stringify({ ok: false, error: "no element matches selector" });
+  el.scrollIntoView({ block: "center", inline: "center" });
+  try { el.focus(); } catch (e) {}
+  var tag = (el.tagName || "").toLowerCase();
+  var text = __IMPALA_TEXT__;
+  if (tag === "input" || tag === "textarea") {
+    var proto = tag === "input" ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+    var desc = Object.getOwnPropertyDescriptor(proto, "value");
+    if (desc && desc.set) desc.set.call(el, text);
+    else el.value = text;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return JSON.stringify({ ok: true, tag: tag });
+  }
+  if (el.isContentEditable) {
+    el.textContent = text;
+    el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    return JSON.stringify({ ok: true, tag: tag });
+  }
+  return JSON.stringify({ ok: false, error: "element is not an input, textarea, or contenteditable" });
+})()
+"#;
+
+pub fn type_into_selector(
+    wv: &Webview,
+    selector: &str,
+    text: &str,
+) -> Result<serde_json::Value, String> {
+    let sel_js = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+    let text_js = serde_json::to_string(text).map_err(|e| e.to_string())?;
+    let js = TYPE_JS
+        .replace("__IMPALA_SELECTOR__", &sel_js)
+        .replace("__IMPALA_TEXT__", &text_js);
+    info!(selector = %selector, chars = text.len(), "browser type");
+    let raw = native::eval_js(wv, &js, Duration::from_secs(3))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("bad type payload: {e}"))?;
+    if v.get("ok").and_then(|b| b.as_bool()) == Some(true) {
+        Ok(serde_json::json!({ "typed": { "tag": v.get("tag") } }))
+    } else {
+        let err = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("type failed");
+        Err(format!("{err}: {selector}"))
+    }
+}
+
 /// Navigate the worktree's browser pane; if none exists, ask the frontend to
 /// create the tab (the webview materializes when the pane first mounts).
 pub fn navigate_worktree(
