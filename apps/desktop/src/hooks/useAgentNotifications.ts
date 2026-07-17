@@ -25,6 +25,10 @@ export function playNotificationSound(soundId: string) {
 
 export function useAgentNotifications() {
   const windowFocusedRef = useRef(true);
+  // worktree_path → automation name, set by automation-run-completed just
+  // before the same Stop event's agent-status idle arrives. Lets the idle
+  // notification say which automation finished instead of the generic copy.
+  const automationCompletionsRef = useRef(new Map<string, string>());
 
   useEffect(() => {
     let cancelled = false;
@@ -81,11 +85,32 @@ export function useAgentNotifications() {
   }, []);
 
   useEffect(() => {
+    const unlisten = listen<{
+      worktree_path: string;
+      automation_name: string;
+    }>("automation-run-completed", (event) => {
+      automationCompletionsRef.current.set(
+        event.payload.worktree_path,
+        event.payload.automation_name,
+      );
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
     const unlisten = listen<{ worktree_path: string; status: string }>(
       "agent-status",
       async (event) => {
         const { worktree_path, status } = event.payload;
         if (status !== "idle" && status !== "permission") return;
+
+        const automationName =
+          status === "idle"
+            ? automationCompletionsRef.current.get(worktree_path)
+            : undefined;
+        automationCompletionsRef.current.delete(worktree_path);
 
         const selectedWorktree = useUIStore.getState().selectedWorktree;
         if (windowFocusedRef.current && selectedWorktree?.path === worktree_path) {
@@ -98,10 +123,14 @@ export function useAgentNotifications() {
         const isPermission = status === "permission";
         const title = isPermission
           ? `Input Needed — ${projectName}`
-          : `Agent Complete — ${projectName}`;
+          : automationName
+            ? `Automation Complete — ${projectName}`
+            : `Agent Complete — ${projectName}`;
         const body = isPermission
           ? `"${worktreeName}" needs your attention`
-          : `"${worktreeName}" has finished its task`;
+          : automationName
+            ? `"${automationName}" finished — diff ready to review`
+            : `"${worktreeName}" has finished its task`;
 
         const granted = await isPermissionGranted();
         if (granted) {

@@ -15,6 +15,10 @@ import {
 } from "../components/ui/alert-dialog";
 import { useDataStore, useUIStore } from "../store";
 import { selectWorktree } from "../hooks/useWorktreeActions";
+import {
+  AUTOMATION_TEMPLATES,
+  type AutomationTemplate,
+} from "../lib/automation-templates";
 import type { Automation, AutomationRun, Worktree } from "../types";
 
 const WEEKDAYS = [
@@ -111,6 +115,7 @@ export function AutomationsView() {
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [runs, setRuns] = useState<AutomationRun[]>([]);
   const [editing, setEditing] = useState<Automation | "new" | null>(null);
+  const [template, setTemplate] = useState<AutomationTemplate | null>(null);
   const [deleting, setDeleting] = useState<Automation | null>(null);
 
   const refresh = useCallback(() => {
@@ -125,6 +130,9 @@ export function AutomationsView() {
     invoke<AutomationRun[]>("list_automation_runs", { repo: project.path })
       .then(setRuns)
       .catch(() => setRuns([]));
+    // The user is looking at the runs — clear the sidebar badge. Emits (and
+    // re-triggers this refresh) only when rows actually flip.
+    invoke("mark_automation_runs_seen", { repo: project.path }).catch(() => {});
   }, [project]);
 
   useEffect(() => {
@@ -205,20 +213,42 @@ export function AutomationsView() {
             Select a project to manage its automations.
           </div>
         ) : automations.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2">
-            <div className="text-sm font-medium">
-              Run an agent on a schedule
-            </div>
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-6">
+            <div className="text-sm font-medium">Start from a template</div>
             <div className="max-w-md text-center text-sm text-muted-foreground">
               Each run creates a fresh worktree, launches the agent with your
-              prompt, and lands as a reviewable diff — a daily standup digest,
-              a dependency sweep, a bug scan.
+              prompt, and lands as a reviewable diff.
+            </div>
+            <div className="mt-3 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+              {AUTOMATION_TEMPLATES.map((t) => (
+                <button
+                  key={t.name}
+                  onClick={() => {
+                    setTemplate(t);
+                    setEditing("new");
+                  }}
+                  className="flex items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 text-left hover:bg-accent/40"
+                >
+                  <span className="text-lg leading-none">{t.emoji}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium">
+                      {t.name}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {t.description}
+                    </span>
+                  </span>
+                </button>
+              ))}
             </div>
             <button
-              onClick={() => setEditing("new")}
-              className="mt-2 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+              onClick={() => {
+                setTemplate(null);
+                setEditing("new");
+              }}
+              className="mt-3 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
             >
-              New automation
+              Start from scratch
             </button>
           </div>
         ) : (
@@ -285,7 +315,11 @@ export function AutomationsView() {
         <AutomationDialog
           repoPath={project.path}
           automation={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
+          template={editing === "new" ? template : null}
+          onClose={() => {
+            setEditing(null);
+            setTemplate(null);
+          }}
         />
       )}
 
@@ -422,21 +456,24 @@ function AutomationRow({
 function AutomationDialog({
   repoPath,
   automation,
+  template,
   onClose,
 }: {
   repoPath: string;
   automation: Automation | null;
+  template: AutomationTemplate | null;
   onClose: () => void;
 }) {
-  const initial = automation ? matchPreset(automation.schedule) : null;
-  const [name, setName] = useState(automation?.name ?? "");
-  const [prompt, setPrompt] = useState(automation?.prompt ?? "");
+  const initialSchedule = automation?.schedule ?? template?.schedule;
+  const initial = initialSchedule ? matchPreset(initialSchedule) : null;
+  const [name, setName] = useState(automation?.name ?? template?.name ?? "");
+  const [prompt, setPrompt] = useState(automation?.prompt ?? template?.prompt ?? "");
   const [agent, setAgent] = useState<"claude" | "codex">(automation?.agent ?? "claude");
   const [preset, setPreset] = useState<Preset>(initial?.preset ?? "daily");
   const [time, setTime] = useState(initial?.time ?? "09:00");
   const [weekday, setWeekday] = useState(initial?.weekday ?? "MON");
   const [custom, setCustom] = useState(
-    initial?.preset === "custom" && automation ? automation.schedule : "0 9 * * 1-5",
+    initial?.preset === "custom" && initialSchedule ? initialSchedule : "0 9 * * 1-5",
   );
   const [preview, setPreview] = useState<number[]>([]);
   const [scheduleError, setScheduleError] = useState<string | null>(null);

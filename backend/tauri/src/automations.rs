@@ -90,7 +90,14 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
         );
         CREATE INDEX IF NOT EXISTS idx_automation_runs_worktree ON automation_runs(worktree_path, status);",
     )
-    .map_err(|e| format!("Failed to initialize automations tables: {}", e))
+    .map_err(|e| format!("Failed to initialize automations tables: {}", e))?;
+    // Phase 2 added `seen`; Phase-1 databases need the column. Errors
+    // ("duplicate column name") mean it's already there.
+    let _ = conn.execute(
+        "ALTER TABLE automation_runs ADD COLUMN seen INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    Ok(())
 }
 
 // --- cron -------------------------------------------------------------------
@@ -342,14 +349,64 @@ pub fn report_run(
 
 /// Called from the hook server on the agent's Stop event: the agent in this
 /// worktree finished a turn — a launched automation run there is complete.
-pub fn complete_run_for_worktree(conn: &Connection, worktree_path: &str) -> Result<bool, String> {
-    let n = conn
-        .execute(
-            "UPDATE automation_runs SET status = 'completed' WHERE worktree_path = ?1 AND status = 'launched'",
+/// Returns the automation's name when a run was completed.
+pub fn complete_run_for_worktree(
+    conn: &Connection,
+    worktree_path: &str,
+) -> Result<Option<String>, String> {
+    let name: Option<String> = conn
+        .query_row(
+            "SELECT a.name FROM automation_runs r
+             JOIN automations a ON a.id = r.automation_id
+             WHERE r.worktree_path = ?1 AND r.status = 'launched'",
             params![worktree_path],
+            |row| row.get(0),
         )
-        .map_err(|e| format!("Failed to complete run: {}", e))?;
-    Ok(n > 0)
+        .ok();
+    if name.is_none() {
+        return Ok(None);
+    }
+    conn.execute(
+        "UPDATE automation_runs SET status = 'completed' WHERE worktree_path = ?1 AND status = 'launched'",
+        params![worktree_path],
+    )
+    .map_err(|e| format!("Failed to complete run: {}", e))?;
+    Ok(name)
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct UnseenRunCounts {
+    pub total: i64,
+    pub failed: i64,
+}
+
+/// Finished runs (completed/failed) the user hasn't looked at yet.
+pub fn count_unseen_runs(conn: &Connection, repo_path: &str) -> Result<UnseenRunCounts, String> {
+    conn.query_row(
+        "SELECT COUNT(*), SUM(CASE WHEN r.status = 'failed' THEN 1 ELSE 0 END)
+         FROM automation_runs r JOIN automations a ON a.id = r.automation_id
+         WHERE a.repo_path = ?1 AND r.seen = 0 AND r.status IN ('completed', 'failed')",
+        params![repo_path],
+        |row| {
+            Ok(UnseenRunCounts {
+                total: row.get(0)?,
+                failed: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+            })
+        },
+    )
+    .map_err(|e| format!("Failed to count unseen runs: {}", e))
+}
+
+/// Mark finished runs seen. Only completed/failed rows — a launched run
+/// marked seen mid-flight would never badge on completion.
+pub fn mark_runs_seen(conn: &Connection, repo_path: &str) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE automation_runs SET seen = 1
+         WHERE seen = 0 AND status IN ('completed', 'failed')
+           AND automation_id IN (SELECT id FROM automations WHERE repo_path = ?1)",
+        params![repo_path],
+    )
+    .map_err(|e| format!("Failed to mark runs seen: {}", e))
 }
 
 pub fn list_runs_by_repo(conn: &Connection, repo_path: &str) -> Result<Vec<AutomationRun>, String> {
@@ -564,6 +621,37 @@ pub fn report_automation_run(
     Ok(())
 }
 
+#[tauri::command]
+pub fn count_unseen_automation_runs(
+    state: tauri::State<'_, crate::DbState>,
+    repo: String,
+) -> Result<UnseenRunCounts, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    count_unseen_runs(&conn, &repo)
+}
+
+#[tauri::command]
+pub fn mark_automation_runs_seen(
+    app: AppHandle,
+    state: tauri::State<'_, crate::DbState>,
+    repo: String,
+) -> Result<(), String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    // Emit only when something changed — the Automations view marks seen on
+    // every refresh, and an unconditional emit would loop refresh → mark →
+    // emit → refresh forever.
+    if mark_runs_seen(&conn, &repo)? > 0 {
+        let _ = app.emit("automation-runs-changed", ());
+    }
+    Ok(())
+}
+
 /// Validate a schedule and preview its next `count` occurrences (unix
 /// seconds, local tz). Powers the schedule picker preview.
 #[tauri::command]
@@ -672,14 +760,39 @@ mod tests {
         let run = insert_run(&conn, &created.id, 1000).unwrap().unwrap();
         assert!(insert_run(&conn, &created.id, 1000).unwrap().is_none());
 
-        // launched → completed via the worktree Stop path
+        // launched → completed via the worktree Stop path. A run marked seen
+        // while still launched must re-badge on completion.
         report_run(&conn, &run.id, Some("/wt/auto-1"), "launched", None).unwrap();
-        assert!(complete_run_for_worktree(&conn, "/wt/auto-1").unwrap());
-        assert!(!complete_run_for_worktree(&conn, "/wt/auto-1").unwrap());
+        assert_eq!(mark_runs_seen(&conn, "/repo").unwrap(), 0);
+        assert_eq!(
+            complete_run_for_worktree(&conn, "/wt/auto-1").unwrap().as_deref(),
+            Some("Daily digest")
+        );
+        assert!(complete_run_for_worktree(&conn, "/wt/auto-1").unwrap().is_none());
         let runs = list_runs_by_repo(&conn, "/repo").unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "completed");
         assert_eq!(runs[0].worktree_path.as_deref(), Some("/wt/auto-1"));
+
+        // Unseen badge: one completed run, cleared by mark_runs_seen
+        assert_eq!(
+            count_unseen_runs(&conn, "/repo").unwrap(),
+            UnseenRunCounts { total: 1, failed: 0 }
+        );
+        assert_eq!(mark_runs_seen(&conn, "/repo").unwrap(), 1);
+        assert_eq!(mark_runs_seen(&conn, "/repo").unwrap(), 0);
+        assert_eq!(
+            count_unseen_runs(&conn, "/repo").unwrap(),
+            UnseenRunCounts { total: 0, failed: 0 }
+        );
+
+        // Failed runs count as unseen too, flagged separately
+        let run2 = insert_run(&conn, &created.id, 2000).unwrap().unwrap();
+        report_run(&conn, &run2.id, None, "failed", Some("boom")).unwrap();
+        assert_eq!(
+            count_unseen_runs(&conn, "/repo").unwrap(),
+            UnseenRunCounts { total: 1, failed: 1 }
+        );
 
         assert!(report_run(&conn, &run.id, None, "bogus", None).is_err());
 

@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
+import { useAutomationBadge } from "../hooks/useAutomationBadge";
 import { useUIStore, useDataStore, useFilteredWorktrees } from "../store";
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { releaseCachedTerminal } from "./XtermTerminal";
@@ -153,6 +154,7 @@ function ClockIcon() {
 
 export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const navigate = useNavigate();
+  const automationBadge = useAutomationBadge();
   const selectedProject = useUIStore((s) => s.selectedProject);
   const projectIcons = useDataStore((s) => s.projectIcons);
   const worktrees = useFilteredWorktrees();
@@ -291,10 +293,17 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
       {selectedProject && (
         <button
           onClick={() => navigate({ to: "/automations" })}
-          className="w-7 h-7 rounded-[5px] flex items-center justify-center text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors"
+          className="relative w-7 h-7 rounded-[5px] flex items-center justify-center text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors"
           title="Automations"
         >
           <ClockIcon />
+          {automationBadge.total > 0 && (
+            <span
+              className={`absolute top-0 right-0 w-1.5 h-1.5 rounded-full pointer-events-none ${
+                automationBadge.failed > 0 ? "bg-red-500" : "bg-primary"
+              }`}
+            />
+          )}
         </button>
       )}
 
@@ -324,6 +333,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
 
 export function Sidebar() {
   const navigate = useNavigate();
+  const automationBadge = useAutomationBadge();
   const projects = useDataStore((s) => s.projects);
   const addProject = useDataStore((s) => s.addProject);
   const projectIcons = useDataStore((s) => s.projectIcons);
@@ -1008,6 +1018,18 @@ export function Sidebar() {
         >
           <ClockIcon />
           <span>Automations</span>
+          {automationBadge.total > 0 && (
+            <span
+              className={`rounded-full px-1.5 text-xs ${
+                automationBadge.failed > 0
+                  ? "bg-red-500/15 text-red-500"
+                  : "bg-primary/15 text-primary"
+              }`}
+              title={`${automationBadge.total} finished automation run${automationBadge.total === 1 ? "" : "s"} to review`}
+            >
+              {automationBadge.total > 9 ? "9+" : automationBadge.total}
+            </span>
+          )}
         </button>
       )}
 

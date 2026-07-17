@@ -420,19 +420,27 @@ pub fn start(
             };
 
             // The agent finishing a turn completes any launched automation
-            // run in that worktree.
+            // run in that worktree. Emitted before agent-status so the
+            // frontend can specialize the completion notification.
             if event_type == "Stop" && !worktree_path.is_empty() {
                 use tauri::Manager;
                 let state = app_handle.state::<crate::DbState>();
-                let completed = state
+                let completed_name = state
                     .0
                     .lock()
                     .ok()
                     .and_then(|conn| {
                         crate::automations::complete_run_for_worktree(&conn, &worktree_path).ok()
                     })
-                    .unwrap_or(false);
-                if completed {
+                    .flatten();
+                if let Some(automation_name) = completed_name {
+                    let _ = app_handle.emit(
+                        "automation-run-completed",
+                        serde_json::json!({
+                            "worktree_path": worktree_path,
+                            "automation_name": automation_name,
+                        }),
+                    );
                     let _ = app_handle.emit("automation-runs-changed", ());
                 }
             }
