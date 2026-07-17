@@ -38,6 +38,16 @@ export function MainView() {
     useUIStore((s) => s.rightSidebarWidth) ?? DEFAULT_RIGHT_SIDEBAR_WIDTH;
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [isRightSidebarResizing, setIsRightSidebarResizing] = useState(false);
+  // Mirror sidebar drags into the store so the native browser webview can
+  // hide during the drag (it would otherwise capture the cursor mid-drag).
+  const handleSidebarResizing = useCallback((resizing: boolean) => {
+    setIsSidebarResizing(resizing);
+    useUIStore.getState().setPanelDragActive(resizing);
+  }, []);
+  const handleRightSidebarResizing = useCallback((resizing: boolean) => {
+    setIsRightSidebarResizing(resizing);
+    useUIStore.getState().setPanelDragActive(resizing);
+  }, []);
 
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const selectedProject = useUIStore((s) => s.selectedProject);
@@ -288,7 +298,7 @@ export function MainView() {
               width={sidebarWidth}
               onWidthChange={(w) => useUIStore.getState().setSidebarWidth(w)}
               isResizing={isSidebarResizing}
-              onResizingChange={setIsSidebarResizing}
+              onResizingChange={handleSidebarResizing}
               minWidth={MIN_SIDEBAR_WIDTH}
               maxWidth={window.innerWidth * 0.99}
               handleSide="right"
@@ -355,7 +365,7 @@ export function MainView() {
               width={rightSidebarWidth}
               onWidthChange={(w) => useUIStore.getState().setRightSidebarWidth(w)}
               isResizing={isRightSidebarResizing}
-              onResizingChange={setIsRightSidebarResizing}
+              onResizingChange={handleRightSidebarResizing}
               minWidth={MIN_RIGHT_SIDEBAR_WIDTH}
               maxWidth={window.innerWidth * 0.99}
               handleSide="left"

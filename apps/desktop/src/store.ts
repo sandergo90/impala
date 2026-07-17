@@ -112,6 +112,14 @@ interface UIState {
   revealFileInTree: (worktreePath: string, path: string) => void;
   fileFinderOpen: boolean;
   setFileFinderOpen: (open: boolean) => void;
+  // In-memory; lifted out of App.tsx so the native browser webview can hide
+  // beneath the palette (BrowserPane occlusion).
+  commandPaletteOpen: boolean;
+  setCommandPaletteOpen: (open: boolean) => void;
+  // True while a sidebar edge drag is in progress. The native browser webview
+  // hides during drags so the cursor never gets captured by it mid-drag.
+  panelDragActive: boolean;
+  setPanelDragActive: (active: boolean) => void;
   // Whether the sidebar (and other worktree consumers) hides worktrees that
   // live outside the configured worktree base directory. Persisted.
   worktreeFilterEnabled: boolean;
@@ -254,6 +262,10 @@ export const useUIStore = create<UIState>()(
         set({ pendingTreeReveal: { worktreePath, path, nonce: Date.now() } }),
       fileFinderOpen: false,
       setFileFinderOpen: (open) => set({ fileFinderOpen: open }),
+      commandPaletteOpen: false,
+      setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+      panelDragActive: false,
+      setPanelDragActive: (active) => set({ panelDragActive: active }),
       worktreeFilterEnabled: true,
       setWorktreeFilterEnabled: (enabled) => set({ worktreeFilterEnabled: enabled }),
       worktreeBaseDirOverride: null,
@@ -325,6 +337,8 @@ export const useUIStore = create<UIState>()(
           linearApiKey,
           pendingTreeReveal,
           fileFinderOpen,
+          commandPaletteOpen,
+          panelDragActive,
           worktreeNavStates,
           worktreeBaseDirOverride,
           worktreeDefaultBaseDir,
@@ -333,7 +347,8 @@ export const useUIStore = create<UIState>()(
         // Strip in-memory-only fields from each nav state.
         const cleanedNavStates: Record<string, WorktreeNavState> = {};
         for (const [path, nav] of Object.entries(worktreeNavStates)) {
-          const { lastUsedActionId, ...persistableNav } = nav;
+          const { lastUsedActionId, detectedDevServerUrl, ...persistableNav } =
+            nav;
           cleanedNavStates[path] = persistableNav as WorktreeNavState;
         }
         return { ...rest, worktreeNavStates: cleanedNavStates };

@@ -68,9 +68,9 @@ export interface UserTab {
   id: string;
   /**
    * What to run inside the tab. Terminal = shell; Agent = `claude` command;
-   * File = static file viewer (no PTY).
+   * File = static file viewer (no PTY); Browser = native child webview (no PTY).
    */
-  kind: "terminal" | "agent" | "file";
+  kind: "terminal" | "agent" | "file" | "browser";
   /** Display label shown on the tab. Auto-numbered at creation time (monotonic). */
   label: string;
   /** Creation timestamp; stable ordering. */
@@ -79,6 +79,8 @@ export interface UserTab {
   path?: string;
   /** Preview vs pinned semantics; only meaningful when kind === "file". */
   pinned?: boolean;
+  /** Current URL; only set when kind === "browser". Persisted so the tab restores. */
+  url?: string;
   /**
    * Recursive split tree of panes inside this tab. Optional for backward
    * compatibility with tabs created before Phase 4: when absent, the
@@ -126,6 +128,11 @@ export interface WorktreeNavState {
   runExitCode: number | null;
   /** True when the Run script exited non-zero and the user has not yet viewed the Run tab. */
   hasUnreadRunFailure: boolean;
+  /**
+   * Last localhost URL seen in the Run tab's PTY output, cleared when the Run
+   * script exits. Drives the "Open in browser" affordance. In-memory only.
+   */
+  detectedDevServerUrl?: string | null;
   /**
    * Stable id of the Action most recently fired in this worktree. The header's
    * play button and Cmd+Shift+R both fire this Action; the dropdown shows a

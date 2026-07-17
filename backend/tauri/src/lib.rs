@@ -1,5 +1,6 @@
 mod agent_config;
 mod annotations;
+mod browser;
 mod config;
 mod daemon_client;
 mod file_io;
@@ -1842,6 +1843,13 @@ pub fn run() {
             hotkeys::read_hotkey_overrides,
             hotkeys::write_hotkey_overrides,
             fonts::list_system_fonts,
+            browser::browser_open,
+            browser::browser_set_bounds,
+            browser::browser_set_visible,
+            browser::browser_navigate,
+            browser::browser_history,
+            browser::browser_reload,
+            browser::browser_close,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

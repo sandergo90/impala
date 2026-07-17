@@ -17,6 +17,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
 import { FileViewer } from "./FileViewer";
+import { BrowserPane } from "./BrowserPane";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -38,6 +39,7 @@ import {
 } from "../lib/pane-ids";
 import {
   createUserTab,
+  createBrowserTab,
   closeUserTab,
   renameUserTab,
   reorderUserTabs,
@@ -48,8 +50,9 @@ import {
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { useShallow } from "zustand/shallow";
 import { buildDocumentKey } from "../lib/editor-buffer-registry";
+import { useDevServerDetection } from "../hooks/useDevServerDetection";
 
-type TabKind = "terminal" | "agent" | "file";
+type TabKind = "terminal" | "agent" | "file" | "browser";
 
 // Stable empty array — returning `[]` from the userTabs selector would create
 // a new reference every call, breaking Zustand's useSyncExternalStore snapshot
@@ -112,6 +115,11 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   const hasRunTab = Boolean(
     config?.setup?.trim() || (config?.actions.length ?? 0) > 0,
+  );
+
+  useDevServerDetection(worktreePath, hasRunTab);
+  const detectedDevServerUrl = useUIStore(
+    (s) => s.worktreeNavStates[worktreePath]?.detectedDevServerUrl ?? null,
   );
 
   useEffect(() => {
@@ -311,6 +319,33 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     createUserTab(worktreePath, "agent");
   }, [worktreePath]);
 
+  const handleNewBrowser = useCallback(() => {
+    setMenuOpen(false);
+    createBrowserTab(worktreePath);
+  }, [worktreePath]);
+
+  const handleOpenDetectedUrl = useCallback(() => {
+    const uiState = useUIStore.getState();
+    const nav = uiState.getWorktreeNavState(worktreePath);
+    const url = nav.detectedDevServerUrl;
+    if (!url) return;
+    const existing = nav.userTabs.find((t) => t.kind === "browser");
+    if (existing) {
+      // Navigate works when the webview already exists; if the tab was never
+      // activated this session the invoke no-ops and the updated `url` below
+      // seeds `browser_open` on mount instead.
+      invoke("browser_navigate", { id: existing.id, url }).catch(() => {});
+      uiState.updateWorktreeNavState(worktreePath, {
+        userTabs: nav.userTabs.map((t) =>
+          t.id === existing.id ? { ...t, url } : t,
+        ),
+        activeTerminalsTab: existing.id,
+      });
+    } else {
+      createBrowserTab(worktreePath, url);
+    }
+  }, [worktreePath]);
+
   if (agentOnly) {
     return (
       <div className="relative h-full w-full">
@@ -479,9 +514,40 @@ export const TabbedTerminals = memo(function TabbedTerminals({
               >
                 New Agent tab
               </button>
+              <button
+                onClick={handleNewBrowser}
+                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+              >
+                New browser tab
+              </button>
             </div>
           )}
         </div>
+
+        {detectedDevServerUrl && (
+          <button
+            onClick={handleOpenDetectedUrl}
+            className="ml-auto flex items-center gap-1.5 px-2 py-1 text-[13px] text-muted-foreground hover:text-foreground rounded hover:bg-accent"
+            aria-label={`Open ${detectedDevServerUrl} in browser tab`}
+            title={`Open ${detectedDevServerUrl} in browser tab`}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+              <circle
+                cx="8"
+                cy="8"
+                r="6"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
+              <path
+                d="M2 8h12M8 2c1.8 1.7 2.7 3.8 2.7 6S9.8 12.3 8 14c-1.8-1.7-2.7-3.8-2.7-6S6.2 3.7 8 2z"
+                stroke="currentColor"
+                strokeWidth="1.2"
+              />
+            </svg>
+            Open in browser
+          </button>
+        )}
       </div>
 
       <div className="relative flex-1 min-h-0">
@@ -502,6 +568,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             <div key={t.id} className="absolute inset-0">
               {userTab && userTab.kind === "file" ? (
                 <FileViewer />
+              ) : userTab && userTab.kind === "browser" ? (
+                <BrowserPane
+                  tab={userTab}
+                  worktreePath={worktreePath}
+                  isActive={isActive}
+                />
               ) : userTab ? (
                 <UserTabSplitRenderer
                   tab={userTab}

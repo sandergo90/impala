@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { invoke } from "@/lib/invoke";
 import { Outlet, useRouter, useMatchRoute } from "@tanstack/react-router";
 import { useInvoke } from "./hooks/useInvoke";
@@ -29,7 +29,8 @@ import { releaseCachedTerminal } from "./components/XtermTerminal";
 
 export function RootLayout() {
   const { loading: checking, error: gitError } = useInvoke("check_git");
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const commandPaletteOpen = useUIStore((s) => s.commandPaletteOpen);
+  const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const fileFinderOpen = useUIStore((s) => s.fileFinderOpen);
   const setFileFinderOpen = useUIStore((s) => s.setFileFinderOpen);
 
@@ -84,7 +85,7 @@ export function RootLayout() {
   });
 
   useAppHotkey("OPEN_COMMAND_PALETTE", () => {
-    setCommandPaletteOpen((prev) => !prev);
+    setCommandPaletteOpen(!useUIStore.getState().commandPaletteOpen);
   });
 
   useAppHotkey("OPEN_FILE_FINDER", () => {

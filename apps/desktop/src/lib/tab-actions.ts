@@ -100,6 +100,34 @@ export function createUserTab(
   return newTab;
 }
 
+export function createBrowserTab(worktreePath: string, url?: string): UserTab {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+
+  const used = new Set<number>();
+  for (const t of nav.userTabs) {
+    if (t.kind !== "browser") continue;
+    const n = parseLabelNumber(t.label, "Browser");
+    if (n !== null) used.add(n);
+  }
+  const slot = smallestUnused(used, 1);
+  const tabId = `browser-${slot}-${Date.now()}`;
+  const newTab: UserTab = {
+    id: tabId,
+    kind: "browser",
+    label: `Browser ${slot}`,
+    createdAt: Date.now(),
+    url,
+  };
+
+  uiState.updateWorktreeNavState(worktreePath, {
+    userTabs: [...nav.userTabs, newTab],
+    activeTerminalsTab: newTab.id,
+  });
+
+  return newTab;
+}
+
 export function closeUserTab(worktreePath: string, tabId: string): void {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
@@ -117,9 +145,12 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
       if (!proceed) return;
     }
   }
-  if (tab.kind !== "file") {
+  if (tab.kind === "terminal" || tab.kind === "agent") {
     const tree = getEffectiveUserTabSplitTree(tab);
     for (const leaf of getLeaves(tree)) killPaneSession(worktreePath, leaf.id);
+  }
+  if (tab.kind === "browser") {
+    invoke("browser_close", { id: tab.id }).catch(() => {});
   }
 
   const remainingTabs = nav.userTabs.filter((t) => t.id !== tabId);
