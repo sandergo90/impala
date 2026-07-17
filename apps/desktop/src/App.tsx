@@ -23,7 +23,9 @@ import {
   splitUserTabPane,
   closeUserTabFocusedPane,
   focusAdjacentUserTabPane,
+  createBrowserTab,
 } from "./lib/tab-actions";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AGENT_PANE_ID, RUN_PANE_ID } from "./lib/pane-ids";
 import { releaseCachedTerminal } from "./components/XtermTerminal";
 
@@ -39,6 +41,26 @@ export function RootLayout() {
 
   useAgentStatusSync();
   useAgentNotifications();
+
+  // Agent-requested browser navigation for a worktree with no browser tab
+  // yet (hook-server /browser/navigate): create the tab at that URL.
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    listen<{ worktreePath: string; url: string }>(
+      "browser-request-open",
+      (event) => {
+        createBrowserTab(event.payload.worktreePath, event.payload.url);
+      },
+    ).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     useHotkeysStore.getState().load();

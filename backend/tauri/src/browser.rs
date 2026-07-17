@@ -216,13 +216,82 @@ pub fn browser_close(app: AppHandle, id: String) -> Result<(), String> {
 // as commands (and, via hook-server endpoints, to impala-mcp).
 // ---------------------------------------------------------------------------
 
+/// Resolve a worktree to its (first) browser webview via the registry.
+pub fn webview_for_worktree(app: &AppHandle, worktree_path: &str) -> Result<Webview, String> {
+    let registry = app.state::<BrowserRegistry>();
+    let map = registry.0.lock().unwrap();
+    let mut ids: Vec<&String> = map
+        .iter()
+        .filter(|(_, wt)| wt.as_str() == worktree_path)
+        .map(|(id, _)| id)
+        .collect();
+    ids.sort();
+    let id = ids
+        .first()
+        .ok_or_else(|| "no browser tab open for this worktree".to_string())?;
+    get_webview(app, id)
+}
+
+pub fn screenshot_png_base64(wv: &Webview) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let png = native::take_screenshot(wv, Duration::from_secs(5))?;
+    debug!(bytes = png.len(), "browser screenshot captured");
+    Ok(STANDARD.encode(png))
+}
+
+pub fn console_logs(wv: &Webview, clear: bool) -> Result<serde_json::Value, String> {
+    // The shim pushes into the same array forever; draining must clear with
+    // length = 0 (see CONSOLE_SHIM), and stringify before clearing.
+    let js = if clear {
+        "(function(){var l=window.__IMPALA_LOGS__||[];var s=JSON.stringify(l);l.length=0;return s;})()"
+    } else {
+        "JSON.stringify(window.__IMPALA_LOGS__||[])"
+    };
+    let raw = native::eval_js(wv, js, Duration::from_secs(3))?;
+    let logs: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("bad console payload: {e}"))?;
+    Ok(serde_json::json!({ "logs": logs }))
+}
+
+pub fn page_info(wv: &Webview) -> Result<serde_json::Value, String> {
+    let raw = native::eval_js(
+        wv,
+        "JSON.stringify({url:location.href,title:document.title,readyState:document.readyState})",
+        Duration::from_secs(3),
+    )?;
+    serde_json::from_str(&raw).map_err(|e| format!("bad page info payload: {e}"))
+}
+
+/// Navigate the worktree's browser pane; if none exists, ask the frontend to
+/// create the tab (the webview materializes when the pane first mounts).
+pub fn navigate_worktree(
+    app: &AppHandle,
+    worktree_path: &str,
+    url: &str,
+) -> Result<serde_json::Value, String> {
+    let parsed = Url::parse(url).map_err(|e| e.to_string())?;
+    match webview_for_worktree(app, worktree_path) {
+        Ok(wv) => {
+            info!(worktree_path = %worktree_path, url = %url, "browser navigate (worktree)");
+            wv.navigate(parsed).map_err(|e| e.to_string())?;
+            Ok(serde_json::json!({ "created": false }))
+        }
+        Err(_) => {
+            info!(worktree_path = %worktree_path, url = %url, "browser navigate: requesting new tab");
+            let _ = app.emit_to(
+                "main",
+                "browser-request-open",
+                serde_json::json!({ "worktreePath": worktree_path, "url": url }),
+            );
+            Ok(serde_json::json!({ "created": true }))
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn browser_screenshot(app: AppHandle, id: String) -> Result<String, String> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
     let wv = get_webview(&app, &id)?;
-    let png = native::take_screenshot(&wv, Duration::from_secs(5))?;
-    debug!(id = %id, bytes = png.len(), "browser_screenshot");
-    Ok(STANDARD.encode(png))
+    screenshot_png_base64(&wv)
 }
 
 #[tauri::command]
@@ -232,26 +301,13 @@ pub async fn browser_console_logs(
     clear: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let wv = get_webview(&app, &id)?;
-    // The shim pushes into the same array forever; draining must clear with
-    // length = 0 (see CONSOLE_SHIM), and stringify before clearing.
-    let js = if clear.unwrap_or(false) {
-        "(function(){var l=window.__IMPALA_LOGS__||[];var s=JSON.stringify(l);l.length=0;return s;})()"
-    } else {
-        "JSON.stringify(window.__IMPALA_LOGS__||[])"
-    };
-    let raw = native::eval_js(&wv, js, Duration::from_secs(3))?;
-    serde_json::from_str(&raw).map_err(|e| format!("bad console payload: {e}"))
+    console_logs(&wv, clear.unwrap_or(false))
 }
 
 #[tauri::command]
 pub async fn browser_page_info(app: AppHandle, id: String) -> Result<serde_json::Value, String> {
     let wv = get_webview(&app, &id)?;
-    let raw = native::eval_js(
-        &wv,
-        "JSON.stringify({url:location.href,title:document.title,readyState:document.readyState})",
-        Duration::from_secs(3),
-    )?;
-    serde_json::from_str(&raw).map_err(|e| format!("bad page info payload: {e}"))
+    page_info(&wv)
 }
 
 #[cfg(target_os = "macos")]

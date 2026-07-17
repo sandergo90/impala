@@ -224,6 +224,54 @@ fn apply_caffeinate(caffeinators: &Caffeinators, worktree_path: &str, status: &s
 #[cfg(not(target_os = "macos"))]
 fn apply_caffeinate(_caffeinators: &Caffeinators, _worktree_path: &str, _status: &str) {}
 
+/// Dispatch a /browser/* request. Every response is a JSON object with an
+/// `ok` flag; errors carry `error`.
+fn handle_browser_request(
+    app: &AppHandle,
+    path: &str,
+    params: &HashMap<String, String>,
+) -> serde_json::Value {
+    let result = (|| -> Result<serde_json::Value, String> {
+        let worktree_path = params
+            .get("worktree_path")
+            .filter(|p| !p.is_empty())
+            .ok_or("missing worktree_path")?;
+        match path {
+            "/browser/page_info" => {
+                let wv = crate::browser::webview_for_worktree(app, worktree_path)?;
+                crate::browser::page_info(&wv)
+            }
+            "/browser/console" => {
+                let wv = crate::browser::webview_for_worktree(app, worktree_path)?;
+                let clear = params.get("clear").map(|c| c == "true").unwrap_or(false);
+                crate::browser::console_logs(&wv, clear)
+            }
+            "/browser/screenshot" => {
+                let wv = crate::browser::webview_for_worktree(app, worktree_path)?;
+                let png_base64 = crate::browser::screenshot_png_base64(&wv)?;
+                Ok(serde_json::json!({ "png_base64": png_base64 }))
+            }
+            "/browser/navigate" => {
+                let url = params
+                    .get("url")
+                    .filter(|u| !u.is_empty())
+                    .ok_or("missing url")?;
+                crate::browser::navigate_worktree(app, worktree_path, url)
+            }
+            _ => Err(format!("unknown browser endpoint: {path}")),
+        }
+    })();
+    match result {
+        Ok(mut value) => {
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("ok".to_string(), serde_json::Value::Bool(true));
+            }
+            value
+        }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
 /// Start the hook HTTP server on a random port. Returns the port number.
 /// The `statuses` map is updated with every event so the frontend can query
 /// last-known agent status after a hard reload.
@@ -247,6 +295,7 @@ pub fn start(
     std::thread::spawn(move || {
         for request in server.incoming_requests() {
             let url = request.url().to_string();
+            let path = url.splitn(2, '?').next().unwrap_or("").to_string();
 
             let params: HashMap<String, String> = url
                 .splitn(2, '?')
@@ -263,6 +312,25 @@ pub fn start(
                     ))
                 })
                 .collect();
+
+            // Browser agent-hook endpoints (impala-mcp). Screenshots/eval can
+            // take seconds — handle on their own thread so /hook (agent
+            // status, latency-critical) never queues behind them.
+            if path.starts_with("/browser/") {
+                let app = app_handle.clone();
+                std::thread::spawn(move || {
+                    let body = handle_browser_request(&app, &path, &params);
+                    let response = Response::from_string(body.to_string()).with_header(
+                        tiny_http::Header::from_bytes(
+                            &b"Content-Type"[..],
+                            &b"application/json"[..],
+                        )
+                        .expect("static header"),
+                    );
+                    let _ = request.respond(response);
+                });
+                continue;
+            }
 
             let event_type = params.get("event_type").map(|s| s.as_str()).unwrap_or("");
             let worktree_path = params.get("worktree_path").cloned().unwrap_or_default();
