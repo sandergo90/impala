@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { RootLayout } from "./App";
 import { MainView } from "./views/MainView";
+import { AutomationsView } from "./views/AutomationsView";
 import { SettingsLayout } from "./routes/settings-layout";
 import { AppearanceRoute } from "./routes/settings/appearance";
 import { IntegrationsRoute } from "./routes/settings/integrations";
@@ -23,6 +24,12 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: MainView,
+});
+
+const automationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/automations",
+  component: AutomationsView,
 });
 
 const settingsRoute = createRoute({
@@ -74,6 +81,7 @@ export const projectSettingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  automationsRoute,
   settingsRoute.addChildren([
     settingsAppearanceRoute,
     settingsGitRoute,

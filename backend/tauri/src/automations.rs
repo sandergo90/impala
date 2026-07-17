@@ -613,6 +613,24 @@ mod tests {
     }
 
     #[test]
+    fn schedule_accepts_named_weekdays_from_the_picker() {
+        // The frontend presets emit named days; verify each shape parses and
+        // that MON-FRI actually lands on a weekday.
+        let now = chrono::Utc::now().timestamp();
+        for schedule in ["0 * * * *", "0 9 * * *", "0 9 * * MON-FRI", "30 17 * * FRI"] {
+            assert!(next_occurrence(schedule, now).is_ok(), "{schedule}");
+        }
+        let next = next_occurrence("0 9 * * MON-FRI", now).unwrap();
+        let weekday = chrono::TimeZone::timestamp_opt(&chrono::Local, next, 0)
+            .single()
+            .unwrap()
+            .format("%u")
+            .to_string();
+        let n: u32 = weekday.parse().unwrap();
+        assert!((1..=5).contains(&n), "MON-FRI fired on ISO weekday {n}");
+    }
+
+    #[test]
     fn automation_crud_and_run_lifecycle() {
         let conn = test_conn();
         let now = chrono::Utc::now().timestamp();

@@ -17,6 +17,7 @@ import {
   getLeaves,
 } from "./lib/split-tree";
 import { toggleRunScript } from "./lib/run-script";
+import { startAutomationExecutor } from "./lib/automation-executor";
 import { useHotkeysStore } from "./stores/hotkeys";
 import { selectWorktree, selectProject } from "./hooks/useWorktreeActions";
 import {
@@ -79,6 +80,10 @@ export function RootLayout() {
       for (const fn of unlistens) fn();
     };
   }, []);
+
+  // Scheduled automations: the Rust scheduler emits automation-due; the
+  // executor creates the worktree and launches the agent.
+  useEffect(() => startAutomationExecutor(), []);
 
   useEffect(() => {
     useHotkeysStore.getState().load();

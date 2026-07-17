@@ -133,6 +133,24 @@ function TerminalIcon() {
   );
 }
 
+function ClockIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="8" cy="8" r="6.25" />
+      <polyline points="8 4.5 8 8 10.5 9.5" />
+    </svg>
+  );
+}
+
 export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const navigate = useNavigate();
   const selectedProject = useUIStore((s) => s.selectedProject);
@@ -268,6 +286,17 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
       )}
 
       <div className="flex-1" />
+
+      {/* Automations */}
+      {selectedProject && (
+        <button
+          onClick={() => navigate({ to: "/automations" })}
+          className="w-7 h-7 rounded-[5px] flex items-center justify-center text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors"
+          title="Automations"
+        >
+          <ClockIcon />
+        </button>
+      )}
 
       {/* Settings */}
       <button
@@ -968,6 +997,17 @@ export function Sidebar() {
         >
           <TerminalIcon />
           <span>Terminal</span>
+        </button>
+      )}
+
+      {/* Automations — above settings */}
+      {selectedProject && (
+        <button
+          onClick={() => navigate({ to: "/automations" })}
+          className="flex items-center gap-1.5 w-full px-3.5 py-1.5 text-sm text-muted-foreground/90 hover:text-muted-foreground transition-colors"
+        >
+          <ClockIcon />
+          <span>Automations</span>
         </button>
       )}
 

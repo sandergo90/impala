@@ -66,6 +66,32 @@ export interface BrowserAnnotation {
   updated_at: string;
 }
 
+export interface Automation {
+  id: string;
+  repo_path: string;
+  name: string;
+  prompt: string;
+  agent: "claude" | "codex";
+  /** 5-field cron expression, evaluated in local time. */
+  schedule: string;
+  enabled: boolean;
+  /** Unix seconds of the next fire. */
+  next_run_at: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationRun {
+  id: string;
+  automation_id: string;
+  /** Unix seconds of the slot this run covers. */
+  scheduled_for: number;
+  worktree_path?: string | null;
+  status: "pending" | "launched" | "completed" | "failed" | "skipped";
+  error?: string | null;
+  created_at: string;
+}
+
 export type SplitNode =
   | { type: "leaf"; id: string; paneType: "agent" | "shell" }
   | {
