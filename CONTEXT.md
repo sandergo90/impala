@@ -36,10 +36,6 @@ _Avoid_: Default action (the project has no notion of a globally "default" Actio
 An inline review comment anchored to a file and line range in a **Worktree**. Surfaced via the in-app reviewer and the `impala` MCP server.
 _Avoid_: Comment, note (Annotation is the canonical term).
 
-**Companion mode**:
-A global, persisted posture in which Impala serves solely as the review surface for work driven by an external agent app (e.g. the Codex desktop app). The terminal surface, **Actions**, and all **Worktree** management are hidden; a read-only sidebar lists every **Project** with its **Worktrees** (name only), and selecting one gives the usual diffs, commits, **Annotations**, and single-file preview. Entered and exited via the command palette; the unnamed alternative is the full experience. Layout-only: background terminal sessions keep running and are restored on exit.
-_Avoid_: Viewer mode, diff-only mode, review mode (the full experience is also review).
-
 **Remote provider**:
 The hosting service backing a **Project**'s git remote — currently GitHub or Bitbucket Cloud. Determines whether Impala can surface a **Pull request status** for the Project's **Worktrees**; a Project whose remote matches no known provider is unsupported.
 _Avoid_: Remote (the bare git origin URL is not the provider), host, forge, integration.

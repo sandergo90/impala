@@ -38,26 +38,17 @@ function Placeholder({
   );
 }
 
-export function FileViewer({
-  worktreePath,
-  filePath,
-}: {
-  // When provided, view this exact file instead of the active file tab.
-  // Used by the Companion-mode inline preview, which has no tab surface.
-  worktreePath?: string;
-  filePath?: string;
-} = {}) {
+export function FileViewer() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
-  const wtPath = worktreePath ?? selectedWorktree?.path ?? null;
+  const wtPath = selectedWorktree?.path ?? null;
   const activeTabId = useUIStore((s) =>
     wtPath ? s.worktreeNavStates[wtPath]?.activeTerminalsTab ?? null : null,
   );
-  const tabFilePath = useUIStore((s) => {
+  const selectedFilePath = useUIStore((s) => {
     if (!wtPath || !activeTabId) return null;
     const tab = s.worktreeNavStates[wtPath]?.userTabs.find((t) => t.id === activeTabId);
     return tab && tab.kind === "file" ? tab.path ?? null : null;
   });
-  const selectedFilePath = filePath ?? tabFilePath;
 
   const fullPath = wtPath && selectedFilePath ? `${wtPath}/${selectedFilePath}` : null;
   const initialKind: FileKind | null = selectedFilePath ? classifyFile(selectedFilePath) : null;

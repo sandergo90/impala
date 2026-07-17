@@ -4,9 +4,6 @@ import { useUIStore, useDataStore } from "../store";
 import type { Worktree, CommitInfo, ChangedFile, Project } from "../types";
 
 export async function selectWorktree(wt: Worktree) {
-  // Any worktree selection returns Companion mode's preview to the diff, no
-  // matter the path taken (sidebar click, palette, jump hotkey, boot restore).
-  useUIStore.getState().setCompanionFilePreview(null);
   useUIStore.getState().setSelectedWorktree(wt);
   const projectPath = useUIStore.getState().selectedProject?.path;
   if (projectPath) {
@@ -60,65 +57,6 @@ export function activateGeneralTerminal() {
   }
   state.setSelectedWorktree(null);
   state.setGeneralTerminalActive(true);
-}
-
-/**
- * App boot: load persisted projects, kick off icon discovery, and restore the
- * persisted project/worktree selection. Called from whichever sidebar mounts
- * (full Sidebar or Companion mode's sidebar) — safe to re-run on remount.
- */
-export async function bootProjects(): Promise<void> {
-  try {
-    const paths = await invoke<string[]>("load_projects");
-    const loaded: Project[] = paths.map((p) => ({
-      path: p,
-      name: p.split("/").pop() || p,
-    }));
-    useDataStore.getState().setProjects(loaded);
-
-    // Discover icons for all projects in parallel
-    for (const project of loaded) {
-      invoke<string | null>("discover_project_icon", {
-        projectPath: project.path,
-      })
-        .then((icon) => {
-          if (icon) useDataStore.getState().setProjectIcon(project.path, icon);
-        })
-        .catch(() => {});
-    }
-
-    const persistedProject = useUIStore.getState().selectedProject;
-    if (
-      persistedProject &&
-      loaded.some((p) => p.path === persistedProject.path)
-    ) {
-      try {
-        const wts = await invoke<Worktree[]>("list_worktrees", {
-          repoPath: persistedProject.path,
-        });
-        useDataStore.getState().setWorktrees(wts);
-
-        const persistedWorktree = useUIStore.getState().selectedWorktree;
-        if (
-          persistedWorktree &&
-          wts.some((wt) => wt.path === persistedWorktree.path)
-        ) {
-          useUIStore.getState().setGeneralTerminalActive(false);
-          await selectWorktree(persistedWorktree);
-        } else {
-          useUIStore.getState().setSelectedWorktree(null);
-        }
-      } catch {
-        useUIStore.getState().setSelectedProject(null);
-        useUIStore.getState().setSelectedWorktree(null);
-      }
-    } else if (persistedProject) {
-      useUIStore.getState().setSelectedProject(null);
-      useUIStore.getState().setSelectedWorktree(null);
-    }
-  } catch (e) {
-    toast.error("Failed to load projects");
-  }
 }
 
 export async function selectProject(project: Project) {

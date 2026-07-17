@@ -389,27 +389,6 @@ export function openFileTab(
   const nav = uiState.getWorktreeNavState(worktreePath);
   const label = basename(path);
 
-  // Companion mode has no tab surface: every file open becomes the single
-  // inline preview shown in place of the diff. The returned tab is synthetic
-  // (callers ignore it) and nothing is written to the worktree's nav state.
-  if (uiState.companionMode) {
-    if (line !== undefined) {
-      useEditorDocsStore
-        .getState()
-        .setPendingTarget(buildDocumentKey(worktreePath, path), { line, col });
-    }
-    uiState.setCompanionFilePreview({ worktreePath, path });
-    uiState.revealFileInTree(worktreePath, path);
-    return {
-      id: "companion-preview",
-      kind: "file",
-      label,
-      createdAt: Date.now(),
-      path,
-      pinned: pin,
-    };
-  }
-
   // Only force the top-level tab area to "terminal" when the user is on a
   // mode where TabbedTerminals isn't visible. "terminal" and "split" already
   // show terminal content; flipping them would collapse the user's layout.

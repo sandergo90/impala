@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
-import { CompanionSidebar } from "../components/CompanionSidebar";
-import { CompanionFilePreview } from "../components/CompanionFilePreview";
 import { RightSidebar } from "../components/RightSidebar";
 import { DiffView } from "../components/DiffView";
 import { SplitTreeRenderer } from "../components/SplitTreeRenderer";
@@ -62,12 +60,7 @@ export function MainView() {
     wtPath ? s.worktreeDataStates[wtPath] ?? null : null
   );
 
-  // Companion mode is a hard layout mode: the content area is locked to the
-  // diff and the per-worktree activeTab is not consulted (never overwritten),
-  // so exiting restores the layout exactly as it was.
-  const companionMode = useUIStore((s) => s.companionMode);
-  const companionFilePreview = useUIStore((s) => s.companionFilePreview);
-  const activeTab = companionMode ? "diff" : navState?.activeTab ?? "diff";
+  const activeTab = navState?.activeTab ?? "diff";
 
   const hasUnreadRunFailure = useUIStore((s) =>
     wtPath ? s.worktreeNavStates[wtPath]?.hasUnreadRunFailure ?? false : false,
@@ -83,10 +76,10 @@ export function MainView() {
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: tab });
   };
 
-  // -- Tab switching via Cmd+Shift+1/2/3/4 -- (inert in Companion mode)
-  useAppHotkey("SWITCH_TAB_TERMINAL", () => setTab("terminal"), { enabled: !companionMode }, [companionMode]);
-  useAppHotkey("SWITCH_TAB_DIFF", () => setTab("diff"), { enabled: !companionMode }, [companionMode]);
-  useAppHotkey("SWITCH_TAB_SPLIT", () => setTab("split"), { enabled: !companionMode }, [companionMode]);
+  // -- Tab switching via Cmd+Shift+1/2/3/4 --
+  useAppHotkey("SWITCH_TAB_TERMINAL", () => setTab("terminal"));
+  useAppHotkey("SWITCH_TAB_DIFF", () => setTab("diff"));
+  useAppHotkey("SWITCH_TAB_SPLIT", () => setTab("split"));
 
   const isWorktreeTerminalActive = Boolean(wtPath) && activeTab === "terminal";
 
@@ -168,7 +161,7 @@ export function MainView() {
     } else {
       activateGeneralTerminal();
     }
-  }, { enabled: !companionMode }, [companionMode]);
+  });
 
   const handleGeneralTerminalFocusPane = useCallback((paneId: string) => {
     useUIStore.getState().setGeneralTerminalFocusedPaneId(paneId);
@@ -231,8 +224,8 @@ export function MainView() {
           })()}
         </div>
 
-        {/* Center: run + tabs — hidden in Companion mode (no terminal surface) */}
-        {selectedWorktree && !companionMode && (
+        {/* Center: run + tabs */}
+        {selectedWorktree && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingLeft: "88px" }}>
             <div className="relative flex items-center gap-1.5 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
               <RunActionsButton
@@ -289,9 +282,7 @@ export function MainView() {
       >
         <div className="flex flex-1 min-h-0 min-w-0">
           {sidebarCollapsed ? (
-            companionMode ? null : (
-              <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
-            )
+            <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
           ) : (
             <ResizablePanel
               width={sidebarWidth}
@@ -305,7 +296,7 @@ export function MainView() {
                 useUIStore.getState().setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
               }
             >
-              {companionMode ? <CompanionSidebar /> : <Sidebar />}
+              <Sidebar />
             </ResizablePanel>
           )}
 
@@ -346,16 +337,7 @@ export function MainView() {
                 <div
                   className={`absolute inset-0 bg-background ${activeTab === "diff" ? "z-10" : "z-0 invisible"}`}
                 >
-                  {companionMode &&
-                  companionFilePreview &&
-                  companionFilePreview.worktreePath === wtPath ? (
-                    <CompanionFilePreview
-                      worktreePath={companionFilePreview.worktreePath}
-                      path={companionFilePreview.path}
-                    />
-                  ) : (
-                    <DiffView />
-                  )}
+                  <DiffView />
                 </div>
                 <div className={`absolute inset-0 ${activeTab !== "diff" ? "z-10" : "z-0 invisible"}`}>
                   <WorktreeTerminals
