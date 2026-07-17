@@ -233,7 +233,7 @@ export function CommitPanel() {
     const requestId = ++selectionRequestRef.current;
     clearScheduledAutoRefresh();
     const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
-    updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
+    updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff', ...(currentTab === 'split' ? { splitRightPane: 'diff' as const } : {}) });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
       const payload = await loadDiffPayload("all-changes");
@@ -248,7 +248,7 @@ export function CommitPanel() {
     const requestId = ++selectionRequestRef.current;
     clearScheduledAutoRefresh();
     const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
-    updateNav({ viewMode: 'last-turn', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
+    updateNav({ viewMode: 'last-turn', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff', ...(currentTab === 'split' ? { splitRightPane: 'diff' as const } : {}) });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
       const payload = await loadDiffPayload("last-turn");
@@ -263,7 +263,7 @@ export function CommitPanel() {
     const requestId = ++selectionRequestRef.current;
     clearScheduledAutoRefresh();
     const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
-    updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
+    updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff', ...(currentTab === 'split' ? { splitRightPane: 'diff' as const } : {}) });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
       const payload = await loadDiffPayload("uncommitted");
@@ -278,7 +278,7 @@ export function CommitPanel() {
     const requestId = ++selectionRequestRef.current;
     clearScheduledAutoRefresh();
     const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
-    updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff' });
+    updateNav({ viewMode: 'commit', selectedCommit: commit, selectedFile: null, activeTab: currentTab === 'split' ? 'split' : 'diff', ...(currentTab === 'split' ? { splitRightPane: 'diff' as const } : {}) });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
     try {
       const payload = await loadDiffPayload("commit", commit);
@@ -290,7 +290,8 @@ export function CommitPanel() {
   };
 
   const selectFile = (file: ChangedFile) => {
-    updateNav({ selectedFile: file });
+    const currentTab = useUIStore.getState().worktreeNavStates[worktreePath]?.activeTab ?? 'diff';
+    updateNav({ selectedFile: file, ...(currentTab === 'split' ? { splitRightPane: 'diff' as const } : {}) });
     const currentFileDiffs = useDataStore.getState().getWorktreeDataState(worktreePath).fileDiffs;
     const diff = currentFileDiffs[file.path] ?? "";
     updateData({ diffText: diff });
