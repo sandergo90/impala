@@ -347,8 +347,7 @@ export const useUIStore = create<UIState>()(
         // Strip in-memory-only fields from each nav state.
         const cleanedNavStates: Record<string, WorktreeNavState> = {};
         for (const [path, nav] of Object.entries(worktreeNavStates)) {
-          const { lastUsedActionId, detectedDevServerUrl, ...persistableNav } =
-            nav;
+          const { lastUsedActionId, ...persistableNav } = nav;
           cleanedNavStates[path] = persistableNav as WorktreeNavState;
         }
         return { ...rest, worktreeNavStates: cleanedNavStates };

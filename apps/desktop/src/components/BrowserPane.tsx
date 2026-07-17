@@ -61,9 +61,6 @@ export const BrowserPane = memo(function BrowserPane({
   // about:blank, and wry webviews draw no background), so an empty tab
   // renders a DOM empty state instead of a transparent native view.
   const hasUrl = Boolean(tab.url);
-  const detectedDevServerUrl = useUIStore(
-    (s) => s.worktreeNavStates[worktreePath]?.detectedDevServerUrl ?? null,
-  );
 
   // Occlusion: the native webview composites ABOVE the entire DOM, so
   // anything that must draw over the pane region hides it instead. Diff
@@ -349,17 +346,7 @@ export const BrowserPane = memo(function BrowserPane({
               Failed to open browser view: {openError}
             </span>
           ) : !hasUrl ? (
-            <>
-              <span>Enter a URL above to preview</span>
-              {detectedDevServerUrl && (
-                <button
-                  onClick={() => navigate(detectedDevServerUrl)}
-                  className="px-3 py-1.5 rounded border border-border font-mono text-[13px] hover:bg-accent hover:text-foreground"
-                >
-                  Open {detectedDevServerUrl}
-                </button>
-              )}
-            </>
+            <span>Enter a URL above to preview</span>
           ) : loading ? (
             <span>Loading…</span>
           ) : null}

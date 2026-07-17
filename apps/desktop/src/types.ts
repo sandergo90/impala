@@ -129,11 +129,6 @@ export interface WorktreeNavState {
   /** True when the Run script exited non-zero and the user has not yet viewed the Run tab. */
   hasUnreadRunFailure: boolean;
   /**
-   * Last localhost URL seen in the Run tab's PTY output, cleared when the Run
-   * script exits. Drives the "Open in browser" affordance. In-memory only.
-   */
-  detectedDevServerUrl?: string | null;
-  /**
    * Stable id of the Action most recently fired in this worktree. The header's
    * play button and Cmd+Shift+R both fire this Action; the dropdown shows a
    * checkmark next to it. In-memory only — reset on app restart.
