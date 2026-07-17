@@ -18,6 +18,10 @@ import {
   cropScreenshot,
   type BrowserPick,
 } from "../lib/browser-picker";
+import {
+  AGENT_ACTIVITY_LABELS,
+  useBrowserAgentActivity,
+} from "../hooks/useBrowserAgentActivity";
 
 const DEFAULT_URL = "about:blank";
 
@@ -82,6 +86,8 @@ export const BrowserPane = memo(function BrowserPane({
   const finderOpen = useUIStore((s) => s.fileFinderOpen);
   const dragActive = useUIStore((s) => s.panelDragActive);
   const visible = isActive && !paletteOpen && !finderOpen && !dragActive;
+  const { active: agentActive, kind: agentKind } =
+    useBrowserAgentActivity(worktreePath);
   // Read by the async browser_open callback, which may resolve after
   // visibility already changed (or after unmount).
   const visibleRef = useRef(visible);
@@ -435,6 +441,14 @@ export const BrowserPane = memo(function BrowserPane({
             />
           </svg>
         </button>
+        {agentActive && (
+          <span
+            className="flex shrink-0 items-center rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-medium text-primary animate-pulse"
+            title={`Agent is ${AGENT_ACTIVITY_LABELS[agentKind ?? ""] ?? "using the browser"}`}
+          >
+            Agent
+          </span>
+        )}
       </div>
       {pendingPick && (
         <div className="flex shrink-0 items-center gap-2 px-2 py-1.5 border-b border-border/40 bg-sidebar">
@@ -480,7 +494,16 @@ export const BrowserPane = memo(function BrowserPane({
           {lastError}
         </div>
       )}
-      <div ref={placeholderRef} className="relative flex-1 min-h-0 bg-background">
+      {/* The 2px frame is permanent (the webview is bounds-synced to the
+          INNER div) so toggling the ring color never resizes the page —
+          a viewport resize would trigger reflow/media queries on every
+          agent-activity blip. */}
+      <div
+        className={`relative flex-1 min-h-0 border-2 transition-colors ${
+          agentActive ? "border-primary/60" : "border-transparent"
+        }`}
+      >
+      <div ref={placeholderRef} className="relative h-full w-full bg-background">
         {/* The native webview floats over this div. Content here is only
             visible before creation, on error, or while the webview is hidden. */}
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
@@ -494,6 +517,7 @@ export const BrowserPane = memo(function BrowserPane({
             <span>Loading…</span>
           ) : null}
         </div>
+      </div>
       </div>
     </div>
   );

@@ -42,23 +42,41 @@ export function RootLayout() {
   useAgentStatusSync();
   useAgentNotifications();
 
-  // Agent-requested browser navigation for a worktree with no browser tab
-  // yet (hook-server /browser/navigate): create the tab at that URL.
+  // Agent browser interactions (hook-server /browser/*): create the tab on a
+  // navigate for a worktree without one, and mark activity for the indicators.
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
+    const unlistens: UnlistenFn[] = [];
     let cancelled = false;
-    listen<{ worktreePath: string; url: string }>(
-      "browser-request-open",
-      (event) => {
-        createBrowserTab(event.payload.worktreePath, event.payload.url);
-      },
-    ).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
+    const track = (p: Promise<UnlistenFn>) => {
+      p.then((fn) => {
+        if (cancelled) fn();
+        else unlistens.push(fn);
+      }).catch(() => {});
+    };
+    track(
+      listen<{ worktreePath: string; url: string }>(
+        "browser-request-open",
+        (event) => {
+          createBrowserTab(event.payload.worktreePath, event.payload.url);
+        },
+      ),
+    );
+    track(
+      listen<{ worktreePath: string; kind: string }>(
+        "browser-agent-activity",
+        (event) => {
+          useUIStore
+            .getState()
+            .markBrowserAgentActivity(
+              event.payload.worktreePath,
+              event.payload.kind,
+            );
+        },
+      ),
+    );
     return () => {
       cancelled = true;
-      unlisten?.();
+      for (const fn of unlistens) fn();
     };
   }, []);
 

@@ -50,6 +50,7 @@ import {
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { useShallow } from "zustand/shallow";
 import { buildDocumentKey } from "../lib/editor-buffer-registry";
+import { useBrowserAgentActivity } from "../hooks/useBrowserAgentActivity";
 
 type TabKind = "terminal" | "agent" | "file" | "browser";
 
@@ -115,6 +116,8 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   const hasRunTab = Boolean(
     config?.setup?.trim() || (config?.actions.length ?? 0) > 0,
   );
+
+  const { active: browserAgentActive } = useBrowserAgentActivity(worktreePath);
 
   useEffect(() => {
     if (!hasRunTab) return;
@@ -367,6 +370,14 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         >
           {isDirtyById.get(t.id) && (
             <span className="text-foreground" aria-label="Unsaved">●</span>
+          )}
+          {t.kind === "browser" && browserAgentActive && (
+            <span
+              className="text-primary animate-pulse"
+              aria-label="Agent using browser"
+            >
+              ●
+            </span>
           )}
           {t.label}
         </button>

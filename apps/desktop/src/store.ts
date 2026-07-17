@@ -120,6 +120,10 @@ interface UIState {
   // hides during drags so the cursor never gets captured by it mid-drag.
   panelDragActive: boolean;
   setPanelDragActive: (active: boolean) => void;
+  // worktreePath -> recent agent browser activity (hook-server /browser/*
+  // calls). In-memory; drives the activity indicators with a decay window.
+  browserAgentActivity: Record<string, { until: number; kind: string }>;
+  markBrowserAgentActivity: (worktreePath: string, kind: string) => void;
   // Whether the sidebar (and other worktree consumers) hides worktrees that
   // live outside the configured worktree base directory. Persisted.
   worktreeFilterEnabled: boolean;
@@ -266,6 +270,14 @@ export const useUIStore = create<UIState>()(
       setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
       panelDragActive: false,
       setPanelDragActive: (active) => set({ panelDragActive: active }),
+      browserAgentActivity: {},
+      markBrowserAgentActivity: (worktreePath, kind) =>
+        set((s) => ({
+          browserAgentActivity: {
+            ...s.browserAgentActivity,
+            [worktreePath]: { until: Date.now() + 2500, kind },
+          },
+        })),
       worktreeFilterEnabled: true,
       setWorktreeFilterEnabled: (enabled) => set({ worktreeFilterEnabled: enabled }),
       worktreeBaseDirOverride: null,
@@ -339,6 +351,7 @@ export const useUIStore = create<UIState>()(
           fileFinderOpen,
           commandPaletteOpen,
           panelDragActive,
+          browserAgentActivity,
           worktreeNavStates,
           worktreeBaseDirOverride,
           worktreeDefaultBaseDir,

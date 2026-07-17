@@ -273,6 +273,18 @@ fn handle_browser_request(
     path: &str,
     params: &HashMap<String, String>,
 ) -> serde_json::Value {
+    // Surface agent activity in the UI (tab dot, toolbar chip, pane ring).
+    // Every agent interaction flows through here; user-driven actions go
+    // through tauri commands instead, so this is a clean attribution signal.
+    if let Some(wt) = params.get("worktree_path").filter(|p| !p.is_empty()) {
+        let kind = path.strip_prefix("/browser/").unwrap_or("unknown");
+        let _ = app.emit_to(
+            "main",
+            "browser-agent-activity",
+            serde_json::json!({ "worktreePath": wt, "kind": kind }),
+        );
+    }
+
     let result = (|| -> Result<serde_json::Value, String> {
         let worktree_path = params
             .get("worktree_path")
