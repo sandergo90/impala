@@ -54,21 +54,26 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
             .as_array_mut()
             .ok_or_else(|| format!("hooks.{} is not an array", event_name))?;
 
-        // Idempotent: skip if an Impala-managed hook is already there.
-        let already = defs.iter().any(|def| {
-            def.get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hs| {
-                    hs.iter().any(|h| {
-                        h.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(|c| c.contains("IMPALA_HOOK_PORT"))
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false)
-        });
-        if already {
+        // Idempotent, but migrating: an Impala-managed hook may carry a stale
+        // command from an older app version — rewrite it in place.
+        let mut found = false;
+        for def in defs.iter_mut() {
+            let Some(hs) = def.get_mut("hooks").and_then(|h| h.as_array_mut()) else {
+                continue;
+            };
+            for h in hs.iter_mut() {
+                let is_impala = h
+                    .get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains("IMPALA_HOOK_PORT"))
+                    .unwrap_or(false);
+                if is_impala {
+                    h["command"] = serde_json::json!(cmd);
+                    found = true;
+                }
+            }
+        }
+        if found {
             continue;
         }
 
@@ -432,7 +437,24 @@ fn ensure_codex_hooks_in(codex_dir: &Path) -> Result<Vec<CodexHookRegistration>,
         });
 
         let group_index = match existing_index {
-            Some(index) => index,
+            Some(index) => {
+                // Rewrite a stale command in place: the trusted hash below is
+                // computed from `cmd`, so the file must carry the same string
+                // or Codex refuses the hook as untrusted.
+                if let Some(hs) = groups[index].get_mut("hooks").and_then(|h| h.as_array_mut()) {
+                    for hook in hs.iter_mut() {
+                        let is_impala = hook
+                            .get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains("IMPALA_HOOK_PORT"))
+                            .unwrap_or(false);
+                        if is_impala {
+                            hook["command"] = serde_json::json!(cmd);
+                        }
+                    }
+                }
+                index
+            }
             None => {
                 let index = groups.len();
                 groups.push(serde_json::json!({
