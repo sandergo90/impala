@@ -176,20 +176,50 @@ Browser annotations: `url` (the page), `selector` (CSS path to the element), `el
 - **Work file by file** — group annotations by file to avoid redundant file reads
 "#;
 
-/// Install the /impala-review skill to ~/.claude/skills/impala-review/SKILL.md
-pub fn install_impala_review_skill() {
+const IMPALA_BROWSER_SKILL: &str = r#"---
+name: impala-browser
+description: Verify or diagnose the running app in Impala's built-in browser. Use when the user wants to check something in the browser, verify a UI or frontend change works, see what a page looks like, or when diagnosing blank pages, console errors, or layout issues in a web app.
+allowed-tools: mcp__impala__browser_page_info, mcp__impala__browser_navigate, mcp__impala__browser_screenshot, mcp__impala__browser_console
+---
+
+Impala (the desktop app this worktree is open in) has a built-in browser pane next to the code, driven by the `mcp__impala__browser_*` tools. Prefer them over curl, Playwright, or headless browsers for anything the rendered page can answer — the user watches the same pane you're testing, so what you verify is what they see.
+
+## The loop
+
+1. `mcp__impala__browser_page_info` — is a browser pane open, and what page is it on?
+2. `mcp__impala__browser_navigate` — go to the page you need (e.g. the dev-server route you changed). If the response has `created: true`, a new browser tab was created; its webview loads once the pane is visible in Impala, so tell the user to open it rather than retrying screenshots in a loop.
+3. `mcp__impala__browser_screenshot` — SEE the rendered page. This is the ground truth for visual verification.
+4. `mcp__impala__browser_console` — read console output, window errors, and unhandled rejections when the page misbehaves. Pass `clear: true` to drain, navigate again to reproduce, then read for a clean signal.
+
+After making a fix, navigate again and screenshot — verify visually before declaring success.
+
+## Notes
+
+- The dev server must be running (usually Impala's Run tab). Connection failures render as a blank page with no error event — a blank screenshot plus an unreachable URL usually means the server is down.
+- Console logs are captured per page; they reset on navigation.
+- Screenshots show the pane's viewport, not the full scroll height.
+- "no browser tab open for this worktree" → ask the user to open one (+ menu → New browser tab), or navigate to create it.
+"#;
+
+/// Install a skill to ~/.claude/skills/<name>/SKILL.md
+fn install_skill(name: &str, content: &str) {
     let home = match dirs::home_dir() {
         Some(h) => h,
         None => return,
     };
 
-    let skill_dir = home.join(".claude").join("skills").join("impala-review");
-    if let Err(_) = std::fs::create_dir_all(&skill_dir) {
+    let skill_dir = home.join(".claude").join("skills").join(name);
+    if std::fs::create_dir_all(&skill_dir).is_err() {
         return;
     }
 
-    let skill_path = skill_dir.join("SKILL.md");
-    let _ = std::fs::write(&skill_path, IMPALA_REVIEW_SKILL);
+    let _ = std::fs::write(skill_dir.join("SKILL.md"), content);
+}
+
+/// Install the Impala skills (/impala-review, /impala-browser) for Claude Code.
+pub fn install_impala_review_skill() {
+    install_skill("impala-review", IMPALA_REVIEW_SKILL);
+    install_skill("impala-browser", IMPALA_BROWSER_SKILL);
 }
 
 /// macOS only. Maintains one `caffeinate -i` process per worktree that is

@@ -297,6 +297,8 @@ fn write_codex_commands(codex_home: &Path) -> Result<(), String> {
     fs::create_dir_all(&commands_dir).map_err(|e| format!("mkdir codex commands: {}", e))?;
     fs::write(commands_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
         .map_err(|e| format!("write codex impala-review.md: {}", e))?;
+    fs::write(commands_dir.join("impala-browser.md"), IMPALA_BROWSER_COMMAND)
+        .map_err(|e| format!("write codex impala-browser.md: {}", e))?;
 
     Ok(())
 }
@@ -638,6 +640,10 @@ Work file by file. After addressing each annotation, immediately call `mcp__impa
 
 ACTIONABLE: Fix the code, then resolve. DISCUSSION: explore codebase first; if still unclear, present options to the user, wait for their answer, apply it, then resolve. ALREADY ADDRESSED: resolve immediately.
 
+## Browser Annotations (kind: "browser")
+
+Annotations with `kind: "browser"` point at a rendered element (URL + CSS selector + element HTML), not a source line. For each: fetch the screenshot via `mcp__impala__get_browser_annotation_screenshot` to SEE what the reviewer picked, grep the selector's distinctive parts (ids, classes, data-testids) to locate the component, make the change, then verify visually with `mcp__impala__browser_navigate` to the annotation's URL followed by `mcp__impala__browser_screenshot`. Resolve when confirmed.
+
 ## Phase 4: Verify
 
 After all annotations are addressed, run the project's typecheck and lint to make sure nothing is broken.
@@ -645,6 +651,29 @@ After all annotations are addressed, run the project's typecheck and lint to mak
 ## Phase 5: Summary
 
 Report fixed / already addressed / discussion resolved counts and a per-file change summary.
+"#;
+
+const IMPALA_BROWSER_COMMAND: &str = r#"---
+description: Verify or diagnose the running app in Impala's built-in browser pane. Use to check a page, verify a UI change, or debug console errors.
+---
+
+Impala (the desktop app this worktree is open in) has a built-in browser pane next to the code, driven by the `mcp__impala__browser_*` tools. Prefer them over curl, Playwright, or headless browsers for anything the rendered page can answer — the user watches the same pane you're testing, so what you verify is what they see.
+
+## The loop
+
+1. `mcp__impala__browser_page_info` — is a browser pane open, and what page is it on?
+2. `mcp__impala__browser_navigate` — go to the page you need (e.g. the dev-server route you changed). If the response has `created: true`, a new browser tab was created; its webview loads once the pane is visible in Impala, so tell the user to open it rather than retrying screenshots in a loop.
+3. `mcp__impala__browser_screenshot` — SEE the rendered page. This is the ground truth for visual verification.
+4. `mcp__impala__browser_console` — read console output, window errors, and unhandled rejections when the page misbehaves. Pass `clear: true` to drain, navigate again to reproduce, then read for a clean signal.
+
+After making a fix, navigate again and screenshot — verify visually before declaring success.
+
+## Notes
+
+- The dev server must be running (usually Impala's Run tab). Connection failures render as a blank page with no error event — a blank screenshot plus an unreachable URL usually means the server is down.
+- Console logs are captured per page; they reset on navigation.
+- Screenshots show the pane's viewport, not the full scroll height.
+- "no browser tab open for this worktree" → ask the user to open one (+ menu → New browser tab), or navigate to create it.
 "#;
 
 /// Append entries to <worktree>/.git/info/exclude (the per-worktree

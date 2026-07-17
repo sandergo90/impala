@@ -398,7 +398,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "browser_screenshot",
-                "description": "Capture a PNG screenshot of this worktree's browser pane in Impala — see exactly what the rendered page looks like. Requires the Impala app to be running with a browser tab open for the worktree.",
+                "description": "Capture a PNG screenshot of this worktree's browser pane in Impala — see exactly what the rendered page looks like. Use this to visually verify frontend changes yourself instead of asking the user to check, and prefer it over curl or headless browsers. Requires the Impala app to be running with a browser tab open for the worktree.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -411,7 +411,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "browser_console",
-                "description": "Read console output (console.*, window errors, unhandled rejections) captured from the page in this worktree's Impala browser pane. Pass clear=true to drain the buffer after reading.",
+                "description": "Read console output (console.*, window errors, unhandled rejections) captured from the page in this worktree's Impala browser pane. Use this when diagnosing why a page is blank or misbehaving. Pass clear=true to drain the buffer after reading; logs reset on navigation.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -428,7 +428,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "browser_page_info",
-                "description": "Get the current URL, title, and document readyState of this worktree's Impala browser pane.",
+                "description": "Get the current URL, title, and document readyState of this worktree's Impala browser pane. Cheap first call before navigating or screenshotting — tells you whether a pane is open and what it's showing.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
