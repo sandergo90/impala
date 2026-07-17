@@ -182,6 +182,87 @@ fn tool_list_files_with_annotations(conn: &Connection, params: &Value) -> Result
 }
 
 // ---------------------------------------------------------------------------
+// Browser tools — talk to the running Impala app via its hook server. The
+// port is written to ~/.impala/hook-port on every app start (hook_server.rs).
+// ---------------------------------------------------------------------------
+
+fn hook_port() -> Result<u16, String> {
+    let home = dirs::home_dir().ok_or("could not determine home directory")?;
+    let raw = std::fs::read_to_string(home.join(".impala").join("hook-port"))
+        .map_err(|_| "Impala isn't running (no hook port file)".to_string())?;
+    raw.trim()
+        .parse::<u16>()
+        .map_err(|_| "invalid hook port file".to_string())
+}
+
+fn browser_get(path: &str, params: &[(&str, &str)]) -> Result<Value, String> {
+    let port = hook_port()?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let url = reqwest::Url::parse_with_params(
+        &format!("http://127.0.0.1:{port}{path}"),
+        params.iter().copied(),
+    )
+    .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(url)
+        .send()
+        .map_err(|_| "Impala isn't reachable (is the app running?)".to_string())?;
+    let body: Value = resp.json().map_err(|e| format!("bad response: {e}"))?;
+    if body.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        Ok(body)
+    } else {
+        Err(body
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("unknown browser error")
+            .to_string())
+    }
+}
+
+fn strip_ok(mut value: Value) -> Value {
+    if let Some(obj) = value.as_object_mut() {
+        obj.remove("ok");
+    }
+    value
+}
+
+fn tool_browser_page_info(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    browser_get("/browser/page_info", &[("worktree_path", &wt)]).map(strip_ok)
+}
+
+fn tool_browser_console(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let clear = args.get("clear").and_then(|c| c.as_bool()).unwrap_or(false);
+    browser_get(
+        "/browser/console",
+        &[("worktree_path", &wt), ("clear", if clear { "true" } else { "false" })],
+    )
+    .map(strip_ok)
+}
+
+fn tool_browser_navigate(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let url = args
+        .get("url")
+        .and_then(|u| u.as_str())
+        .ok_or("missing url")?;
+    browser_get("/browser/navigate", &[("worktree_path", &wt), ("url", url)]).map(strip_ok)
+}
+
+fn tool_browser_screenshot(args: &Value) -> Result<String, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let body = browser_get("/browser/screenshot", &[("worktree_path", &wt)])?;
+    body.get("png_base64")
+        .and_then(|p| p.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "screenshot response missing png_base64".to_string())
+}
+
+// ---------------------------------------------------------------------------
 // MCP protocol definitions
 // ---------------------------------------------------------------------------
 
@@ -221,6 +302,67 @@ fn tool_definitions() -> Value {
                         }
                     },
                     "required": ["id"]
+                }
+            },
+            {
+                "name": "browser_screenshot",
+                "description": "Capture a PNG screenshot of this worktree's browser pane in Impala — see exactly what the rendered page looks like. Requires the Impala app to be running with a browser tab open for the worktree.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        }
+                    }
+                }
+            },
+            {
+                "name": "browser_console",
+                "description": "Read console output (console.*, window errors, unhandled rejections) captured from the page in this worktree's Impala browser pane. Pass clear=true to drain the buffer after reading.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        },
+                        "clear": {
+                            "type": "boolean",
+                            "description": "Clear the captured logs after reading (default false)"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "browser_page_info",
+                "description": "Get the current URL, title, and document readyState of this worktree's Impala browser pane.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        }
+                    }
+                }
+            },
+            {
+                "name": "browser_navigate",
+                "description": "Navigate this worktree's Impala browser pane to a URL (e.g. the dev server). If no browser tab exists yet one is created (response has created: true); its webview loads when the pane is visible in Impala, so an immediate screenshot after created: true may fail until the user can see the tab.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        },
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to open"
+                        }
+                    },
+                    "required": ["url"]
                 }
             },
             {
@@ -331,9 +473,27 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
             };
             let tool_args = params.get("arguments").cloned().unwrap_or(json!({}));
 
+            // Screenshot returns an MCP image content block, not JSON text.
+            if tool_name == "browser_screenshot" {
+                return Some(match tool_browser_screenshot(&tool_args) {
+                    Ok(b64) => make_response(
+                        id,
+                        json!({
+                            "content": [
+                                { "type": "image", "data": b64, "mimeType": "image/png" }
+                            ]
+                        }),
+                    ),
+                    Err(e) => make_response(id, make_tool_error(&e)),
+                });
+            }
+
             let result = match tool_name {
                 "list_annotations" => tool_list_annotations(conn, &tool_args),
                 "resolve_annotation" => tool_resolve_annotation(conn, &tool_args),
+                "browser_console" => tool_browser_console(&tool_args),
+                "browser_page_info" => tool_browser_page_info(&tool_args),
+                "browser_navigate" => tool_browser_navigate(&tool_args),
                 "list_files_with_annotations" => {
                     tool_list_files_with_annotations(conn, &tool_args)
                 }
