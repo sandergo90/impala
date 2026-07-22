@@ -61,6 +61,9 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: bunx tauri build --target aarch64-apple-darwin
 
+      - name: Verify frontend bundle boots
+        run: bun --cwd apps/desktop run check:bundle
+
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
