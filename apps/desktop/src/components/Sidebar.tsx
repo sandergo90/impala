@@ -1,10 +1,11 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/shallow";
 import { invoke } from "@/lib/invoke";
 import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { Clock3, Settings, SquareTerminal } from "lucide-react";
 import { useAutomationBadge } from "../hooks/useAutomationBadge";
 import { useUIStore, useDataStore, useFilteredWorktrees } from "../store";
 import { useEditorDocsStore } from "../stores/editor-docs";
@@ -33,7 +34,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ContextMenu } from "@/components/ui/context-menu";
 
-import { projectColor } from "../lib/utils";
+import { cn, projectColor } from "../lib/utils";
 import {
   AUTOMATIONS_PROJECT,
   isAutomationsProject,
@@ -120,44 +121,69 @@ function BranchIcon({ active }: { active: boolean }) {
   );
 }
 
-function TerminalIcon() {
+function SidebarNavButton({
+  label,
+  icon,
+  active = false,
+  compact = false,
+  badge,
+  onClick,
+}: {
+  label: string;
+  icon: ReactNode;
+  active?: boolean;
+  compact?: boolean;
+  badge?: { count: number; failed: boolean };
+  onClick: () => void;
+}) {
   return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={compact ? label : undefined}
+      title={compact ? label : undefined}
+      className={cn(
+        "relative flex items-center rounded-md text-[13px] font-medium outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring",
+        compact ? "size-8 justify-center" : "h-9 w-full gap-2 px-2.5",
+        active
+          ? "bg-accent text-foreground shadow-sm"
+          : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+      )}
     >
-      <polyline points="4 6 8 10 4 14" />
-      <line x1="10" y1="14" x2="14" y2="14" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="8" cy="8" r="6.25" />
-      <polyline points="8 4.5 8 8 10.5 9.5" />
-    </svg>
+      {icon}
+      {!compact && <span>{label}</span>}
+      {badge && badge.count > 0 &&
+        (compact ? (
+          <span
+            className={cn(
+              "absolute right-1 top-1 size-1.5 rounded-full",
+              badge.failed ? "bg-red-500" : "bg-primary",
+            )}
+            aria-label={`${badge.count} automation runs to review`}
+          />
+        ) : (
+          <span
+            className={cn(
+              "ml-auto min-w-5 rounded-full px-1.5 text-center text-[11px] leading-5",
+              badge.failed
+                ? "bg-red-500/15 text-red-500"
+                : "bg-primary/15 text-primary",
+            )}
+            title={`${badge.count} finished automation run${badge.count === 1 ? "" : "s"} to review`}
+          >
+            {badge.count > 9 ? "9+" : badge.count}
+          </span>
+        ))}
+    </button>
   );
 }
 
 export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const navigate = useNavigate();
+  const currentPath = useRouterState({
+    select: (state) => state.location.pathname,
+  });
   const automationBadge = useAutomationBadge();
   const selectedProject = useUIStore((s) => s.selectedProject);
   const projectIcons = useDataStore((s) => s.projectIcons);
@@ -200,6 +226,29 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
 
   return (
     <div className="flex flex-col items-center h-full w-10 bg-sidebar border-r border-border py-2.5 gap-1">
+      <div className="flex flex-col items-center gap-1 border-b border-border/60 pb-2 mb-1">
+        {selectedProject && (
+          <SidebarNavButton
+            compact
+            label="Terminal"
+            icon={<SquareTerminal aria-hidden="true" className="size-4" />}
+            active={currentPath === "/" && generalTerminalActive}
+            onClick={activateGeneralTerminal}
+          />
+        )}
+        <SidebarNavButton
+          compact
+          label="Automations"
+          icon={<Clock3 aria-hidden="true" className="size-4" />}
+          active={currentPath === "/automations"}
+          badge={{
+            count: automationBadge.total,
+            failed: automationBadge.failed > 0,
+          }}
+          onClick={() => navigate({ to: "/automations" })}
+        />
+      </div>
+
       {/* Project badge */}
       {selectedProject ? (
         iconUrl ? (
@@ -276,65 +325,26 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
           );
         })}
 
-      {/* General Terminal */}
-      {selectedProject && (
-        <button
-          onClick={activateGeneralTerminal}
-          className={`w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
-            generalTerminalActive
-              ? "bg-primary/15 text-foreground"
-              : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent"
-          }`}
-          title="Terminal"
-        >
-          <TerminalIcon />
-        </button>
-      )}
-
       <div className="flex-1" />
 
-      {/* Automations */}
-      <button
-        onClick={() => navigate({ to: "/automations" })}
-        className="relative w-7 h-7 rounded-[5px] flex items-center justify-center text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors"
-        title="Automations"
-      >
-        <ClockIcon />
-        {automationBadge.total > 0 && (
-          <span
-            className={`absolute top-0 right-0 w-1.5 h-1.5 rounded-full pointer-events-none ${
-              automationBadge.failed > 0 ? "bg-red-500" : "bg-primary"
-            }`}
-          />
-        )}
-      </button>
-
-      {/* Settings */}
-      <button
-        onClick={() => navigate({ to: "/settings" })}
-        className="w-7 h-7 flex items-center justify-center text-muted-foreground/90 hover:text-muted-foreground transition-colors border-t border-border pt-2"
-        title="Settings"
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      </button>
+      <div className="border-t border-border/60 pt-2">
+        <SidebarNavButton
+          compact
+          label="Settings"
+          icon={<Settings aria-hidden="true" className="size-4" />}
+          active={currentPath.startsWith("/settings")}
+          onClick={() => navigate({ to: "/settings" })}
+        />
+      </div>
     </div>
   );
 }
 
 export function Sidebar() {
   const navigate = useNavigate();
+  const currentPath = useRouterState({
+    select: (state) => state.location.pathname,
+  });
   const automationBadge = useAutomationBadge();
   const projects = useDataStore((s) => s.projects);
   const addProject = useDataStore((s) => s.addProject);
@@ -730,30 +740,59 @@ export function Sidebar() {
 
   return (
     <div className="flex flex-col h-full text-sm overflow-hidden relative bg-sidebar">
-      {/* Project Switcher */}
-      <div
-        onClick={() =>
-          projects.length === 0 ? openProject() : setShowDropdown(!showDropdown)
-        }
-        className="mx-2.5 mt-2.5 mb-1.5 px-2.5 py-1.5 rounded-md flex items-center gap-2 cursor-pointer bg-accent hover:bg-accent/80"
+      <nav
+        aria-label="Workspace navigation"
+        className="mx-2.5 mt-2.5 mb-2 flex flex-col gap-0.5 rounded-lg bg-accent/35 p-1"
       >
-        {selectedProject ? (
-          <>
-            <ProjectBadge
-              name={selectedProject.name}
-              iconUrl={projectIcons[selectedProject.path]}
-            />
-            <span className="text-foreground text-sm font-medium truncate">
-              {selectedProject.name}
-            </span>
-          </>
-        ) : (
-          <span className="text-muted-foreground text-sm">Select project</span>
+        {selectedProject && (
+          <SidebarNavButton
+            label="Terminal"
+            icon={<SquareTerminal aria-hidden="true" className="size-4" />}
+            active={currentPath === "/" && generalTerminalActive}
+            onClick={activateGeneralTerminal}
+          />
         )}
-        <span className="ml-auto text-muted-foreground/90 text-sm">
-          &#9662;
-        </span>
-      </div>
+        <SidebarNavButton
+          label="Automations"
+          icon={<Clock3 aria-hidden="true" className="size-4" />}
+          active={currentPath === "/automations"}
+          badge={{
+            count: automationBadge.total,
+            failed: automationBadge.failed > 0,
+          }}
+          onClick={() => navigate({ to: "/automations" })}
+        />
+      </nav>
+
+      <div className="relative mx-2.5 mb-1.5">
+        {/* Project Switcher */}
+        <div
+          onClick={() =>
+            projects.length === 0
+              ? openProject()
+              : setShowDropdown(!showDropdown)
+          }
+          className="flex w-full items-center gap-2 rounded-md bg-accent px-2.5 py-1.5 cursor-pointer hover:bg-accent/80"
+        >
+          {selectedProject ? (
+            <>
+              <ProjectBadge
+                name={selectedProject.name}
+                iconUrl={projectIcons[selectedProject.path]}
+              />
+              <span className="text-foreground text-sm font-medium truncate">
+                {selectedProject.name}
+              </span>
+            </>
+          ) : (
+            <span className="text-muted-foreground text-sm">
+              Select project
+            </span>
+          )}
+          <span className="ml-auto text-muted-foreground/90 text-sm">
+            &#9662;
+          </span>
+        </div>
 
       {/* Project Dropdown */}
       {showDropdown && (
@@ -763,7 +802,7 @@ export function Sidebar() {
             onClick={() => setShowDropdown(false)}
           />
           <div
-            className="absolute left-2.5 right-2.5 top-[42px] z-30 rounded-md border border-border py-1 shadow-2xl ring-1 ring-black/30"
+            className="absolute left-0 right-0 top-[calc(100%+0.125rem)] z-30 rounded-md border border-border py-1 shadow-2xl ring-1 ring-black/30"
             style={{
               background:
                 "color-mix(in srgb, var(--popover) 100%, white 6%)",
@@ -804,7 +843,7 @@ export function Sidebar() {
               className="flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-accent"
             >
               <div className="w-5 h-5 rounded-[5px] flex items-center justify-center bg-accent text-muted-foreground shrink-0">
-                <ClockIcon />
+                <Clock3 aria-hidden="true" className="size-3" />
               </div>
               <span
                 className={`text-sm truncate ${isAutomationsProject(selectedProject) ? "text-foreground font-medium" : "text-muted-foreground"}`}
@@ -832,6 +871,7 @@ export function Sidebar() {
           </div>
         </>
       )}
+      </div>
 
       {/* Search / Command Palette Trigger */}
       <button
@@ -1051,62 +1091,14 @@ export function Sidebar() {
 
       {!selectedProject && <div className="flex-1" />}
 
-      {/* General Terminal — above settings */}
-      {selectedProject && (
-        <button
-          onClick={activateGeneralTerminal}
-          className={`flex items-center gap-1.5 w-full px-3.5 py-1.5 text-sm transition-colors ${
-            generalTerminalActive
-              ? "text-foreground"
-              : "text-muted-foreground/90 hover:text-muted-foreground"
-          }`}
-        >
-          <TerminalIcon />
-          <span>Terminal</span>
-        </button>
-      )}
-
-      {/* Automations — above settings */}
-      <button
-        onClick={() => navigate({ to: "/automations" })}
-        className="flex items-center gap-1.5 w-full px-3.5 py-1.5 text-sm text-muted-foreground/90 hover:text-muted-foreground transition-colors"
-      >
-          <ClockIcon />
-          <span>Automations</span>
-          {automationBadge.total > 0 && (
-            <span
-              className={`rounded-full px-1.5 text-xs ${
-                automationBadge.failed > 0
-                  ? "bg-red-500/15 text-red-500"
-                  : "bg-primary/15 text-primary"
-              }`}
-              title={`${automationBadge.total} finished automation run${automationBadge.total === 1 ? "" : "s"} to review`}
-            >
-              {automationBadge.total > 9 ? "9+" : automationBadge.total}
-            </span>
-          )}
-      </button>
-
-      {/* Settings gear — always at bottom */}
-      <button
-        onClick={() => navigate({ to: "/settings" })}
-        className="flex items-center gap-1.5 px-3.5 py-2.5 text-muted-foreground/90 hover:text-muted-foreground transition-colors border-t border-border"
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-        <span className="text-sm">Settings</span>
-      </button>
+      <div className="mx-2.5 mb-2 border-t border-border/60 pt-2">
+        <SidebarNavButton
+          label="Settings"
+          icon={<Settings aria-hidden="true" className="size-4" />}
+          active={currentPath.startsWith("/settings")}
+          onClick={() => navigate({ to: "/settings" })}
+        />
+      </div>
 
       {/* New Worktree Dialog */}
       {showNewWorktree && selectedProject && (
