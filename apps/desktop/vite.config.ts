@@ -24,6 +24,19 @@ export default defineConfig(async () => ({
   },
   build: {
     sourcemap: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor",
+              test: /node_modules[\\/]/,
+              maxSize: 1024 * 1024,
+            },
+          ],
+        },
+      },
+    },
   },
   resolve: {
     alias: {
