@@ -87,7 +87,7 @@ export interface AutomationRun {
   /** Unix seconds of the slot this run covers. */
   scheduled_for: number;
   worktree_path?: string | null;
-  status: "pending" | "launched" | "completed" | "failed" | "skipped";
+  status: "pending" | "launched" | "completed" | "failed" | "aborted" | "skipped";
   error?: string | null;
   created_at: string;
 }

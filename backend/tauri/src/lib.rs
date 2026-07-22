@@ -464,6 +464,7 @@ async fn create_worktree(
 
 #[tauri::command]
 async fn delete_worktree(
+    app: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     repo_path: String,
     worktree_path: String,
@@ -479,11 +480,25 @@ async fn delete_worktree(
             .unwrap_or(true)
     };
 
-    tokio::task::spawn_blocking(move || {
-        git::delete_worktree(&repo_path, &worktree_path, force, delete_branch)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    {
+        let wt = worktree_path.clone();
+        tokio::task::spawn_blocking(move || {
+            git::delete_worktree(&repo_path, &wt, force, delete_branch)
+        })
+        .await
+        .map_err(|e| format!("Task join error: {}", e))??;
+    }
+
+    // The worktree may have carried an in-flight automation run — abort it
+    // so it doesn't sit in "running" forever.
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    if automations::abort_runs_for_worktree(&conn, &worktree_path)? {
+        let _ = app.emit("automation-runs-changed", ());
+    }
+    Ok(())
 }
 
 /// Run the project's teardown script in the worktree before it's removed.

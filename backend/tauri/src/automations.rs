@@ -52,7 +52,8 @@ pub struct AutomationRun {
     /// next_run_at at fire time — may be in the past for a catch-up run).
     pub scheduled_for: i64,
     pub worktree_path: Option<String>,
-    /// pending → launched → completed | failed. skipped reserved.
+    /// pending → launched → completed | failed. aborted = the worktree was
+    /// deleted while the run was in flight. skipped reserved.
     pub status: String,
     pub error: Option<String>,
     pub created_at: String,
@@ -64,7 +65,14 @@ pub struct AutomationDueEvent {
     pub automation: Automation,
 }
 
-const RUN_STATUSES: &[&str] = &["pending", "launched", "completed", "failed", "skipped"];
+const RUN_STATUSES: &[&str] = &[
+    "pending",
+    "launched",
+    "completed",
+    "failed",
+    "aborted",
+    "skipped",
+];
 
 pub fn init_db(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
@@ -377,6 +385,21 @@ pub fn complete_run_for_worktree(
     )
     .map_err(|e| format!("Failed to complete run: {}", e))?;
     Ok(name)
+}
+
+/// Deleting a worktree aborts any in-flight run it carried. Finished runs
+/// keep their status — reviewing the diff and then deleting the worktree is
+/// the normal lifecycle. Marked seen: the deletion was deliberate, don't
+/// badge it.
+pub fn abort_runs_for_worktree(conn: &Connection, worktree_path: &str) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE automation_runs SET status = 'aborted', seen = 1
+             WHERE worktree_path = ?1 AND status IN ('pending', 'launched')",
+            params![worktree_path],
+        )
+        .map_err(|e| format!("Failed to abort runs: {}", e))?;
+    Ok(n > 0)
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -922,6 +945,25 @@ mod tests {
         complete_run_for_worktree(&conn, "/scratch/g1").unwrap();
         assert_eq!(count_unseen_runs(&conn).unwrap().total, 2);
         assert_eq!(mark_runs_seen(&conn).unwrap(), 2);
+
+        // Deleting a worktree aborts its in-flight run (already seen), but a
+        // finished run's worktree deletion leaves the record alone.
+        let run3 = insert_run(&conn, &created.id, 4000).unwrap().unwrap();
+        report_run(&conn, &run3.id, Some("/wt/auto-2"), "launched", None).unwrap();
+        assert!(abort_runs_for_worktree(&conn, "/wt/auto-2").unwrap());
+        assert!(!abort_runs_for_worktree(&conn, "/wt/auto-2").unwrap());
+        assert!(!abort_runs_for_worktree(&conn, "/scratch/g1").unwrap()); // completed stays
+        let statuses: Vec<(String, String)> = list_runs_by_repo(&conn, "/repo")
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.id, r.status))
+            .collect();
+        assert!(statuses.contains(&(run3.id.clone(), "aborted".to_string())));
+        assert_eq!(count_unseen_runs(&conn).unwrap().total, 0);
+        // An aborted run can't complete later (stale Stop event after delete).
+        assert!(!complete_run_for_worktree(&conn, "/wt/auto-2")
+            .unwrap()
+            .is_some());
 
         assert!(report_run(&conn, &run.id, None, "bogus", None).is_err());
 

@@ -109,6 +109,7 @@ const RUN_STATUS_META: Record<AutomationRun["status"], { dot: string; label: str
   launched: { dot: "bg-blue-500", label: "running" },
   completed: { dot: "bg-emerald-500", label: "completed" },
   failed: { dot: "bg-red-500", label: "failed" },
+  aborted: { dot: "bg-muted-foreground/40", label: "aborted" },
   skipped: { dot: "bg-muted-foreground/40", label: "skipped" },
 };
 
