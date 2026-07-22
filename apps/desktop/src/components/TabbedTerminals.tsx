@@ -3,6 +3,7 @@ import { invoke } from "@/lib/invoke";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
@@ -16,10 +17,11 @@ import {
 import {
   SortableContext,
   horizontalListSortingStrategy,
+  sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Bot, FileText, Globe2, Terminal, X } from "lucide-react";
+import { Bot, FileText, Globe2, GripVertical, Terminal, X } from "lucide-react";
 import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
 import { FileViewer } from "./FileViewer";
 import { BrowserPane } from "./BrowserPane";
@@ -276,6 +278,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       // and close button still register as clicks, not drags.
       activationConstraint: { distance: 5 },
     }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   const userTabIds = useMemo(
@@ -1294,7 +1297,15 @@ function SortableWorkspaceTab({
   dropTarget: WorkspaceTabDropTarget;
   children: ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } =
     useSortable({
       id: dndId,
       disabled,
@@ -1304,16 +1315,26 @@ function SortableWorkspaceTab({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : undefined,
-    cursor: disabled ? undefined : "grab",
   };
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={className}
-      {...attributes}
-      {...listeners}
     >
+      <button
+        ref={setActivatorNodeRef}
+        type="button"
+        disabled={disabled}
+        className={`ml-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-60 outline-none hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${
+          disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+        }`}
+        aria-label={`Drag ${dragData.label}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical aria-hidden="true" className="size-3.5" />
+      </button>
       {children}
     </div>
   );
