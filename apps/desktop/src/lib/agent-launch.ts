@@ -60,7 +60,7 @@ export async function launchAgentHeadless(opts: {
   const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
   if (isNew && !nav.agentLaunched) {
     const flags = await resolveFlags(agent, projectPath);
-    const cmd = buildLaunchCommand(agent, flags, prompt);
+    const cmd = buildLaunchCommand(agent, flags, prompt, extraEnv);
     await awaitShellReady(ptyId);
     await invoke("pty_write", { sessionId: ptyId, data: encodePtyInput(cmd) });
     useUIStore

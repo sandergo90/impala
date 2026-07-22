@@ -6,6 +6,7 @@ import type { Theme, VibrancyMaterial } from "./themes/types";
 import { defaultDark } from "./themes/built-in";
 import { applyTheme, applyWindowVibrancy, initThemeFromStore, resolveThemeById } from "./themes/apply";
 import { createLeaf } from "./lib/split-tree";
+import { isAutomationsProject } from "./lib/automations-project";
 
 function createDefaultNavState(): WorktreeNavState {
   return {
@@ -468,12 +469,18 @@ export function useFilteredWorktrees(): Worktree[] {
   const enabled = useUIStore((s) => s.worktreeFilterEnabled);
   const override = useUIStore((s) => s.worktreeBaseDirOverride);
   const defaultDir = useUIStore((s) => s.worktreeDefaultBaseDir);
+  const isVirtual = useUIStore((s) =>
+    isAutomationsProject(s.selectedProject),
+  );
   const baseDir = override ?? defaultDir;
   return useMemo(() => {
+    // The virtual Automations project lists scratch repos that live under
+    // ~/.impala/automation-runs — never inside the worktree base dir.
+    if (isVirtual) return worktrees;
     if (!enabled || !baseDir) return worktrees;
     const prefix = baseDir.endsWith("/") ? baseDir : `${baseDir}/`;
     return worktrees.filter(
       (w) => w.title === null || w.path === baseDir || w.path.startsWith(prefix),
     );
-  }, [worktrees, enabled, baseDir]);
+  }, [worktrees, enabled, baseDir, isVirtual]);
 }

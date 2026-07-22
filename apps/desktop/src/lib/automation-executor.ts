@@ -54,11 +54,14 @@ async function executeRun({ run_id, automation }: AutomationDueEvent) {
       runPath = await invoke<string>("prepare_automation_run_dir", {
         name: automation.name,
       });
-      // Refresh the virtual Automations project's run list if it's on screen.
-      if (isAutomationsProject(useUIStore.getState().selectedProject)) {
-        const wts = await invoke<Worktree[]>("list_automation_run_worktrees");
-        useDataStore.getState().setWorktrees(wts);
-      }
+      // Scratch dirs have no creation-time agent setting (create_worktree
+      // writes it for project worktrees) — persist it so a pane relaunch
+      // after a daemon restart resolves the right agent.
+      await invoke("set_setting", {
+        key: "selectedAgent",
+        scope: runPath,
+        value: automation.agent,
+      }).catch(() => {});
     } else {
       const branch = `auto/${slugify(automation.name)}-${branchStamp()}`;
       const worktree = await invoke<Worktree>("create_worktree", {
@@ -97,6 +100,16 @@ async function executeRun({ run_id, automation }: AutomationDueEvent) {
       status: "launched",
       error: null,
     });
+
+    // Refresh the virtual Automations project's run list if it's on screen —
+    // after the report, since the listing reads worktree_path off the run row.
+    if (
+      automation.repo_path === "" &&
+      isAutomationsProject(useUIStore.getState().selectedProject)
+    ) {
+      const wts = await invoke<Worktree[]>("list_automation_run_worktrees");
+      useDataStore.getState().setWorktrees(wts);
+    }
   } catch (e) {
     await invoke("report_automation_run", {
       runId: run_id,
