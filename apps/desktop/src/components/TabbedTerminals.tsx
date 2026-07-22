@@ -74,6 +74,7 @@ import { useEditorDocsStore } from "../stores/editor-docs";
 import { useShallow } from "zustand/shallow";
 import { buildDocumentKey } from "../lib/editor-buffer-registry";
 import { useBrowserAgentActivity } from "../hooks/useBrowserAgentActivity";
+import { selectWorkspaceDropCollision } from "../lib/workspace-drop-collision";
 
 type TabKind = "terminal" | "agent" | "file" | "browser";
 
@@ -109,7 +110,21 @@ const groupTabDndId = (ownerTopTabId: string, groupId: string, tabId: string) =>
 
 const workspaceCollisionDetection: CollisionDetection = (args) => {
   const pointerHits = pointerWithin(args);
-  if (pointerHits.length > 0) return pointerHits;
+  if (pointerHits.length > 0) {
+    const selected = selectWorkspaceDropCollision(
+      pointerHits.map((collision) => ({
+        collision,
+        target: (
+          args.droppableContainers.find(
+            (container) => container.id === collision.id,
+          )?.data.current as
+            | WorkspaceTabDropData
+            | undefined
+        )?.dropTarget,
+      })),
+    );
+    return selected ? [selected] : [];
+  }
   // A pointer release in the gaps between visible targets is an intentional
   // no-op. Keyboard drags have no pointer coordinates, so keep nearest-target
   // navigation for them.
@@ -1076,7 +1091,14 @@ function PaneTabGroup({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border/70 bg-sidebar px-2 py-1">
         {isPrimaryGroup ? (
-          primaryTabList
+          <PaneGroupDropZone
+            ownerTopTabId={topTabId}
+            groupId={group.id}
+            appendIndex={group.tabs.length}
+            nestedTabList
+          >
+            {primaryTabList}
+          </PaneGroupDropZone>
         ) : (
           <PaneGroupDropZone
             ownerTopTabId={topTabId}
@@ -1330,11 +1352,13 @@ function PaneGroupDropZone({
   groupId,
   appendIndex,
   children,
+  nestedTabList = false,
 }: {
   ownerTopTabId: string;
   groupId: string;
   appendIndex: number;
   children: ReactNode;
+  nestedTabList?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `group-strip:${ownerTopTabId}:${groupId}`,
@@ -1353,8 +1377,8 @@ function PaneGroupDropZone({
       className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto rounded ${
         isOver ? "ring-1 ring-primary/50" : ""
       }`}
-      role="tablist"
-      aria-label="Pane tabs"
+      role={nestedTabList ? undefined : "tablist"}
+      aria-label={nestedTabList ? undefined : "Pane tabs"}
     >
       {children}
     </div>
