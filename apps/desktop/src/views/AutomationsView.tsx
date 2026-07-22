@@ -14,7 +14,7 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { useDataStore, useUIStore } from "../store";
-import { selectWorktree } from "../hooks/useWorktreeActions";
+import { selectWorktree, selectProject } from "../hooks/useWorktreeActions";
 import { Sidebar } from "../components/Sidebar";
 import {
   AUTOMATION_TEMPLATES,
@@ -124,34 +124,17 @@ export function AutomationsView() {
   const [deleting, setDeleting] = useState<Automation | null>(null);
 
   const refresh = useCallback(() => {
-    // Global ("" scope) automations show on every project's page — and are
-    // the whole page when no project is selected.
-    const scopes = project ? [project.path, ""] : [""];
-    Promise.all(
-      scopes.map((repo) =>
-        invoke<Automation[]>("list_automations", { repo }).catch(
-          () => [] as Automation[],
-        ),
-      ),
-    ).then((lists) => setAutomations(lists.flat()));
-    Promise.all(
-      scopes.map((repo) =>
-        invoke<AutomationRun[]>("list_automation_runs", { repo }).catch(
-          () => [] as AutomationRun[],
-        ),
-      ),
-    ).then((lists) =>
-      setRuns(
-        lists.flat().sort((a, b) => b.created_at.localeCompare(a.created_at)),
-      ),
-    );
+    // The view is unscoped: every project's automations plus global ones.
+    invoke<Automation[]>("list_automations")
+      .then(setAutomations)
+      .catch(() => setAutomations([]));
+    invoke<AutomationRun[]>("list_automation_runs")
+      .then(setRuns)
+      .catch(() => setRuns([]));
     // The user is looking at the runs — clear the sidebar badge. Emits (and
-    // re-triggers this refresh) only when rows actually flip. The backend
-    // covers global scope for whichever repo we pass.
-    invoke("mark_automation_runs_seen", { repo: project?.path ?? "" }).catch(
-      () => {},
-    );
-  }, [project]);
+    // re-triggers this refresh) only when rows actually flip.
+    invoke("mark_automation_runs_seen").catch(() => {});
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -174,6 +157,8 @@ export function AutomationsView() {
 
   const selected = automations.find((a) => a.id === selectedId) ?? null;
 
+  const projects = useDataStore((s) => s.projects);
+
   const openRunWorktree = useCallback(
     async (run: AutomationRun, automation?: Automation) => {
       if (!run.worktree_path) return;
@@ -191,9 +176,18 @@ export function AutomationsView() {
           navigate({ to: "/" });
           return;
         }
-        if (!project) return;
+        // The run may belong to a different project than the selected one —
+        // switch first so the sidebar and worktree list line up.
+        const repo = automation?.repo_path ?? project?.path;
+        if (!repo) return;
+        if (project?.path !== repo) {
+          const target =
+            projects.find((p) => p.path === repo) ??
+            ({ path: repo, name: repo.split("/").pop() ?? repo });
+          await selectProject(target);
+        }
         const wts = await invoke<Worktree[]>("list_worktrees", {
-          repoPath: project.path,
+          repoPath: repo,
         });
         useDataStore.getState().setWorktrees(wts);
         const wt = wts.find((w) => w.path === run.worktree_path);
@@ -208,7 +202,7 @@ export function AutomationsView() {
         toast.error(`Failed to open worktree: ${e}`);
       }
     },
-    [project, navigate],
+    [project, projects, navigate],
   );
 
   const openCreate = (template: AutomationTemplate | null) => {
@@ -289,11 +283,6 @@ export function AutomationsView() {
                             <span className="truncate text-[15px] font-medium">
                               {a.name}
                             </span>
-                            {a.repo_path === "" && project && (
-                              <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
-                                global
-                              </span>
-                            )}
                             {!a.enabled && (
                               <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
                                 paused
@@ -301,6 +290,12 @@ export function AutomationsView() {
                             )}
                           </div>
                           <div className="mt-0.5 truncate text-[13px] text-muted-foreground">
+                            {a.repo_path === ""
+                              ? "Global"
+                              : projects.find((p) => p.path === a.repo_path)
+                                  ?.name ??
+                                (a.repo_path.split("/").pop() || a.repo_path)}
+                            {" · "}
                             {describeSchedule(a.schedule)}
                             {a.enabled && <> · Next run {formatWhen(a.next_run_at)}</>}
                             {lastRun && lastMeta && (

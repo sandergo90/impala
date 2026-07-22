@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@/lib/invoke";
-import { useUIStore } from "../store";
 
 interface UnseenRunCounts {
   total: number;
@@ -11,22 +10,18 @@ interface UnseenRunCounts {
 const NONE: UnseenRunCounts = { total: 0, failed: 0 };
 
 /**
- * Finished automation runs (completed/failed) the user hasn't seen for the
- * selected project. Cleared when the Automations view marks them seen.
+ * Finished automation runs (completed/failed) the user hasn't seen — across
+ * all projects and global automations, matching the unscoped Automations
+ * view. Cleared when the view marks them seen.
  */
 export function useAutomationBadge(): UnseenRunCounts {
-  const projectPath = useUIStore((s) => s.selectedProject?.path);
   const [counts, setCounts] = useState<UnseenRunCounts>(NONE);
 
   const refresh = useCallback(() => {
-    // "" scope = global automations only; with a project the backend counts
-    // that project plus global.
-    invoke<UnseenRunCounts>("count_unseen_automation_runs", {
-      repo: projectPath ?? "",
-    })
+    invoke<UnseenRunCounts>("count_unseen_automation_runs")
       .then(setCounts)
       .catch(() => setCounts(NONE));
-  }, [projectPath]);
+  }, []);
 
   useEffect(() => {
     refresh();
