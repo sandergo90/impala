@@ -506,7 +506,7 @@ function AutomationEditor({
   };
 
   return (
-    <div className="flex w-[440px] shrink-0 flex-col border-l border-border/50">
+    <div className="flex w-[560px] max-w-[45vw] shrink-0 flex-col border-l border-border/50">
       <div className="flex items-center gap-2 px-4 pt-3">
         <span
           className={`text-xs font-medium ${
@@ -617,7 +617,7 @@ function AutomationEditor({
             }
           }}
           placeholder="Add the prompt each run starts with — make it self-contained, and have it write its output into files so the diff carries the result."
-          className="mt-3 h-56 w-full resize-y rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 focus:border-primary/40"
+          className="mt-3 h-72 w-full resize-y rounded-lg border border-border/60 bg-muted/20 px-3.5 py-3 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 focus:border-primary/40"
         />
 
         <div className="mt-4 mb-1.5 px-1 text-xs font-medium text-muted-foreground">
