@@ -482,9 +482,12 @@ export function Sidebar() {
         sessionIds.add(agentPtySessionId(wt.path));
         const nav = useUIStore.getState().getWorktreeNavState(wt.path);
         for (const tab of nav.userTabs) {
-          if (tab.kind === "file") continue;
-          for (const leaf of getLeaves(getEffectiveUserTabSplitTree(tab))) {
-            sessionIds.add(panePtySessionId(wt.path, leaf.id));
+          for (const group of getLeaves(getEffectiveUserTabSplitTree(tab))) {
+            for (const groupTab of group.tabs) {
+              if (groupTab.content.kind === "agent" || groupTab.content.kind === "shell") {
+                sessionIds.add(panePtySessionId(wt.path, groupTab.id));
+              }
+            }
           }
         }
         const ptyKills = [...sessionIds].map((sessionId) => {

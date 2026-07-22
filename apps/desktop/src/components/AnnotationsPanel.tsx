@@ -68,7 +68,7 @@ export function AnnotationsPanel() {
     }
 
     // Switch to diff tab if not already there
-    if (nav.activeTab !== "diff" && nav.activeTab !== "split") {
+    if (nav.activeTab !== "diff") {
       useUIStore.getState().updateWorktreeNavState(wtPath, { activeTab: "diff" });
     }
 

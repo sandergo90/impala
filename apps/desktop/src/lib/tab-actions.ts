@@ -8,19 +8,61 @@ import {
   getLeaves,
   getAdjacentLeafId,
   findLeaf,
+  updateRatio,
+  updateLeafContent,
+  updateGroupTab,
+  normalizeLegacySplitTree,
+  createGroupTab,
+  findGroupTab,
+  getActiveGroupTab,
+  getAdjacentGroupTabId,
+  removeGroupTab,
+  setActiveGroupTab,
+  addTabToGroup,
+  createGroup,
+  shouldUseGroupTabs,
+  getHorizontalNeighborGroupId,
 } from "./split-tree";
 import { basename } from "./path-utils";
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { buildDocumentKey } from "./editor-buffer-registry";
-import type { SplitNode, UserTab, WorktreeNavState } from "../types";
+import type { GroupTab, PaneContent, SplitNode, UserTab, WorktreeNavState } from "../types";
+import type { Agent } from "./agent";
 
-// Pre-Phase-4 persisted user tabs don't carry `splitTree`; synthesize a
-// single leaf whose id matches the original `tab-user-${id}` convention so
-// existing PTY sessions still resolve.
+// The pane content a single-leaf tab shows, derived from its `kind` + the
+// `path`/`url` mirror. Keep in sync with the leaf `content` written at
+// creation and the v7 migration.
+function contentForTab(tab: UserTab): PaneContent {
+  switch (tab.kind) {
+    case "agent":
+      return { kind: "agent" };
+    case "file":
+      return { kind: "file", path: tab.path ?? "" };
+    case "browser":
+      return { kind: "browser", url: tab.url };
+    default:
+      return { kind: "shell" };
+  }
+}
+
+function singleGroup(
+  id: string,
+  content: PaneContent,
+  label?: string,
+  pinned?: boolean,
+): Extract<SplitNode, { type: "group" }> {
+  const groupTab = { ...createGroupTab(id, content, label), ...(pinned ? { pinned } : {}) };
+  return { type: "group", id, tabs: [groupTab], activeTabId: groupTab.id };
+}
+
+// Belt-and-braces for any tab that slips through without a tree: synthesize a
+// single leaf whose id matches the `tab-user-${id}` convention so existing PTY
+// sessions still resolve and the primary browser/file leaf keeps its id.
 export function getEffectiveUserTabSplitTree(tab: UserTab): SplitNode {
-  if (tab.splitTree) return tab.splitTree;
-  const paneType = tab.kind === "agent" ? "agent" : "shell";
-  return { type: "leaf", id: userTabPaneId(tab.id), paneType };
+  if (tab.splitTree) {
+    return normalizeLegacySplitTree(tab.splitTree, contentForTab(tab));
+  }
+  return singleGroup(userTabPaneId(tab.id), contentForTab(tab), tab.label);
 }
 
 export function getEffectiveUserTabFocusedPaneId(tab: UserTab): string {
@@ -28,6 +70,13 @@ export function getEffectiveUserTabFocusedPaneId(tab: UserTab): string {
   const stored = tab.focusedPaneId;
   if (stored && findLeaf(tree, stored)) return stored;
   return getLeaves(tree)[0]?.id ?? userTabPaneId(tab.id);
+}
+
+function getPrimaryGroupTabId(tab: UserTab): string {
+  const tree = getEffectiveUserTabSplitTree(tab);
+  const conventionalId = userTabPaneId(tab.id);
+  if (findGroupTab(tree, conventionalId)) return conventionalId;
+  return getLeaves(tree)[0]?.tabs[0]?.id ?? conventionalId;
 }
 
 function killPaneSession(worktreePath: string, paneId: string): void {
@@ -60,6 +109,8 @@ function parseLabelNumber(label: string, prefix: string): number | null {
 export function createUserTab(
   worktreePath: string,
   kind: "terminal" | "agent",
+  initialPrompt?: string,
+  initialAgent?: Agent,
 ): UserTab {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
@@ -78,11 +129,11 @@ export function createUserTab(
   const slot = smallestUnused(used, startAt);
   const label = `${prefix} ${slot}`;
   const tabId = `${kind}-${slot}-${Date.now()}`;
-  const rootLeaf: SplitNode = {
-    type: "leaf",
-    id: userTabPaneId(tabId),
-    paneType: kind === "agent" ? "agent" : "shell",
-  };
+  const rootLeaf = singleGroup(
+    userTabPaneId(tabId),
+    kind === "agent" ? { kind: "agent" } : { kind: "shell" },
+    label,
+  );
   const newTab: UserTab = {
     id: tabId,
     kind,
@@ -92,12 +143,36 @@ export function createUserTab(
     focusedPaneId: rootLeaf.id,
   };
 
+  const prompt = initialPrompt?.trim();
+  if (kind === "agent" && prompt) {
+    pendingAgentLaunches.set(rootLeaf.id, { prompt, agent: initialAgent });
+  }
+
   uiState.updateWorktreeNavState(worktreePath, {
     userTabs: [...nav.userTabs, newTab],
     activeTerminalsTab: newTab.id,
   });
 
   return newTab;
+}
+
+// Prompt handoffs are intentionally in-memory: once the new agent's launch
+// command has been written, a later PTY recovery must not replay the task.
+interface PendingAgentLaunch {
+  prompt: string;
+  agent?: Agent;
+}
+
+const pendingAgentLaunches = new Map<string, PendingAgentLaunch>();
+
+export function getPendingAgentLaunch(
+  paneId: string,
+): PendingAgentLaunch | undefined {
+  return pendingAgentLaunches.get(paneId);
+}
+
+export function clearPendingAgentLaunch(paneId: string): void {
+  pendingAgentLaunches.delete(paneId);
 }
 
 export function createBrowserTab(worktreePath: string, url?: string): UserTab {
@@ -112,12 +187,19 @@ export function createBrowserTab(worktreePath: string, url?: string): UserTab {
   }
   const slot = smallestUnused(used, 1);
   const tabId = `browser-${slot}-${Date.now()}`;
+  const rootLeaf = singleGroup(
+    userTabPaneId(tabId),
+    { kind: "browser", url },
+    `Browser ${slot}`,
+  );
   const newTab: UserTab = {
     id: tabId,
     kind: "browser",
     label: `Browser ${slot}`,
     createdAt: Date.now(),
     url,
+    splitTree: rootLeaf,
+    focusedPaneId: rootLeaf.id,
   };
 
   uiState.updateWorktreeNavState(worktreePath, {
@@ -132,26 +214,28 @@ export function createBrowserTab(worktreePath: string, url?: string): UserTab {
 export function openBrowserTabAt(worktreePath: string, url: string): void {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
-  // Split mode with the browser pane showing already displays the tab —
-  // don't yank the user into terminal mode.
-  const browserVisibleInSplit =
-    nav.activeTab === "split" && (nav.splitRightPane ?? "diff") === "browser";
-  const targetTab = browserVisibleInSplit ? nav.activeTab : "terminal";
   const existing = nav.userTabs.find((t) => t.kind === "browser");
   if (existing) {
-    // No-ops if the webview doesn't exist yet; the updated tab url seeds
-    // browser_open on mount instead.
-    invoke("browser_navigate", { id: existing.id, url }).catch(() => {});
+    // The webview label is `browser-{paneId}`; target the tab's primary
+    // browser leaf. No-ops if the webview doesn't exist yet; the updated leaf
+    // url seeds browser_open on mount instead.
+    const primaryPaneId = getPrimaryGroupTabId(existing);
+    invoke("browser_navigate", { id: primaryPaneId, url }).catch(() => {});
+    const nextTree = updateLeafContent(
+      getEffectiveUserTabSplitTree(existing),
+      primaryPaneId,
+      (c) => (c.kind === "browser" ? { ...c, url } : c),
+    );
     uiState.updateWorktreeNavState(worktreePath, {
       userTabs: nav.userTabs.map((t) =>
-        t.id === existing.id ? { ...t, url } : t,
+        t.id === existing.id ? { ...t, url, splitTree: nextTree } : t,
       ),
       activeTerminalsTab: existing.id,
-      activeTab: targetTab,
+      activeTab: "terminal",
     });
   } else {
     createBrowserTab(worktreePath, url);
-    uiState.updateWorktreeNavState(worktreePath, { activeTab: targetTab });
+    uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
   }
 }
 
@@ -162,23 +246,16 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
   if (closedIndex === -1) return;
 
   const tab = nav.userTabs[closedIndex];
-  if (tab.kind === "file" && tab.path) {
-    const key = buildDocumentKey(worktreePath, tab.path);
-    const doc = useEditorDocsStore.getState().docs[key];
-    if (doc?.dirty) {
-      const proceed = window.confirm(
-        `${tab.path} has unsaved changes. Discard them?`,
-      );
-      if (!proceed) return;
-    }
+  const groupTabs = getLeaves(getEffectiveUserTabSplitTree(tab)).flatMap(
+    (group) => group.tabs,
+  );
+  if (groupTabs.some((groupTab) => !confirmGroupTabClose(worktreePath, groupTab))) {
+    return;
   }
-  if (tab.kind === "terminal" || tab.kind === "agent") {
-    const tree = getEffectiveUserTabSplitTree(tab);
-    for (const leaf of getLeaves(tree)) killPaneSession(worktreePath, leaf.id);
-  }
-  if (tab.kind === "browser") {
-    invoke("browser_close", { id: tab.id }).catch(() => {});
-  }
+  // Dispose every pane in the tree by kind: kill PTYs for terminal/agent
+  // leaves, close the native webview for each browser leaf (label
+  // `browser-{paneId}`). File leaves need no teardown here.
+  for (const groupTab of groupTabs) disposeGroupTab(worktreePath, groupTab);
 
   const remainingTabs = nav.userTabs.filter((t) => t.id !== tabId);
   const hasRunTab =
@@ -219,10 +296,10 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
     tabHistory: nextHistory,
   });
 
-  if (tab.kind === "file" && tab.path) {
-    useEditorDocsStore
-      .getState()
-      .removeDoc(buildDocumentKey(worktreePath, tab.path));
+  const closedFilePaths = groupTabs.flatMap((groupTab) =>
+    groupTab.content.kind === "file" ? [groupTab.content.path] : [],
+  );
+  if (closedFilePaths.length > 0) {
     // Clear a stale tree-reveal pointing at the just-closed file. Otherwise
     // the FilesPanel reveal effect re-fires on the next worktree switch
     // (treePaths change) and re-opens the tab via onSelectionChange.
@@ -230,7 +307,7 @@ export function closeUserTab(worktreePath: string, tabId: string): void {
     if (
       reveal &&
       reveal.worktreePath === worktreePath &&
-      reveal.path === tab.path
+      closedFilePaths.includes(reveal.path)
     ) {
       useUIStore.setState({ pendingTreeReveal: null });
     }
@@ -319,6 +396,7 @@ export function splitUserTabPane(
   worktreePath: string,
   tabId: string,
   orientation: "horizontal" | "vertical",
+  content: PaneContent = { kind: "shell" },
 ): string | null {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
@@ -328,7 +406,7 @@ export function splitUserTabPane(
   const tree = getEffectiveUserTabSplitTree(tab);
   const focusedId = getEffectiveUserTabFocusedPaneId(tab);
 
-  const result = splitNode(tree, focusedId, orientation);
+  const result = splitNode(tree, focusedId, orientation, content);
   if (!result) return null;
 
   const nextTabs = nav.userTabs.map((t) =>
@@ -339,6 +417,431 @@ export function splitUserTabPane(
 
   uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
   return result.newLeafId;
+}
+
+export function canSplitTerminalsTab(
+  activeTabId: string,
+  userTabs: UserTab[],
+): boolean {
+  return (
+    activeTabId === AGENT_PANE_ID || userTabs.some((tab) => tab.id === activeTabId)
+  );
+}
+
+/** Route a split request for the currently active Agent or user tab. */
+export function splitActiveTabPane(
+  worktreePath: string,
+  orientation: "horizontal" | "vertical",
+  content: PaneContent = { kind: "shell" },
+): string | null {
+  const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+  if (nav.activeTerminalsTab === AGENT_PANE_ID) {
+    return splitAgentTabPane(worktreePath, orientation, content);
+  }
+  if (nav.userTabs.some((tab) => tab.id === nav.activeTerminalsTab)) {
+    return splitUserTabPane(
+      worktreePath,
+      nav.activeTerminalsTab,
+      orientation,
+      content,
+    );
+  }
+  return null;
+}
+
+export function addTabToActivePane(
+  worktreePath: string,
+  content: PaneContent,
+  initialPrompt?: string,
+  initialAgent?: Agent,
+): string | null {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const newTab = createGroup(content).tabs[0];
+  const prompt = initialPrompt?.trim();
+  if (content.kind === "agent" && prompt) {
+    pendingAgentLaunches.set(newTab.id, { prompt, agent: initialAgent });
+  }
+
+  if (nav.activeTerminalsTab === AGENT_PANE_ID) {
+    const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+    const groupId = getEffectiveAgentTabFocusedPaneId(
+      nav.agentTabSplitTree,
+      nav.agentTabFocusedPaneId,
+    );
+    uiState.updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: addTabToGroup(tree, groupId, newTab),
+    });
+    return newTab.id;
+  }
+
+  const topTab = nav.userTabs.find((tab) => tab.id === nav.activeTerminalsTab);
+  if (!topTab) return null;
+  const tree = getEffectiveUserTabSplitTree(topTab);
+  const groupId = getEffectiveUserTabFocusedPaneId(topTab);
+  uiState.updateWorktreeNavState(worktreePath, {
+    userTabs: nav.userTabs.map((tab) =>
+      tab.id === topTab.id
+        ? { ...tab, splitTree: addTabToGroup(tree, groupId, newTab) }
+        : tab,
+    ),
+  });
+  return newTab.id;
+}
+
+/**
+ * Create an MCP-requested agent tab next to the agent that made the request.
+ * Secondary split panes own their local tab strip; the primary pane continues
+ * to use the top-level tab strip. Sessions created before IMPALA_PANE_ID was
+ * introduced fall back to the currently focused pane.
+ */
+export function createAgentTabFromRequest(
+  worktreePath: string,
+  initialPrompt: string,
+  initialAgent?: Agent,
+  sourcePaneId?: string,
+  placement: "auto" | "current" | "left" | "right" = "auto",
+): string {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+
+  const addToRequestedGroup = (
+    tree: SplitNode,
+    update: (nextTree: SplitNode, groupId: string) => void,
+    fallbackGroupId?: string,
+  ): string | null => {
+    const sourceGroup = sourcePaneId
+      ? findGroupTab(tree, sourcePaneId)?.group
+      : fallbackGroupId
+        ? findLeaf(tree, fallbackGroupId)
+        : null;
+    if (!sourceGroup) return null;
+
+    const targetGroupId =
+      placement === "left" || placement === "right"
+        ? getHorizontalNeighborGroupId(tree, sourceGroup.id, placement)
+        : sourceGroup.id;
+    if (!targetGroupId) return null;
+    // The first group's tabs are represented by the workspace's top-level
+    // strip. Adding an inner tab there would make it active but invisible.
+    if (getLeaves(tree)[0]?.id === targetGroupId) {
+      return null;
+    }
+
+    const newTab = createGroup({ kind: "agent" }).tabs[0];
+    const prompt = initialPrompt.trim();
+    if (prompt) {
+      pendingAgentLaunches.set(newTab.id, { prompt, agent: initialAgent });
+    }
+    update(addTabToGroup(tree, targetGroupId, newTab), targetGroupId);
+    return newTab.id;
+  };
+
+  const agentTree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+  const agentPaneTabId = addToRequestedGroup(
+    agentTree,
+    (nextTree, groupId) => {
+      uiState.updateWorktreeNavState(worktreePath, {
+        activeTab: "terminal",
+        activeTerminalsTab: AGENT_PANE_ID,
+        agentTabSplitTree: nextTree,
+        agentTabFocusedPaneId: groupId,
+      });
+    },
+    nav.activeTerminalsTab === AGENT_PANE_ID
+      ? getEffectiveAgentTabFocusedPaneId(
+          nav.agentTabSplitTree,
+          nav.agentTabFocusedPaneId,
+        )
+      : undefined,
+  );
+  if (agentPaneTabId) return agentPaneTabId;
+
+  for (const topTab of nav.userTabs) {
+    const tree = getEffectiveUserTabSplitTree(topTab);
+    const paneTabId = addToRequestedGroup(
+      tree,
+      (nextTree, groupId) => {
+        uiState.updateWorktreeNavState(worktreePath, {
+          activeTab: "terminal",
+          activeTerminalsTab: topTab.id,
+          userTabs: nav.userTabs.map((candidate) =>
+            candidate.id === topTab.id
+              ? { ...candidate, splitTree: nextTree, focusedPaneId: groupId }
+              : candidate,
+          ),
+        });
+      },
+      nav.activeTerminalsTab === topTab.id
+        ? getEffectiveUserTabFocusedPaneId(topTab)
+        : undefined,
+    );
+    if (paneTabId) return paneTabId;
+  }
+
+  if (
+    placement === "auto" &&
+    !sourcePaneId &&
+    shouldCreateTabInFocusedPane(worktreePath)
+  ) {
+    const paneTabId = addTabToActivePane(
+      worktreePath,
+      { kind: "agent" },
+      initialPrompt,
+      initialAgent,
+    );
+    if (paneTabId) {
+      uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
+      return paneTabId;
+    }
+  }
+
+  const topTab = createUserTab(
+    worktreePath,
+    "agent",
+    initialPrompt,
+    initialAgent,
+  );
+  uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
+  return getPrimaryGroupTabId(topTab);
+}
+
+function getActivePaneContext(worktreePath: string): {
+  nav: WorktreeNavState;
+  tree: SplitNode;
+  groupId: string;
+  topTab: UserTab | null;
+  isAgent: boolean;
+} | null {
+  const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+  if (nav.activeTerminalsTab === AGENT_PANE_ID) {
+    return {
+      nav,
+      tree: getEffectiveAgentTabSplitTree(nav.agentTabSplitTree),
+      groupId: getEffectiveAgentTabFocusedPaneId(
+        nav.agentTabSplitTree,
+        nav.agentTabFocusedPaneId,
+      ),
+      topTab: null,
+      isAgent: true,
+    };
+  }
+  const topTab = nav.userTabs.find((tab) => tab.id === nav.activeTerminalsTab);
+  if (!topTab) return null;
+  return {
+    nav,
+    tree: getEffectiveUserTabSplitTree(topTab),
+    groupId: getEffectiveUserTabFocusedPaneId(topTab),
+    topTab,
+    isAgent: false,
+  };
+}
+
+/** True once the active top-level tab has a real pane/group context. */
+export function shouldCreateTabInFocusedPane(worktreePath: string): boolean {
+  const context = getActivePaneContext(worktreePath);
+  if (!context) return false;
+  // The first pane uses the top-level Run / Agent / user-tab strip as its
+  // native tab bar. Cmd+T there should therefore keep creating top-level
+  // tabs; only secondary split panes own group-local tabs.
+  if (getLeaves(context.tree)[0]?.id === context.groupId) return false;
+  return shouldUseGroupTabs(context.tree, context.groupId);
+}
+
+/** Cycle inner tabs in the focused pane; false means callers should cycle top-level tabs. */
+export function focusAdjacentActiveGroupTab(
+  worktreePath: string,
+  direction: 1 | -1,
+): boolean {
+  const context = getActivePaneContext(worktreePath);
+  if (!context) return false;
+  if (getLeaves(context.tree)[0]?.id === context.groupId) return false;
+  const group = findLeaf(context.tree, context.groupId);
+  if (!group) return false;
+  const nextId = getAdjacentGroupTabId(group, direction);
+  if (!nextId) return false;
+  if (context.isAgent) {
+    setAgentGroupActiveTab(worktreePath, group.id, nextId);
+  } else {
+    setUserGroupActiveTab(worktreePath, context.topTab!.id, group.id, nextId);
+  }
+  return true;
+}
+
+export function setUserGroupActiveTab(
+  worktreePath: string,
+  topTabId: string,
+  groupId: string,
+  groupTabId: string,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const topTab = nav.userTabs.find((tab) => tab.id === topTabId);
+  if (!topTab) return;
+  const tree = setActiveGroupTab(
+    getEffectiveUserTabSplitTree(topTab),
+    groupId,
+    groupTabId,
+  );
+  uiState.updateWorktreeNavState(worktreePath, {
+    userTabs: nav.userTabs.map((tab) =>
+      tab.id === topTabId ? { ...tab, splitTree: tree, focusedPaneId: groupId } : tab,
+    ),
+  });
+}
+
+export function setAgentGroupActiveTab(
+  worktreePath: string,
+  groupId: string,
+  groupTabId: string,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  uiState.updateWorktreeNavState(worktreePath, {
+    agentTabSplitTree: setActiveGroupTab(
+      getEffectiveAgentTabSplitTree(nav.agentTabSplitTree),
+      groupId,
+      groupTabId,
+    ),
+    agentTabFocusedPaneId: groupId,
+  });
+}
+
+function userKindForContent(content: PaneContent): UserTab["kind"] {
+  return content.kind === "shell" ? "terminal" : content.kind;
+}
+
+function withPrimaryContent(tab: UserTab, tree: SplitNode): UserTab {
+  const primaryTab = getActiveGroupTab(getLeaves(tree)[0]);
+  const primary = primaryTab.content;
+  const {
+    path: _path,
+    url: _url,
+    pinned: _pinned,
+    ...rest
+  } = tab;
+  return {
+    ...rest,
+    kind: userKindForContent(primary),
+    label: primaryTab.label,
+    ...(primary.kind === "file"
+      ? { path: primary.path, ...(primaryTab.pinned ? { pinned: true } : {}) }
+      : {}),
+    ...(primary.kind === "browser" ? { url: primary.url } : {}),
+    splitTree: tree,
+  };
+}
+
+// Tear down one pane's resource by content kind: kill its PTY for
+// terminal/agent leaves, close the native webview for a browser leaf. File
+// leaves need no teardown. Also drops any pending agent-launch handoff.
+function disposeGroupTab(
+  worktreePath: string,
+  tab: GroupTab,
+): void {
+  clearPendingAgentLaunch(tab.id);
+  if (tab.content.kind === "browser") {
+    invoke("browser_close", { id: tab.id }).catch(() => {});
+  } else if (tab.content.kind === "agent" || tab.content.kind === "shell") {
+    killPaneSession(worktreePath, tab.id);
+  } else if (tab.content.kind === "file") {
+    useEditorDocsStore
+      .getState()
+      .removeDoc(buildDocumentKey(worktreePath, tab.content.path));
+  }
+}
+
+function confirmGroupTabClose(worktreePath: string, tab: GroupTab): boolean {
+  if (tab.content.kind !== "file") return true;
+  const doc = useEditorDocsStore.getState().docs[
+    buildDocumentKey(worktreePath, tab.content.path)
+  ];
+  return !doc?.dirty || window.confirm(
+    `${tab.content.path} has unsaved changes. Discard them?`,
+  );
+}
+
+// Persist a divider drag inside a user tab's split tree. `splitId` identifies
+// the split (see `updateRatio`); no-op when the tab has no tree yet.
+export function updateUserTabRatio(
+  worktreePath: string,
+  tabId: string,
+  splitId: string,
+  ratio: number,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tab = nav.userTabs.find((t) => t.id === tabId);
+  if (!tab) return;
+
+  const tree = getEffectiveUserTabSplitTree(tab);
+  const nextTree = updateRatio(tree, splitId, ratio);
+
+  const nextTabs = nav.userTabs.map((t) =>
+    t.id === tabId ? { ...t, splitTree: nextTree } : t,
+  );
+  uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
+}
+
+// Persist a browser pane's current URL onto its leaf content (the source of
+// truth), mirroring to `tab.url` when it's a user tab's primary leaf. Called
+// from BrowserPane on navigation events. `tabId === AGENT_PANE_ID` routes to
+// the agent system tab's tree. No-op if the leaf isn't a browser leaf.
+export function setBrowserLeafUrl(
+  worktreePath: string,
+  tabId: string,
+  paneId: string,
+  url: string,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+
+  if (tabId === AGENT_PANE_ID) {
+    const nextTree = updateLeafContent(
+      getEffectiveAgentTabSplitTree(nav.agentTabSplitTree),
+      paneId,
+      (c) => (c.kind === "browser" ? { ...c, url } : c),
+    );
+    uiState.updateWorktreeNavState(worktreePath, { agentTabSplitTree: nextTree });
+    return;
+  }
+
+  const tab = nav.userTabs.find((t) => t.id === tabId);
+  if (!tab) return;
+
+  const nextTree = updateLeafContent(
+    getEffectiveUserTabSplitTree(tab),
+    paneId,
+    (c) => (c.kind === "browser" ? { ...c, url } : c),
+  );
+  const isPrimary = paneId === getPrimaryGroupTabId(tab);
+  const nextTabs = nav.userTabs.map((t) =>
+    t.id === tabId
+      ? { ...t, splitTree: nextTree, ...(isPrimary ? { url } : {}) }
+      : t,
+  );
+  uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
+}
+
+// The current persisted URL of a browser pane, read from its leaf content.
+// `tabId === AGENT_PANE_ID` reads the agent system tab's tree. Used by
+// BrowserPane's omnibox to recover the live URL on blur.
+export function getBrowserLeafUrl(
+  worktreePath: string,
+  tabId: string,
+  paneId: string,
+): string | undefined {
+  const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+  const tree =
+    tabId === AGENT_PANE_ID
+      ? getEffectiveAgentTabSplitTree(nav.agentTabSplitTree)
+      : (() => {
+          const tab = nav.userTabs.find((t) => t.id === tabId);
+          return tab ? getEffectiveUserTabSplitTree(tab) : null;
+        })();
+  if (!tree) return undefined;
+  const found = findGroupTab(tree, paneId);
+  return found?.tab.content.kind === "browser" ? found.tab.content.url : undefined;
 }
 
 // Multi-leaf tab: removes focused pane, advances focus to the previously-
@@ -353,19 +856,38 @@ export function closeUserTabFocusedPane(
   if (!tab) return;
 
   const tree = getEffectiveUserTabSplitTree(tab);
-  if (getLeaves(tree).length <= 1) {
+  const focusedId = getEffectiveUserTabFocusedPaneId(tab);
+  const focusedGroup = findLeaf(tree, focusedId);
+  if (!focusedGroup) return;
+  const activeGroupTab = getActiveGroupTab(focusedGroup);
+
+  if (focusedGroup.tabs.length === 1 && getLeaves(tree).length <= 1) {
     closeUserTab(worktreePath, tabId);
     return;
   }
 
-  const focusedId = getEffectiveUserTabFocusedPaneId(tab);
-  const adjacentId = getAdjacentLeafId(tree, focusedId, -1);
-  const newTree = removeNode(tree, focusedId)!;
+  if (focusedGroup.tabs.length > 1) {
+    if (!confirmGroupTabClose(worktreePath, activeGroupTab)) return;
+    const result = removeGroupTab(tree, focusedId, activeGroupTab.id);
+    disposeGroupTab(worktreePath, activeGroupTab);
+    const nextTree = result.tree!;
+    uiState.updateWorktreeNavState(worktreePath, {
+      userTabs: nav.userTabs.map((candidate) =>
+        candidate.id === tabId ? withPrimaryContent(candidate, nextTree) : candidate,
+      ),
+    });
+    return;
+  }
 
-  killPaneSession(worktreePath, focusedId);
+  const adjacentId = getAdjacentLeafId(tree, focusedId, -1);
+  if (!confirmGroupTabClose(worktreePath, activeGroupTab)) return;
+  const newTree = removeNode(tree, focusedId)!;
+  disposeGroupTab(worktreePath, activeGroupTab);
 
   const nextTabs = nav.userTabs.map((t) =>
-    t.id === tabId ? { ...t, splitTree: newTree, focusedPaneId: adjacentId } : t,
+    t.id === tabId
+      ? { ...withPrimaryContent(t, newTree), focusedPaneId: adjacentId }
+      : t,
   );
   uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
 }
@@ -410,6 +932,142 @@ export function setUserTabFocusedPane(
   uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
 }
 
+// --- Agent system tab split ---
+// The Agent tab is synthesized (no UserTab record), so its split state lives
+// directly on the nav state. The root leaf keeps id AGENT_PANE_ID so the
+// primary agent's PTY session is unchanged; the Run tab stays unsplittable.
+
+export function getEffectiveAgentTabSplitTree(
+  splitTree: SplitNode | undefined,
+): SplitNode {
+  if (splitTree) return normalizeLegacySplitTree(splitTree, { kind: "agent" });
+  return singleGroup(AGENT_PANE_ID, { kind: "agent" }, "Agent");
+}
+
+export function getEffectiveAgentTabFocusedPaneId(
+  splitTree: SplitNode | undefined,
+  focusedPaneId: string | undefined,
+): string {
+  const tree = getEffectiveAgentTabSplitTree(splitTree);
+  if (focusedPaneId && findLeaf(tree, focusedPaneId)) return focusedPaneId;
+  return getLeaves(tree)[0]?.id ?? AGENT_PANE_ID;
+}
+
+export function splitAgentTabPane(
+  worktreePath: string,
+  orientation: "horizontal" | "vertical",
+  content: PaneContent = { kind: "shell" },
+): string | null {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+  const focusedId = getEffectiveAgentTabFocusedPaneId(
+    nav.agentTabSplitTree,
+    nav.agentTabFocusedPaneId,
+  );
+  const result = splitNode(tree, focusedId, orientation, content);
+  if (!result) return null;
+  uiState.updateWorktreeNavState(worktreePath, {
+    agentTabSplitTree: result.tree,
+    agentTabFocusedPaneId: result.newLeafId,
+  });
+  return result.newLeafId;
+}
+
+export function updateAgentTabRatio(
+  worktreePath: string,
+  splitId: string,
+  ratio: number,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+  uiState.updateWorktreeNavState(worktreePath, {
+    agentTabSplitTree: updateRatio(tree, splitId, ratio),
+  });
+}
+
+// Removes the focused pane; the Agent tab itself is never closed (system tab),
+// so a single-leaf tree is a no-op.
+export function closeAgentTabFocusedPane(worktreePath: string): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+  const focusedId = getEffectiveAgentTabFocusedPaneId(
+    nav.agentTabSplitTree,
+    nav.agentTabFocusedPaneId,
+  );
+  const focusedGroup = findLeaf(tree, focusedId);
+  if (!focusedGroup) return;
+  const activeGroupTab = getActiveGroupTab(focusedGroup);
+  const totalTabs = getLeaves(tree).reduce(
+    (total, group) => total + group.tabs.length,
+    0,
+  );
+
+  // The system tab itself survives its last inner tab. If its primary Agent
+  // was closed earlier, closing the final remaining tab restores that Agent.
+  if (totalTabs === 1) {
+    if (activeGroupTab.id === AGENT_PANE_ID) return;
+    if (!confirmGroupTabClose(worktreePath, activeGroupTab)) return;
+    disposeGroupTab(worktreePath, activeGroupTab);
+    uiState.updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: singleGroup(AGENT_PANE_ID, { kind: "agent" }, "Agent"),
+      agentTabFocusedPaneId: AGENT_PANE_ID,
+    });
+    return;
+  }
+
+  if (focusedGroup.tabs.length > 1) {
+    if (!confirmGroupTabClose(worktreePath, activeGroupTab)) return;
+    const result = removeGroupTab(tree, focusedId, activeGroupTab.id);
+    disposeGroupTab(worktreePath, activeGroupTab);
+    uiState.updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: result.tree!,
+      agentTabFocusedPaneId: focusedId,
+    });
+    return;
+  }
+
+  if (!confirmGroupTabClose(worktreePath, activeGroupTab)) return;
+  const adjacentId = getAdjacentLeafId(tree, focusedId, -1);
+  const newTree = removeNode(tree, focusedId)!;
+  disposeGroupTab(worktreePath, activeGroupTab);
+
+  uiState.updateWorktreeNavState(worktreePath, {
+    agentTabSplitTree: newTree,
+    agentTabFocusedPaneId: adjacentId,
+  });
+}
+
+export function focusAdjacentAgentTabPane(
+  worktreePath: string,
+  direction: 1 | -1,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+  if (getLeaves(tree).length <= 1) return;
+
+  const focusedId = getEffectiveAgentTabFocusedPaneId(
+    nav.agentTabSplitTree,
+    nav.agentTabFocusedPaneId,
+  );
+  const nextId = getAdjacentLeafId(tree, focusedId, direction);
+  if (nextId === focusedId) return;
+  uiState.updateWorktreeNavState(worktreePath, { agentTabFocusedPaneId: nextId });
+}
+
+export function setAgentTabFocusedPane(
+  worktreePath: string,
+  paneId: string,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  if (nav.agentTabFocusedPaneId === paneId) return;
+  uiState.updateWorktreeNavState(worktreePath, { agentTabFocusedPaneId: paneId });
+}
+
 export interface OpenFileTabOptions {
   pin?: boolean;
   /**
@@ -447,9 +1105,9 @@ export function openFileTab(
   const nav = uiState.getWorktreeNavState(worktreePath);
   const label = basename(path);
 
-  // Only force the top-level tab area to "terminal" when the user is on a
-  // mode where TabbedTerminals isn't visible. "terminal" and "split" already
-  // show terminal content; flipping them would collapse the user's layout.
+  // Only force the top-level tab area to "terminal" when the user is on the
+  // diff view (where TabbedTerminals isn't visible); the terminal view already
+  // shows terminal content, so flipping it would collapse the user's layout.
   const needsTabAreaSwitch = nav.activeTab === "diff";
 
   const parkPendingTarget = (): void => {
@@ -484,11 +1142,27 @@ export function openFileTab(
     : undefined;
 
   if (previewTab) {
+    // Retarget the preview's primary file tab to the new path and label
+    // (source of truth), keeping the top-level mirrors in step.
+    const nextTree = updateGroupTab(
+      getEffectiveUserTabSplitTree(previewTab),
+      getPrimaryGroupTabId(previewTab),
+      (groupTab) => ({
+        ...groupTab,
+        label,
+        pinned: pin || groupTab.pinned,
+        content:
+          groupTab.content.kind === "file"
+            ? { ...groupTab.content, path }
+            : groupTab.content,
+      }),
+    );
     const updated: UserTab = {
       ...previewTab,
       path,
       label,
       pinned: pin || previewTab.pinned,
+      splitTree: nextTree,
     };
     const next = nav.userTabs.map((t) =>
       t.id === previewTab.id ? updated : t,
@@ -506,6 +1180,12 @@ export function openFileTab(
 
   // No preview tab; create one.
   const tabId = `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const rootLeaf = singleGroup(
+    userTabPaneId(tabId),
+    { kind: "file", path },
+    label,
+    pin,
+  );
   const newTab: UserTab = {
     id: tabId,
     kind: "file",
@@ -513,6 +1193,8 @@ export function openFileTab(
     createdAt: Date.now(),
     path,
     pinned: pin,
+    splitTree: rootLeaf,
+    focusedPaneId: rootLeaf.id,
   };
   const updates: Partial<WorktreeNavState> = {
     userTabs: [...nav.userTabs, newTab],

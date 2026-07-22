@@ -6,6 +6,11 @@ import type { Theme, VibrancyMaterial } from "./themes/types";
 import { defaultDark } from "./themes/built-in";
 import { applyTheme, applyWindowVibrancy, initThemeFromStore, resolveThemeById } from "./themes/apply";
 import { createLeaf } from "./lib/split-tree";
+import {
+  migrateSplitTreeToV8,
+  migrateUserTabsToV7,
+  migrateUserTabsToV8,
+} from "./lib/split-tree-migration";
 import { isAutomationsProject } from "./lib/automations-project";
 
 function createDefaultNavState(): WorktreeNavState {
@@ -26,7 +31,7 @@ function createDefaultNavState(): WorktreeNavState {
   };
 }
 
-const defaultGeneralTerminalLeaf = createLeaf("shell");
+const defaultGeneralTerminalLeaf = createLeaf({ kind: "shell" });
 
 const defaultDataState: WorktreeDataState = {
   paneSessions: {},
@@ -288,7 +293,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 6,
+      version: 9,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};
@@ -335,6 +340,37 @@ export const useUIStore = create<UIState>()(
           // userTabs === undefined and crash the first .find/.some/.map on it.
           for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
             if (nav && !Array.isArray(nav.userTabs)) nav.userTabs = [];
+          }
+        }
+        if (fromVersion < 7 && persistedState?.worktreeNavStates) {
+          // Split-tree leaves gained `content: PaneContent`, replacing the old
+          // `paneType: "agent" | "shell"`. Convert every persisted tree, and
+          // give every tab a single-leaf tree when it lacked one — keeping the
+          // primary leaf id at `tab-user-${tabId}` so daemon PTYs reattach.
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (!nav || !Array.isArray(nav.userTabs)) continue;
+            nav.userTabs = migrateUserTabsToV7(nav.userTabs);
+          }
+        }
+        if (fromVersion < 8 && persistedState?.worktreeNavStates) {
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (!nav) continue;
+            if (Array.isArray(nav.userTabs)) {
+              nav.userTabs = migrateUserTabsToV8(nav.userTabs);
+            }
+            if (nav.agentTabSplitTree) {
+              nav.agentTabSplitTree = migrateSplitTreeToV8(nav.agentTabSplitTree);
+            }
+          }
+        }
+        if (fromVersion < 9 && persistedState?.worktreeNavStates) {
+          // The legacy top-level Split destination was replaced by split
+          // panes inside Terminal tabs. Restore old sessions to Terminal and
+          // remove the obsolete right-pane preference.
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (!nav) continue;
+            if (nav.activeTab === "split") nav.activeTab = "terminal";
+            delete nav.splitRightPane;
           }
         }
         return persistedState;

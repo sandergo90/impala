@@ -57,19 +57,19 @@ export function RunActionsButton({
   };
 
   return (
-    <div className="flex items-stretch rounded-md overflow-hidden ring-1 ring-inset ring-black/20">
+    <div className="flex h-9 items-stretch overflow-hidden rounded-md ring-1 ring-inset ring-black/20">
       <button
         onClick={() => toggleRunScript()}
         disabled={isStopping || playDisabled}
         title={playTooltip}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 text-md font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${variantClasses}`}
+        className={`flex items-center gap-2 px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${variantClasses}`}
       >
         {isActive ? (
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <rect x="2" y="2" width="12" height="12" rx="1" />
           </svg>
         ) : (
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M4 2l10 6-10 6V2z" />
           </svg>
         )}
@@ -80,7 +80,7 @@ export function RunActionsButton({
         <Menu.Root>
           <Menu.Trigger
             aria-label="Pick an action"
-            className={`flex items-center px-1.5 border-l border-black/20 transition-colors ${variantClasses}`}
+            className={`flex w-7 items-center justify-center border-l border-black/20 transition-colors ${variantClasses}`}
           >
             <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
               <path d="M2 4l4 4 4-4z" />

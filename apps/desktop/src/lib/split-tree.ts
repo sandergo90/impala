@@ -1,122 +1,239 @@
-import type { SplitNode } from "../types";
+import type { GroupTab, PaneContent, SplitNode } from "../types";
+
+export type SplitGroup = Extract<SplitNode, { type: "group" }>;
+
+function defaultLabel(content: PaneContent): string {
+  switch (content.kind) {
+    case "agent": return "Agent";
+    case "shell": return "Terminal";
+    case "file": return content.path.split("/").pop() || content.path;
+    case "browser": return "Browser";
+  }
+}
+
+export function createGroupTab(
+  id: string,
+  content: PaneContent,
+  label = defaultLabel(content),
+): GroupTab {
+  return { id, label, content, createdAt: Date.now() };
+}
+
+/** Normalize pre-v8 leaf trees and hot-reloaded legacy paneType trees. */
+export function normalizeSplitTree(
+  value: unknown,
+  fallbackContent: PaneContent = { kind: "shell" },
+): SplitNode {
+  const node = value as any;
+  if (node?.type === "group" && typeof node.id === "string") return node;
+  if (node?.type === "leaf" && typeof node.id === "string") {
+    const content: PaneContent = node.content ??
+      (node.paneType === "agent" ? { kind: "agent" } :
+       node.paneType === "shell" ? { kind: "shell" } : fallbackContent);
+    const tab = createGroupTab(node.id, content);
+    return { type: "group", id: node.id, tabs: [tab], activeTabId: tab.id };
+  }
+  if (
+    node?.type === "split" &&
+    (node.orientation === "horizontal" || node.orientation === "vertical") &&
+    typeof node.ratio === "number"
+  ) {
+    return {
+      type: "split",
+      orientation: node.orientation,
+      ratio: node.ratio,
+      first: normalizeSplitTree(node.first, fallbackContent),
+      second: normalizeSplitTree(node.second, fallbackContent),
+    };
+  }
+  throw new Error("Invalid split tree");
+}
+
+/** Backward-compatible name used at existing runtime boundaries. */
+export const normalizeLegacySplitTree = normalizeSplitTree;
 
 let paneCounter = 0;
 
-/** Derive a PTY session ID from a pane ID */
 export function paneSessionId(paneId: string): string {
   return `pty-${paneId}`;
 }
 
-/** Create a new leaf node with a unique ID */
-export function createLeaf(paneType: "agent" | "shell" = "shell"): Extract<SplitNode, { type: "leaf" }> {
-  return { type: "leaf", id: `pane-${Date.now()}-${paneCounter++}`, paneType };
+export function createGroup(content: PaneContent = { kind: "shell" }): SplitGroup {
+  const id = `pane-${Date.now()}-${paneCounter++}`;
+  const tab = createGroupTab(id, content);
+  return { type: "group", id, tabs: [tab], activeTabId: tab.id };
 }
 
-/** Get all leaf nodes in the tree (left-to-right, top-to-bottom order) */
-export function getLeaves(node: SplitNode): Extract<SplitNode, { type: "leaf" }>[] {
-  if (node.type === "leaf") return [node];
-  return [...getLeaves(node.first), ...getLeaves(node.second)];
+/** Compatibility alias for callers creating a single content-bearing pane. */
+export const createLeaf = createGroup;
+
+export function getGroups(node: SplitNode): SplitGroup[] {
+  if (node.type === "group") return [node];
+  return [...getGroups(node.first), ...getGroups(node.second)];
 }
 
-/** Find a leaf by ID */
-export function findLeaf(
-  node: SplitNode,
-  id: string
-): Extract<SplitNode, { type: "leaf" }> | null {
-  if (node.type === "leaf") return node.id === id ? node : null;
-  return findLeaf(node.first, id) ?? findLeaf(node.second, id);
+export const getLeaves = getGroups;
+
+export function findGroup(node: SplitNode, id: string): SplitGroup | null {
+  if (node.type === "group") return node.id === id ? node : null;
+  return findGroup(node.first, id) ?? findGroup(node.second, id);
 }
 
-/**
- * Split a leaf node into two panes.
- * The existing leaf stays as `first`, the new leaf becomes `second`.
- * Returns the new tree and the new leaf's ID.
- */
+export const findLeaf = findGroup;
+
+export function getActiveGroupTab(group: SplitGroup): GroupTab {
+  return group.tabs.find((tab) => tab.id === group.activeTabId) ?? group.tabs[0];
+}
+
+export function shouldUseGroupTabs(tree: SplitNode, groupId: string): boolean {
+  const group = findGroup(tree, groupId);
+  return getGroups(tree).length > 1 || (group?.tabs.length ?? 0) > 1;
+}
+
+export function getAdjacentGroupTabId(
+  group: SplitGroup,
+  direction: 1 | -1,
+): string | null {
+  if (group.tabs.length <= 1) return null;
+  const currentIndex = group.tabs.findIndex((tab) => tab.id === group.activeTabId);
+  return group.tabs[
+    (Math.max(currentIndex, 0) + direction + group.tabs.length) % group.tabs.length
+  ].id;
+}
+
+export function findGroupTab(
+  tree: SplitNode,
+  tabId: string,
+): { group: SplitGroup; tab: GroupTab } | null {
+  for (const group of getGroups(tree)) {
+    const tab = group.tabs.find((candidate) => candidate.id === tabId);
+    if (tab) return { group, tab };
+  }
+  return null;
+}
+
 export function splitNode(
   tree: SplitNode,
   targetId: string,
-  orientation: "horizontal" | "vertical"
+  orientation: "horizontal" | "vertical",
+  content: PaneContent = { kind: "shell" },
 ): { tree: SplitNode; newLeafId: string } | null {
-  const newLeaf = createLeaf("shell");
-
-  const replaced = replaceNode(tree, targetId, (leaf) => ({
-    type: "split" as const,
+  const newGroup = createGroup(content);
+  const replaced = replaceNode(tree, targetId, (group) => ({
+    type: "split",
     orientation,
     ratio: 0.5,
-    first: leaf,
-    second: newLeaf,
+    first: group,
+    second: newGroup,
   }));
-
-  if (!replaced) return null;
-  return { tree: replaced, newLeafId: newLeaf.id };
+  return replaced ? { tree: replaced, newLeafId: newGroup.id } : null;
 }
 
-/**
- * Remove a leaf node from the tree.
- * Its sibling takes the parent's place.
- * Returns the new tree, or null if the leaf is the root (last pane).
- */
-export function removeNode(
-  tree: SplitNode,
-  targetId: string
-): SplitNode | null {
-  if (tree.type === "leaf") {
-    return tree.id === targetId ? null : tree;
-  }
-
-  if (tree.first.type === "leaf" && tree.first.id === targetId) {
-    return tree.second;
-  }
-  if (tree.second.type === "leaf" && tree.second.id === targetId) {
-    return tree.first;
-  }
-
+export function removeNode(tree: SplitNode, targetId: string): SplitNode | null {
+  if (tree.type === "group") return tree.id === targetId ? null : tree;
+  if (tree.first.type === "group" && tree.first.id === targetId) return tree.second;
+  if (tree.second.type === "group" && tree.second.id === targetId) return tree.first;
   const newFirst = removeNode(tree.first, targetId);
   if (newFirst !== tree.first) {
     return newFirst === null ? tree.second : { ...tree, first: newFirst };
   }
-
   const newSecond = removeNode(tree.second, targetId);
   if (newSecond !== tree.second) {
     return newSecond === null ? tree.first : { ...tree, second: newSecond };
   }
-
   return tree;
 }
 
-/**
- * Get the next/previous leaf ID for keyboard navigation.
- * `direction`: 1 for next (Cmd+]), -1 for previous (Cmd+[)
- */
 export function getAdjacentLeafId(
   tree: SplitNode,
   currentId: string,
-  direction: 1 | -1
+  direction: 1 | -1,
 ): string {
-  const leaves = getLeaves(tree);
-  const idx = leaves.findIndex((l) => l.id === currentId);
-  if (idx === -1) return leaves[0]?.id ?? currentId;
-  const nextIdx = (idx + direction + leaves.length) % leaves.length;
-  return leaves[nextIdx].id;
+  const groups = getGroups(tree);
+  const idx = groups.findIndex((group) => group.id === currentId);
+  if (idx === -1) return groups[0]?.id ?? currentId;
+  return groups[(idx + direction + groups.length) % groups.length].id;
 }
 
-/**
- * Update the ratio of a split node that contains a specific child.
- * Used when the user drags a resize handle.
- */
-export function updateRatio(
-  tree: SplitNode,
-  splitId: string,
-  ratio: number
-): SplitNode {
-  if (tree.type === "leaf") return tree;
-  if (
-    tree.type === "split" &&
-    ((tree.first.type === "leaf" && tree.first.id === splitId) ||
-      (tree.first.type === "split" && getLeaves(tree.first)[0]?.id === splitId))
-  ) {
-    return { ...tree, ratio };
+type PaneBounds = {
+  id: string;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+function collectPaneBounds(
+  node: SplitNode,
+  bounds: Omit<PaneBounds, "id">,
+): PaneBounds[] {
+  if (node.type === "group") return [{ id: node.id, ...bounds }];
+
+  if (node.orientation === "vertical") {
+    const divider = bounds.left + (bounds.right - bounds.left) * node.ratio;
+    return [
+      ...collectPaneBounds(node.first, { ...bounds, right: divider }),
+      ...collectPaneBounds(node.second, { ...bounds, left: divider }),
+    ];
   }
+
+  const divider = bounds.top + (bounds.bottom - bounds.top) * node.ratio;
+  return [
+    ...collectPaneBounds(node.first, { ...bounds, bottom: divider }),
+    ...collectPaneBounds(node.second, { ...bounds, top: divider }),
+  ];
+}
+
+/** Find the nearest pane that is geometrically left or right of a pane. */
+export function getHorizontalNeighborGroupId(
+  tree: SplitNode,
+  groupId: string,
+  direction: "left" | "right",
+): string | null {
+  const panes = collectPaneBounds(tree, {
+    left: 0,
+    right: 1,
+    top: 0,
+    bottom: 1,
+  });
+  const current = panes.find((pane) => pane.id === groupId);
+  if (!current) return null;
+
+  const epsilon = 1e-9;
+  const candidates = panes
+    .filter((pane) => {
+      const verticalOverlap =
+        Math.min(current.bottom, pane.bottom) - Math.max(current.top, pane.top);
+      if (verticalOverlap <= epsilon) return false;
+      return direction === "right"
+        ? pane.left >= current.right - epsilon
+        : pane.right <= current.left + epsilon;
+    })
+    .map((pane) => ({
+      pane,
+      gap:
+        direction === "right"
+          ? pane.left - current.right
+          : current.left - pane.right,
+      overlap:
+        Math.min(current.bottom, pane.bottom) - Math.max(current.top, pane.top),
+      centerDistance: Math.abs(
+        (pane.top + pane.bottom) / 2 - (current.top + current.bottom) / 2,
+      ),
+    }))
+    .sort(
+      (a, b) =>
+        a.gap - b.gap ||
+        b.overlap - a.overlap ||
+        a.centerDistance - b.centerDistance,
+    );
+
+  return candidates[0]?.pane.id ?? null;
+}
+
+export function updateRatio(tree: SplitNode, splitId: string, ratio: number): SplitNode {
+  if (tree.type === "group") return tree;
+  if (getGroups(tree.second)[0]?.id === splitId) return { ...tree, ratio };
   return {
     ...tree,
     first: updateRatio(tree.first, splitId, ratio),
@@ -124,22 +241,103 @@ export function updateRatio(
   };
 }
 
-/** Internal helper: replace a leaf node using a transform function */
+export function updateGroup(
+  tree: SplitNode,
+  groupId: string,
+  update: (group: SplitGroup) => SplitGroup,
+): SplitNode {
+  if (tree.type === "group") return tree.id === groupId ? update(tree) : tree;
+  return {
+    ...tree,
+    first: updateGroup(tree.first, groupId, update),
+    second: updateGroup(tree.second, groupId, update),
+  };
+}
+
+export function updateLeafContent(
+  tree: SplitNode,
+  tabId: string,
+  update: (content: PaneContent) => PaneContent,
+): SplitNode {
+  const found = findGroupTab(tree, tabId);
+  if (!found) return tree;
+  return updateGroup(tree, found.group.id, (group) => ({
+    ...group,
+    tabs: group.tabs.map((tab) =>
+      tab.id === tabId ? { ...tab, content: update(tab.content) } : tab,
+    ),
+  }));
+}
+
+export function updateGroupTab(
+  tree: SplitNode,
+  tabId: string,
+  update: (tab: GroupTab) => GroupTab,
+): SplitNode {
+  const found = findGroupTab(tree, tabId);
+  if (!found) return tree;
+  return updateGroup(tree, found.group.id, (group) => ({
+    ...group,
+    tabs: group.tabs.map((tab) => (tab.id === tabId ? update(tab) : tab)),
+  }));
+}
+
+export function addTabToGroup(
+  tree: SplitNode,
+  groupId: string,
+  tab: GroupTab,
+): SplitNode {
+  return updateGroup(tree, groupId, (group) => ({
+    ...group,
+    tabs: [...group.tabs, tab],
+    activeTabId: tab.id,
+  }));
+}
+
+export function setActiveGroupTab(
+  tree: SplitNode,
+  groupId: string,
+  tabId: string,
+): SplitNode {
+  return updateGroup(tree, groupId, (group) =>
+    group.tabs.some((tab) => tab.id === tabId)
+      ? { ...group, activeTabId: tabId }
+      : group,
+  );
+}
+
+export function removeGroupTab(
+  tree: SplitNode,
+  groupId: string,
+  tabId: string,
+): { tree: SplitNode | null; removed: GroupTab | null } {
+  const group = findGroup(tree, groupId);
+  const removed = group?.tabs.find((tab) => tab.id === tabId) ?? null;
+  if (!group || !removed) return { tree, removed: null };
+  if (group.tabs.length === 1) return { tree: removeNode(tree, groupId), removed };
+  const index = group.tabs.indexOf(removed);
+  const remaining = group.tabs.filter((tab) => tab.id !== tabId);
+  const activeTabId = group.activeTabId === tabId
+    ? remaining[Math.min(index, remaining.length - 1)].id
+    : group.activeTabId;
+  return {
+    tree: updateGroup(tree, groupId, (current) => ({
+      ...current,
+      tabs: remaining,
+      activeTabId,
+    })),
+    removed,
+  };
+}
+
 function replaceNode(
   tree: SplitNode,
   targetId: string,
-  transform: (leaf: Extract<SplitNode, { type: "leaf" }>) => SplitNode
+  transform: (group: SplitGroup) => SplitNode,
 ): SplitNode | null {
-  if (tree.type === "leaf") {
-    if (tree.id === targetId) return transform(tree);
-    return null;
-  }
-
-  const newFirst = replaceNode(tree.first, targetId, transform);
-  if (newFirst) return { ...tree, first: newFirst };
-
-  const newSecond = replaceNode(tree.second, targetId, transform);
-  if (newSecond) return { ...tree, second: newSecond };
-
-  return null;
+  if (tree.type === "group") return tree.id === targetId ? transform(tree) : null;
+  const first = replaceNode(tree.first, targetId, transform);
+  if (first) return { ...tree, first };
+  const second = replaceNode(tree.second, targetId, transform);
+  return second ? { ...tree, second } : null;
 }

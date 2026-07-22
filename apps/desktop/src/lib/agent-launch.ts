@@ -45,10 +45,11 @@ export async function launchAgentHeadless(opts: {
     shellPath: launch.shell_path,
     shellArgs: launch.shell_args,
     envVars: {
-      IMPALA_HOOK_PORT: String(hookPort),
-      IMPALA_WORKTREE_PATH: worktreePath,
       ...launch.env,
       ...extraEnv,
+      IMPALA_HOOK_PORT: String(hookPort),
+      IMPALA_WORKTREE_PATH: worktreePath,
+      IMPALA_PANE_ID: AGENT_PANE_ID,
     },
   });
 

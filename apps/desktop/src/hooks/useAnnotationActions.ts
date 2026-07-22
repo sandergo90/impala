@@ -111,7 +111,7 @@ export function useAnnotationActions() {
       const currentTab = useUIStore.getState().getWorktreeNavState(worktreePath).activeTab;
       useUIStore.getState().updateWorktreeNavState(worktreePath, {
         activeTerminalsTab: AGENT_PANE_ID,
-        ...(currentTab === "diff" ? { activeTab: "split" } : {}),
+        ...(currentTab === "diff" ? { activeTab: "terminal" } : {}),
       });
     },
     [worktreePath]

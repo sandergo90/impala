@@ -361,6 +361,79 @@ fn tool_browser_type(args: &Value) -> Result<Value, String> {
     .map(strip_ok)
 }
 
+fn tool_browser_click_at(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let x = args
+        .get("x")
+        .and_then(|v| v.as_f64())
+        .ok_or("missing required parameter: x")?;
+    let y = args
+        .get("y")
+        .and_then(|v| v.as_f64())
+        .ok_or("missing required parameter: y")?;
+    browser_get(
+        "/browser/click_at",
+        &[
+            ("worktree_path", &wt),
+            ("x", &x.to_string()),
+            ("y", &y.to_string()),
+        ],
+    )
+    .map(strip_ok)
+}
+
+fn tool_browser_scroll(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let dy = args
+        .get("dy")
+        .and_then(|v| v.as_f64())
+        .ok_or("missing required parameter: dy")?;
+    let dx = args.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    browser_get(
+        "/browser/scroll",
+        &[
+            ("worktree_path", &wt),
+            ("dy", &dy.to_string()),
+            ("dx", &dx.to_string()),
+        ],
+    )
+    .map(strip_ok)
+}
+
+fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let prompt = args
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("missing required parameter: prompt")?;
+    let agent = args.get("agent").and_then(|value| value.as_str());
+    if let Some(agent) = agent {
+        if agent != "claude" && agent != "codex" {
+            return Err("agent must be 'claude' or 'codex'".to_string());
+        }
+    }
+    let placement = args
+        .get("placement")
+        .and_then(|value| value.as_str())
+        .unwrap_or("auto");
+    if !matches!(placement, "auto" | "current" | "left" | "right") {
+        return Err("placement must be 'auto', 'current', 'left', or 'right'".to_string());
+    }
+    let mut params = vec![("worktree_path", wt.as_str()), ("prompt", prompt)];
+    if let Some(agent) = agent {
+        params.push(("agent", agent));
+    }
+    let source_pane_id = std::env::var("IMPALA_PANE_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    if let Some(source_pane_id) = source_pane_id.as_deref() {
+        params.push(("source_pane_id", source_pane_id));
+    }
+    params.push(("placement", placement));
+    browser_get("/agents/open", &params).map(strip_ok)
+}
+
 fn tool_browser_screenshot(args: &Value) -> Result<String, String> {
     let wt = param_or_cwd(args, "worktree_path")?;
     let body = browser_get("/browser/screenshot", &[("worktree_path", &wt)])?;
@@ -524,7 +597,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "browser_page_info",
-                "description": "Get the current URL, title, and document readyState of this worktree's Impala browser pane. Cheap first call before navigating or screenshotting — tells you whether a pane is open and what it's showing.",
+                "description": "Get the current URL, title, document readyState, and viewport size (CSS px) of this worktree's Impala browser pane. Cheap first call before navigating or screenshotting — tells you whether a pane is open and what it's showing. The viewport size is also how you scale screenshot pixel coordinates for browser_click_at.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -555,7 +628,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "browser_click",
-                "description": "Click an element in this worktree's Impala browser pane by CSS selector (from a browser annotation, or found via browser_console/page inspection). Dispatches a full pointer/mouse sequence plus click. Events are synthesized (isTrusted: false) — fine for app buttons/links/tabs, but native controls like file pickers won't respond. Take a browser_screenshot afterwards to verify the result.",
+                "description": "Click an element in this worktree's Impala browser pane by CSS selector (from a browser annotation, or found via browser_console/page inspection). Delivers real platform input — the page sees trusted events (isTrusted: true) with user activation, so clipboard access and native controls respond. A native OS dialog (e.g. a file picker) may open; you cannot drive those — tell the user. window.open to a new window stays blocked (the pane has no popup handling). A visible cursor glides to the target in the pane. Take a browser_screenshot afterwards to verify the result.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -573,7 +646,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "browser_type",
-                "description": "Type into an input, textarea, or contenteditable in this worktree's Impala browser pane by CSS selector. Sets the value through the native setter and fires input/change events so frameworks (React, Vue) register it. Replaces the whole current value — pass an empty string to clear. No key events are synthesized, so keystroke-shortcut handlers won't fire. Take a browser_screenshot afterwards to verify.",
+                "description": "Type into an input, textarea, or contenteditable in this worktree's Impala browser pane by CSS selector: a real click focuses the element, the current value is selected, and the text is typed as real keystrokes (trusted keydown/input events — frameworks and keystroke handlers register them). Replaces the whole current value — pass an empty string to clear. Newline characters press Return, which may submit the form. Falls back to a native value-setter if the element refuses focus. Take a browser_screenshot afterwards to verify.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -591,6 +664,78 @@ fn tool_definitions() -> Value {
                         }
                     },
                     "required": ["selector", "text"]
+                }
+            },
+            {
+                "name": "browser_click_at",
+                "description": "Click at raw viewport coordinates in this worktree's Impala browser pane — for canvas, maps, or other targets with no usable CSS selector (otherwise prefer browser_click). Coordinates are CSS pixels with origin at the viewport's top-left. Screenshots are captured at the display's scale factor: divide screenshot pixel coordinates by (screenshot width / viewport width from browser_page_info) before passing them here. The click is real platform input, delivered with a visible cursor glide.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        },
+                        "x": {
+                            "type": "number",
+                            "description": "X coordinate in CSS px from the viewport's left edge"
+                        },
+                        "y": {
+                            "type": "number",
+                            "description": "Y coordinate in CSS px from the viewport's top edge"
+                        }
+                    },
+                    "required": ["x", "y"]
+                }
+            },
+            {
+                "name": "browser_scroll",
+                "description": "Scroll this worktree's Impala browser pane with a real wheel event aimed at the viewport center. Positive dy scrolls down, negative up; dx scrolls horizontally (optional, default 0). Deltas are CSS pixels. Take a browser_screenshot afterwards to see the result.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        },
+                        "dy": {
+                            "type": "number",
+                            "description": "Vertical scroll amount in CSS px (positive scrolls down)"
+                        },
+                        "dx": {
+                            "type": "number",
+                            "description": "Horizontal scroll amount in CSS px (positive scrolls right, default 0)"
+                        }
+                    },
+                    "required": ["dy"]
+                }
+            },
+            {
+                "name": "open_agent_tab",
+                "description": "Delegate work to a fresh agent thread in a new Impala Agent tab for this worktree. The caller pane is detected automatically. Set placement='right' or 'left' to open the tab in that neighboring split pane, or placement='current' for the caller's pane. With the default placement='auto', a caller in a secondary split pane opens locally; otherwise the tab opens in the main workspace strip. Use when the user says to investigate, implement, continue, or do something 'in a new thread', 'in another agent tab', or equivalent. Pass agent='claude' or agent='codex' when the user names a provider; omit it to use the worktree's configured agent. The new thread has no access to this conversation: turn references such as 'this issue' or 'this plan' into a self-contained prompt with the relevant paths, requirements, and context. After opening the tab, do not also perform the delegated task in the current thread unless the user explicitly asks you to.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "Self-contained task for the new agent thread"
+                        },
+                        "agent": {
+                            "type": "string",
+                            "enum": ["claude", "codex"],
+                            "description": "Agent provider for this tab. Defaults to the worktree's configured agent."
+                        },
+                        "placement": {
+                            "type": "string",
+                            "enum": ["auto", "current", "left", "right"],
+                            "description": "Where to open the tab relative to the calling agent pane. Defaults to auto."
+                        }
+                    },
+                    "required": ["prompt"]
                 }
             },
             {
@@ -805,7 +950,10 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_page_info" => tool_browser_page_info(&tool_args),
                 "browser_navigate" => tool_browser_navigate(&tool_args),
                 "browser_click" => tool_browser_click(&tool_args),
+                "browser_click_at" => tool_browser_click_at(&tool_args),
+                "browser_scroll" => tool_browser_scroll(&tool_args),
                 "browser_type" => tool_browser_type(&tool_args),
+                "open_agent_tab" => tool_open_agent_tab(&tool_args),
                 "list_automations" => tool_list_automations(&tool_args),
                 "create_automation" => tool_create_automation(&tool_args),
                 "run_automation_now" => tool_run_automation_now(&tool_args),

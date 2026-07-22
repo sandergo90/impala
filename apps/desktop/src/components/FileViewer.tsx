@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@/lib/invoke";
 import { listen } from "@tauri-apps/api/event";
-import { useUIStore } from "../store";
 import { useEditorDocsStore, type SaveOutcome } from "../stores/editor-docs";
 import { buildDocumentKey, getCurrent, getBaseline } from "../lib/editor-buffer-registry";
 import { classifyFile, formatBytes, TEXT_SIZE_CAP_BYTES, type FileKind } from "../lib/file-kind";
@@ -38,17 +37,18 @@ function Placeholder({
   );
 }
 
-export function FileViewer() {
-  const selectedWorktree = useUIStore((s) => s.selectedWorktree);
-  const wtPath = selectedWorktree?.path ?? null;
-  const activeTabId = useUIStore((s) =>
-    wtPath ? s.worktreeNavStates[wtPath]?.activeTerminalsTab ?? null : null,
-  );
-  const selectedFilePath = useUIStore((s) => {
-    if (!wtPath || !activeTabId) return null;
-    const tab = s.worktreeNavStates[wtPath]?.userTabs.find((t) => t.id === activeTabId);
-    return tab && tab.kind === "file" ? tab.path ?? null : null;
-  });
+export function FileViewer({
+  worktreePath,
+  path,
+}: {
+  worktreePath: string;
+  path: string;
+}) {
+  // Prop-driven so two panes can each show a different file. The leaf decides
+  // "which file"; the pane-agnostic editor-docs store keeps buffers keyed by
+  // worktreePath+path, so backgrounding/restore keeps working.
+  const wtPath = worktreePath;
+  const selectedFilePath = path;
 
   const fullPath = wtPath && selectedFilePath ? `${wtPath}/${selectedFilePath}` : null;
   const initialKind: FileKind | null = selectedFilePath ? classifyFile(selectedFilePath) : null;

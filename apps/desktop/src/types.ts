@@ -92,8 +92,23 @@ export interface AutomationRun {
   created_at: string;
 }
 
+/** What fills a single pane. The leaf's content is the source of truth for it. */
+export type PaneContent =
+  | { kind: "agent" }
+  | { kind: "shell" }
+  | { kind: "file"; path: string }
+  | { kind: "browser"; url?: string };
+
+export interface GroupTab {
+  id: string;
+  label: string;
+  content: PaneContent;
+  createdAt: number;
+  pinned?: boolean;
+}
+
 export type SplitNode =
-  | { type: "leaf"; id: string; paneType: "agent" | "shell" }
+  | { type: "group"; id: string; tabs: GroupTab[]; activeTabId: string }
   | {
       type: "split";
       orientation: "horizontal" | "vertical";
@@ -121,27 +136,22 @@ export interface UserTab {
   /** Current URL; only set when kind === "browser". Persisted so the tab restores. */
   url?: string;
   /**
-   * Recursive split tree of panes inside this tab. Optional for backward
-   * compatibility with tabs created before Phase 4: when absent, the
-   * renderer synthesizes a single leaf with id `tab-user-${id}`. Never set
-   * for `kind: "file"` (no PTY).
+   * Recursive split tree of panes inside this tab; the leaves' `content` is
+   * the source of truth for what each pane shows. Optional for backward
+   * compatibility: when absent, `getEffectiveUserTabSplitTree` synthesizes a
+   * single leaf (id `tab-user-${id}`) whose content is derived from `kind` +
+   * `path`/`url`.
    */
   splitTree?: SplitNode;
   /**
    * Id of the currently focused leaf inside `splitTree`. Optional; the
-   * renderer falls back to the first leaf when absent or stale. Never set
-   * for `kind: "file"`.
+   * renderer falls back to the first leaf when absent or stale.
    */
   focusedPaneId?: string;
 }
 
 export interface WorktreeNavState {
-  activeTab: "terminal" | "diff" | "split";
-  /**
-   * What the right panel of the top-level Split mode shows: the diff or the
-   * worktree's browser tab. Persisted; defaults to "diff".
-   */
-  splitRightPane?: "diff" | "browser";
+  activeTab: "terminal" | "diff";
   agentLaunched: boolean;
   viewMode: "commit" | "all-changes" | "uncommitted" | "last-turn";
   selectedCommit: CommitInfo | null;
@@ -160,6 +170,15 @@ export interface WorktreeNavState {
   runStatus: "idle" | "running" | "stopping";
   /** User-added tabs (plus button). Empty when the user hasn't created any. */
   userTabs: UserTab[];
+  /**
+   * Split tree for the synthesized Agent system tab. The root leaf keeps id
+   * `AGENT_PANE_ID` so the primary agent's PTY session is unchanged. Optional;
+   * `getEffectiveAgentTabSplitTree` synthesizes a single agent leaf when
+   * absent. Persisted. The Run tab stays unsplittable.
+   */
+  agentTabSplitTree?: SplitNode;
+  /** Focused leaf id inside `agentTabSplitTree`. Persisted. */
+  agentTabFocusedPaneId?: string;
   /**
    * Stack of previously-visited tab IDs in this worktree, most recent last.
    * Maintained automatically by `updateWorktreeNavState` whenever

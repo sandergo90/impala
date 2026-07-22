@@ -6,11 +6,18 @@ use tauri::webview::{PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl};
 use tracing::{debug, info, warn};
 
-/// tabId -> worktreePath for every live browser webview. Lets worktree-scoped
-/// callers (hook-server endpoints, MCP tools) find "the browser pane of this
-/// worktree" without knowing frontend tab state.
+/// Per-tab state for every live browser webview, keyed by tab id. Lets
+/// worktree-scoped callers (hook-server endpoints, MCP tools) find "the
+/// browser pane of this worktree" without knowing frontend tab state, and
+/// carries the virtual cursor's last position so glides stay continuous
+/// across navigations (each page re-creates the overlay from scratch).
+pub struct TabState {
+    pub worktree_path: String,
+    pub cursor: Option<(f64, f64)>,
+}
+
 #[derive(Default)]
-pub struct BrowserRegistry(pub Mutex<HashMap<String, String>>);
+pub struct BrowserRegistry(pub Mutex<HashMap<String, TabState>>);
 
 /// Console capture: shims console.*, window.onerror, and unhandledrejection
 /// into a capped window.__IMPALA_LOGS__ ring buffer. Runs per navigation
@@ -47,6 +54,72 @@ const CONSOLE_SHIM: &str = r#"
   });
 })();
 "#;
+
+/// Virtual cursor overlay: makes agent-driven input visible in the pane. A
+/// pointer-events:none arrow that glides to each interaction point (350ms,
+/// matching the Rust-side wait in animate_cursor) and fades out after 2s
+/// idle. Unregistered custom element names keep page CSS from styling it.
+/// Runs per navigation; Rust re-seeds the position via moveTo's seed args.
+const CURSOR_JS: &str = r##"
+(function () {
+  if (window.__IMPALA_CURSOR__) return;
+  var GLIDE = "transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)";
+  var FADE = "opacity 0.25s ease";
+  var el = null, fadeTimer = null, pos = null;
+  function ensure() {
+    if (el && el.isConnected) return el;
+    el = document.createElement("impala-cursor");
+    el.style.cssText =
+      "position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;display:block;" +
+      "opacity:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));transition:" + GLIDE + "," + FADE + ";";
+    el.innerHTML =
+      '<svg width="17" height="22" viewBox="0 0 17 22" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M1 1 L1 16.6 L5.4 12.9 L8 19.4 L11.2 18.1 L8.6 11.8 L14.6 11.3 Z" ' +
+      'fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+    (document.body || document.documentElement).appendChild(el);
+    return el;
+  }
+  function place(x, y) {
+    ensure().style.transform = "translate(" + x + "px, " + y + "px)";
+    pos = { x: x, y: y };
+  }
+  function wake() {
+    ensure().style.opacity = "1";
+    if (fadeTimer) clearTimeout(fadeTimer);
+    fadeTimer = setTimeout(function () { if (el) el.style.opacity = "0"; }, 2000);
+  }
+  window.__IMPALA_CURSOR__ = {
+    moveTo: function (x, y, seedX, seedY) {
+      var c = ensure();
+      if (!pos) {
+        // Fresh overlay (first action, or first after a navigation): start
+        // from the seed — the pre-navigation position — without animating.
+        c.style.transition = FADE;
+        place(seedX == null ? x : seedX, seedY == null ? y : seedY);
+        void c.getBoundingClientRect().width;
+        c.style.transition = GLIDE + "," + FADE;
+      }
+      place(x, y);
+      wake();
+    },
+    ripple: function () {
+      if (!pos) return;
+      var r = document.createElement("impala-cursor-ripple");
+      r.style.cssText =
+        "position:fixed;z-index:2147483646;pointer-events:none;display:block;" +
+        "left:" + (pos.x - 12) + "px;top:" + (pos.y - 12) + "px;width:24px;height:24px;" +
+        "border-radius:50%;border:2px solid rgba(59,130,246,0.9);background:rgba(59,130,246,0.3);" +
+        "transform:scale(0.35);opacity:1;transition:transform 0.4s ease-out, opacity 0.45s ease-out;";
+      (document.body || document.documentElement).appendChild(r);
+      void r.getBoundingClientRect().width;
+      r.style.transform = "scale(1.7)";
+      r.style.opacity = "0";
+      setTimeout(function () { if (r.parentNode) r.parentNode.removeChild(r); }, 500);
+      wake();
+    }
+  };
+})();
+"##;
 
 // Webview labels must stay within tauri's allowed charset; tab ids are
 // frontend-generated (`browser-{slot}-{timestamp}`) but sanitize anyway.
@@ -88,7 +161,12 @@ pub async fn browser_open(
         .0
         .lock()
         .unwrap()
-        .insert(id.clone(), worktree_path);
+        .entry(id.clone())
+        .and_modify(|tab| tab.worktree_path = worktree_path.clone())
+        .or_insert_with(|| TabState {
+            worktree_path: worktree_path.clone(),
+            cursor: None,
+        });
 
     if let Ok(wv) = get_webview(&app, &id) {
         info!(id = %id, x, y, width, height, "browser_open: reshow existing webview");
@@ -116,6 +194,7 @@ pub async fn browser_open(
              (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
         )
         .initialization_script(CONSOLE_SHIM)
+        .initialization_script(CURSOR_JS)
         .on_navigation(move |url| {
             debug!(id = %nav_id, url = %url, "browser on_navigation");
             let _ = nav_app.emit_to("main", &format!("browser-nav-{nav_id}"), url.to_string());
@@ -229,7 +308,7 @@ pub fn webview_for_worktree(app: &AppHandle, worktree_path: &str) -> Result<Webv
     let map = registry.0.lock().unwrap();
     let mut ids: Vec<&String> = map
         .iter()
-        .filter(|(_, wt)| wt.as_str() == worktree_path)
+        .filter(|(_, tab)| tab.worktree_path == worktree_path)
         .map(|(id, _)| id)
         .collect();
     ids.sort();
@@ -263,66 +342,187 @@ pub fn console_logs(wv: &Webview, clear: bool) -> Result<serde_json::Value, Stri
 pub fn page_info(wv: &Webview) -> Result<serde_json::Value, String> {
     let raw = native::eval_js(
         wv,
-        "JSON.stringify({url:location.href,title:document.title,readyState:document.readyState})",
+        "JSON.stringify({url:location.href,title:document.title,readyState:document.readyState,viewport:{width:innerWidth,height:innerHeight}})",
         Duration::from_secs(3),
     )?;
     serde_json::from_str(&raw).map_err(|e| format!("bad page info payload: {e}"))
 }
 
-// Selector-scoped click for agents (deliberately NOT arbitrary JS — that
-// stays frontend-only via browser_eval). Full pointer/mouse sequence plus
-// native .click() activation; events are synthesized (isTrusted: false), so
-// native controls (file pickers, some selects) won't respond.
-const CLICK_JS: &str = r#"
+// Selector resolution for agents (deliberately NOT arbitrary JS — that stays
+// frontend-only via browser_eval): scroll the element into view and return
+// its center in viewport CSS coordinates, clamped inside the viewport. The
+// actual interaction is delivered as real platform events (native module).
+const RESOLVE_JS: &str = r#"
 (function () {
   var el = document.querySelector(__IMPALA_SELECTOR__);
   if (!el) return JSON.stringify({ ok: false, error: "no element matches selector" });
   el.scrollIntoView({ block: "center", inline: "center" });
   var r = el.getBoundingClientRect();
-  var opts = {
-    bubbles: true, cancelable: true, composed: true, view: window,
-    clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0
-  };
-  ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach(function (type) {
-    var ev = type.indexOf("pointer") === 0 ? new PointerEvent(type, opts) : new MouseEvent(type, opts);
-    el.dispatchEvent(ev);
-  });
-  if (el.focus) try { el.focus(); } catch (e) {}
-  if (el.click) el.click();
-  else el.dispatchEvent(new MouseEvent("click", opts));
+  var x = Math.min(Math.max(r.left + r.width / 2, 0), window.innerWidth - 1);
+  var y = Math.min(Math.max(r.top + r.height / 2, 0), window.innerHeight - 1);
   return JSON.stringify({
-    ok: true,
+    ok: true, x: x, y: y,
     tag: el.tagName.toLowerCase(),
     text: (el.innerText || el.value || "").trim().slice(0, 80)
   });
 })()
 "#;
 
-pub fn click_selector(wv: &Webview, selector: &str) -> Result<serde_json::Value, String> {
+struct ResolvedTarget {
+    x: f64,
+    y: f64,
+    tag: String,
+    text: String,
+}
+
+fn resolve_selector(wv: &Webview, selector: &str) -> Result<ResolvedTarget, String> {
     // JSON-encode the selector so it lands as a safe JS string literal.
     let sel_js = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-    let js = CLICK_JS.replace("__IMPALA_SELECTOR__", &sel_js);
-    info!(selector = %selector, "browser click");
+    let js = RESOLVE_JS.replace("__IMPALA_SELECTOR__", &sel_js);
     let raw = native::eval_js(wv, &js, Duration::from_secs(3))?;
     let v: serde_json::Value =
-        serde_json::from_str(&raw).map_err(|e| format!("bad click payload: {e}"))?;
-    if v.get("ok").and_then(|b| b.as_bool()) == Some(true) {
-        Ok(serde_json::json!({
-            "clicked": { "tag": v.get("tag"), "text": v.get("text") }
-        }))
-    } else {
+        serde_json::from_str(&raw).map_err(|e| format!("bad resolve payload: {e}"))?;
+    if v.get("ok").and_then(|b| b.as_bool()) != Some(true) {
         let err = v
             .get("error")
             .and_then(|e| e.as_str())
-            .unwrap_or("click failed");
-        Err(format!("{err}: {selector}"))
+            .unwrap_or("could not resolve selector");
+        return Err(format!("{err}: {selector}"));
+    }
+    Ok(ResolvedTarget {
+        x: v.get("x").and_then(|n| n.as_f64()).ok_or("resolve payload missing x")?,
+        y: v.get("y").and_then(|n| n.as_f64()).ok_or("resolve payload missing y")?,
+        tag: v.get("tag").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+        text: v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+    })
+}
+
+/// Glide the virtual cursor to (x, y) and wait out the animation so the user
+/// can see where the interaction lands before it happens. Best-effort: pages
+/// that reject the eval must not break the interaction itself.
+fn animate_cursor(app: &AppHandle, wv: &Webview, x: f64, y: f64) {
+    let id = wv
+        .label()
+        .strip_prefix("browser-")
+        .unwrap_or(wv.label())
+        .to_string();
+    let seed = app
+        .state::<BrowserRegistry>()
+        .0
+        .lock()
+        .unwrap()
+        .get(&id)
+        .and_then(|tab| tab.cursor);
+    let (sx, sy) = match seed {
+        Some((sx, sy)) => (sx.to_string(), sy.to_string()),
+        None => ("null".to_string(), "null".to_string()),
+    };
+    let js = format!(
+        "window.__IMPALA_CURSOR__ && __IMPALA_CURSOR__.moveTo({x}, {y}, {sx}, {sy}); \"\""
+    );
+    if native::eval_js(wv, &js, Duration::from_secs(1)).is_ok() {
+        // Matches the 350ms CSS glide in CURSOR_JS.
+        std::thread::sleep(Duration::from_millis(400));
+    }
+    if let Some(tab) = app.state::<BrowserRegistry>().0.lock().unwrap().get_mut(&id) {
+        tab.cursor = Some((x, y));
     }
 }
 
-// Value is set through the native prototype setter so framework value
-// trackers (React/Vue controlled inputs) register the change — a direct
-// `.value =` write is invisible to them. Replaces the whole value; no key
-// events are synthesized, so keystroke-level handlers won't fire.
+fn cursor_ripple(wv: &Webview) {
+    let _ = native::eval_js(
+        wv,
+        "window.__IMPALA_CURSOR__ && __IMPALA_CURSOR__.ripple(); \"\"",
+        Duration::from_secs(1),
+    );
+}
+
+pub fn click_selector(
+    app: &AppHandle,
+    wv: &Webview,
+    selector: &str,
+) -> Result<serde_json::Value, String> {
+    let target = resolve_selector(wv, selector)?;
+    info!(selector = %selector, x = target.x, y = target.y, "browser click");
+    animate_cursor(app, wv, target.x, target.y);
+    native::post_mouse_click(wv, target.x, target.y)?;
+    cursor_ripple(wv);
+    Ok(serde_json::json!({
+        "clicked": { "tag": target.tag, "text": target.text }
+    }))
+}
+
+/// Click at raw viewport CSS coordinates — for canvas/vision targets where
+/// no selector exists.
+pub fn click_at(
+    app: &AppHandle,
+    wv: &Webview,
+    x: f64,
+    y: f64,
+) -> Result<serde_json::Value, String> {
+    info!(x, y, "browser click_at");
+    animate_cursor(app, wv, x, y);
+    native::post_mouse_click(wv, x, y)?;
+    cursor_ripple(wv);
+    Ok(serde_json::json!({ "clicked_at": { "x": x, "y": y } }))
+}
+
+/// Scroll with a real wheel event aimed at the viewport center. Positive dy
+/// scrolls down, positive dx scrolls right (scrollBy semantics).
+pub fn scroll(
+    app: &AppHandle,
+    wv: &Webview,
+    dx: f64,
+    dy: f64,
+) -> Result<serde_json::Value, String> {
+    info!(dx, dy, "browser scroll");
+    if let Ok(raw) = native::eval_js(
+        wv,
+        "JSON.stringify({w:innerWidth,h:innerHeight})",
+        Duration::from_secs(1),
+    ) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let (Some(w), Some(h)) = (
+                v.get("w").and_then(|n| n.as_f64()),
+                v.get("h").and_then(|n| n.as_f64()),
+            ) {
+                animate_cursor(app, wv, w / 2.0, h / 2.0);
+            }
+        }
+    }
+    native::post_scroll(wv, dx, dy)?;
+    Ok(serde_json::json!({ "scrolled": { "dx": dx, "dy": dy } }))
+}
+
+// After the real click focused the element, verify focus actually landed on
+// it (or inside it — clicking a wrapper can focus an inner input) and select
+// the current content so the upcoming keystrokes replace it.
+const FOCUS_SELECT_JS: &str = r#"
+(function () {
+  var el = document.querySelector(__IMPALA_SELECTOR__);
+  if (!el) return JSON.stringify({ ok: false, error: "no element matches selector" });
+  var active = document.activeElement;
+  var focused = active === el || el.contains(active);
+  if (!focused) return JSON.stringify({ ok: true, focused: false });
+  var target = active && active !== el ? active : el;
+  try {
+    if (target.select) target.select();
+    else if (target.isContentEditable) {
+      var range = document.createRange();
+      range.selectNodeContents(target);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  } catch (e) {}
+  return JSON.stringify({ ok: true, focused: true });
+})()
+"#;
+
+// Fallback for elements that refuse focus: value is set through the native
+// prototype setter so framework value trackers (React/Vue controlled inputs)
+// register the change — a direct `.value =` write is invisible to them.
+// Replaces the whole value; no key events fire.
 const TYPE_JS: &str = r#"
 (function () {
   var el = document.querySelector(__IMPALA_SELECTOR__);
@@ -350,6 +550,45 @@ const TYPE_JS: &str = r#"
 "#;
 
 pub fn type_into_selector(
+    app: &AppHandle,
+    wv: &Webview,
+    selector: &str,
+    text: &str,
+) -> Result<serde_json::Value, String> {
+    let target = resolve_selector(wv, selector)?;
+    info!(selector = %selector, chars = text.len(), "browser type");
+    animate_cursor(app, wv, target.x, target.y);
+    native::post_mouse_click(wv, target.x, target.y)?;
+    cursor_ripple(wv);
+
+    let sel_js = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+    let js = FOCUS_SELECT_JS.replace("__IMPALA_SELECTOR__", &sel_js);
+    let raw = native::eval_js(wv, &js, Duration::from_secs(3))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("bad focus payload: {e}"))?;
+    if v.get("ok").and_then(|b| b.as_bool()) != Some(true) {
+        let err = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("type failed");
+        return Err(format!("{err}: {selector}"));
+    }
+
+    if v.get("focused").and_then(|b| b.as_bool()) == Some(true) {
+        // The old value is selected; typing replaces it. Empty text deletes
+        // the selection instead (there are no keystrokes to do it for us).
+        if text.is_empty() {
+            native::post_key_text(wv, "\u{7f}")?;
+        } else {
+            native::post_key_text(wv, text)?;
+        }
+        Ok(serde_json::json!({ "typed": { "tag": target.tag } }))
+    } else {
+        set_value_via_setter(wv, selector, text)
+    }
+}
+
+fn set_value_via_setter(
     wv: &Webview,
     selector: &str,
     text: &str,
@@ -359,7 +598,6 @@ pub fn type_into_selector(
     let js = TYPE_JS
         .replace("__IMPALA_SELECTOR__", &sel_js)
         .replace("__IMPALA_TEXT__", &text_js);
-    info!(selector = %selector, chars = text.len(), "browser type");
     let raw = native::eval_js(wv, &js, Duration::from_secs(3))?;
     let v: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("bad type payload: {e}"))?;
@@ -438,10 +676,13 @@ mod native {
     use block2::RcBlock;
     use objc2::runtime::AnyObject;
     use objc2::rc::Retained;
+    use objc2::MainThreadMarker;
     use objc2_app_kit::{
-        NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSImage,
+        NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSEvent,
+        NSEventModifierFlags, NSEventType, NSImage, NSScreen, NSWindow,
     };
-    use objc2_foundation::{NSDictionary, NSError, NSString};
+    use objc2_core_graphics::{CGEvent, CGScrollEventUnit};
+    use objc2_foundation::{NSDictionary, NSError, NSPoint, NSProcessInfo, NSString};
     use objc2_web_kit::WKWebView;
     use tauri::Webview;
 
@@ -521,6 +762,210 @@ mod native {
             .map_err(|_| "timed out waiting for the snapshot".to_string())?
     }
 
+    /// Convert webview-local CSS coordinates (top-left origin, what
+    /// getBoundingClientRect returns; WKWebView is 1:1 CSS px ↔ logical
+    /// points) to window coordinates, rejecting points outside the viewport.
+    fn window_point(wk: &WKWebView, x: f64, y: f64) -> Result<(NSPoint, Retained<NSWindow>), String> {
+        let window = wk
+            .window()
+            .ok_or("browser webview is not attached to a window")?;
+        let bounds = wk.bounds();
+        if x < 0.0 || y < 0.0 || x >= bounds.size.width || y >= bounds.size.height {
+            return Err(format!(
+                "point ({x:.0}, {y:.0}) is outside the browser viewport ({:.0}x{:.0})",
+                bounds.size.width, bounds.size.height
+            ));
+        }
+        // AppKit view coords are bottom-left origin unless the view is
+        // flipped (WKWebView is); convertPoint handles frame offset + any
+        // further flips up the hierarchy.
+        let local = if wk.isFlipped() {
+            NSPoint::new(x, y)
+        } else {
+            NSPoint::new(x, bounds.size.height - y)
+        };
+        Ok((wk.convertPoint_toView(local, None), window))
+    }
+
+    fn mouse_event(
+        ty: NSEventType,
+        location: NSPoint,
+        window_number: isize,
+        time: f64,
+        clicks: isize,
+        pressure: f32,
+    ) -> Result<Retained<NSEvent>, String> {
+        NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+            ty,
+            location,
+            NSEventModifierFlags::empty(),
+            time,
+            window_number,
+            None,
+            0,
+            clicks,
+            pressure,
+        )
+        .ok_or_else(|| "could not create mouse event".to_string())
+    }
+
+    /// Deliver a real mouse click (move → down → up) to the webview. Events
+    /// go directly to the view's NSResponder methods rather than through
+    /// NSWindow::sendEvent: coordinates round-trip exactly (window coords
+    /// are computed FROM the view's current frame), no hit-testing can
+    /// misroute the click, and it keeps working while the pane is parked
+    /// offscreen (background tab). WebKit treats them as user input, so the
+    /// page sees isTrusted: true and user-gesture gates are satisfied.
+    ///
+    /// Same threading contract as eval_js: never call ON the main thread.
+    pub fn post_mouse_click(webview: &Webview, x: f64, y: f64) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel::<Result<(), String>>();
+        webview
+            .with_webview(move |pw| {
+                let result = (|| {
+                    let wk = unsafe { &*(pw.inner() as *const WKWebView) };
+                    let (location, window) = window_point(wk, x, y)?;
+                    let wnum = window.windowNumber();
+                    let time = NSProcessInfo::processInfo().systemUptime();
+                    // The move primes hover state so :hover styles and
+                    // mouseover handlers see the pointer before the click.
+                    let moved =
+                        mouse_event(NSEventType::MouseMoved, location, wnum, time, 0, 0.0)?;
+                    wk.mouseMoved(&moved);
+                    let down =
+                        mouse_event(NSEventType::LeftMouseDown, location, wnum, time, 1, 1.0)?;
+                    wk.mouseDown(&down);
+                    let up = mouse_event(
+                        NSEventType::LeftMouseUp,
+                        location,
+                        wnum,
+                        time + 0.05,
+                        1,
+                        0.0,
+                    )?;
+                    wk.mouseUp(&up);
+                    Ok(())
+                })();
+                let _ = tx.send(result);
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(Duration::from_secs(3))
+            .map_err(|_| "timed out posting mouse events".to_string())?
+    }
+
+    /// Real wheel event at the viewport center. NSEvent has no public
+    /// scroll constructor, so build a CGEvent and wrap it (the
+    /// WebKitTestRunner pattern). An NSEvent wrapped from a window-less
+    /// CGEvent reports its location flipped relative to the first screen
+    /// (rdar://17180591), so the CGEvent location is pre-flipped to make
+    /// locationInWindow come out at the target point. Positive dy scrolls
+    /// down, positive dx scrolls right (scrollBy semantics); CGEvent wheel
+    /// deltas point the other way, hence the negation.
+    pub fn post_scroll(webview: &Webview, dx: f64, dy: f64) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel::<Result<(), String>>();
+        webview
+            .with_webview(move |pw| {
+                let result = (|| {
+                    let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
+                    let wk = unsafe { &*(pw.inner() as *const WKWebView) };
+                    let bounds = wk.bounds();
+                    let (location, _window) =
+                        window_point(wk, bounds.size.width / 2.0, bounds.size.height / 2.0)?;
+                    let cg = CGEvent::new_scroll_wheel_event2(
+                        None,
+                        CGScrollEventUnit::Pixel,
+                        2,
+                        (-dy) as i32,
+                        (-dx) as i32,
+                        0,
+                    )
+                    .ok_or("could not create scroll event")?;
+                    let screen_height = NSScreen::screens(mtm)
+                        .firstObject()
+                        .map(|s| s.frame().size.height)
+                        .unwrap_or(0.0);
+                    CGEvent::set_location(
+                        Some(&cg),
+                        NSPoint::new(location.x, screen_height - location.y),
+                    );
+                    let event =
+                        NSEvent::eventWithCGEvent(&cg).ok_or("could not wrap scroll event")?;
+                    wk.scrollWheel(&event);
+                    Ok(())
+                })();
+                let _ = tx.send(result);
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(Duration::from_secs(3))
+            .map_err(|_| "timed out posting the scroll event".to_string())?
+    }
+
+    /// Trusted typing: per-character keyDown/keyUp pairs. WebKit inserts
+    /// text from `characters`, so exact key codes are unnecessary except
+    /// for the specials it maps by code (Return, Tab, Backspace). Keyboard
+    /// focus moves to the webview for the duration — required for key
+    /// routing — and is restored afterwards so the user's terminal/editor
+    /// focus survives agent typing.
+    pub fn post_key_text(webview: &Webview, text: &str) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel::<Result<(), String>>();
+        let text = text.to_string();
+        webview
+            .with_webview(move |pw| {
+                let result = (|| {
+                    let wk = unsafe { &*(pw.inner() as *const WKWebView) };
+                    let window = wk
+                        .window()
+                        .ok_or("browser webview is not attached to a window")?;
+                    let wnum = window.windowNumber();
+                    let previous = window.firstResponder();
+                    window.makeFirstResponder(Some(wk));
+                    let location = NSPoint::new(0.0, 0.0);
+                    let outcome = (|| {
+                        for ch in text.chars() {
+                            let (chars, code): (String, u16) = match ch {
+                                '\r' | '\n' => ("\r".to_string(), 36),
+                                '\t' => ("\t".to_string(), 48),
+                                '\u{8}' | '\u{7f}' => ("\u{7f}".to_string(), 51),
+                                c => (c.to_string(), 0),
+                            };
+                            let chars = NSString::from_str(&chars);
+                            let time = NSProcessInfo::processInfo().systemUptime();
+                            for ty in [NSEventType::KeyDown, NSEventType::KeyUp] {
+                                let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+                                    ty,
+                                    location,
+                                    NSEventModifierFlags::empty(),
+                                    time,
+                                    wnum,
+                                    None,
+                                    &chars,
+                                    &chars,
+                                    false,
+                                    code,
+                                )
+                                .ok_or_else(|| "could not create key event".to_string())?;
+                                if ty == NSEventType::KeyDown {
+                                    wk.keyDown(&event);
+                                } else {
+                                    wk.keyUp(&event);
+                                }
+                            }
+                        }
+                        Ok(())
+                    })();
+                    // Hand keyboard focus back even when typing failed.
+                    if let Some(previous) = previous {
+                        window.makeFirstResponder(Some(&previous));
+                    }
+                    outcome
+                })();
+                let _ = tx.send(result);
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(Duration::from_secs(10))
+            .map_err(|_| "timed out posting key events".to_string())?
+    }
+
     fn encode_png(image: &NSImage) -> Result<Vec<u8>, String> {
         let tiff = image
             .TIFFRepresentation()
@@ -547,6 +992,18 @@ mod native {
     }
 
     pub fn take_screenshot(_wv: &Webview, _t: Duration) -> Result<Vec<u8>, String> {
+        Err("browser agent hooks are only supported on macOS".to_string())
+    }
+
+    pub fn post_mouse_click(_wv: &Webview, _x: f64, _y: f64) -> Result<(), String> {
+        Err("browser agent hooks are only supported on macOS".to_string())
+    }
+
+    pub fn post_scroll(_wv: &Webview, _dx: f64, _dy: f64) -> Result<(), String> {
+        Err("browser agent hooks are only supported on macOS".to_string())
+    }
+
+    pub fn post_key_text(_wv: &Webview, _text: &str) -> Result<(), String> {
         Err("browser agent hooks are only supported on macOS".to_string())
     }
 }

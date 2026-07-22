@@ -4,11 +4,8 @@ import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
 import { RightSidebar } from "../components/RightSidebar";
 import { DiffView } from "../components/DiffView";
 import { SplitTreeRenderer } from "../components/SplitTreeRenderer";
-import {
-  ResizablePanelGroup,
-  ResizablePanel as RrpResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable";
+import { GeneralTerminalLeaf } from "../components/GeneralTerminalLeaf";
+import { updateRatio } from "../lib/split-tree";
 import { ResizablePanel } from "../components/ResizablePanel";
 
 const DEFAULT_SIDEBAR_WIDTH = 280;
@@ -24,10 +21,17 @@ import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 import { RunActionsButton } from "../components/RunActionsButton";
+import { SquareTerminal } from "lucide-react";
 import { TabPill } from "../components/TabPill";
 import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
-import { createUserTab, createBrowserTab, stepActiveTab } from "../lib/tab-actions";
-import { BrowserPane } from "../components/BrowserPane";
+import {
+  addTabToActivePane,
+  createUserTab,
+  createBrowserTab,
+  focusAdjacentActiveGroupTab,
+  shouldCreateTabInFocusedPane,
+  stepActiveTab,
+} from "../lib/tab-actions";
 
 let cachedHomeDir: string | null = null;
 
@@ -49,45 +53,9 @@ export function MainView() {
     setIsRightSidebarResizing(resizing);
     useUIStore.getState().setPanelDragActive(resizing);
   }, []);
-  // Split-divider drags need the same webview parking as sidebar drags now
-  // that a browser pane can sit beside the divider. react-resizable-panels v4
-  // exposes no dragging callback, so bracket it with pointer events.
-  const handleSplitDividerPointerDown = useCallback(() => {
-    useUIStore.getState().setPanelDragActive(true);
-    const end = () => {
-      useUIStore.getState().setPanelDragActive(false);
-      window.removeEventListener("pointerup", end);
-      window.removeEventListener("pointercancel", end);
-    };
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
-  }, []);
-
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const selectedProject = useUIStore((s) => s.selectedProject);
   const wtPath = selectedWorktree?.path;
-
-  const splitRightPane = useUIStore(
-    (s) =>
-      (wtPath ? s.worktreeNavStates[wtPath]?.splitRightPane : undefined) ??
-      "diff",
-  );
-  const splitBrowserTab = useUIStore((s) =>
-    wtPath
-      ? ((s.worktreeNavStates[wtPath]?.userTabs ?? []).find(
-          (t) => t.kind === "browser",
-        ) ?? null)
-      : null,
-  );
-  const setSplitRightPane = useCallback(
-    (pane: "diff" | "browser") => {
-      if (!wtPath) return;
-      useUIStore
-        .getState()
-        .updateWorktreeNavState(wtPath, { splitRightPane: pane });
-    },
-    [wtPath],
-  );
 
   // General terminal state
   const [homeDirPath, setHomeDirPath] = useState<string | null>(cachedHomeDir);
@@ -115,24 +83,58 @@ export function MainView() {
   const sidebarTooltip = useHotkeyTooltip("TOGGLE_SIDEBAR", sidebarCollapsed ? "Show sidebar" : "Hide sidebar");
   const openInEditorTooltip = useHotkeyTooltip("OPEN_IN_EDITOR", "Open in editor");
 
-  const setTab = (tab: "diff" | "terminal" | "split") => {
+  const openWorkspace = () => {
     if (!selectedWorktree) return;
     useUIStore
       .getState()
-      .updateWorktreeNavState(selectedWorktree.path, { activeTab: tab });
+      .updateWorktreeNavState(selectedWorktree.path, { activeTab: "terminal" });
   };
 
-  // -- Tab switching via Cmd+Shift+1/2/3/4 --
-  useAppHotkey("SWITCH_TAB_TERMINAL", () => setTab("terminal"));
-  useAppHotkey("SWITCH_TAB_DIFF", () => setTab("diff"));
-  useAppHotkey("SWITCH_TAB_SPLIT", () => setTab("split"));
+  useAppHotkey("SWITCH_TAB_TERMINAL", openWorkspace);
+
+  useEffect(() => {
+    if (activeTab !== "diff" || !wtPath) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+
+      // Let transient UI dismiss itself first. These surfaces are portalled,
+      // so they are not necessarily descendants of the Diff view.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) {
+        return;
+      }
+
+      event.preventDefault();
+      useUIStore
+        .getState()
+        .updateWorktreeNavState(wtPath, { activeTab: "terminal" });
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [activeTab, wtPath]);
 
   const isWorktreeTerminalActive = Boolean(wtPath) && activeTab === "terminal";
 
   useAppHotkey(
     "NEW_TERMINAL_TAB",
     () => {
-      if (wtPath) createUserTab(wtPath, "terminal");
+      if (!wtPath) return;
+      if (shouldCreateTabInFocusedPane(wtPath)) {
+        addTabToActivePane(wtPath, { kind: "shell" });
+      } else {
+        createUserTab(wtPath, "terminal");
+      }
     },
     { enabled: isWorktreeTerminalActive },
     [wtPath, isWorktreeTerminalActive],
@@ -141,7 +143,26 @@ export function MainView() {
   useAppHotkey(
     "NEW_AGENT_TAB",
     () => {
-      if (wtPath) createUserTab(wtPath, "agent");
+      if (!wtPath) return;
+      if (shouldCreateTabInFocusedPane(wtPath)) {
+        addTabToActivePane(wtPath, { kind: "agent" });
+      } else {
+        createUserTab(wtPath, "agent");
+      }
+    },
+    { enabled: isWorktreeTerminalActive },
+    [wtPath, isWorktreeTerminalActive],
+  );
+
+  useAppHotkey(
+    "NEW_BROWSER_TAB",
+    () => {
+      if (!wtPath) return;
+      if (shouldCreateTabInFocusedPane(wtPath)) {
+        addTabToActivePane(wtPath, { kind: "browser" });
+      } else {
+        createBrowserTab(wtPath);
+      }
     },
     { enabled: isWorktreeTerminalActive },
     [wtPath, isWorktreeTerminalActive],
@@ -151,7 +172,7 @@ export function MainView() {
     "NEXT_TAB",
     () => {
       if (!wtPath) return;
-      stepActiveTab(wtPath, 1);
+      if (!focusAdjacentActiveGroupTab(wtPath, 1)) stepActiveTab(wtPath, 1);
     },
     { enabled: isWorktreeTerminalActive },
     [wtPath, isWorktreeTerminalActive],
@@ -161,7 +182,7 @@ export function MainView() {
     "PREV_TAB",
     () => {
       if (!wtPath) return;
-      stepActiveTab(wtPath, -1);
+      if (!focusAdjacentActiveGroupTab(wtPath, -1)) stepActiveTab(wtPath, -1);
     },
     { enabled: isWorktreeTerminalActive },
     [wtPath, isWorktreeTerminalActive],
@@ -278,28 +299,23 @@ export function MainView() {
                 projectPath={selectedProject?.path ?? null}
                 worktreePath={selectedWorktree?.path ?? null}
               />
-              <span className="mx-0.5 w-px h-3.5 bg-border/50" />
-              {([
-                { tab: "terminal" as const, label: "Terminal", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
-                { tab: "diff" as const, label: "Diff", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M3 12h18"/></svg> },
-                { tab: "split" as const, label: "Split", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg> },
-              ]).map(({ tab, label, icon }) => (
-                <button
-                  key={tab}
-                  onClick={() => setTab(tab)}
-                  className={`relative flex items-center gap-1.5 px-3 py-1 text-md font-medium rounded-[5px] transition-colors ${
-                    activeTab === tab
-                      ? "text-foreground bg-accent"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {icon}
-                  {label}
-                  {tab === "terminal" && hasUnreadRunFailure && (
-                    <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-red-500" />
-                  )}
-                </button>
-              ))}
+              <span className="mx-0.5 h-5 w-px bg-border/60" />
+              <button
+                type="button"
+                onClick={openWorkspace}
+                className={`relative flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
+                  activeTab === "terminal"
+                    ? "bg-accent text-foreground shadow-sm"
+                    : "text-foreground/70 hover:bg-accent/60 hover:text-foreground"
+                }`}
+                aria-pressed={activeTab === "terminal"}
+              >
+                <SquareTerminal aria-hidden="true" className="size-4" />
+                Workspace
+                {hasUnreadRunFailure && (
+                  <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-red-500" aria-label="Run failed" />
+                )}
+              </button>
             </div>
           </div>
         )}
@@ -352,67 +368,30 @@ export function MainView() {
               generalTerminalActive && homeDirPath ? (
                 <SplitTreeRenderer
                   tree={generalTerminalSplitTree}
-                  worktreePath={homeDirPath}
-                  cwd={homeDirPath}
                   focusedPaneId={generalTerminalFocusedPaneId}
-                  paneSessions={generalTerminalPaneSessions}
                   onFocusPane={handleGeneralTerminalFocusPane}
-                  onSessionSpawned={handleGeneralTerminalSessionSpawned}
+                  onRatioChange={(splitId, ratio) => {
+                    const s = useUIStore.getState();
+                    s.setGeneralTerminalSplitTree(
+                      updateRatio(s.generalTerminalSplitTree, splitId, ratio),
+                    );
+                  }}
+                  renderLeaf={(group, isFocused) => (
+                    <GeneralTerminalLeaf
+                      paneId={group.activeTabId}
+                      worktreePath={homeDirPath}
+                      cwd={homeDirPath}
+                      isFocused={isFocused}
+                      sessionId={generalTerminalPaneSessions[group.activeTabId] ?? null}
+                      onSessionSpawned={handleGeneralTerminalSessionSpawned}
+                    />
+                  )}
                 />
               ) : (
                 <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
                   Select a worktree
                 </div>
               )
-            ) : activeTab === "split" ? (
-              <ResizablePanelGroup orientation="horizontal">
-                <RrpResizablePanel defaultSize="50%" minSize={200}>
-                  <WorktreeTerminals activeWorktreePath={wtPath!} agentOnly />
-                </RrpResizablePanel>
-                <ResizableHandle
-                  withHandle
-                  onPointerDown={handleSplitDividerPointerDown}
-                />
-                <RrpResizablePanel defaultSize="50%" minSize={200}>
-                  <div className="flex h-full flex-col">
-                    <div className="flex shrink-0 items-center gap-0.5 px-2 py-1 border-b border-border/40">
-                      <TabPill
-                        label="Diff"
-                        isActive={splitRightPane === "diff"}
-                        onClick={() => setSplitRightPane("diff")}
-                      />
-                      <TabPill
-                        label="Browser"
-                        isActive={splitRightPane === "browser"}
-                        onClick={() => setSplitRightPane("browser")}
-                      />
-                    </div>
-                    <div className="relative flex-1 min-h-0">
-                      {splitRightPane === "browser" ? (
-                        splitBrowserTab ? (
-                          <BrowserPane
-                            tab={splitBrowserTab}
-                            worktreePath={wtPath!}
-                            isActive
-                          />
-                        ) : (
-                          <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-                            <span>No browser tab yet</span>
-                            <button
-                              onClick={() => createBrowserTab(wtPath!)}
-                              className="px-3 py-1.5 rounded border border-border hover:bg-accent hover:text-foreground"
-                            >
-                              Open a browser
-                            </button>
-                          </div>
-                        )
-                      ) : (
-                        <DiffView />
-                      )}
-                    </div>
-                  </div>
-                </RrpResizablePanel>
-              </ResizablePanelGroup>
             ) : (
               <div className="relative flex-1 min-w-0">
                 {/* Solid bg — xterm's WebGL canvas is on its own GPU layer

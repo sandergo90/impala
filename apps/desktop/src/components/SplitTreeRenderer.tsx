@@ -1,212 +1,134 @@
-import { useEffect, useCallback, useRef } from "react";
-import { invoke } from "@/lib/invoke";
+import type { ReactNode } from "react";
+import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
 import type { SplitNode } from "../types";
-import { paneSessionId } from "../lib/split-tree";
-import { useDataStore } from "../store";
-import { useAppHotkey } from "../hooks/useAppHotkey";
+import { getLeaves } from "../lib/split-tree";
+import { useUIStore } from "../store";
+
+type GroupNode = Extract<SplitNode, { type: "group" }>;
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
-  worktreePath: string;
   focusedPaneId: string;
-  /** Map of paneId -> ptySessionId for active sessions */
-  paneSessions: Record<string, string>;
+  /**
+   * When false, unfocused panes are NOT dimmed (the whole tab is inactive, so
+   * a focus indicator would be misleading). Defaults to true.
+   */
+  isActive?: boolean;
   onFocusPane: (paneId: string) => void;
-  onSessionSpawned: (paneId: string, sessionId: string) => void;
-  /** Override cwd for PTY spawn */
-  cwd?: string;
+  /**
+   * Persist a divider drag. `splitId` is the leading leaf id of the split's
+   * `second` subtree (see `updateRatio`), `ratio` the new size of the first
+   * pane (0..1).
+   */
+  onRatioChange: (splitId: string, ratio: number) => void;
+  renderLeaf: (group: GroupNode, isFocused: boolean) => ReactNode;
 }
 
-export function SplitTreeRenderer({
-  tree,
-  worktreePath,
-  focusedPaneId,
-  paneSessions,
-  onFocusPane,
-  onSessionSpawned,
-  cwd,
-}: SplitTreeRendererProps) {
-  return (
-    <SplitNodeRenderer
-      node={tree}
-      worktreePath={worktreePath}
-      focusedPaneId={focusedPaneId}
-      paneSessions={paneSessions}
-      onFocusPane={onFocusPane}
-      onSessionSpawned={onSessionSpawned}
-      cwd={cwd}
-    />
-  );
+// Split-handle drags must park native browser webviews: pointer events over a
+// child webview would swallow the drag. Mirror the divider drag into the store
+// flag BrowserPane reads for occlusion (same pattern as MainView's sidebar
+// drags). Plain function — only touches the store's imperative API.
+function bracketHandleDrag(): void {
+  useUIStore.getState().setPanelDragActive(true);
+  const end = () => {
+    useUIStore.getState().setPanelDragActive(false);
+    window.removeEventListener("pointerup", end);
+    window.removeEventListener("pointercancel", end);
+  };
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+}
+
+/**
+ * Recursive split-tree renderer shared by every splittable surface (user tabs,
+ * the agent system tab, the general terminal). It owns the layout algebra —
+ * orientation inversion, focus dimming, divider-drag webview parking, and
+ * ratio write-back — while `renderLeaf` fills each pane with content.
+ */
+export function SplitTreeRenderer(props: SplitTreeRendererProps) {
+  return <SplitNodeRenderer node={props.tree} {...props} />;
 }
 
 function SplitNodeRenderer({
   node,
-  worktreePath,
   focusedPaneId,
-  paneSessions,
+  isActive = true,
   onFocusPane,
-  onSessionSpawned,
-  cwd,
-}: {
-  node: SplitNode;
-  worktreePath: string;
-  focusedPaneId: string;
-  paneSessions: Record<string, string>;
-  onFocusPane: (paneId: string) => void;
-  onSessionSpawned: (paneId: string, sessionId: string) => void;
-  cwd?: string;
-}) {
-  if (node.type === "leaf") {
+  onRatioChange,
+  renderLeaf,
+}: { node: SplitNode } & Omit<SplitTreeRendererProps, "tree">) {
+  if (node.type === "group") {
+    const isFocused = node.id === focusedPaneId;
     return (
-      <LeafPane
-        paneId={node.id}
-        paneType={node.paneType}
-        worktreePath={worktreePath}
-        isFocused={node.id === focusedPaneId}
-        sessionId={paneSessions[node.id] ?? null}
-        onFocus={() => onFocusPane(node.id)}
-        onSessionSpawned={(sessionId) => onSessionSpawned(node.id, sessionId)}
-        cwd={cwd}
-      />
+      <div
+        className="h-full w-full relative"
+        style={{
+          opacity: isFocused || !isActive ? 1 : 0.6,
+          transition: "opacity 150ms ease",
+        }}
+        onMouseDownCapture={() => {
+          if (!isFocused) onFocusPane(node.id);
+        }}
+      >
+        {renderLeaf(node, isFocused)}
+      </div>
     );
   }
 
-  // Split node — render nested ResizablePanelGroup
-  // orientation "vertical" in our model = vertical divider = side-by-side = horizontal panel group
-  // orientation "horizontal" in our model = horizontal divider = stacked = vertical panel group
+  // SplitNode.orientation is the divider line; ResizablePanelGroup.orientation
+  // is the opposite (stacking axis). horizontal divider → vertical stack.
   const panelOrientation =
-    node.orientation === "vertical" ? "horizontal" : "vertical";
-
+    node.orientation === "horizontal" ? "vertical" : "horizontal";
   const firstPercent = Math.round(node.ratio * 100);
-  const secondPercent = 100 - firstPercent;
+
+  // `splitId` (leading leaf of `second`) is globally unique per split, so
+  // deriving both panel ids from it keeps them unique across nested groups.
+  const splitId = getLeaves(node.second)[0]?.id ?? "";
+  const firstPanelId = `${splitId}:a`;
+  const secondPanelId = `${splitId}:b`;
+
+  const handleLayoutChanged = (layout: Layout, meta: LayoutChangedMeta) => {
+    if (!meta.isUserInteraction) return;
+    const a = layout[firstPanelId];
+    const b = layout[secondPanelId];
+    if (a == null || b == null) return;
+    const total = a + b;
+    if (total <= 0) return;
+    onRatioChange(splitId, a / total);
+  };
 
   return (
-    <ResizablePanelGroup orientation={panelOrientation}>
-      <ResizablePanel defaultSize={`${firstPercent}%`} minSize={80}>
+    <ResizablePanelGroup
+      orientation={panelOrientation}
+      className="h-full w-full"
+      onLayoutChanged={handleLayoutChanged}
+    >
+      <ResizablePanel id={firstPanelId} defaultSize={`${firstPercent}%`} minSize={10}>
         <SplitNodeRenderer
           node={node.first}
-          worktreePath={worktreePath}
           focusedPaneId={focusedPaneId}
-          paneSessions={paneSessions}
+          isActive={isActive}
           onFocusPane={onFocusPane}
-          onSessionSpawned={onSessionSpawned}
-          cwd={cwd}
+          onRatioChange={onRatioChange}
+          renderLeaf={renderLeaf}
         />
       </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={`${secondPercent}%`} minSize={80}>
+      <ResizableHandle withHandle onPointerDown={bracketHandleDrag} />
+      <ResizablePanel id={secondPanelId} defaultSize={`${100 - firstPercent}%`} minSize={10}>
         <SplitNodeRenderer
           node={node.second}
-          worktreePath={worktreePath}
           focusedPaneId={focusedPaneId}
-          paneSessions={paneSessions}
+          isActive={isActive}
           onFocusPane={onFocusPane}
-          onSessionSpawned={onSessionSpawned}
-          cwd={cwd}
+          onRatioChange={onRatioChange}
+          renderLeaf={renderLeaf}
         />
       </ResizablePanel>
     </ResizablePanelGroup>
-  );
-}
-
-function LeafPane({
-  paneId,
-  paneType,
-  worktreePath,
-  isFocused,
-  sessionId,
-  onFocus,
-  onSessionSpawned,
-  cwd,
-}: {
-  paneId: string;
-  paneType: "agent" | "shell";
-  worktreePath: string;
-  isFocused: boolean;
-  sessionId: string | null;
-  onFocus: () => void;
-  onSessionSpawned: (sessionId: string) => void;
-  cwd?: string;
-}) {
-  const handleRestart = useCallback(() => {
-    if (!sessionId) return;
-    invoke("pty_kill", { sessionId }).catch(() => {});
-    releaseCachedTerminal(sessionId);
-    const { [paneId]: _, ...remaining } =
-      useDataStore.getState().generalTerminalPaneSessions;
-    useDataStore.getState().setGeneralTerminalPaneSessions(remaining);
-  }, [sessionId, paneId]);
-
-  useAppHotkey("RESTART_SESSION", handleRestart, { enabled: isFocused }, [handleRestart]);
-
-  // Auto-spawn PTY session when leaf has no session. This renderer backs the
-  // generic terminal only: no worktree env vars and no agent auto-launch.
-  const spawningRef = useRef(false);
-  const spawnCwd = cwd ?? worktreePath;
-  useEffect(() => {
-    if (sessionId || spawningRef.current) return;
-    spawningRef.current = true;
-
-    const ptyId = paneSessionId(paneId);
-    invoke<boolean>("pty_spawn", {
-      sessionId: ptyId,
-      cwd: spawnCwd,
-      command: null,
-      envVars: {},
-    })
-      .then(() => {
-        onSessionSpawned(ptyId);
-      })
-      .catch((err) => {
-        console.error("Failed to spawn PTY:", err);
-        spawningRef.current = false;
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: backend deduplicates spawns
-  }, [paneId, sessionId, spawnCwd]);
-
-  return (
-    <div
-      className="h-full w-full relative"
-      style={{
-        opacity: isFocused ? 1 : 0.6,
-        transition: "opacity 150ms ease",
-      }}
-    >
-      {/* Focus indicator border */}
-      {isFocused && (
-        <div
-          className="absolute inset-0 pointer-events-none z-10"
-          style={{
-            boxShadow: "inset 0 0 0 1px var(--accent)",
-            borderRadius: "2px",
-          }}
-        />
-      )}
-      {paneType === "agent" && (
-        <div className="absolute top-1 right-2 text-md font-medium text-muted-foreground/40 z-10 pointer-events-none">
-          Agent
-        </div>
-      )}
-      {sessionId ? (
-        <XtermTerminal
-          key={sessionId}
-          sessionId={sessionId}
-          baseDir={worktreePath}
-          isFocused={isFocused}
-          onFocus={onFocus}
-          onRestart={handleRestart}
-        />
-      ) : (
-        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-          Starting terminal...
-        </div>
-      )}
-    </div>
   );
 }

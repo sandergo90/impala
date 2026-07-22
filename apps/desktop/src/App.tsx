@@ -21,10 +21,14 @@ import { startAutomationExecutor } from "./lib/automation-executor";
 import { useHotkeysStore } from "./stores/hotkeys";
 import { selectWorktree, selectProject } from "./hooks/useWorktreeActions";
 import {
-  splitUserTabPane,
   closeUserTabFocusedPane,
   focusAdjacentUserTabPane,
+  closeAgentTabFocusedPane,
+  focusAdjacentAgentTabPane,
   createBrowserTab,
+  createAgentTabFromRequest,
+  canSplitTerminalsTab,
+  splitActiveTabPane,
 } from "./lib/tab-actions";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AGENT_PANE_ID, RUN_PANE_ID } from "./lib/pane-ids";
@@ -72,6 +76,26 @@ export function RootLayout() {
               event.payload.worktreePath,
               event.payload.kind,
             );
+        },
+      ),
+    );
+    track(
+      listen<{
+        worktreePath: string;
+        prompt: string;
+        agent?: "claude" | "codex";
+        sourcePaneId?: string;
+        placement?: "auto" | "current" | "left" | "right";
+      }>(
+        "agent-tab-request-open",
+        (event) => {
+          createAgentTabFromRequest(
+            event.payload.worktreePath,
+            event.payload.prompt,
+            event.payload.agent,
+            event.payload.sourcePaneId,
+            event.payload.placement,
+          );
         },
       ),
     );
@@ -155,6 +179,13 @@ export function RootLayout() {
       ? s.worktreeNavStates[selectedWorktreePath]?.activeTab ?? null
       : null,
   );
+  // Which of the worktree's terminals tabs is active and splittable. The Agent
+  // system tab and every user tab are splittable; the Run tab is not.
+  const worktreeActiveTerminalsTab = useUIStore((s) =>
+    selectedWorktreePath
+      ? s.worktreeNavStates[selectedWorktreePath]?.activeTerminalsTab ?? AGENT_PANE_ID
+      : null,
+  );
   const worktreeActiveTabIsUser = useUIStore((s) => {
     if (!selectedWorktreePath) return false;
     const nav = s.worktreeNavStates[selectedWorktreePath];
@@ -163,6 +194,12 @@ export function RootLayout() {
     const activeId = nav.activeTerminalsTab;
     return userTabs.some((t) => t.id === activeId);
   });
+  const worktreeActiveTabIsSplittable =
+    selectedWorktreePath !== null &&
+    canSplitTerminalsTab(
+      worktreeActiveTerminalsTab ?? AGENT_PANE_ID,
+      useUIStore.getState().getWorktreeNavState(selectedWorktreePath).userTabs,
+    );
 
   const handleSplit = (direction: "vertical" | "horizontal") => {
     const uiState = useUIStore.getState();
@@ -175,10 +212,9 @@ export function RootLayout() {
       return;
     }
 
-    if (selectedWorktreePath && worktreeActiveTabIsUser) {
-      const nav = uiState.getWorktreeNavState(selectedWorktreePath);
-      splitUserTabPane(selectedWorktreePath, nav.activeTerminalsTab, direction);
-    }
+    if (!selectedWorktreePath) return;
+    // ⌘D / ⇧⌘D stay the fast path and create a shell.
+    splitActiveTabPane(selectedWorktreePath, direction, { kind: "shell" });
   };
 
   const handleFocusAdjacentPane = (direction: 1 | -1) => {
@@ -189,8 +225,11 @@ export function RootLayout() {
       return;
     }
 
-    if (selectedWorktreePath && worktreeActiveTabIsUser) {
-      const nav = uiState.getWorktreeNavState(selectedWorktreePath);
+    if (!selectedWorktreePath) return;
+    const nav = uiState.getWorktreeNavState(selectedWorktreePath);
+    if (nav.activeTerminalsTab === AGENT_PANE_ID) {
+      focusAdjacentAgentTabPane(selectedWorktreePath, direction);
+    } else if (worktreeActiveTabIsUser) {
       focusAdjacentUserTabPane(selectedWorktreePath, nav.activeTerminalsTab, direction);
     }
   };
@@ -199,31 +238,31 @@ export function RootLayout() {
     generalTerminalActive ||
     (selectedWorktreePath !== null &&
       worktreeActiveTab === "terminal" &&
-      worktreeActiveTabIsUser);
+      worktreeActiveTabIsSplittable);
 
   useAppHotkey(
     "SPLIT_VERTICAL",
     () => handleSplit("vertical"),
     { enabled: splitEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsSplittable, worktreeActiveTabIsUser],
   );
   useAppHotkey(
     "SPLIT_HORIZONTAL",
     () => handleSplit("horizontal"),
     { enabled: splitEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsSplittable, worktreeActiveTabIsUser],
   );
   useAppHotkey(
     "NEXT_PANE",
     () => handleFocusAdjacentPane(1),
     { enabled: splitEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsSplittable, worktreeActiveTabIsUser],
   );
   useAppHotkey(
     "PREV_PANE",
     () => handleFocusAdjacentPane(-1),
     { enabled: splitEnabled },
-    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsUser],
+    [generalTerminalActive, selectedWorktreePath, worktreeActiveTab, worktreeActiveTabIsSplittable, worktreeActiveTabIsUser],
   );
 
   const closePaneEnabled =
@@ -262,7 +301,13 @@ export function RootLayout() {
       } else if (selectedWorktreePath) {
         const nav = uiState.getWorktreeNavState(selectedWorktreePath);
         const activeTabId = nav.activeTerminalsTab;
-        if (activeTabId === AGENT_PANE_ID || activeTabId === RUN_PANE_ID) return;
+        // The Agent system tab closes only its focused split pane (never the
+        // tab itself); the Run tab is unsplittable.
+        if (activeTabId === AGENT_PANE_ID) {
+          closeAgentTabFocusedPane(selectedWorktreePath);
+          return;
+        }
+        if (activeTabId === RUN_PANE_ID) return;
         if (!nav.userTabs.some((t) => t.id === activeTabId)) return;
         closeUserTabFocusedPane(selectedWorktreePath, activeTabId);
       }

@@ -10,7 +10,7 @@ import { invoke } from "@/lib/invoke";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInSystemBrowser } from "@tauri-apps/plugin-shell";
 import { useUIStore } from "../store";
-import type { UserTab } from "../types";
+import { setBrowserLeafUrl, getBrowserLeafUrl } from "../lib/tab-actions";
 import {
   PICKER_ARM,
   PICKER_DISARM,
@@ -42,25 +42,32 @@ export function sanitizeUrl(raw: string): string {
 }
 
 /**
- * Browser tab body. The web content is a NATIVE child webview (Rust
- * `browser_*` commands, label `browser-{tab.id}`) floating above the DOM —
+ * One browser pane. The web content is a NATIVE child webview (Rust
+ * `browser_*` commands, label `browser-{paneId}`) floating above the DOM —
  * this component renders only the toolbar and a placeholder div, and mirrors
  * the placeholder's rect to the webview. The webview outlives this component:
- * unmount hides it, `closeUserTab` destroys it.
+ * unmount hides it, `closeUserTab` destroys it. Keyed by the leaf/pane id so a
+ * tab can hold several browser panes side by side.
  */
 export const BrowserPane = memo(function BrowserPane({
-  tab,
+  paneId,
+  tabId,
   worktreePath,
+  url,
   isActive,
+  isFocused,
 }: {
-  tab: UserTab;
+  paneId: string;
+  tabId: string;
   worktreePath: string;
+  url?: string;
   isActive: boolean;
+  isFocused: boolean;
 }) {
   const placeholderRef = useRef<HTMLDivElement | null>(null);
   const createdRef = useRef(false);
   const inputFocusedRef = useRef(false);
-  const [inputValue, setInputValue] = useState(tab.url ?? "");
+  const [inputValue, setInputValue] = useState(url ?? "");
   const [loading, setLoading] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   // Last failed browser_* invoke, shown as a strip under the toolbar. Cleared
@@ -76,7 +83,7 @@ export const BrowserPane = memo(function BrowserPane({
   // about:blank is invisible anyway (tauri-runtime-wry skips with_url for
   // about:blank, and wry webviews draw no background), so an empty tab
   // renders a DOM empty state instead of a transparent native view.
-  const hasUrl = Boolean(tab.url);
+  const hasUrl = Boolean(url);
 
   // Occlusion: the native webview composites ABOVE the entire DOM, so
   // anything that must draw over the pane region hides it instead. Diff
@@ -94,16 +101,10 @@ export const BrowserPane = memo(function BrowserPane({
   visibleRef.current = visible;
 
   const persistUrl = useCallback(
-    (url: string) => {
-      const uiState = useUIStore.getState();
-      const nav = uiState.getWorktreeNavState(worktreePath);
-      uiState.updateWorktreeNavState(worktreePath, {
-        userTabs: nav.userTabs.map((t) =>
-          t.id === tab.id ? { ...t, url } : t,
-        ),
-      });
+    (next: string) => {
+      setBrowserLeafUrl(worktreePath, tabId, paneId, next);
     },
-    [worktreePath, tab.id],
+    [worktreePath, tabId, paneId],
   );
 
   const syncBounds = useCallback(() => {
@@ -114,13 +115,13 @@ export const BrowserPane = memo(function BrowserPane({
     // Viewport coords ARE window-logical coords: the main webview fills the
     // window (titleBarStyle Overlay) and the app never scrolls the body.
     invoke("browser_set_bounds", {
-      id: tab.id,
+      id: paneId,
       x: r.x,
       y: r.y,
       width: r.width,
       height: r.height,
     }).catch(() => {});
-  }, [tab.id]);
+  }, [paneId]);
 
   useLayoutEffect(() => {
     if (!hasUrl) return;
@@ -129,11 +130,11 @@ export const BrowserPane = memo(function BrowserPane({
     let disposed = false;
     const r = el.getBoundingClientRect();
     invoke("browser_open", {
-      id: tab.id,
+      id: paneId,
       worktreePath,
       // hasUrl guards this effect; on the flip from empty state this closure
-      // re-runs with the freshly navigated tab.url.
-      url: tab.url,
+      // re-runs with the freshly navigated url.
+      url,
       x: r.x,
       y: r.y,
       width: Math.max(r.width, 1),
@@ -145,7 +146,7 @@ export const BrowserPane = memo(function BrowserPane({
         if (disposed || !visibleRef.current) {
           // Creation resolved after unmount/occlusion — the webview was
           // created visible; hide it before it covers the wrong content.
-          invoke("browser_set_visible", { id: tab.id, visible: false }).catch(
+          invoke("browser_set_visible", { id: paneId, visible: false }).catch(
             () => {},
           );
           return;
@@ -170,21 +171,21 @@ export const BrowserPane = memo(function BrowserPane({
       cancelAnimationFrame(raf);
       // Hide, never close — the webview survives tab switches; closeUserTab
       // owns destruction.
-      invoke("browser_set_visible", { id: tab.id, visible: false }).catch(
+      invoke("browser_set_visible", { id: paneId, visible: false }).catch(
         () => {},
       );
     };
-    // tab.url intentionally omitted: it changes on every navigation, but the
+    // url intentionally omitted: it changes on every navigation, but the
     // webview is created once (hasUrl only ever flips false -> true) and
     // navigates itself from then on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.id, hasUrl, syncBounds]);
+  }, [paneId, hasUrl, syncBounds]);
 
   useEffect(() => {
     if (!createdRef.current) return;
-    invoke("browser_set_visible", { id: tab.id, visible }).catch(() => {});
+    invoke("browser_set_visible", { id: paneId, visible }).catch(() => {});
     if (visible) syncBounds();
-  }, [visible, tab.id, syncBounds]);
+  }, [visible, paneId, syncBounds]);
 
   // Self-heal: attaching the docked Web Inspector (right-click → Inspect
   // Element) makes WebKit resize the child webview to fill the window, and
@@ -201,7 +202,7 @@ export const BrowserPane = memo(function BrowserPane({
     let unlistenNav: UnlistenFn | undefined;
     let unlistenLoading: UnlistenFn | undefined;
     let cancelled = false;
-    listen<string>(`browser-nav-${tab.id}`, (event) => {
+    listen<string>(`browser-nav-${paneId}`, (event) => {
       persistUrl(event.payload);
       setLastError(null);
       // The picker dies with the old page; drop any in-progress annotation.
@@ -212,7 +213,7 @@ export const BrowserPane = memo(function BrowserPane({
       if (cancelled) fn();
       else unlistenNav = fn;
     });
-    listen<boolean>(`browser-loading-${tab.id}`, (event) => {
+    listen<boolean>(`browser-loading-${paneId}`, (event) => {
       setLoading(event.payload);
     }).then((fn) => {
       if (cancelled) fn();
@@ -223,7 +224,7 @@ export const BrowserPane = memo(function BrowserPane({
       unlistenNav?.();
       unlistenLoading?.();
     };
-  }, [tab.id, persistUrl]);
+  }, [paneId, persistUrl]);
 
   const navigate = useCallback(
     (raw: string) => {
@@ -234,12 +235,12 @@ export const BrowserPane = memo(function BrowserPane({
       // First navigation from the empty state: the webview doesn't exist yet;
       // persisting the URL flips `hasUrl` and the layout effect creates it.
       if (createdRef.current) {
-        invoke("browser_navigate", { id: tab.id, url }).catch((e) =>
+        invoke("browser_navigate", { id: paneId, url }).catch((e) =>
           setLastError(String(e)),
         );
       }
     },
-    [tab.id, persistUrl],
+    [paneId, persistUrl],
   );
 
   const toggleAnnotate = useCallback(() => {
@@ -247,15 +248,15 @@ export const BrowserPane = memo(function BrowserPane({
       setAnnotating(false); // the polling effect's cleanup sends the disarm
       return;
     }
-    invoke("browser_eval", { id: tab.id, js: PICKER_ARM })
+    invoke("browser_eval", { id: paneId, js: PICKER_ARM })
       .then(() => setAnnotating(true))
       .catch((e) => setLastError(String(e)));
-  }, [annotating, tab.id]);
+  }, [annotating, paneId]);
 
   useEffect(() => {
     if (!annotating) return;
     const iv = setInterval(() => {
-      invoke<string>("browser_eval", { id: tab.id, js: PICKER_POLL })
+      invoke<string>("browser_eval", { id: paneId, js: PICKER_POLL })
         .then((raw) => {
           const pick = JSON.parse(raw) as BrowserPick | null;
           if (!pick) return;
@@ -268,9 +269,9 @@ export const BrowserPane = memo(function BrowserPane({
       clearInterval(iv);
       // Harmless if the picker already self-disarmed on pick/Escape; covers
       // toggle-off, tab unmount, and navigation.
-      invoke("browser_eval", { id: tab.id, js: PICKER_DISARM }).catch(() => {});
+      invoke("browser_eval", { id: paneId, js: PICKER_DISARM }).catch(() => {});
     };
-  }, [annotating, tab.id]);
+  }, [annotating, paneId]);
 
   const cancelPendingPick = useCallback(() => {
     setPendingPick(null);
@@ -283,7 +284,7 @@ export const BrowserPane = memo(function BrowserPane({
     try {
       let screenshotBase64: string | undefined;
       try {
-        const full = await invoke<string>("browser_screenshot", { id: tab.id });
+        const full = await invoke<string>("browser_screenshot", { id: paneId });
         const width = placeholderRef.current?.getBoundingClientRect().width ?? 0;
         screenshotBase64 = await cropScreenshot(full, pendingPick.rect, width);
       } catch {
@@ -307,16 +308,22 @@ export const BrowserPane = memo(function BrowserPane({
     } finally {
       setSaving(false);
     }
-  }, [pendingPick, comment, saving, tab.id, worktreePath]);
+  }, [pendingPick, comment, saving, paneId, worktreePath]);
 
-  const currentUrl = tab.url ?? DEFAULT_URL;
+  const currentUrl = url ?? DEFAULT_URL;
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex shrink-0 items-center gap-1 px-2 py-1.5 border-b border-border/40 bg-sidebar">
+      <div
+        className={`flex shrink-0 items-center gap-1 px-2 py-1.5 border-b transition-colors ${
+          isFocused
+            ? "border-primary/70 bg-accent/50"
+            : "border-border/40 bg-sidebar"
+        }`}
+      >
         <button
           onClick={() =>
-            invoke("browser_history", { id: tab.id, direction: "back" }).catch(
+            invoke("browser_history", { id: paneId, direction: "back" }).catch(
               () => {},
             )
           }
@@ -337,7 +344,7 @@ export const BrowserPane = memo(function BrowserPane({
         <button
           onClick={() =>
             invoke("browser_history", {
-              id: tab.id,
+              id: paneId,
               direction: "forward",
             }).catch(() => {})
           }
@@ -357,7 +364,7 @@ export const BrowserPane = memo(function BrowserPane({
         </button>
         <button
           onClick={() =>
-            invoke("browser_reload", { id: tab.id }).catch((e) =>
+            invoke("browser_reload", { id: paneId }).catch((e) =>
               setLastError(String(e)),
             )
           }
@@ -386,13 +393,10 @@ export const BrowserPane = memo(function BrowserPane({
           }}
           onBlur={() => {
             inputFocusedRef.current = false;
-            // Read the latest persisted URL from the store — the render
-            // closure's tab.url is stale right after an Enter-triggered
+            // Read the latest persisted URL from this pane's leaf — the render
+            // closure's `url` prop is stale right after an Enter-triggered
             // navigate, which would visibly revert the bar to the old URL.
-            const latest = useUIStore
-              .getState()
-              .getWorktreeNavState(worktreePath)
-              .userTabs.find((t) => t.id === tab.id)?.url;
+            const latest = getBrowserLeafUrl(worktreePath, tabId, paneId);
             setInputValue(latest ?? "");
           }}
           onKeyDown={(e) => {

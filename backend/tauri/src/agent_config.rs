@@ -690,15 +690,18 @@ Impala (the desktop app this worktree is open in) has a built-in browser pane ne
 
 1. `mcp__impala__browser_page_info` — is a browser pane open, and what page is it on?
 2. `mcp__impala__browser_navigate` — go to the page you need (e.g. the dev-server route you changed). If the response has `created: true`, a new browser tab was created; its webview loads once the pane is visible in Impala, so tell the user to open it rather than retrying screenshots in a loop.
-3. `mcp__impala__browser_click` — click a button, link, or tab by CSS selector when the flow needs interaction. Events are synthesized (isTrusted: false): fine for app UI, ignored by native controls like file pickers. Screenshot after to confirm what happened.
-4. `mcp__impala__browser_type` — set the value of an input/textarea by CSS selector (native setter + input/change events, so React/Vue register it; replaces the whole value, empty string clears).
-5. `mcp__impala__browser_screenshot` — SEE the rendered page. This is the ground truth for visual verification.
-6. `mcp__impala__browser_console` — read console output, window errors, and unhandled rejections when the page misbehaves. Pass `clear: true` to drain, navigate again to reproduce, then read for a clean signal.
+3. `mcp__impala__browser_click` — click a button, link, or tab by CSS selector when the flow needs interaction. Delivers real platform input (isTrusted: true with user activation — clipboard and native controls respond; window.open popups stay blocked). A visible cursor glides to the target in the pane. Screenshot after to confirm what happened.
+4. `mcp__impala__browser_type` — click-focuses the element by CSS selector, then types the text as real keystrokes (keydown/input events fire, so React/Vue and shortcut handlers register it; replaces the current value, empty string clears, newlines press Return).
+5. `mcp__impala__browser_click_at` — click at raw viewport coordinates (CSS px, origin top-left) when no selector exists (canvas, maps). Pair with `browser_screenshot`; screenshots are captured at the display's scale factor, so divide screenshot pixels by (screenshot width / viewport width from `browser_page_info`).
+6. `mcp__impala__browser_scroll` — scroll with a real wheel event at the viewport center (positive dy scrolls down; dx optional).
+7. `mcp__impala__browser_screenshot` — SEE the rendered page. This is the ground truth for visual verification.
+8. `mcp__impala__browser_console` — read console output, window errors, and unhandled rejections when the page misbehaves. Pass `clear: true` to drain, navigate again to reproduce, then read for a clean signal.
 
 After making a fix, navigate again and screenshot — verify visually before declaring success.
 
 ## Notes
 
+- Clicks are real input: they can open native OS dialogs (file pickers) that you cannot drive — tell the user when one is needed.
 - The dev server must be running (usually Impala's Run tab). Connection failures render as a blank page with no error event — a blank screenshot plus an unreachable URL usually means the server is down.
 - Console logs are captured per page; they reset on navigation.
 - Screenshots show the pane's viewport, not the full scroll height.

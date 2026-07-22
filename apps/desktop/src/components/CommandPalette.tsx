@@ -3,6 +3,11 @@ import { Command } from "cmdk";
 import { useNavigate } from "@tanstack/react-router";
 import { useUIStore, useDataStore, useFilteredWorktrees } from "../store";
 import { selectWorktree, selectProject } from "../hooks/useWorktreeActions";
+import {
+  canSplitTerminalsTab,
+  splitActiveTabPane,
+} from "../lib/tab-actions";
+import type { PaneContent } from "../types";
 import { HotkeyDisplay } from "./HotkeyDisplay";
 import { projectColor } from "../lib/utils";
 
@@ -40,6 +45,29 @@ export function CommandPalette({
     onClose();
   };
 
+  // Split the active terminals tab's focused pane (right/side-by-side) with the
+  // chosen content. Enabled for the Agent system tab and any user tab; the Run
+  // tab is unsplittable. Mirrors the ⌘D fast path but with a content choice.
+  const canSplitActivePane = (): boolean => {
+    const wt = useUIStore.getState().selectedWorktree?.path;
+    if (!wt) return false;
+    const nav = useUIStore.getState().getWorktreeNavState(wt);
+    if (nav.activeTab !== "terminal") return false;
+    return canSplitTerminalsTab(nav.activeTerminalsTab, nav.userTabs);
+  };
+
+  const handleSplitPane = (
+    orientation: "horizontal" | "vertical",
+    content: PaneContent,
+  ) => {
+    const wt = useUIStore.getState().selectedWorktree?.path;
+    if (wt) {
+      splitActiveTabPane(wt, orientation, content);
+    }
+    onClose();
+  };
+
+
   const handleAction = (action: string) => {
     switch (action) {
       case "settings":
@@ -58,19 +86,9 @@ export function CommandPalette({
         }
         break;
       }
-      case "diff-tab":
-        if (selectedWorktree) {
-          useUIStore.getState().updateWorktreeNavState(selectedWorktree.path, { activeTab: "diff" });
-        }
-        break;
       case "terminal-tab":
         if (selectedWorktree) {
           useUIStore.getState().updateWorktreeNavState(selectedWorktree.path, { activeTab: "terminal" });
-        }
-        break;
-      case "split-tab":
-        if (selectedWorktree) {
-          useUIStore.getState().updateWorktreeNavState(selectedWorktree.path, { activeTab: "split" });
         }
         break;
     }
@@ -183,18 +201,7 @@ export function CommandPalette({
               {selectedWorktree && (
                 <>
                   <Command.Item
-                    value="Switch to Diff view"
-                    onSelect={() => handleAction("diff-tab")}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
-                      <path d="M12 3v18"/>
-                      <rect width="18" height="18" x="3" y="3" rx="2"/>
-                    </svg>
-                    Switch to Diff
-                  </Command.Item>
-                  <Command.Item
-                    value="Switch to Terminal view"
+                    value="Open Workspace"
                     onSelect={() => handleAction("terminal-tab")}
                     className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
                   >
@@ -202,19 +209,78 @@ export function CommandPalette({
                       <polyline points="4 17 10 11 4 5"/>
                       <line x1="12" x2="20" y1="19" y2="19"/>
                     </svg>
-                    Switch to Terminal
+                    Open Workspace
                   </Command.Item>
-                  <Command.Item
-                    value="Switch to Split view"
-                    onSelect={() => handleAction("split-tab")}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
-                      <rect width="18" height="18" x="3" y="3" rx="2"/>
-                      <path d="M12 3v18"/>
-                    </svg>
-                    Switch to Split
-                  </Command.Item>
+                  {canSplitActivePane() && (
+                    <>
+                      <Command.Item
+                        value="Split pane right with Agent"
+                        onSelect={() => handleSplitPane("vertical", { kind: "agent" })}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
+                          <rect width="18" height="18" x="3" y="3" rx="2"/>
+                          <path d="M12 3v18"/>
+                        </svg>
+                        Split pane right with Agent
+                      </Command.Item>
+                      <Command.Item
+                        value="Split pane right with Terminal"
+                        onSelect={() => handleSplitPane("vertical", { kind: "shell" })}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
+                          <polyline points="4 17 10 11 4 5"/>
+                          <line x1="12" x2="20" y1="19" y2="19"/>
+                        </svg>
+                        Split pane right with Terminal
+                      </Command.Item>
+                      <Command.Item
+                        value="Split pane right with Browser"
+                        onSelect={() => handleSplitPane("vertical", { kind: "browser" })}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
+                          <circle cx="12" cy="12" r="9"/>
+                          <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>
+                        </svg>
+                        Split pane right with Browser
+                      </Command.Item>
+                      <Command.Item
+                        value="Split pane down with Agent"
+                        onSelect={() => handleSplitPane("horizontal", { kind: "agent" })}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
+                          <rect width="18" height="18" x="3" y="3" rx="2"/>
+                          <path d="M3 12h18"/>
+                        </svg>
+                        Split pane down with Agent
+                      </Command.Item>
+                      <Command.Item
+                        value="Split pane down with Terminal"
+                        onSelect={() => handleSplitPane("horizontal", { kind: "shell" })}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
+                          <polyline points="4 15 10 9 4 3"/>
+                          <line x1="12" x2="20" y1="17" y2="17"/>
+                        </svg>
+                        Split pane down with Terminal
+                      </Command.Item>
+                      <Command.Item
+                        value="Split pane down with Browser"
+                        onSelect={() => handleSplitPane("horizontal", { kind: "browser" })}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md text-muted-foreground cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground/90">
+                          <circle cx="12" cy="12" r="9"/>
+                          <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>
+                        </svg>
+                        Split pane down with Browser
+                      </Command.Item>
+                    </>
+                  )}
                 </>
               )}
               <Command.Item

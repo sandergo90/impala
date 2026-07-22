@@ -67,7 +67,7 @@ fn hook_command(event_type: &str) -> String {
 const IMPALA_REVIEW_SKILL: &str = r#"---
 name: impala-review
 description: Review and address code review annotations from Impala. Use when asked to review annotations, or when invoked as /impala-review.
-allowed-tools: mcp__impala__list_annotations, mcp__impala__resolve_annotation, mcp__impala__list_files_with_annotations, mcp__impala__get_browser_annotation_screenshot, mcp__impala__browser_navigate, mcp__impala__browser_click, mcp__impala__browser_type, mcp__impala__browser_screenshot, mcp__impala__browser_console, mcp__impala__browser_page_info, Read, Edit, Write, Grep, Glob
+allowed-tools: mcp__impala__list_annotations, mcp__impala__resolve_annotation, mcp__impala__list_files_with_annotations, mcp__impala__get_browser_annotation_screenshot, mcp__impala__browser_navigate, mcp__impala__browser_click, mcp__impala__browser_click_at, mcp__impala__browser_scroll, mcp__impala__browser_type, mcp__impala__browser_screenshot, mcp__impala__browser_console, mcp__impala__browser_page_info, Read, Edit, Write, Grep, Glob
 argument-hint: "[annotation-id]"
 ---
 
@@ -182,7 +182,7 @@ Browser annotations: `url` (the page), `selector` (CSS path to the element), `el
 const IMPALA_BROWSER_SKILL: &str = r#"---
 name: impala-browser
 description: Verify or diagnose the running app in Impala's built-in browser. Use when the user wants to check something in the browser, verify a UI or frontend change works, see what a page looks like, or when diagnosing blank pages, console errors, or layout issues in a web app.
-allowed-tools: mcp__impala__browser_page_info, mcp__impala__browser_navigate, mcp__impala__browser_click, mcp__impala__browser_type, mcp__impala__browser_screenshot, mcp__impala__browser_console
+allowed-tools: mcp__impala__browser_page_info, mcp__impala__browser_navigate, mcp__impala__browser_click, mcp__impala__browser_click_at, mcp__impala__browser_scroll, mcp__impala__browser_type, mcp__impala__browser_screenshot, mcp__impala__browser_console
 ---
 
 Impala (the desktop app this worktree is open in) has a built-in browser pane next to the code, driven by the `mcp__impala__browser_*` tools. Prefer them over curl, Playwright, or headless browsers for anything the rendered page can answer — the user watches the same pane you're testing, so what you verify is what they see.
@@ -191,15 +191,18 @@ Impala (the desktop app this worktree is open in) has a built-in browser pane ne
 
 1. `mcp__impala__browser_page_info` — is a browser pane open, and what page is it on?
 2. `mcp__impala__browser_navigate` — go to the page you need (e.g. the dev-server route you changed). If the response has `created: true`, a new browser tab was created; its webview loads once the pane is visible in Impala, so tell the user to open it rather than retrying screenshots in a loop.
-3. `mcp__impala__browser_click` — click a button, link, or tab by CSS selector when the flow needs interaction. Events are synthesized (isTrusted: false): fine for app UI, ignored by native controls like file pickers. Screenshot after to confirm what happened.
-4. `mcp__impala__browser_type` — set the value of an input/textarea by CSS selector (native setter + input/change events, so React/Vue register it; replaces the whole value, empty string clears).
-5. `mcp__impala__browser_screenshot` — SEE the rendered page. This is the ground truth for visual verification.
-6. `mcp__impala__browser_console` — read console output, window errors, and unhandled rejections when the page misbehaves. Pass `clear: true` to drain, navigate again to reproduce, then read for a clean signal.
+3. `mcp__impala__browser_click` — click a button, link, or tab by CSS selector when the flow needs interaction. Delivers real platform input (isTrusted: true with user activation — clipboard and native controls respond; window.open popups stay blocked). A visible cursor glides to the target in the pane. Screenshot after to confirm what happened.
+4. `mcp__impala__browser_type` — click-focuses the element by CSS selector, then types the text as real keystrokes (keydown/input events fire, so React/Vue and shortcut handlers register it; replaces the current value, empty string clears, newlines press Return).
+5. `mcp__impala__browser_click_at` — click at raw viewport coordinates (CSS px, origin top-left) when no selector exists (canvas, maps). Pair with `browser_screenshot`; screenshots are captured at the display's scale factor, so divide screenshot pixels by (screenshot width / viewport width from `browser_page_info`).
+6. `mcp__impala__browser_scroll` — scroll with a real wheel event at the viewport center (positive dy scrolls down; dx optional).
+7. `mcp__impala__browser_screenshot` — SEE the rendered page. This is the ground truth for visual verification.
+8. `mcp__impala__browser_console` — read console output, window errors, and unhandled rejections when the page misbehaves. Pass `clear: true` to drain, navigate again to reproduce, then read for a clean signal.
 
 After making a fix, navigate again and screenshot — verify visually before declaring success.
 
 ## Notes
 
+- Clicks are real input: they can open native OS dialogs (file pickers) that you cannot drive — tell the user when one is needed.
 - The dev server must be running (usually Impala's Run tab). Connection failures render as a blank page with no error event — a blank screenshot plus an unreachable URL usually means the server is down.
 - Console logs are captured per page; they reset on navigation.
 - Screenshots show the pane's viewport, not the full scroll height.
@@ -351,7 +354,31 @@ fn handle_browser_request(
                     .get("selector")
                     .filter(|s| !s.is_empty())
                     .ok_or("missing selector")?;
-                crate::browser::click_selector(&wv, selector)
+                crate::browser::click_selector(app, &wv, selector)
+            }
+            "/browser/click_at" => {
+                let wv = crate::browser::webview_for_worktree(app, worktree_path)?;
+                let x = params
+                    .get("x")
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .ok_or("missing or invalid x")?;
+                let y = params
+                    .get("y")
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .ok_or("missing or invalid y")?;
+                crate::browser::click_at(app, &wv, x, y)
+            }
+            "/browser/scroll" => {
+                let wv = crate::browser::webview_for_worktree(app, worktree_path)?;
+                let dy = params
+                    .get("dy")
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .ok_or("missing or invalid dy")?;
+                let dx = params
+                    .get("dx")
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                crate::browser::scroll(app, &wv, dx, dy)
             }
             "/browser/type" => {
                 let wv = crate::browser::webview_for_worktree(app, worktree_path)?;
@@ -361,7 +388,7 @@ fn handle_browser_request(
                     .ok_or("missing selector")?;
                 // Empty text is legal — it clears the field.
                 let text = params.get("text").map(|s| s.as_str()).unwrap_or("");
-                crate::browser::type_into_selector(&wv, selector, text)
+                crate::browser::type_into_selector(app, &wv, selector, text)
             }
             _ => Err(format!("unknown browser endpoint: {path}")),
         }
@@ -484,6 +511,68 @@ fn handle_automation_request(
     }
 }
 
+fn handle_agent_request(
+    app: &AppHandle,
+    path: &str,
+    params: &HashMap<String, String>,
+) -> serde_json::Value {
+    let result = (|| -> Result<serde_json::Value, String> {
+        if path != "/agents/open" {
+            return Err(format!("unknown agents endpoint: {path}"));
+        }
+        let worktree_path = params
+            .get("worktree_path")
+            .filter(|value| !value.is_empty())
+            .ok_or("missing worktree_path")?;
+        let prompt = params
+            .get("prompt")
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("missing prompt")?;
+        let agent = params.get("agent").filter(|value| !value.is_empty());
+        if let Some(agent) = agent {
+            if agent != "claude" && agent != "codex" {
+                return Err("agent must be 'claude' or 'codex'".to_string());
+            }
+        }
+        let source_pane_id = params
+            .get("source_pane_id")
+            .filter(|value| !value.trim().is_empty());
+        let placement = params
+            .get("placement")
+            .map(String::as_str)
+            .unwrap_or("auto");
+        if !matches!(placement, "auto" | "current" | "left" | "right") {
+            return Err("placement must be 'auto', 'current', 'left', or 'right'".to_string());
+        }
+
+        app.emit_to(
+            "main",
+            "agent-tab-request-open",
+            serde_json::json!({
+                "worktreePath": worktree_path,
+                "prompt": prompt,
+                "agent": agent,
+                "sourcePaneId": source_pane_id,
+                "placement": placement,
+            }),
+        )
+        .map_err(|e| format!("failed to open agent tab: {e}"))?;
+
+        Ok(serde_json::json!({
+            "opened": true,
+            "agent": agent.map(|value| value.as_str()).unwrap_or("configured"),
+        }))
+    })();
+
+    match result {
+        Ok(mut value) => {
+            value["ok"] = serde_json::Value::Bool(true);
+            value
+        }
+        Err(error) => serde_json::json!({ "ok": false, "error": error }),
+    }
+}
+
 /// Start the hook HTTP server on a random port. Returns the port number.
 /// The `statuses` map is updated with every event so the frontend can query
 /// last-known agent status after a hard reload.
@@ -518,9 +607,13 @@ pub fn start(
                     let mut parts = pair.splitn(2, '=');
                     let key = parts.next()?;
                     let value = parts.next().unwrap_or("");
+                    // Clients (curl -G --data-urlencode, reqwest's
+                    // parse_with_params) send form encoding: space arrives
+                    // as '+', a literal '+' as %2B — undo the '+' first.
+                    let value = value.replace('+', " ");
                     Some((
                         key.to_string(),
-                        urlencoding::decode(value).unwrap_or_default().into_owned(),
+                        urlencoding::decode(&value).unwrap_or_default().into_owned(),
                     ))
                 })
                 .collect();
@@ -528,11 +621,16 @@ pub fn start(
             // Browser agent-hook endpoints (impala-mcp). Screenshots/eval can
             // take seconds — handle on their own thread so /hook (agent
             // status, latency-critical) never queues behind them.
-            if path.starts_with("/browser/") || path.starts_with("/automations/") {
+            if path.starts_with("/browser/")
+                || path.starts_with("/automations/")
+                || path.starts_with("/agents/")
+            {
                 let app = app_handle.clone();
                 std::thread::spawn(move || {
                     let body = if path.starts_with("/browser/") {
                         handle_browser_request(&app, &path, &params)
+                    } else if path.starts_with("/agents/") {
+                        handle_agent_request(&app, &path, &params)
                     } else {
                         handle_automation_request(&app, &path, &params)
                     };
