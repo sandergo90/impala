@@ -1,9 +1,20 @@
 import { invoke } from "@/lib/invoke";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
+import { router } from "../router";
 import type { Worktree, CommitInfo, ChangedFile, Project } from "../types";
 
+/** Worktree/terminal selection only renders on the main view — leave
+ * full-page routes (/automations) when the user picks one. Runtime-only
+ * router access, so the import cycle with router.tsx is harmless. */
+function ensureMainView() {
+  if (router.state.location.pathname !== "/") {
+    router.navigate({ to: "/" });
+  }
+}
+
 export async function selectWorktree(wt: Worktree) {
+  ensureMainView();
   useUIStore.getState().setSelectedWorktree(wt);
   const projectPath = useUIStore.getState().selectedProject?.path;
   if (projectPath) {
@@ -50,6 +61,7 @@ export async function selectWorktree(wt: Worktree) {
 }
 
 export function activateGeneralTerminal() {
+  ensureMainView();
   const state = useUIStore.getState();
   const current = state.selectedWorktree;
   if (current) {

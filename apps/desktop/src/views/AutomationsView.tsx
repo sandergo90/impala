@@ -15,11 +15,14 @@ import {
 } from "../components/ui/alert-dialog";
 import { useDataStore, useUIStore } from "../store";
 import { selectWorktree } from "../hooks/useWorktreeActions";
+import { Sidebar } from "../components/Sidebar";
 import {
   AUTOMATION_TEMPLATES,
   type AutomationTemplate,
 } from "../lib/automation-templates";
 import type { Automation, AutomationRun, Worktree } from "../types";
+
+const DEFAULT_SIDEBAR_WIDTH = 280;
 
 const WEEKDAYS = [
   { value: "MON", label: "Monday" },
@@ -186,6 +189,11 @@ export function AutomationsView() {
     setCreating({ template });
   };
 
+  const suggestions = AUTOMATION_TEMPLATES.filter(
+    (t) => !automations.some((a) => a.name === t.name),
+  );
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth) ?? DEFAULT_SIDEBAR_WIDTH;
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <div
@@ -193,27 +201,6 @@ export function AutomationsView() {
         style={{ paddingLeft: "88px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
-        <button
-          onClick={() => navigate({ to: "/" })}
-          className="relative flex items-center gap-1.5 rounded px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="Back"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path
-              d="M10 2L4 8l6 6"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-        <span className="relative font-semibold">Automations</span>
-        {project && (
-          <span className="relative truncate text-sm text-muted-foreground">
-            {project.name}
-          </span>
-        )}
         <div className="flex-1" />
         {project && (
           <button
@@ -226,94 +213,115 @@ export function AutomationsView() {
       </div>
 
       <div className="flex min-h-0 flex-1">
+        <div
+          style={{ width: sidebarWidth }}
+          className="shrink-0 overflow-hidden border-r border-border"
+        >
+          <Sidebar />
+        </div>
+
         <div className="min-w-0 flex-1 overflow-y-auto">
           {!project ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               Select a project to manage its automations.
             </div>
-          ) : automations.length === 0 && !creating ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-6">
-              <div className="text-sm font-medium">Start from a template</div>
-              <div className="max-w-md text-center text-sm text-muted-foreground">
-                Each run creates a fresh worktree, launches the agent with your
-                prompt, and lands as a reviewable diff.
-              </div>
-              <div className="mt-3 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
-                {AUTOMATION_TEMPLATES.map((t) => (
-                  <button
-                    key={t.name}
-                    onClick={() => openCreate(t)}
-                    className="flex items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 text-left hover:bg-accent/40"
-                  >
-                    <span className="text-lg leading-none">{t.emoji}</span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">
-                        {t.name}
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {t.description}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => openCreate(null)}
-                className="mt-3 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
-              >
-                Start from scratch
-              </button>
-            </div>
           ) : (
-            <div className="mx-auto max-w-2xl px-4 py-4">
-              <div className="flex flex-col gap-1">
-                {automations.map((a) => {
-                  const lastRun = lastRunByAutomation.get(a.id);
-                  const lastMeta = lastRun ? RUN_STATUS_META[lastRun.status] : null;
-                  const isSelected = a.id === selectedId;
-                  return (
-                    <button
-                      key={a.id}
-                      onClick={() => {
-                        setCreating(null);
-                        setSelectedId(a.id);
-                      }}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-left ${
-                        isSelected ? "bg-accent/60" : "hover:bg-accent/30"
-                      }`}
-                    >
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${
-                          !a.enabled
-                            ? "bg-muted-foreground/40"
-                            : lastRun?.status === "failed"
-                              ? "bg-red-500"
-                              : "bg-emerald-500"
+            <div className="mx-auto max-w-3xl px-8 pb-16 pt-10">
+              <h1 className="text-2xl font-semibold">Automations</h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                Run agents on a schedule — each run creates a fresh worktree
+                and lands as a reviewable diff.
+              </p>
+
+              {automations.length > 0 && (
+                <div className="mt-8 flex flex-col">
+                  {automations.map((a) => {
+                    const lastRun = lastRunByAutomation.get(a.id);
+                    const lastMeta = lastRun ? RUN_STATUS_META[lastRun.status] : null;
+                    const isSelected = a.id === selectedId;
+                    return (
+                      <button
+                        key={a.id}
+                        onClick={() => {
+                          setCreating(null);
+                          setSelectedId(a.id);
+                        }}
+                        className={`flex items-center gap-3.5 rounded-lg px-3 py-3 text-left ${
+                          isSelected ? "bg-accent/60" : "hover:bg-accent/30"
                         }`}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-medium">
-                            {a.name}
-                          </span>
-                          {!a.enabled && (
-                            <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
-                              paused
+                      >
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${
+                            !a.enabled
+                              ? "bg-muted-foreground/40"
+                              : lastRun?.status === "failed"
+                                ? "bg-red-500"
+                                : "bg-emerald-500"
+                          }`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate text-[15px] font-medium">
+                              {a.name}
                             </span>
-                          )}
+                            {!a.enabled && (
+                              <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
+                                paused
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 truncate text-[13px] text-muted-foreground">
+                            {describeSchedule(a.schedule)}
+                            {a.enabled && <> · Next run {formatWhen(a.next_run_at)}</>}
+                            {lastRun && lastMeta && (
+                              <> · Last {lastMeta.label} {formatWhen(lastRun.scheduled_for)}</>
+                            )}
+                          </div>
                         </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {describeSchedule(a.schedule)}
-                          {a.enabled && <> · next {formatWhen(a.next_run_at)}</>}
-                          {lastRun && lastMeta && (
-                            <> · last {lastMeta.label} {formatWhen(lastRun.scheduled_for)}</>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {suggestions.length > 0 && (
+                <>
+                  {automations.length > 0 ? (
+                    <div className="mb-6 mt-8 border-t border-border/50" />
+                  ) : (
+                    <div className="mt-8" />
+                  )}
+                  <div className="px-3 text-[15px] font-medium text-muted-foreground">
+                    Suggestions
+                  </div>
+                  <div className="mt-2 flex flex-col">
+                    {suggestions.map((t) => (
+                      <button
+                        key={t.name}
+                        onClick={() => openCreate(t)}
+                        className="flex items-start gap-3.5 rounded-lg px-3 py-3 text-left hover:bg-accent/30"
+                      >
+                        <span className="mt-0.5 text-base leading-none">
+                          {t.emoji}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="flex items-baseline gap-2.5">
+                            <span className="truncate text-[15px] font-medium">
+                              {t.name}
+                            </span>
+                            <span className="shrink-0 text-[13px] text-muted-foreground">
+                              {describeSchedule(t.schedule)}
+                            </span>
+                          </span>
+                          <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
+                            {t.description}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
