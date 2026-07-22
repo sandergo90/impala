@@ -7,9 +7,12 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDndContext,
   useDroppable,
   closestCenter,
+  pointerWithin,
   DragOverlay,
+  type CollisionDetection,
   type DragCancelEvent,
   type DragEndEvent,
   type DragStartEvent,
@@ -101,6 +104,11 @@ interface WorkspaceTabDropData {
 const topTabDndId = (tabId: string) => `top-tab:${tabId}`;
 const groupTabDndId = (ownerTopTabId: string, groupId: string, tabId: string) =>
   `group-tab:${ownerTopTabId}:${groupId}:${tabId}`;
+
+const workspaceCollisionDetection: CollisionDetection = (args) => {
+  const pointerHits = pointerWithin(args);
+  return pointerHits.length > 0 ? pointerHits : closestCenter(args);
+};
 
 /**
  * Tabbed terminals view for a single worktree.
@@ -569,7 +577,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={workspaceCollisionDetection}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
@@ -1097,6 +1105,11 @@ function PaneTabGroup({
         <PaneSplitControl onFocus={onFocus} onSplit={onSplit} />
       </div>
       <div className="relative min-h-0 flex-1" key={activeTab.id}>
+        <PaneBodyDropZones
+          ownerTopTabId={topTabId}
+          groupId={group.id}
+          isPrimaryGroup={isPrimaryGroup}
+        />
         {body}
       </div>
     </div>
@@ -1279,6 +1292,79 @@ function PaneGroupDropZone({
     >
       {children}
     </div>
+  );
+}
+
+type PaneDropPlacement = "left" | "right" | "top" | "bottom" | "center";
+
+function PaneBodyDropZones({
+  ownerTopTabId,
+  groupId,
+  isPrimaryGroup,
+}: {
+  ownerTopTabId: string;
+  groupId: string;
+  isPrimaryGroup: boolean;
+}) {
+  const { active } = useDndContext();
+  if (!active) return null;
+
+  const placements: PaneDropPlacement[] = isPrimaryGroup
+    ? ["right", "bottom"]
+    : ["left", "right", "top", "bottom", "center"];
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20" aria-hidden="true">
+      {placements.map((placement) => (
+        <PaneBodyDropZone
+          key={placement}
+          ownerTopTabId={ownerTopTabId}
+          groupId={groupId}
+          placement={placement}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PaneBodyDropZone({
+  ownerTopTabId,
+  groupId,
+  placement,
+}: {
+  ownerTopTabId: string;
+  groupId: string;
+  placement: PaneDropPlacement;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `pane-drop:${ownerTopTabId}:${groupId}:${placement}`,
+    data: {
+      dropTarget: {
+        type: "pane",
+        ownerTopTabId,
+        groupId,
+        placement,
+      },
+    },
+  });
+  const positionClass =
+    placement === "left"
+      ? "bottom-1/4 left-2 top-1/4 w-[22%]"
+      : placement === "right"
+        ? "bottom-1/4 right-2 top-1/4 w-[22%]"
+        : placement === "top"
+          ? "left-1/4 right-1/4 top-2 h-[22%]"
+          : placement === "bottom"
+            ? "bottom-2 left-1/4 right-1/4 h-[22%]"
+            : "inset-[28%]";
+  return (
+    <div
+      ref={setNodeRef}
+      className={`absolute ${positionClass} rounded-md border transition-colors ${
+        isOver
+          ? "border-primary bg-primary/25 shadow-[0_0_0_1px_color-mix(in_oklab,var(--primary)_40%,transparent)]"
+          : "border-primary/40 bg-primary/10"
+      }`}
+    />
   );
 }
 

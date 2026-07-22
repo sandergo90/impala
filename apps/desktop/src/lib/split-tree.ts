@@ -306,6 +306,37 @@ export function insertGroupTab(
   });
 }
 
+export type PaneEdge = "left" | "right" | "top" | "bottom";
+
+/** Split a pane at an edge and place an existing tab in the new sibling group. */
+export function insertGroupAtEdge(
+  tree: SplitNode,
+  targetGroupId: string,
+  edge: PaneEdge,
+  tab: GroupTab,
+): SplitNode {
+  if (findGroupTab(tree, tab.id) || !findGroup(tree, targetGroupId)) return tree;
+
+  const groupId = `pane-${Date.now()}-${paneCounter++}`;
+  const newGroup: SplitGroup = {
+    type: "group",
+    id: groupId,
+    tabs: [tab],
+    activeTabId: tab.id,
+  };
+  const orientation = edge === "left" || edge === "right"
+    ? "vertical"
+    : "horizontal";
+  const newGroupFirst = edge === "left" || edge === "top";
+  return replaceNode(tree, targetGroupId, (target) => ({
+    type: "split",
+    orientation,
+    ratio: 0.5,
+    first: newGroupFirst ? newGroup : target,
+    second: newGroupFirst ? target : newGroup,
+  })) ?? tree;
+}
+
 export function setActiveGroupTab(
   tree: SplitNode,
   groupId: string,

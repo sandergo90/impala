@@ -12,6 +12,7 @@ import {
   getHorizontalNeighborGroupId,
   normalizeLegacySplitTree,
   insertGroupTab,
+  insertGroupAtEdge,
   moveGroupTab,
   removeGroupTab,
   removeNode,
@@ -193,5 +194,38 @@ describe("tabs inside groups", () => {
 
     expect(result.tab).toBe(file);
     expect(findGroup(result.tree, root.id).tabs).toEqual(root.tabs);
+  });
+
+  test("inserts an existing tab on each pane edge with spatially correct ordering", () => {
+    const target = group("target", { kind: "agent" });
+    const moved = createGroupTab("browser-session", { kind: "browser" }, "Browser");
+
+    const left = insertGroupAtEdge(target, target.id, "left", moved);
+    expect(left.orientation).toBe("vertical");
+    expect(getLeaves(left).map((pane) => pane.tabs[0])).toEqual([
+      moved,
+      target.tabs[0],
+    ]);
+
+    const right = insertGroupAtEdge(target, target.id, "right", moved);
+    expect(right.orientation).toBe("vertical");
+    expect(getLeaves(right).map((pane) => pane.tabs[0])).toEqual([
+      target.tabs[0],
+      moved,
+    ]);
+
+    const top = insertGroupAtEdge(target, target.id, "top", moved);
+    expect(top.orientation).toBe("horizontal");
+    expect(getLeaves(top).map((pane) => pane.tabs[0])).toEqual([
+      moved,
+      target.tabs[0],
+    ]);
+
+    const bottom = insertGroupAtEdge(target, target.id, "bottom", moved);
+    expect(bottom.orientation).toBe("horizontal");
+    expect(getLeaves(bottom).map((pane) => pane.tabs[0])).toEqual([
+      target.tabs[0],
+      moved,
+    ]);
   });
 });

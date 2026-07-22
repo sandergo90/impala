@@ -24,8 +24,10 @@ import {
   getHorizontalNeighborGroupId,
   extractGroupTab,
   insertGroupTab,
+  insertGroupAtEdge,
   moveGroupTab,
 } from "./split-tree";
+import type { PaneEdge } from "./split-tree";
 import { basename } from "./path-utils";
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { buildDocumentKey } from "./editor-buffer-registry";
@@ -372,6 +374,12 @@ export type WorkspaceTabDropTarget =
       ownerTopTabId: string;
       groupId: string;
       index?: number;
+    }
+  | {
+      type: "pane";
+      ownerTopTabId: string;
+      groupId: string;
+      placement: PaneEdge | "center";
     };
 
 function userTabFromGroupTab(groupTab: GroupTab): UserTab {
@@ -407,13 +415,21 @@ export function moveWorkspaceTab(
 ): boolean {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
+  const normalizedTarget: WorkspaceTabDropTarget =
+    target.type === "pane" && target.placement === "center"
+      ? {
+          type: "group",
+          ownerTopTabId: target.ownerTopTabId,
+          groupId: target.groupId,
+        }
+      : target;
 
-  if (source.type === "top-level" && target.type === "top-level") {
+  if (source.type === "top-level" && normalizedTarget.type === "top-level") {
     const fromIndex = nav.userTabs.findIndex((tab) => tab.id === source.topTabId);
     if (fromIndex < 0) return false;
     const toIndex = Math.max(
       0,
-      Math.min(target.index ?? nav.userTabs.length - 1, nav.userTabs.length - 1),
+      Math.min(normalizedTarget.index ?? nav.userTabs.length - 1, nav.userTabs.length - 1),
     );
     if (fromIndex === toIndex) return false;
     const userTabs = [...nav.userTabs];
@@ -423,7 +439,7 @@ export function moveWorkspaceTab(
     return true;
   }
 
-  if (source.type === "group-tab" && target.type === "top-level") {
+  if (source.type === "group-tab" && normalizedTarget.type === "top-level") {
     if (source.groupTabId === AGENT_PANE_ID) return false;
     const isAgentOwner = source.ownerTopTabId === AGENT_PANE_ID;
     const ownerTab = isAgentOwner
@@ -448,7 +464,7 @@ export function moveWorkspaceTab(
     });
     const insertionIndex = Math.max(
       0,
-      Math.min(target.index ?? userTabs.length, userTabs.length),
+      Math.min(normalizedTarget.index ?? userTabs.length, userTabs.length),
     );
     userTabs.splice(insertionIndex, 0, promoted);
 
@@ -466,33 +482,58 @@ export function moveWorkspaceTab(
     return true;
   }
 
-  if (target.type !== "group") return false;
-  const targetIsAgent = target.ownerTopTabId === AGENT_PANE_ID;
+  if (normalizedTarget.type !== "group" && normalizedTarget.type !== "pane") {
+    return false;
+  }
+  const edge: PaneEdge | null =
+    normalizedTarget.type === "pane" && normalizedTarget.placement !== "center"
+    ? normalizedTarget.placement
+    : null;
+  const targetIndex = normalizedTarget.type === "group"
+    ? normalizedTarget.index
+    : undefined;
+  const targetIsAgent = normalizedTarget.ownerTopTabId === AGENT_PANE_ID;
   const targetOwner = targetIsAgent
     ? null
-    : nav.userTabs.find((tab) => tab.id === target.ownerTopTabId);
+    : nav.userTabs.find((tab) => tab.id === normalizedTarget.ownerTopTabId);
   const targetTree = targetIsAgent
     ? getEffectiveAgentTabSplitTree(nav.agentTabSplitTree)
     : targetOwner
       ? getEffectiveUserTabSplitTree(targetOwner)
       : null;
-  // The first pane is represented by the top-level strip, not a local strip.
-  if (!targetTree || getLeaves(targetTree)[0]?.id === target.groupId) return false;
+  if (!targetTree) return false;
+  const primaryGroupId = getLeaves(targetTree)[0]?.id;
+  const targetIsPrimary = primaryGroupId === normalizedTarget.groupId;
+  // Center drops would create invisible group tabs in the primary pane. Left
+  // and top edge drops would replace the first group and move the workspace's
+  // top-level/system strip into the dragged content. Preserve that invariant.
+  if (
+    targetIsPrimary &&
+    (edge === null || edge === "left" || edge === "top")
+  ) {
+    return false;
+  }
 
   if (source.type === "top-level") {
     const sourceTab = nav.userTabs.find((tab) => tab.id === source.topTabId);
-    if (!sourceTab || sourceTab.id === target.ownerTopTabId) return false;
+    if (!sourceTab || sourceTab.id === normalizedTarget.ownerTopTabId) return false;
     const sourceTree = getEffectiveUserTabSplitTree(sourceTab);
     const sourceGroups = getLeaves(sourceTree);
     if (sourceGroups.length !== 1 || sourceGroups[0].tabs.length !== 1) return false;
     const groupTab = sourceGroups[0].tabs[0];
-    const nextTargetTree = insertGroupTab(
-      targetTree,
-      target.groupId,
-      groupTab,
-      target.index,
-    );
+    const nextTargetTree = edge
+      ? insertGroupAtEdge(targetTree, normalizedTarget.groupId, edge, groupTab)
+      : insertGroupTab(
+          targetTree,
+          normalizedTarget.groupId,
+          groupTab,
+          targetIndex,
+        );
     if (nextTargetTree === targetTree) return false;
+    const destinationGroupId = edge
+      ? findGroupTab(nextTargetTree, groupTab.id)?.group.id
+      : normalizedTarget.groupId;
+    if (!destinationGroupId) return false;
 
     const userTabs = nav.userTabs
       .filter((tab) => tab.id !== sourceTab.id)
@@ -500,7 +541,7 @@ export function moveWorkspaceTab(
         targetOwner && tab.id === targetOwner.id
           ? {
               ...withPrimaryContent(tab, nextTargetTree),
-              focusedPaneId: target.groupId,
+              focusedPaneId: destinationGroupId,
             }
           : tab,
       );
@@ -508,45 +549,69 @@ export function moveWorkspaceTab(
       ...(targetIsAgent
         ? {
             agentTabSplitTree: nextTargetTree,
-            agentTabFocusedPaneId: target.groupId,
+            agentTabFocusedPaneId: destinationGroupId,
           }
         : {}),
       userTabs,
       activeTab: "terminal",
-      activeTerminalsTab: target.ownerTopTabId,
+      activeTerminalsTab: normalizedTarget.ownerTopTabId,
       tabHistory: (nav.tabHistory ?? []).filter((id) => id !== sourceTab.id),
     });
     return true;
   }
 
-  if (source.ownerTopTabId !== target.ownerTopTabId) return false;
+  if (source.ownerTopTabId !== normalizedTarget.ownerTopTabId) return false;
   if (getLeaves(targetTree)[0]?.id === source.groupId) return false;
-  const nextTree = moveGroupTab(
-    targetTree,
-    source.groupId,
-    source.groupTabId,
-    target.groupId,
-    target.index,
-  );
+  const sourceGroup = findLeaf(targetTree, source.groupId);
+  if (!sourceGroup) return false;
+  if (edge && source.groupId === normalizedTarget.groupId && sourceGroup.tabs.length === 1) {
+    return false;
+  }
+  const nextTree = edge
+    ? (() => {
+        const extracted = extractGroupTab(
+          targetTree,
+          source.groupId,
+          source.groupTabId,
+        );
+        if (!extracted.tree || !extracted.tab) return targetTree;
+        return insertGroupAtEdge(
+          extracted.tree,
+          normalizedTarget.groupId,
+          edge,
+          extracted.tab,
+        );
+      })()
+    : moveGroupTab(
+        targetTree,
+        source.groupId,
+        source.groupTabId,
+        normalizedTarget.groupId,
+        targetIndex,
+      );
   if (nextTree === targetTree) return false;
+  const destinationGroupId = edge
+    ? findGroupTab(nextTree, source.groupTabId)?.group.id
+    : normalizedTarget.groupId;
+  if (!destinationGroupId) return false;
   uiState.updateWorktreeNavState(worktreePath, {
     ...(targetIsAgent
       ? {
           agentTabSplitTree: nextTree,
-          agentTabFocusedPaneId: target.groupId,
+          agentTabFocusedPaneId: destinationGroupId,
         }
       : {
           userTabs: nav.userTabs.map((tab) =>
             targetOwner && tab.id === targetOwner.id
               ? {
                   ...withPrimaryContent(tab, nextTree),
-                  focusedPaneId: target.groupId,
+                  focusedPaneId: destinationGroupId,
                 }
               : tab,
           ),
         }),
     activeTab: "terminal",
-    activeTerminalsTab: target.ownerTopTabId,
+    activeTerminalsTab: normalizedTarget.ownerTopTabId,
   });
   return true;
 }

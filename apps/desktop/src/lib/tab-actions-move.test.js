@@ -213,4 +213,151 @@ describe("moveWorkspaceTab", () => {
     ).toBe(false);
     expect(useUIStore.getState().getWorktreeNavState(worktreePath)).toEqual(before);
   });
+
+  test("splits a simple top-level tab onto a pane edge without changing content identity", () => {
+    const primary = group("primary", groupTab("agent-session", { kind: "agent" }));
+    const secondary = group(
+      "secondary",
+      groupTab("browser-session", { kind: "browser" }),
+    );
+    const owner = userTab("owner", split(primary, secondary));
+    const movedSession = groupTab("shell-session", { kind: "shell" }, "Terminal");
+    const simple = userTab("simple", group("simple-pane", movedSession));
+    setTabs([owner, simple], owner.id, { tabHistory: [simple.id] });
+
+    expect(
+      moveWorkspaceTab(
+        worktreePath,
+        { type: "top-level", topTabId: simple.id },
+        {
+          type: "pane",
+          ownerTopTabId: owner.id,
+          groupId: secondary.id,
+          placement: "right",
+        },
+      ),
+    ).toBe(true);
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const tree = nav.userTabs[0].splitTree;
+    const moved = findGroup(tree, nav.userTabs[0].focusedPaneId);
+    expect(nav.userTabs.map((tab) => tab.id)).toEqual([owner.id]);
+    expect(moved.tabs[0]).toBe(movedSession);
+    expect(tree.second.orientation).toBe("vertical");
+    expect(getLeaves(tree.second).map((pane) => pane.id)).toEqual([
+      secondary.id,
+      moved.id,
+    ]);
+    expect(nav.tabHistory).toEqual([]);
+  });
+
+  test("splits one local group tab onto its own pane edge and supports center drops", () => {
+    const primary = group("primary", groupTab("agent-session", { kind: "agent" }));
+    const shell = groupTab("shell-session", { kind: "shell" }, "Terminal");
+    const browser = groupTab("browser-session", { kind: "browser" }, "Browser");
+    const secondary = {
+      type: "group",
+      id: "secondary",
+      tabs: [shell, browser],
+      activeTabId: browser.id,
+    };
+    const target = group("target", groupTab("file-session", { kind: "file", path: "README.md" }));
+    const owner = userTab("owner", split(primary, split(secondary, target)));
+    setTabs([owner], owner.id);
+
+    expect(
+      moveWorkspaceTab(
+        worktreePath,
+        {
+          type: "group-tab",
+          ownerTopTabId: owner.id,
+          groupId: secondary.id,
+          groupTabId: browser.id,
+        },
+        {
+          type: "pane",
+          ownerTopTabId: owner.id,
+          groupId: secondary.id,
+          placement: "bottom",
+        },
+      ),
+    ).toBe(true);
+
+    let nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    let tree = nav.userTabs[0].splitTree;
+    const browserGroup = findGroup(tree, nav.userTabs[0].focusedPaneId);
+    expect(browserGroup.tabs[0]).toBe(browser);
+    expect(findGroup(tree, secondary.id).tabs).toEqual([shell]);
+
+    expect(
+      moveWorkspaceTab(
+        worktreePath,
+        {
+          type: "group-tab",
+          ownerTopTabId: owner.id,
+          groupId: browserGroup.id,
+          groupTabId: browser.id,
+        },
+        {
+          type: "pane",
+          ownerTopTabId: owner.id,
+          groupId: target.id,
+          placement: "center",
+        },
+      ),
+    ).toBe(true);
+
+    nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    tree = nav.userTabs[0].splitTree;
+    expect(findGroup(tree, target.id).tabs.at(-1)).toBe(browser);
+    expect(getLeaves(tree).some((pane) => pane.id === browserGroup.id)).toBe(false);
+  });
+
+  test("preserves the primary-pane strip invariant and rejects splitting an only tab onto itself", () => {
+    const primary = group("primary", groupTab("agent-session", { kind: "agent" }));
+    const secondary = group(
+      "secondary",
+      groupTab("browser-session", { kind: "browser" }),
+    );
+    const owner = userTab("owner", split(primary, secondary));
+    const simple = userTab(
+      "simple",
+      group("simple-pane", groupTab("shell-session", { kind: "shell" })),
+    );
+    setTabs([owner, simple], owner.id);
+    const before = useUIStore.getState().getWorktreeNavState(worktreePath);
+
+    for (const placement of ["left", "top", "center"]) {
+      expect(
+        moveWorkspaceTab(
+          worktreePath,
+          { type: "top-level", topTabId: simple.id },
+          {
+            type: "pane",
+            ownerTopTabId: owner.id,
+            groupId: primary.id,
+            placement,
+          },
+        ),
+      ).toBe(false);
+    }
+    expect(
+      moveWorkspaceTab(
+        worktreePath,
+        {
+          type: "group-tab",
+          ownerTopTabId: owner.id,
+          groupId: secondary.id,
+          groupTabId: secondary.tabs[0].id,
+        },
+        {
+          type: "pane",
+          ownerTopTabId: owner.id,
+          groupId: secondary.id,
+          placement: "right",
+        },
+      ),
+    ).toBe(false);
+    expect(useUIStore.getState().getWorktreeNavState(worktreePath)).toEqual(before);
+  });
 });
