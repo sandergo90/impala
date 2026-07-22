@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -29,8 +30,14 @@ const waitFor = async (probe, timeoutMs, description) => {
   );
 };
 
-const stop = (process) => {
-  if (!process.killed) process.kill("SIGTERM");
+const stop = async (process) => {
+  if (process.exitCode !== null) return;
+
+  process.kill("SIGTERM");
+  await Promise.race([
+    once(process, "exit"),
+    new Promise((resolve) => setTimeout(resolve, 2_000)),
+  ]);
 };
 
 const profilePath = await mkdtemp(path.join(tmpdir(), "impala-bundle-check-"));
@@ -140,7 +147,12 @@ try {
 
   console.log("Production bundle mounted into #root");
 } finally {
-  stop(preview);
-  if (chrome) stop(chrome);
-  await rm(profilePath, { recursive: true, force: true });
+  await stop(preview);
+  if (chrome) await stop(chrome);
+  await rm(profilePath, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+    retryDelay: 100,
+  });
 }

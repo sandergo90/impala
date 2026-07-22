@@ -7,6 +7,23 @@ import pkg from "./package.json" with { type: "json" };
 
 const host = process.env.TAURI_DEV_HOST;
 
+const vendorChunkName = (moduleId: string) => {
+  const packagePath = moduleId.replaceAll("\\", "/").split("/node_modules/").at(-1);
+  if (!packagePath) return null;
+
+  const [scopeOrName, scopedName, ...modulePath] = packagePath.split("/");
+  if (scopeOrName === "@shikijs" && scopedName === "langs") {
+    const moduleName = modulePath.join("-").replaceAll(/[^a-zA-Z0-9_-]/g, "-");
+    return `vendor-shikijs-langs-${moduleName}`;
+  }
+
+  const packageName = scopeOrName.startsWith("@")
+    ? `${scopeOrName.slice(1)}-${scopedName}`
+    : scopeOrName;
+
+  return `vendor-${packageName.replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
+};
+
 export default defineConfig(async () => ({
   plugins: [
     react(),
@@ -25,6 +42,20 @@ export default defineConfig(async () => ({
   build: {
     modulePreload: false,
     sourcemap: true,
+    rolldownOptions: {
+      preserveEntrySignatures: "allow-extension",
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: vendorChunkName,
+              test: /node_modules[\\/]/,
+              includeDependenciesRecursively: false,
+            },
+          ],
+        },
+      },
+    },
   },
   resolve: {
     alias: {
