@@ -595,7 +595,10 @@ export function Sidebar() {
               persistedWorktree &&
               wts.some((wt) => wt.path === persistedWorktree.path)
             ) {
-              await selectWorktree(persistedWorktree);
+              useUIStore.getState().setGeneralTerminalActive(false);
+              await sharedSelectWorktree(persistedWorktree, {
+                stayOnRoute: true,
+              });
             } else {
               useUIStore.getState().setSelectedWorktree(null);
             }

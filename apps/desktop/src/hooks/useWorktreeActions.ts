@@ -13,8 +13,13 @@ function ensureMainView() {
   }
 }
 
-export async function selectWorktree(wt: Worktree) {
-  ensureMainView();
+export async function selectWorktree(
+  wt: Worktree,
+  opts?: { stayOnRoute?: boolean },
+) {
+  // Mount-time selection *restore* passes stayOnRoute — it re-selects the
+  // persisted worktree to refresh data, not because the user picked one.
+  if (!opts?.stayOnRoute) ensureMainView();
   useUIStore.getState().setSelectedWorktree(wt);
   const projectPath = useUIStore.getState().selectedProject?.path;
   if (projectPath) {
@@ -91,7 +96,9 @@ export async function selectProject(project: Project) {
     const lastWorktree = lastPath ? wts.find((wt) => wt.path === lastPath) : undefined;
     if (lastWorktree) {
       useUIStore.getState().setGeneralTerminalActive(false);
-      await selectWorktree(lastWorktree);
+      // Part of the project *switch*, not a direct worktree pick — a
+      // project-scoped route (/automations) stays put and re-scopes.
+      await selectWorktree(lastWorktree, { stayOnRoute: true });
     }
   } catch (e) {
     toast.error("Failed to load worktrees");
