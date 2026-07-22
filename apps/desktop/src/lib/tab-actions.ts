@@ -367,6 +367,8 @@ export type WorkspaceTabDragSource =
       groupTabId: string;
     };
 
+export type PaneDropPlacement = PaneEdge | "center";
+
 export type WorkspaceTabDropTarget =
   | { type: "top-level"; index?: number }
   | {
@@ -379,7 +381,7 @@ export type WorkspaceTabDropTarget =
       type: "pane";
       ownerTopTabId: string;
       groupId: string;
-      placement: PaneEdge | "center";
+      placement: PaneDropPlacement;
     };
 
 function userTabFromGroupTab(groupTab: GroupTab): UserTab {

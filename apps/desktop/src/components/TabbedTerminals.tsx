@@ -66,6 +66,7 @@ import {
   closeUserTabFocusedPane,
   closeAgentTabFocusedPane,
   moveWorkspaceTab,
+  type PaneDropPlacement,
   type WorkspaceTabDragSource,
   type WorkspaceTabDropTarget,
 } from "../lib/tab-actions";
@@ -107,7 +108,11 @@ const groupTabDndId = (ownerTopTabId: string, groupId: string, tabId: string) =>
 
 const workspaceCollisionDetection: CollisionDetection = (args) => {
   const pointerHits = pointerWithin(args);
-  return pointerHits.length > 0 ? pointerHits : closestCenter(args);
+  if (pointerHits.length > 0) return pointerHits;
+  // A pointer release in the gaps between visible targets is an intentional
+  // no-op. Keyboard drags have no pointer coordinates, so keep nearest-target
+  // navigation for them.
+  return args.pointerCoordinates ? [] : closestCenter(args);
 };
 
 /**
@@ -1294,8 +1299,6 @@ function PaneGroupDropZone({
     </div>
   );
 }
-
-type PaneDropPlacement = "left" | "right" | "top" | "bottom" | "center";
 
 function PaneBodyDropZones({
   ownerTopTabId,
