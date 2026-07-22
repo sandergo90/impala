@@ -108,6 +108,13 @@ pub async fn browser_open(
     let load_app = app.clone();
     let load_id = id.clone();
     let builder = WebviewBuilder::new(label_for(&id), WebviewUrl::External(parsed))
+        // WKWebView's default UA lacks the "Version/… Safari/…" suffix, so
+        // UA-sniffing sites (Google among them) serve their legacy fallback
+        // pages. Present as current macOS Safari.
+        .user_agent(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
+             (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+        )
         .initialization_script(CONSOLE_SHIM)
         .on_navigation(move |url| {
             debug!(id = %nav_id, url = %url, "browser on_navigation");
