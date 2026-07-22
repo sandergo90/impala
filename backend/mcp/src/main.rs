@@ -374,6 +374,72 @@ fn tool_browser_screenshot(args: &Value) -> Result<String, String> {
 // MCP protocol definitions
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Automation tools — same hook-server transport as the browser tools.
+// ---------------------------------------------------------------------------
+
+fn tool_list_automations(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    browser_get("/automations/list", &[("worktree_path", &wt)]).map(strip_ok)
+}
+
+fn tool_create_automation(args: &Value) -> Result<Value, String> {
+    let wt = param_or_cwd(args, "worktree_path")?;
+    let name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("missing name")?;
+    let prompt = args
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("missing prompt")?;
+    let schedule = args
+        .get("schedule")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("missing schedule")?;
+    let agent = args.get("agent").and_then(|v| v.as_str()).unwrap_or("");
+    browser_get(
+        "/automations/create",
+        &[
+            ("worktree_path", &wt),
+            ("name", name),
+            ("prompt", prompt),
+            ("schedule", schedule),
+            ("agent", agent),
+        ],
+    )
+    .map(strip_ok)
+}
+
+fn tool_run_automation_now(args: &Value) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("missing id")?;
+    browser_get("/automations/run_now", &[("id", id)]).map(strip_ok)
+}
+
+fn tool_set_automation_enabled(args: &Value) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("missing id")?;
+    let enabled = args
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .ok_or("missing enabled")?;
+    browser_get(
+        "/automations/set_enabled",
+        &[("id", id), ("enabled", if enabled { "true" } else { "false" })],
+    )
+    .map(strip_ok)
+}
+
 fn tool_definitions() -> Value {
     json!({
         "tools": [
@@ -528,6 +594,82 @@ fn tool_definitions() -> Value {
                 }
             },
             {
+                "name": "list_automations",
+                "description": "List this project's scheduled automations in Impala (name, prompt, cron schedule, agent, enabled, next run) plus recent runs. Call before create_automation to avoid duplicates. Each automation run creates a fresh worktree, launches the agent with the stored prompt, and lands as a reviewable diff in Impala.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        }
+                    }
+                }
+            },
+            {
+                "name": "create_automation",
+                "description": "Create a scheduled automation in Impala for this project. Runs fire while the Impala app is open (a missed slot fires once on next launch); each run creates a fresh worktree and launches the agent with the prompt. Write the prompt to be self-contained and to save its output into files in the worktree — the diff is what the user reviews. Schedule is 5-field cron in local time (e.g. \"0 9 * * MON-FRI\").",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Worktree path. Defaults to the current working directory."
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Short human name, e.g. \"Daily standup digest\""
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "The prompt each run starts the agent with. Self-contained; output written into worktree files."
+                        },
+                        "schedule": {
+                            "type": "string",
+                            "description": "5-field cron expression, local time (e.g. \"0 9 * * MON-FRI\")"
+                        },
+                        "agent": {
+                            "type": "string",
+                            "enum": ["claude", "codex"],
+                            "description": "Agent to run. Defaults to this worktree's agent."
+                        }
+                    },
+                    "required": ["name", "prompt", "schedule"]
+                }
+            },
+            {
+                "name": "run_automation_now",
+                "description": "Trigger one immediate run of an automation (get the id from list_automations). Creates a real worktree and launches the agent — tell the user before doing this. Does not change the automation's schedule.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "The automation id"
+                        }
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
+                "name": "set_automation_enabled",
+                "description": "Pause (enabled=false) or resume (enabled=true) an automation. Resuming schedules from now — occurrences missed while paused are skipped.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "The automation id"
+                        },
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "false to pause, true to resume"
+                        }
+                    },
+                    "required": ["id", "enabled"]
+                }
+            },
+            {
                 "name": "list_files_with_annotations",
                 "description": "List files in the current worktree that have unresolved annotations, with counts. Defaults to the current working directory; pass repo_path to query a different worktree.",
                 "inputSchema": {
@@ -664,6 +806,10 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_navigate" => tool_browser_navigate(&tool_args),
                 "browser_click" => tool_browser_click(&tool_args),
                 "browser_type" => tool_browser_type(&tool_args),
+                "list_automations" => tool_list_automations(&tool_args),
+                "create_automation" => tool_create_automation(&tool_args),
+                "run_automation_now" => tool_run_automation_now(&tool_args),
+                "set_automation_enabled" => tool_set_automation_enabled(&tool_args),
                 "list_files_with_annotations" => {
                     tool_list_files_with_annotations(conn, &tool_args)
                 }

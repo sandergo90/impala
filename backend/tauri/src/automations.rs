@@ -428,7 +428,7 @@ pub fn list_runs_by_repo(conn: &Connection, repo_path: &str) -> Result<Vec<Autom
 
 // --- dispatch + scheduler ---------------------------------------------------
 
-fn dispatch(
+pub(crate) fn dispatch(
     app: &AppHandle,
     conn: &Connection,
     automation: &Automation,

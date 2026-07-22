@@ -206,6 +206,32 @@ After making a fix, navigate again and screenshot — verify visually before dec
 - "no browser tab open for this worktree" → ask the user to open one (+ menu → New browser tab), or navigate to create it.
 "#;
 
+const IMPALA_AUTOMATIONS_SKILL: &str = r#"---
+name: impala-automations
+description: Schedule recurring agent runs in Impala. Use when the user asks for work on a schedule — "every morning", "daily", "check this weekly", "keep an eye on this" — or wants to list, pause, resume, or trigger scheduled automations.
+allowed-tools: mcp__impala__list_automations, mcp__impala__create_automation, mcp__impala__run_automation_now, mcp__impala__set_automation_enabled
+---
+
+Impala (the desktop app this worktree is open in) runs scheduled automations: name + prompt + schedule + agent, per project. At each fire Impala creates a fresh worktree, launches the agent with the prompt, and the finished run lands as a reviewable diff with a badge in the app. Runs fire only while Impala is open; a slot missed while it was closed fires once on next launch.
+
+## Tools
+
+- `mcp__impala__list_automations` — automations + recent runs for this project. Call this FIRST before creating; update duplicates instead of stacking similar ones (there is no update tool — if one exists already, tell the user to edit it in Impala's Automations view).
+- `mcp__impala__create_automation` — name, prompt, schedule; agent defaults to this worktree's agent.
+- `mcp__impala__run_automation_now` — trigger one run immediately (creates a real worktree; say so before doing it).
+- `mcp__impala__set_automation_enabled` — pause (false) / resume (true). Resuming skips occurrences missed while paused.
+
+## Schedules
+
+5-field cron, evaluated in the machine's local timezone. Common shapes: `0 9 * * *` daily 9:00, `0 9 * * MON-FRI` weekday mornings, `0 17 * * FRI` Friday 17:00, `0 * * * *` hourly.
+
+## Writing automation prompts
+
+The prompt runs unattended in a fresh worktree with nobody there to answer questions, so make it self-contained and decisive: state exactly what to examine, what to change or produce, and where to put it. Have it write results into files (e.g. `docs/<topic>/<date>.md`) or make the fixes directly — the diff IS the deliverable the user reviews. Never write a prompt that only prints to the terminal.
+
+When the user's request is ambiguous about cadence or scope ("keep an eye on this"), propose a concrete name + schedule + prompt and confirm before creating.
+"#;
+
 /// Install a skill to ~/.claude/skills/<name>/SKILL.md
 fn install_skill(name: &str, content: &str) {
     let home = match dirs::home_dir() {
@@ -221,10 +247,12 @@ fn install_skill(name: &str, content: &str) {
     let _ = std::fs::write(skill_dir.join("SKILL.md"), content);
 }
 
-/// Install the Impala skills (/impala-review, /impala-browser) for Claude Code.
+/// Install the Impala skills (/impala-review, /impala-browser,
+/// /impala-automations) for Claude Code.
 pub fn install_impala_review_skill() {
     install_skill("impala-review", IMPALA_REVIEW_SKILL);
     install_skill("impala-browser", IMPALA_BROWSER_SKILL);
+    install_skill("impala-automations", IMPALA_AUTOMATIONS_SKILL);
 }
 
 /// macOS only. Maintains one `caffeinate -i` process per worktree that is
@@ -349,6 +377,113 @@ fn handle_browser_request(
     }
 }
 
+/// Dispatch an /automations/* request (impala-mcp's automation tools). Same
+/// contract as /browser/*: JSON object with an `ok` flag, errors in `error`.
+/// Automations are keyed by the main repo path, so worktree-scoped calls
+/// resolve through the .git gitdir link first.
+fn handle_automation_request(
+    app: &AppHandle,
+    path: &str,
+    params: &HashMap<String, String>,
+) -> serde_json::Value {
+    use tauri::Manager;
+
+    let result = (|| -> Result<serde_json::Value, String> {
+        let state = app.state::<crate::DbState>();
+        let conn = state
+            .0
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+
+        let resolve_repo = || -> Result<String, String> {
+            let worktree_path = params
+                .get("worktree_path")
+                .filter(|p| !p.is_empty())
+                .ok_or("missing worktree_path")?;
+            crate::agent_config::main_worktree_root(std::path::Path::new(worktree_path))
+                .map(|p| p.to_string_lossy().to_string())
+                .ok_or_else(|| "not inside a git repository".to_string())
+        };
+        let require = |key: &str| -> Result<&String, String> {
+            params
+                .get(key)
+                .filter(|v| !v.is_empty())
+                .ok_or(format!("missing {key}"))
+        };
+
+        match path {
+            "/automations/list" => {
+                let repo = resolve_repo()?;
+                let automations = crate::automations::list_by_repo(&conn, &repo)?;
+                let runs = crate::automations::list_runs_by_repo(&conn, &repo)?;
+                Ok(serde_json::json!({ "automations": automations, "recent_runs": runs }))
+            }
+            "/automations/create" => {
+                let repo = resolve_repo()?;
+                // Default the agent to the calling worktree's own agent —
+                // "check this again every morning" means "as me".
+                let agent = match params.get("agent").filter(|a| !a.is_empty()) {
+                    Some(a) => a.clone(),
+                    None => params
+                        .get("worktree_path")
+                        .and_then(|wt| {
+                            crate::settings::get_setting(&conn, "selectedAgent", wt)
+                                .ok()
+                                .flatten()
+                        })
+                        .unwrap_or_else(|| "claude".to_string()),
+                };
+                let created = crate::automations::create_automation_row(
+                    &conn,
+                    crate::automations::NewAutomation {
+                        repo_path: repo,
+                        name: require("name")?.clone(),
+                        prompt: require("prompt")?.clone(),
+                        agent,
+                        schedule: require("schedule")?.clone(),
+                    },
+                    chrono::Utc::now().timestamp(),
+                )?;
+                let _ = app.emit("automations-changed", ());
+                Ok(serde_json::json!({ "automation": created }))
+            }
+            "/automations/run_now" => {
+                let id = require("id")?;
+                let automation = crate::automations::get_automation(&conn, id)?;
+                crate::automations::dispatch(
+                    app,
+                    &conn,
+                    &automation,
+                    chrono::Utc::now().timestamp(),
+                )?;
+                Ok(serde_json::json!({ "started": automation.name }))
+            }
+            "/automations/set_enabled" => {
+                let id = require("id")?;
+                let enabled = require("enabled")? == "true";
+                crate::automations::set_enabled_row(
+                    &conn,
+                    id,
+                    enabled,
+                    chrono::Utc::now().timestamp(),
+                )?;
+                let _ = app.emit("automations-changed", ());
+                Ok(serde_json::json!({ "enabled": enabled }))
+            }
+            _ => Err(format!("unknown automations endpoint: {path}")),
+        }
+    })();
+    match result {
+        Ok(mut value) => {
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("ok".to_string(), serde_json::Value::Bool(true));
+            }
+            value
+        }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
 /// Start the hook HTTP server on a random port. Returns the port number.
 /// The `statuses` map is updated with every event so the frontend can query
 /// last-known agent status after a hard reload.
@@ -393,10 +528,14 @@ pub fn start(
             // Browser agent-hook endpoints (impala-mcp). Screenshots/eval can
             // take seconds — handle on their own thread so /hook (agent
             // status, latency-critical) never queues behind them.
-            if path.starts_with("/browser/") {
+            if path.starts_with("/browser/") || path.starts_with("/automations/") {
                 let app = app_handle.clone();
                 std::thread::spawn(move || {
-                    let body = handle_browser_request(&app, &path, &params);
+                    let body = if path.starts_with("/browser/") {
+                        handle_browser_request(&app, &path, &params)
+                    } else {
+                        handle_automation_request(&app, &path, &params)
+                    };
                     let response = Response::from_string(body.to_string()).with_header(
                         tiny_http::Header::from_bytes(
                             &b"Content-Type"[..],

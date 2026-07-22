@@ -131,7 +131,7 @@ fn link_codex_auth(codex_home: &Path) -> Result<(), String> {
 /// for a `git worktree`-linked checkout it's the original repo, derived by
 /// reading the `.git` file's `gitdir:` line. Returns None outside a git
 /// repo, in which case the caller skips the trust block.
-fn main_worktree_root(worktree_path: &Path) -> Option<PathBuf> {
+pub(crate) fn main_worktree_root(worktree_path: &Path) -> Option<PathBuf> {
     let git = worktree_path.join(".git");
     if git.is_dir() {
         return Some(worktree_path.to_path_buf());
@@ -304,6 +304,11 @@ fn write_codex_commands(codex_home: &Path) -> Result<(), String> {
         .map_err(|e| format!("write codex impala-review.md: {}", e))?;
     fs::write(commands_dir.join("impala-browser.md"), IMPALA_BROWSER_COMMAND)
         .map_err(|e| format!("write codex impala-browser.md: {}", e))?;
+    fs::write(
+        commands_dir.join("impala-automations.md"),
+        IMPALA_AUTOMATIONS_COMMAND,
+    )
+    .map_err(|e| format!("write codex impala-automations.md: {}", e))?;
 
     Ok(())
 }
@@ -698,6 +703,30 @@ After making a fix, navigate again and screenshot — verify visually before dec
 - Console logs are captured per page; they reset on navigation.
 - Screenshots show the pane's viewport, not the full scroll height.
 - "no browser tab open for this worktree" → ask the user to open one (+ menu → New browser tab), or navigate to create it.
+"#;
+
+const IMPALA_AUTOMATIONS_COMMAND: &str = r#"---
+description: Schedule recurring agent runs in Impala. Use when the user asks for work on a schedule ("every morning", "daily", "check this weekly") or wants to list, pause, resume, or trigger scheduled automations.
+---
+
+Impala (the desktop app this worktree is open in) runs scheduled automations: name + prompt + schedule + agent, per project. At each fire Impala creates a fresh worktree, launches the agent with the prompt, and the finished run lands as a reviewable diff with a badge in the app. Runs fire only while Impala is open; a slot missed while it was closed fires once on next launch.
+
+## Tools
+
+- `mcp__impala__list_automations` — automations + recent runs for this project. Call this FIRST before creating; if a similar one exists, tell the user to edit it in Impala's Automations view instead of stacking a duplicate.
+- `mcp__impala__create_automation` — name, prompt, schedule; agent defaults to this worktree's agent.
+- `mcp__impala__run_automation_now` — trigger one run immediately (creates a real worktree; say so before doing it).
+- `mcp__impala__set_automation_enabled` — pause (false) / resume (true). Resuming skips occurrences missed while paused.
+
+## Schedules
+
+5-field cron, evaluated in the machine's local timezone. Common shapes: `0 9 * * *` daily 9:00, `0 9 * * MON-FRI` weekday mornings, `0 17 * * FRI` Friday 17:00, `0 * * * *` hourly.
+
+## Writing automation prompts
+
+The prompt runs unattended in a fresh worktree with nobody there to answer questions, so make it self-contained and decisive: state exactly what to examine, what to change or produce, and where to put it. Have it write results into files (e.g. `docs/<topic>/<date>.md`) or make the fixes directly — the diff IS the deliverable the user reviews. Never write a prompt that only prints to the terminal.
+
+When the user's request is ambiguous about cadence or scope ("keep an eye on this"), propose a concrete name + schedule + prompt and confirm before creating.
 "#;
 
 /// Append entries to <worktree>/.git/info/exclude (the per-worktree
