@@ -290,22 +290,20 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
       <div className="flex-1" />
 
       {/* Automations */}
-      {selectedProject && (
-        <button
-          onClick={() => navigate({ to: "/automations" })}
-          className="relative w-7 h-7 rounded-[5px] flex items-center justify-center text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors"
-          title="Automations"
-        >
-          <ClockIcon />
-          {automationBadge.total > 0 && (
-            <span
-              className={`absolute top-0 right-0 w-1.5 h-1.5 rounded-full pointer-events-none ${
-                automationBadge.failed > 0 ? "bg-red-500" : "bg-primary"
-              }`}
-            />
-          )}
-        </button>
-      )}
+      <button
+        onClick={() => navigate({ to: "/automations" })}
+        className="relative w-7 h-7 rounded-[5px] flex items-center justify-center text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors"
+        title="Automations"
+      >
+        <ClockIcon />
+        {automationBadge.total > 0 && (
+          <span
+            className={`absolute top-0 right-0 w-1.5 h-1.5 rounded-full pointer-events-none ${
+              automationBadge.failed > 0 ? "bg-red-500" : "bg-primary"
+            }`}
+          />
+        )}
+      </button>
 
       {/* Settings */}
       <button
@@ -1014,11 +1012,10 @@ export function Sidebar() {
       )}
 
       {/* Automations — above settings */}
-      {selectedProject && (
-        <button
-          onClick={() => navigate({ to: "/automations" })}
-          className="flex items-center gap-1.5 w-full px-3.5 py-1.5 text-sm text-muted-foreground/90 hover:text-muted-foreground transition-colors"
-        >
+      <button
+        onClick={() => navigate({ to: "/automations" })}
+        className="flex items-center gap-1.5 w-full px-3.5 py-1.5 text-sm text-muted-foreground/90 hover:text-muted-foreground transition-colors"
+      >
           <ClockIcon />
           <span>Automations</span>
           {automationBadge.total > 0 && (
@@ -1033,8 +1030,7 @@ export function Sidebar() {
               {automationBadge.total > 9 ? "9+" : automationBadge.total}
             </span>
           )}
-        </button>
-      )}
+      </button>
 
       {/* Settings gear — always at bottom */}
       <button

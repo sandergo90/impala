@@ -19,12 +19,10 @@ export function useAutomationBadge(): UnseenRunCounts {
   const [counts, setCounts] = useState<UnseenRunCounts>(NONE);
 
   const refresh = useCallback(() => {
-    if (!projectPath) {
-      setCounts(NONE);
-      return;
-    }
+    // "" scope = global automations only; with a project the backend counts
+    // that project plus global.
     invoke<UnseenRunCounts>("count_unseen_automation_runs", {
-      repo: projectPath,
+      repo: projectPath ?? "",
     })
       .then(setCounts)
       .catch(() => setCounts(NONE));

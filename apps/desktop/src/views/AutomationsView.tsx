@@ -124,20 +124,33 @@ export function AutomationsView() {
   const [deleting, setDeleting] = useState<Automation | null>(null);
 
   const refresh = useCallback(() => {
-    if (!project) {
-      setAutomations([]);
-      setRuns([]);
-      return;
-    }
-    invoke<Automation[]>("list_automations", { repo: project.path })
-      .then(setAutomations)
-      .catch(() => setAutomations([]));
-    invoke<AutomationRun[]>("list_automation_runs", { repo: project.path })
-      .then(setRuns)
-      .catch(() => setRuns([]));
+    // Global ("" scope) automations show on every project's page — and are
+    // the whole page when no project is selected.
+    const scopes = project ? [project.path, ""] : [""];
+    Promise.all(
+      scopes.map((repo) =>
+        invoke<Automation[]>("list_automations", { repo }).catch(
+          () => [] as Automation[],
+        ),
+      ),
+    ).then((lists) => setAutomations(lists.flat()));
+    Promise.all(
+      scopes.map((repo) =>
+        invoke<AutomationRun[]>("list_automation_runs", { repo }).catch(
+          () => [] as AutomationRun[],
+        ),
+      ),
+    ).then((lists) =>
+      setRuns(
+        lists.flat().sort((a, b) => b.created_at.localeCompare(a.created_at)),
+      ),
+    );
     // The user is looking at the runs — clear the sidebar badge. Emits (and
-    // re-triggers this refresh) only when rows actually flip.
-    invoke("mark_automation_runs_seen", { repo: project.path }).catch(() => {});
+    // re-triggers this refresh) only when rows actually flip. The backend
+    // covers global scope for whichever repo we pass.
+    invoke("mark_automation_runs_seen", { repo: project?.path ?? "" }).catch(
+      () => {},
+    );
   }, [project]);
 
   useEffect(() => {
@@ -162,9 +175,23 @@ export function AutomationsView() {
   const selected = automations.find((a) => a.id === selectedId) ?? null;
 
   const openRunWorktree = useCallback(
-    async (run: AutomationRun) => {
-      if (!run.worktree_path || !project) return;
+    async (run: AutomationRun, automation?: Automation) => {
+      if (!run.worktree_path) return;
       try {
+        // Global runs live in scratch repos, not project worktrees — open
+        // them directly; the main view works off the path alone.
+        if (automation?.repo_path === "") {
+          useUIStore.getState().setGeneralTerminalActive(false);
+          await selectWorktree({
+            path: run.worktree_path,
+            branch: "main",
+            head_commit: "",
+            title: automation.name,
+          });
+          navigate({ to: "/" });
+          return;
+        }
+        if (!project) return;
         const wts = await invoke<Worktree[]>("list_worktrees", {
           repoPath: project.path,
         });
@@ -189,9 +216,13 @@ export function AutomationsView() {
     setCreating({ template });
   };
 
-  const suggestions = AUTOMATION_TEMPLATES.filter(
-    (t) => !automations.some((a) => a.name === t.name),
-  );
+  // Template prompts are repo-flavored ("this repository") — only suggest
+  // them inside a project context.
+  const suggestions = project
+    ? AUTOMATION_TEMPLATES.filter(
+        (t) => !automations.some((a) => a.name === t.name),
+      )
+    : [];
   const sidebarWidth = useUIStore((s) => s.sidebarWidth) ?? DEFAULT_SIDEBAR_WIDTH;
 
   return (
@@ -202,14 +233,12 @@ export function AutomationsView() {
       >
         <div className="absolute inset-0" data-tauri-drag-region />
         <div className="flex-1" />
-        {project && (
-          <button
-            onClick={() => openCreate(null)}
-            className="relative rounded-md border border-border px-2.5 py-1 text-sm hover:bg-accent"
-          >
-            + New automation
-          </button>
-        )}
+        <button
+          onClick={() => openCreate(null)}
+          className="relative rounded-md border border-border px-2.5 py-1 text-sm hover:bg-accent"
+        >
+          + New automation
+        </button>
       </div>
 
       <div className="flex min-h-0 flex-1">
@@ -221,11 +250,7 @@ export function AutomationsView() {
         </div>
 
         <div className="min-w-0 flex-1 overflow-y-auto">
-          {!project ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Select a project to manage its automations.
-            </div>
-          ) : (
+          {
             <div className="mx-auto max-w-3xl px-8 pb-16 pt-10">
               <h1 className="text-2xl font-semibold">Automations</h1>
               <p className="mt-1.5 text-sm text-muted-foreground">
@@ -264,6 +289,11 @@ export function AutomationsView() {
                             <span className="truncate text-[15px] font-medium">
                               {a.name}
                             </span>
+                            {a.repo_path === "" && project && (
+                              <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
+                                global
+                              </span>
+                            )}
                             {!a.enabled && (
                               <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
                                 paused
@@ -323,13 +353,13 @@ export function AutomationsView() {
                 </>
               )}
             </div>
-          )}
+          }
         </div>
 
-        {project && (selected || creating) && (
+        {(selected || creating) && (
           <AutomationEditor
             key={selected ? selected.id : "new"}
-            repoPath={project.path}
+            repoPath={project?.path ?? ""}
             automation={selected}
             template={creating?.template ?? null}
             runs={selected ? runs.filter((r) => r.automation_id === selected.id) : []}
@@ -342,7 +372,7 @@ export function AutomationsView() {
               setCreating(null);
             }}
             onDelete={() => selected && setDeleting(selected)}
-            onOpenRun={openRunWorktree}
+            onOpenRun={(run) => openRunWorktree(run, selected ?? undefined)}
           />
         )}
       </div>
@@ -642,9 +672,10 @@ function AutomationEditor({
               }}
               className={rowSelectClass}
             >
+              <option value="">No project (global)</option>
               {/* Keep the current value selectable even if its project was
                   removed from the tracked list. */}
-              {!projects.some((p) => p.path === targetRepo) && (
+              {targetRepo !== "" && !projects.some((p) => p.path === targetRepo) && (
                 <option value={targetRepo}>
                   {targetRepo.split("/").pop() ?? targetRepo}
                 </option>
@@ -672,7 +703,9 @@ function AutomationEditor({
           </DetailRow>
           <DetailRow label="Runs in">
             <span className="py-1 text-sm text-muted-foreground">
-              New worktree per run
+              {targetRepo === ""
+                ? "Fresh scratch repo per run"
+                : "New worktree per run"}
             </span>
           </DetailRow>
         </div>

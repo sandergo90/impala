@@ -9,6 +9,8 @@ use tracing::warn;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Automation {
     pub id: String,
+    /// Project path, or "" for a global (project-less) automation — its runs
+    /// execute in a fresh scratch git repo under ~/.impala/automation-runs.
     pub repo_path: String,
     pub name: String,
     pub prompt: String,
@@ -383,12 +385,13 @@ pub struct UnseenRunCounts {
     pub failed: i64,
 }
 
-/// Finished runs (completed/failed) the user hasn't looked at yet.
+/// Finished runs (completed/failed) the user hasn't looked at yet. Global
+/// automations ("" scope) always count — they belong to every view.
 pub fn count_unseen_runs(conn: &Connection, repo_path: &str) -> Result<UnseenRunCounts, String> {
     conn.query_row(
         "SELECT COUNT(*), SUM(CASE WHEN r.status = 'failed' THEN 1 ELSE 0 END)
          FROM automation_runs r JOIN automations a ON a.id = r.automation_id
-         WHERE a.repo_path = ?1 AND r.seen = 0 AND r.status IN ('completed', 'failed')",
+         WHERE (a.repo_path = ?1 OR a.repo_path = '') AND r.seen = 0 AND r.status IN ('completed', 'failed')",
         params![repo_path],
         |row| {
             Ok(UnseenRunCounts {
@@ -401,15 +404,69 @@ pub fn count_unseen_runs(conn: &Connection, repo_path: &str) -> Result<UnseenRun
 }
 
 /// Mark finished runs seen. Only completed/failed rows — a launched run
-/// marked seen mid-flight would never badge on completion.
+/// marked seen mid-flight would never badge on completion. Covers global
+/// automations too, mirroring count_unseen_runs.
 pub fn mark_runs_seen(conn: &Connection, repo_path: &str) -> Result<usize, String> {
     conn.execute(
         "UPDATE automation_runs SET seen = 1
          WHERE seen = 0 AND status IN ('completed', 'failed')
-           AND automation_id IN (SELECT id FROM automations WHERE repo_path = ?1)",
+           AND automation_id IN (SELECT id FROM automations WHERE repo_path = ?1 OR repo_path = '')",
         params![repo_path],
     )
     .map_err(|e| format!("Failed to mark runs seen: {}", e))
+}
+
+/// Create the scratch git repo a global automation run executes in. A real
+/// repo (init + empty commit) so the main view's uncommitted diff shows
+/// everything the agent wrote.
+pub fn create_run_dir(name: &str) -> Result<String, String> {
+    let slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug = if slug.is_empty() { "automation" } else { &slug };
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let dir = dirs::home_dir()
+        .ok_or("no home dir")?
+        .join(".impala")
+        .join("automation-runs")
+        .join(format!("{}-{}", slug, stamp));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create run dir: {}", e))?;
+
+    let git = |args: &[&str]| -> Result<(), String> {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(args)
+            .output()
+            .map_err(|e| format!("git: {}", e))?;
+        if !out.status.success() {
+            return Err(format!(
+                "git {:?}: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+        Ok(())
+    };
+    git(&["init"])?;
+    // Identity flags so the empty commit works without global git config.
+    git(&[
+        "-c",
+        "user.name=Impala",
+        "-c",
+        "user.email=impala@localhost",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "Automation run start",
+    ])?;
+    Ok(dir.to_string_lossy().to_string())
 }
 
 pub fn list_runs_by_repo(conn: &Connection, repo_path: &str) -> Result<Vec<AutomationRun>, String> {
@@ -625,6 +682,11 @@ pub fn report_automation_run(
 }
 
 #[tauri::command]
+pub fn prepare_automation_run_dir(name: String) -> Result<String, String> {
+    create_run_dir(&name)
+}
+
+#[tauri::command]
 pub fn count_unseen_automation_runs(
     state: tauri::State<'_, crate::DbState>,
     repo: String,
@@ -827,6 +889,26 @@ mod tests {
             count_unseen_runs(&conn, "/repo").unwrap(),
             UnseenRunCounts { total: 1, failed: 1 }
         );
+
+        // Global ("" scope) automations list separately but their unseen
+        // runs surface in every project's badge.
+        let global = create_automation_row(
+            &conn,
+            NewAutomation {
+                repo_path: "".into(),
+                ..new_automation("0 8 * * *")
+            },
+            now,
+        )
+        .unwrap();
+        assert_eq!(list_by_repo(&conn, "").unwrap().len(), 1);
+        assert_eq!(list_by_repo(&conn, "/repo").unwrap().len(), 1);
+        let grun = insert_run(&conn, &global.id, 3000).unwrap().unwrap();
+        report_run(&conn, &grun.id, Some("/scratch/g1"), "launched", None).unwrap();
+        complete_run_for_worktree(&conn, "/scratch/g1").unwrap();
+        assert_eq!(count_unseen_runs(&conn, "/repo").unwrap().total, 2);
+        assert_eq!(count_unseen_runs(&conn, "").unwrap().total, 1);
+        assert_eq!(mark_runs_seen(&conn, "/repo").unwrap(), 2);
 
         assert!(report_run(&conn, &run.id, None, "bogus", None).is_err());
 

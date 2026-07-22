@@ -45,36 +45,49 @@ export function startAutomationExecutor(): () => void {
 
 async function executeRun({ run_id, automation }: AutomationDueEvent) {
   try {
-    const branch = `auto/${slugify(automation.name)}-${branchStamp()}`;
-    const worktree = await invoke<Worktree>("create_worktree", {
-      repoPath: automation.repo_path,
-      branchName: branch,
-      baseBranch: null,
-      existing: false,
-      initialTitle: automation.name,
-      agent: automation.agent,
-    });
-
-    // Sidebar list refresh — only meaningful when this project is selected.
-    if (useUIStore.getState().selectedProject?.path === automation.repo_path) {
-      const wts = await invoke<Worktree[]>("list_worktrees", {
-        repoPath: automation.repo_path,
+    let runPath: string;
+    if (automation.repo_path === "") {
+      // Global automation — no project to branch from. Runs in a fresh
+      // scratch git repo so the agent's output is reviewable as an
+      // uncommitted diff when the run is opened.
+      runPath = await invoke<string>("prepare_automation_run_dir", {
+        name: automation.name,
       });
-      useDataStore.getState().setWorktrees(wts);
+    } else {
+      const branch = `auto/${slugify(automation.name)}-${branchStamp()}`;
+      const worktree = await invoke<Worktree>("create_worktree", {
+        repoPath: automation.repo_path,
+        branchName: branch,
+        baseBranch: null,
+        existing: false,
+        initialTitle: automation.name,
+        agent: automation.agent,
+      });
+      runPath = worktree.path;
+
+      // Sidebar list refresh — only meaningful when this project is selected.
+      if (useUIStore.getState().selectedProject?.path === automation.repo_path) {
+        const wts = await invoke<Worktree[]>("list_worktrees", {
+          repoPath: automation.repo_path,
+        });
+        useDataStore.getState().setWorktrees(wts);
+      }
+
+      runSetupScript(automation.repo_path, worktree).catch(() => {});
     }
 
-    runSetupScript(automation.repo_path, worktree).catch(() => {});
-
     await launchAgentHeadless({
-      worktreePath: worktree.path,
-      projectPath: automation.repo_path,
+      worktreePath: runPath,
+      // Global runs have no project; the scratch dir itself scopes agent
+      // flag resolution (falls through to global-scope settings).
+      projectPath: automation.repo_path || runPath,
       agent: automation.agent,
       prompt: automation.prompt,
     });
 
     await invoke("report_automation_run", {
       runId: run_id,
-      worktreePath: worktree.path,
+      worktreePath: runPath,
       status: "launched",
       error: null,
     });
