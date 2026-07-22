@@ -34,6 +34,10 @@ import {
 import { ContextMenu } from "@/components/ui/context-menu";
 
 import { projectColor } from "../lib/utils";
+import {
+  AUTOMATIONS_PROJECT,
+  isAutomationsProject,
+} from "../lib/automations-project";
 import { encodePtyInput } from "../lib/encode-pty";
 import {
   RUN_PANE_ID,
@@ -500,26 +504,37 @@ export function Sidebar() {
           invoke("delete_pr_status", { worktreePath: wt.path }).catch(() => {}),
         ]);
 
-        // Run the project's teardown script (if any) while the worktree still
-        // exists. Best-effort: a failure is surfaced but never blocks deletion.
-        await invoke("run_teardown_script", {
-          repoPath: selectedProject.path,
-          worktreePath: wt.path,
-        }).catch((e) => {
-          toast.error(`Teardown script failed: ${e}`);
-        });
+        if (isAutomationsProject(selectedProject)) {
+          // Scratch repo of a global automation run — standalone, no
+          // teardown script, removed wholesale (aborts an in-flight run).
+          await invoke("delete_automation_run_dir", {
+            worktreePath: wt.path,
+          });
+        } else {
+          // Run the project's teardown script (if any) while the worktree
+          // still exists. Best-effort: a failure is surfaced but never
+          // blocks deletion.
+          await invoke("run_teardown_script", {
+            repoPath: selectedProject.path,
+            worktreePath: wt.path,
+          }).catch((e) => {
+            toast.error(`Teardown script failed: ${e}`);
+          });
 
-        await invoke("delete_worktree", {
-          repoPath: selectedProject.path,
-          worktreePath: wt.path,
-          force: true,
-        });
+          await invoke("delete_worktree", {
+            repoPath: selectedProject.path,
+            worktreePath: wt.path,
+            force: true,
+          });
+        }
       } catch (e) {
         // Rollback: re-fetch the real worktree list
         toast.error(`Failed to remove worktree: ${e}`);
-        const updated = await invoke<Worktree[]>("list_worktrees", {
-          repoPath: selectedProject.path,
-        });
+        const updated = isAutomationsProject(selectedProject)
+          ? await invoke<Worktree[]>("list_automation_run_worktrees")
+          : await invoke<Worktree[]>("list_worktrees", {
+              repoPath: selectedProject.path,
+            });
         setWorktrees(updated);
       }
     })();
@@ -528,7 +543,8 @@ export function Sidebar() {
   // -- Worktree hotkeys --
 
   useAppHotkey("NEW_WORKTREE", () => {
-    if (selectedProject) setShowNewWorktree(true);
+    if (selectedProject && !isAutomationsProject(selectedProject))
+      setShowNewWorktree(true);
   });
 
   useAppHotkey("DELETE_WORKTREE", () => {
@@ -578,7 +594,24 @@ export function Sidebar() {
         }
 
         const persistedProject = useUIStore.getState().selectedProject;
-        if (
+        if (isAutomationsProject(persistedProject)) {
+          const wts = await invoke<Worktree[]>(
+            "list_automation_run_worktrees",
+          ).catch(() => [] as Worktree[]);
+          useDataStore.getState().setWorktrees(wts);
+          const persistedWorktree = useUIStore.getState().selectedWorktree;
+          if (
+            persistedWorktree &&
+            wts.some((wt) => wt.path === persistedWorktree.path)
+          ) {
+            useUIStore.getState().setGeneralTerminalActive(false);
+            await sharedSelectWorktree(persistedWorktree, {
+              stayOnRoute: true,
+            });
+          } else {
+            useUIStore.getState().setSelectedWorktree(null);
+          }
+        } else if (
           persistedProject &&
           loaded.some((p) => p.path === persistedProject.path)
         ) {
@@ -759,6 +792,23 @@ export function Sidebar() {
                 </span>
               </div>
             ))}
+            {/* Virtual project: global automation runs' scratch repos. */}
+            <div
+              onClick={() => {
+                selectProject(AUTOMATIONS_PROJECT);
+                setShowDropdown(false);
+              }}
+              className="flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-accent"
+            >
+              <div className="w-5 h-5 rounded-[5px] flex items-center justify-center bg-accent text-muted-foreground shrink-0">
+                <ClockIcon />
+              </div>
+              <span
+                className={`text-sm truncate ${isAutomationsProject(selectedProject) ? "text-foreground font-medium" : "text-muted-foreground"}`}
+              >
+                {AUTOMATIONS_PROJECT.name}
+              </span>
+            </div>
             <div
               className="border-t border-border mt-1 pt-2 flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-accent text-muted-foreground text-sm"
               onClick={() => {
@@ -820,20 +870,22 @@ export function Sidebar() {
           <div className="mx-3 mb-1.5 border-b border-border/30" />
           <div className="flex items-center justify-between px-3.5 pt-1 pb-1 shrink-0">
             <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">
-              Worktrees
+              {isAutomationsProject(selectedProject) ? "Runs" : "Worktrees"}
             </span>
           </div>
-          <div className="px-2 pt-0.5 pb-2.5 shrink-0">
-            <button
-              onClick={() => setShowNewWorktree(true)}
-              className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-[5px] border border-border/50 text-sm text-muted-foreground/90 hover:text-muted-foreground hover:border-border hover:bg-accent/50 transition-colors"
-            >
-              <span>+ New Worktree</span>
-              <kbd className="text-[10px] text-muted-foreground/40 ml-auto">
-                ⌘N
-              </kbd>
-            </button>
-          </div>
+          {!isAutomationsProject(selectedProject) && (
+            <div className="px-2 pt-0.5 pb-2.5 shrink-0">
+              <button
+                onClick={() => setShowNewWorktree(true)}
+                className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-[5px] border border-border/50 text-sm text-muted-foreground/90 hover:text-muted-foreground hover:border-border hover:bg-accent/50 transition-colors"
+              >
+                <span>+ New Worktree</span>
+                <kbd className="text-[10px] text-muted-foreground/40 ml-auto">
+                  ⌘N
+                </kbd>
+              </button>
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto">
             {worktrees.map((wt) => {

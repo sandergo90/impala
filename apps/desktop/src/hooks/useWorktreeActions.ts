@@ -1,6 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
+import { isAutomationsProject } from "../lib/automations-project";
 import { router } from "../router";
 import type { Worktree, CommitInfo, ChangedFile, Project } from "../types";
 
@@ -85,9 +86,13 @@ export async function selectProject(project: Project) {
   useUIStore.getState().setSelectedWorktree(null);
   useDataStore.getState().setWorktrees([]);
   try {
-    const wts = await invoke<Worktree[]>("list_worktrees", {
-      repoPath: project.path,
-    });
+    // The virtual Automations project lists global runs' scratch repos —
+    // its sentinel path must never reach git-facing commands.
+    const wts = isAutomationsProject(project)
+      ? await invoke<Worktree[]>("list_automation_run_worktrees")
+      : await invoke<Worktree[]>("list_worktrees", {
+          repoPath: project.path,
+        });
     useDataStore.getState().setWorktrees(wts);
 
     // Auto-select the worktree the user was last on in this project, if it

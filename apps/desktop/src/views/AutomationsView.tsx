@@ -20,6 +20,7 @@ import {
   AUTOMATION_TEMPLATES,
   type AutomationTemplate,
 } from "../lib/automation-templates";
+import { AUTOMATIONS_PROJECT } from "../lib/automations-project";
 import type { Automation, AutomationRun, Worktree } from "../types";
 
 const DEFAULT_SIDEBAR_WIDTH = 280;
@@ -164,16 +165,20 @@ export function AutomationsView() {
     async (run: AutomationRun, automation?: Automation) => {
       if (!run.worktree_path) return;
       try {
-        // Global runs live in scratch repos, not project worktrees — open
-        // them directly; the main view works off the path alone.
+        // Global runs live in scratch repos under the virtual Automations
+        // project — switch to it so the sidebar shows the run's siblings.
         if (automation?.repo_path === "") {
-          useUIStore.getState().setGeneralTerminalActive(false);
-          await selectWorktree({
+          await selectProject(AUTOMATIONS_PROJECT);
+          const wt = useDataStore
+            .getState()
+            .worktrees.find((w) => w.path === run.worktree_path) ?? {
             path: run.worktree_path,
-            branch: "main",
+            branch: "automation",
             head_commit: "",
             title: automation.name,
-          });
+          };
+          useUIStore.getState().setGeneralTerminalActive(false);
+          await selectWorktree(wt);
           navigate({ to: "/" });
           return;
         }

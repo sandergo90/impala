@@ -402,6 +402,37 @@ pub fn abort_runs_for_worktree(conn: &Connection, worktree_path: &str) -> Result
     Ok(n > 0)
 }
 
+/// Scratch repos of global automation runs, newest first, for the virtual
+/// "Automations" project in the sidebar. `exists` is injected so tests
+/// don't need real directories.
+pub fn list_global_run_worktrees(
+    conn: &Connection,
+    exists: impl Fn(&str) -> bool,
+) -> Result<Vec<(String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT r.worktree_path, a.name FROM automation_runs r
+             JOIN automations a ON a.id = r.automation_id
+             WHERE a.repo_path = '' AND r.worktree_path IS NOT NULL
+             ORDER BY r.created_at DESC",
+        )
+        .map_err(|e| format!("Failed to prepare query: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("Failed to query run worktrees: {}", e))?;
+    let mut seen_paths = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for row in rows {
+        let (path, name) = row.map_err(|e| format!("Failed to read run worktree: {}", e))?;
+        if seen_paths.insert(path.clone()) && exists(&path) {
+            out.push((path, name));
+        }
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Serialize, PartialEq)]
 pub struct UnseenRunCounts {
     pub total: i64,
@@ -726,6 +757,61 @@ pub fn prepare_automation_run_dir(name: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn list_automation_run_worktrees(
+    state: tauri::State<'_, crate::DbState>,
+) -> Result<Vec<crate::git::Worktree>, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    Ok(
+        list_global_run_worktrees(&conn, |p| std::path::Path::new(p).exists())?
+            .into_iter()
+            .map(|(path, name)| crate::git::Worktree {
+                path,
+                branch: "automation".to_string(),
+                head_commit: String::new(),
+                title: Some(name),
+            })
+            .collect(),
+    )
+}
+
+/// Delete a global run's scratch repo. Refuses anything outside
+/// ~/.impala/automation-runs — this command removes directories wholesale.
+#[tauri::command]
+pub fn delete_automation_run_dir(
+    app: AppHandle,
+    state: tauri::State<'_, crate::DbState>,
+    worktree_path: String,
+) -> Result<(), String> {
+    let runs_root = dirs::home_dir()
+        .ok_or("no home dir")?
+        .join(".impala")
+        .join("automation-runs");
+    let canonical = std::fs::canonicalize(&worktree_path)
+        .map_err(|e| format!("resolve run dir: {}", e))?;
+    let canonical_root = std::fs::canonicalize(&runs_root)
+        .map_err(|e| format!("resolve automation-runs dir: {}", e))?;
+    if !canonical.starts_with(&canonical_root) || canonical == canonical_root {
+        return Err(format!(
+            "refusing to delete {}: not an automation run dir",
+            worktree_path
+        ));
+    }
+    std::fs::remove_dir_all(&canonical).map_err(|e| format!("delete run dir: {}", e))?;
+
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    if abort_runs_for_worktree(&conn, &worktree_path)? {
+        let _ = app.emit("automation-runs-changed", ());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn count_unseen_automation_runs(
     state: tauri::State<'_, crate::DbState>,
 ) -> Result<UnseenRunCounts, String> {
@@ -964,6 +1050,19 @@ mod tests {
         assert!(!complete_run_for_worktree(&conn, "/wt/auto-2")
             .unwrap()
             .is_some());
+
+        // Virtual-project listing: global run dirs that still exist, newest
+        // first, deduped, project runs excluded.
+        let grun2 = insert_run(&conn, &global.id, 5000).unwrap().unwrap();
+        report_run(&conn, &grun2.id, Some("/scratch/g2"), "launched", None).unwrap();
+        let listed = list_global_run_worktrees(&conn, |p| p != "/scratch/g2").unwrap();
+        assert_eq!(
+            listed,
+            vec![("/scratch/g1".to_string(), "Daily digest".to_string())]
+        );
+        let listed_all = list_global_run_worktrees(&conn, |_| true).unwrap();
+        assert_eq!(listed_all.len(), 2);
+        assert_eq!(listed_all[0].0, "/scratch/g2"); // newest first
 
         assert!(report_run(&conn, &run.id, None, "bogus", None).is_err());
 

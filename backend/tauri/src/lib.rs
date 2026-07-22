@@ -1902,6 +1902,8 @@ pub fn run() {
             automations::count_unseen_automation_runs,
             automations::mark_automation_runs_seen,
             automations::prepare_automation_run_dir,
+            automations::list_automation_run_worktrees,
+            automations::delete_automation_run_dir,
             get_pr_status,
             refresh_pr_status,
             delete_pr_status,

@@ -4,6 +4,7 @@ import { launchAgentHeadless } from "./agent-launch";
 import { runPtySessionId, RUN_PANE_ID } from "./pane-ids";
 import { encodePtyInput } from "./encode-pty";
 import { useDataStore, useUIStore } from "../store";
+import { isAutomationsProject } from "./automations-project";
 import type { Automation, Worktree } from "../types";
 
 export interface AutomationDueEvent {
@@ -53,6 +54,11 @@ async function executeRun({ run_id, automation }: AutomationDueEvent) {
       runPath = await invoke<string>("prepare_automation_run_dir", {
         name: automation.name,
       });
+      // Refresh the virtual Automations project's run list if it's on screen.
+      if (isAutomationsProject(useUIStore.getState().selectedProject)) {
+        const wts = await invoke<Worktree[]>("list_automation_run_worktrees");
+        useDataStore.getState().setWorktrees(wts);
+      }
     } else {
       const branch = `auto/${slugify(automation.name)}-${branchStamp()}`;
       const worktree = await invoke<Worktree>("create_worktree", {
