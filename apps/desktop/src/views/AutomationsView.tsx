@@ -180,19 +180,28 @@ export function AutomationsView() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <div
-        className="flex h-11 shrink-0 items-center gap-3 border-b border-border px-4"
-        data-tauri-drag-region
+        className="relative flex h-16 shrink-0 items-center gap-3 border-b border-border/50 pr-4"
+        style={{ paddingLeft: "88px" }}
       >
+        <div className="absolute inset-0" data-tauri-drag-region />
         <button
           onClick={() => navigate({ to: "/" })}
-          className="ml-16 rounded px-1.5 py-0.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="relative flex items-center gap-1.5 rounded px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           title="Back"
         >
-          ←
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M10 2L4 8l6 6"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
-        <span className="font-semibold">Automations</span>
+        <span className="relative font-semibold">Automations</span>
         {project && (
-          <span className="truncate text-sm text-muted-foreground">
+          <span className="relative truncate text-sm text-muted-foreground">
             {project.name}
           </span>
         )}
@@ -200,7 +209,7 @@ export function AutomationsView() {
         {project && (
           <button
             onClick={() => setEditing("new")}
-            className="rounded-md border border-border px-2.5 py-1 text-sm hover:bg-accent"
+            className="relative rounded-md border border-border px-2.5 py-1 text-sm hover:bg-accent"
           >
             + New automation
           </button>
