@@ -22,6 +22,9 @@ import {
   createGroup,
   shouldUseGroupTabs,
   getHorizontalNeighborGroupId,
+  extractGroupTab,
+  insertGroupTab,
+  moveGroupTab,
 } from "./split-tree";
 import { basename } from "./path-utils";
 import { useEditorDocsStore } from "../stores/editor-docs";
@@ -351,6 +354,201 @@ export function reorderUserTabs(
   next.splice(adjustedToIndex, 0, moved);
 
   uiState.updateWorktreeNavState(worktreePath, { userTabs: next });
+}
+
+export type WorkspaceTabDragSource =
+  | { type: "top-level"; topTabId: string }
+  | {
+      type: "group-tab";
+      ownerTopTabId: string;
+      groupId: string;
+      groupTabId: string;
+    };
+
+export type WorkspaceTabDropTarget =
+  | { type: "top-level"; index?: number }
+  | {
+      type: "group";
+      ownerTopTabId: string;
+      groupId: string;
+      index?: number;
+    };
+
+function userTabFromGroupTab(groupTab: GroupTab): UserTab {
+  const id = `promoted-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const tree: SplitNode = {
+    type: "group",
+    id: groupTab.id,
+    tabs: [groupTab],
+    activeTabId: groupTab.id,
+  };
+  return withPrimaryContent(
+    {
+      id,
+      kind: userKindForContent(groupTab.content),
+      label: groupTab.label,
+      createdAt: groupTab.createdAt,
+      splitTree: tree,
+      focusedPaneId: tree.id,
+    },
+    tree,
+  );
+}
+
+/**
+ * Atomically move an existing content tab between the workspace's visible tab
+ * strips. This deliberately bypasses every close/dispose path so PTYs,
+ * webviews, editor buffers, and pending agent launches keep their identity.
+ */
+export function moveWorkspaceTab(
+  worktreePath: string,
+  source: WorkspaceTabDragSource,
+  target: WorkspaceTabDropTarget,
+): boolean {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+
+  if (source.type === "top-level" && target.type === "top-level") {
+    const fromIndex = nav.userTabs.findIndex((tab) => tab.id === source.topTabId);
+    if (fromIndex < 0) return false;
+    const toIndex = Math.max(
+      0,
+      Math.min(target.index ?? nav.userTabs.length - 1, nav.userTabs.length - 1),
+    );
+    if (fromIndex === toIndex) return false;
+    const userTabs = [...nav.userTabs];
+    const [moved] = userTabs.splice(fromIndex, 1);
+    userTabs.splice(toIndex, 0, moved);
+    uiState.updateWorktreeNavState(worktreePath, { userTabs });
+    return true;
+  }
+
+  if (source.type === "group-tab" && target.type === "top-level") {
+    if (source.groupTabId === AGENT_PANE_ID) return false;
+    const isAgentOwner = source.ownerTopTabId === AGENT_PANE_ID;
+    const ownerTab = isAgentOwner
+      ? null
+      : nav.userTabs.find((tab) => tab.id === source.ownerTopTabId);
+    const tree = isAgentOwner
+      ? getEffectiveAgentTabSplitTree(nav.agentTabSplitTree)
+      : ownerTab
+        ? getEffectiveUserTabSplitTree(ownerTab)
+        : null;
+    if (!tree || getLeaves(tree)[0]?.id === source.groupId) return false;
+    const extracted = extractGroupTab(tree, source.groupId, source.groupTabId);
+    if (!extracted.tree || !extracted.tab) return false;
+
+    const promoted = userTabFromGroupTab(extracted.tab);
+    const userTabs = nav.userTabs.map((tab) => {
+      if (!ownerTab || tab.id !== ownerTab.id) return tab;
+      return {
+        ...withPrimaryContent(tab, extracted.tree!),
+        focusedPaneId: getLeaves(extracted.tree!)[0]?.id,
+      };
+    });
+    const insertionIndex = Math.max(
+      0,
+      Math.min(target.index ?? userTabs.length, userTabs.length),
+    );
+    userTabs.splice(insertionIndex, 0, promoted);
+
+    uiState.updateWorktreeNavState(worktreePath, {
+      ...(isAgentOwner
+        ? {
+            agentTabSplitTree: extracted.tree,
+            agentTabFocusedPaneId: getLeaves(extracted.tree)[0]?.id,
+          }
+        : {}),
+      userTabs,
+      activeTab: "terminal",
+      activeTerminalsTab: promoted.id,
+    });
+    return true;
+  }
+
+  if (target.type !== "group") return false;
+  const targetIsAgent = target.ownerTopTabId === AGENT_PANE_ID;
+  const targetOwner = targetIsAgent
+    ? null
+    : nav.userTabs.find((tab) => tab.id === target.ownerTopTabId);
+  const targetTree = targetIsAgent
+    ? getEffectiveAgentTabSplitTree(nav.agentTabSplitTree)
+    : targetOwner
+      ? getEffectiveUserTabSplitTree(targetOwner)
+      : null;
+  // The first pane is represented by the top-level strip, not a local strip.
+  if (!targetTree || getLeaves(targetTree)[0]?.id === target.groupId) return false;
+
+  if (source.type === "top-level") {
+    const sourceTab = nav.userTabs.find((tab) => tab.id === source.topTabId);
+    if (!sourceTab || sourceTab.id === target.ownerTopTabId) return false;
+    const sourceTree = getEffectiveUserTabSplitTree(sourceTab);
+    const sourceGroups = getLeaves(sourceTree);
+    if (sourceGroups.length !== 1 || sourceGroups[0].tabs.length !== 1) return false;
+    const groupTab = sourceGroups[0].tabs[0];
+    const nextTargetTree = insertGroupTab(
+      targetTree,
+      target.groupId,
+      groupTab,
+      target.index,
+    );
+    if (nextTargetTree === targetTree) return false;
+
+    const userTabs = nav.userTabs
+      .filter((tab) => tab.id !== sourceTab.id)
+      .map((tab) =>
+        targetOwner && tab.id === targetOwner.id
+          ? {
+              ...withPrimaryContent(tab, nextTargetTree),
+              focusedPaneId: target.groupId,
+            }
+          : tab,
+      );
+    uiState.updateWorktreeNavState(worktreePath, {
+      ...(targetIsAgent
+        ? {
+            agentTabSplitTree: nextTargetTree,
+            agentTabFocusedPaneId: target.groupId,
+          }
+        : {}),
+      userTabs,
+      activeTab: "terminal",
+      activeTerminalsTab: target.ownerTopTabId,
+      tabHistory: (nav.tabHistory ?? []).filter((id) => id !== sourceTab.id),
+    });
+    return true;
+  }
+
+  if (source.ownerTopTabId !== target.ownerTopTabId) return false;
+  if (getLeaves(targetTree)[0]?.id === source.groupId) return false;
+  const nextTree = moveGroupTab(
+    targetTree,
+    source.groupId,
+    source.groupTabId,
+    target.groupId,
+    target.index,
+  );
+  if (nextTree === targetTree) return false;
+  uiState.updateWorktreeNavState(worktreePath, {
+    ...(targetIsAgent
+      ? {
+          agentTabSplitTree: nextTree,
+          agentTabFocusedPaneId: target.groupId,
+        }
+      : {
+          userTabs: nav.userTabs.map((tab) =>
+            targetOwner && tab.id === targetOwner.id
+              ? {
+                  ...withPrimaryContent(tab, nextTree),
+                  focusedPaneId: target.groupId,
+                }
+              : tab,
+          ),
+        }),
+    activeTab: "terminal",
+    activeTerminalsTab: target.ownerTopTabId,
+  });
+  return true;
 }
 
 // Mirrors the tab order rendered by TabbedTerminals: Run (if present), then

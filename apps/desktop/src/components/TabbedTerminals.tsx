@@ -6,8 +6,12 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   closestCenter,
+  DragOverlay,
+  type DragCancelEvent,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -41,7 +45,6 @@ import {
   createBrowserTab,
   closeUserTab,
   renameUserTab,
-  reorderUserTabs,
   getPendingAgentLaunch,
   clearPendingAgentLaunch,
   setUserTabFocusedPane,
@@ -57,6 +60,9 @@ import {
   setAgentGroupActiveTab,
   closeUserTabFocusedPane,
   closeAgentTabFocusedPane,
+  moveWorkspaceTab,
+  type WorkspaceTabDragSource,
+  type WorkspaceTabDropTarget,
 } from "../lib/tab-actions";
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { useShallow } from "zustand/shallow";
@@ -79,6 +85,20 @@ interface TabDescriptor {
   paneId: string;
   isSystem: boolean;
 }
+
+interface WorkspaceTabDragData {
+  source: WorkspaceTabDragSource;
+  label: string;
+  kind: TabKind;
+}
+
+interface WorkspaceTabDropData {
+  dropTarget: WorkspaceTabDropTarget;
+}
+
+const topTabDndId = (tabId: string) => `top-tab:${tabId}`;
+const groupTabDndId = (ownerTopTabId: string, groupId: string, tabId: string) =>
+  `group-tab:${ownerTopTabId}:${groupId}:${tabId}`;
 
 /**
  * Tabbed terminals view for a single worktree.
@@ -258,19 +278,46 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     }),
   );
 
-  const userTabIds = useMemo(() => userTabs.map((t) => t.id), [userTabs]);
+  const userTabIds = useMemo(
+    () => userTabs.map((t) => topTabDndId(t.id)),
+    [userTabs],
+  );
+
+  const [dragPreview, setDragPreview] = useState<{
+    label: string;
+    kind: TabKind;
+  } | null>(null);
+
+  const finishDrag = useCallback(() => {
+    setDragPreview(null);
+    useUIStore.getState().setPanelDragActive(false);
+  }, []);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const data = event.active.data.current as WorkspaceTabDragData | undefined;
+    if (!data?.source) return;
+    setDragPreview({ label: data.label, kind: data.kind });
+    useUIStore.getState().setPanelDragActive(true);
+  }, []);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over) return;
-      const fromId = String(active.id);
-      const toId = String(over.id);
-      if (fromId === toId) return;
-      reorderUserTabs(worktreePath, fromId, toId);
+      try {
+        const source = (event.active.data.current as WorkspaceTabDragData | undefined)
+          ?.source;
+        const target = (event.over?.data.current as WorkspaceTabDropData | undefined)
+          ?.dropTarget;
+        if (source && target) moveWorkspaceTab(worktreePath, source, target);
+      } finally {
+        finishDrag();
+      }
     },
-    [worktreePath],
+    [finishDrag, worktreePath],
   );
+
+  const handleDragCancel = useCallback((_event: DragCancelEvent) => {
+    finishDrag();
+  }, [finishDrag]);
 
   const startRenaming = useCallback((tabId: string, currentLabel: string) => {
     setEditingTabId(tabId);
@@ -421,34 +468,34 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     }`;
 
   const topLevelTabList = (
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto" role="tablist" aria-label="Left pane tabs">
+      <TopLevelDropZone appendIndex={userTabs.length}>
         {systemTabs.map((t) => (
           <div key={t.id} className={baseTabClass(t)}>
             {renderTabInner(t)}
           </div>
         ))}
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
+        <SortableContext
+          items={userTabIds}
+          strategy={horizontalListSortingStrategy}
         >
-          <SortableContext
-            items={userTabIds}
-            strategy={horizontalListSortingStrategy}
-          >
-            {userTabDescriptors.map((t) => (
-              <SortableUserTab
+            {userTabDescriptors.map((t, index) => (
+              <SortableWorkspaceTab
                 key={t.id}
-                tabId={t.id}
+                dndId={topTabDndId(t.id)}
                 disabled={editingTabId === t.id}
                 className={baseTabClass(t)}
+                dragData={{
+                  source: { type: "top-level", topTabId: t.id },
+                  label: t.label,
+                  kind: t.kind,
+                }}
+                dropTarget={{ type: "top-level", index }}
               >
                 {renderTabInner(t)}
-              </SortableUserTab>
+              </SortableWorkspaceTab>
             ))}
-          </SortableContext>
-        </DndContext>
+        </SortableContext>
 
 
         <div className="relative ml-0.5 flex shrink-0 items-center">
@@ -513,12 +560,19 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           )}
         </div>
 
-      </div>
+      </TopLevelDropZone>
   );
 
   return (
-    <div className="h-full">
-      <div className="relative h-full min-h-0">
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
+      <div className="h-full">
+        <div className="relative h-full min-h-0">
         {(() => {
           // Mount only the active tab. Hidden tabs unmount, which detaches
           // the cached xterm wrapper from the DOM. On reactivation the
@@ -574,8 +628,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             </div>
           );
         })()}
+        </div>
       </div>
-    </div>
+      <DragOverlay>
+        {dragPreview ? <WorkspaceTabDragPreview {...dragPreview} /> : null}
+      </DragOverlay>
+    </DndContext>
   );
 });
 
@@ -943,8 +1001,18 @@ function PaneTabGroup({
         {isPrimaryGroup ? (
           primaryTabList
         ) : (
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto" role="tablist" aria-label="Pane tabs">
-            {group.tabs.map((tab) => {
+          <PaneGroupDropZone
+            ownerTopTabId={topTabId}
+            groupId={group.id}
+            appendIndex={group.tabs.length}
+          >
+            <SortableContext
+              items={group.tabs.map((tab) =>
+                groupTabDndId(topTabId, group.id, tab.id)
+              )}
+              strategy={horizontalListSortingStrategy}
+            >
+            {group.tabs.map((tab, index) => {
             const selected = tab.id === activeTab.id;
             const canClose =
               topTabId !== AGENT_PANE_ID || isSplitLayout || group.tabs.length > 1;
@@ -958,8 +1026,26 @@ function PaneTabGroup({
                     : Terminal;
 
             return (
-              <div
+              <SortableWorkspaceTab
                 key={tab.id}
+                dndId={groupTabDndId(topTabId, group.id, tab.id)}
+                disabled={false}
+                dragData={{
+                  source: {
+                    type: "group-tab",
+                    ownerTopTabId: topTabId,
+                    groupId: group.id,
+                    groupTabId: tab.id,
+                  },
+                  label: tab.label,
+                  kind: tab.content.kind === "shell" ? "terminal" : tab.content.kind,
+                }}
+                dropTarget={{
+                  type: "group",
+                  ownerTopTabId: topTabId,
+                  groupId: group.id,
+                  index,
+                }}
                 className={`group/pane-tab flex h-9 min-w-[132px] max-w-[280px] shrink-0 items-center rounded-md transition-colors ${
                   selected
                     ? "bg-accent text-foreground shadow-sm"
@@ -988,6 +1074,7 @@ function PaneTabGroup({
                       event.stopPropagation();
                       onClose(tab.id);
                     }}
+                    onPointerDown={(event) => event.stopPropagation()}
                     className={`mr-1.5 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-opacity hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${
                       selected
                         ? "opacity-70"
@@ -998,10 +1085,11 @@ function PaneTabGroup({
                     <X aria-hidden="true" className="size-4" />
                   </button>
                 )}
-              </div>
+              </SortableWorkspaceTab>
             );
             })}
-          </div>
+            </SortableContext>
+          </PaneGroupDropZone>
         )}
         <PaneSplitControl onFocus={onFocus} onSplit={onSplit} />
       </div>
@@ -1130,19 +1218,88 @@ function AgentTabSplitRenderer({
   );
 }
 
-function SortableUserTab({
-  tabId,
-  disabled,
-  className,
+function TopLevelDropZone({
+  appendIndex,
   children,
 }: {
-  tabId: string;
+  appendIndex: number;
+  children: ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: "top-level-strip",
+    data: { dropTarget: { type: "top-level", index: appendIndex } },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto rounded ${
+        isOver ? "ring-1 ring-primary/50" : ""
+      }`}
+      role="tablist"
+      aria-label="Left pane tabs"
+    >
+      {children}
+    </div>
+  );
+}
+
+function PaneGroupDropZone({
+  ownerTopTabId,
+  groupId,
+  appendIndex,
+  children,
+}: {
+  ownerTopTabId: string;
+  groupId: string;
+  appendIndex: number;
+  children: ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `group-strip:${ownerTopTabId}:${groupId}`,
+    data: {
+      dropTarget: {
+        type: "group",
+        ownerTopTabId,
+        groupId,
+        index: appendIndex,
+      },
+    },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto rounded ${
+        isOver ? "ring-1 ring-primary/50" : ""
+      }`}
+      role="tablist"
+      aria-label="Pane tabs"
+    >
+      {children}
+    </div>
+  );
+}
+
+function SortableWorkspaceTab({
+  dndId,
+  disabled,
+  className,
+  dragData,
+  dropTarget,
+  children,
+}: {
+  dndId: string;
   disabled: boolean;
   className: string;
+  dragData: WorkspaceTabDragData;
+  dropTarget: WorkspaceTabDropTarget;
   children: ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: tabId, disabled });
+    useSortable({
+      id: dndId,
+      disabled,
+      data: { ...dragData, dropTarget },
+    });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1158,6 +1315,29 @@ function SortableUserTab({
       {...listeners}
     >
       {children}
+    </div>
+  );
+}
+
+function WorkspaceTabDragPreview({
+  label,
+  kind,
+}: {
+  label: string;
+  kind: TabKind;
+}) {
+  const Icon =
+    kind === "agent"
+      ? Bot
+      : kind === "file"
+        ? FileText
+        : kind === "browser"
+          ? Globe2
+          : Terminal;
+  return (
+    <div className="flex h-9 max-w-[280px] items-center gap-2.5 rounded-md border border-border bg-accent px-3 text-[0.9375rem] font-medium text-foreground shadow-lg">
+      <Icon aria-hidden="true" className="size-4 shrink-0 opacity-90" />
+      <span className="truncate">{label}</span>
     </div>
   );
 }

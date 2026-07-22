@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   addTabToGroup,
   createGroupTab,
+  extractGroupTab,
   findGroup,
   findGroupTab,
   getActiveGroupTab,
@@ -10,6 +11,8 @@ import {
   getLeaves,
   getHorizontalNeighborGroupId,
   normalizeLegacySplitTree,
+  insertGroupTab,
+  moveGroupTab,
   removeGroupTab,
   removeNode,
   setActiveGroupTab,
@@ -140,5 +143,55 @@ describe("tabs inside groups", () => {
     const root = group("only-pane", { kind: "shell" });
     expect(shouldUseGroupTabs(root, root.id)).toBe(false);
     expect(removeGroupTab(root, root.id, root.id).tree).toBeNull();
+  });
+
+  test("inserts and reorders existing tabs without changing identity", () => {
+    const root = group("pane", { kind: "agent" });
+    const browser = createGroupTab("browser-session", { kind: "browser" }, "Browser");
+    const shell = createGroupTab("shell-session", { kind: "shell" }, "Terminal");
+    const stacked = insertGroupTab(
+      insertGroupTab(root, root.id, browser),
+      root.id,
+      shell,
+    );
+    const moved = moveGroupTab(stacked, root.id, browser.id, root.id, 2);
+
+    expect(findGroup(moved, root.id).tabs).toEqual([
+      root.tabs[0],
+      shell,
+      browser,
+    ]);
+    expect(getActiveGroupTab(findGroup(moved, root.id))).toBe(browser);
+  });
+
+  test("moves a tab between groups and collapses an emptied source", () => {
+    const root = group("primary", { kind: "agent" });
+    const split = splitNode(root, root.id, "vertical", { kind: "browser" });
+    const browser = getActiveGroupTab(findGroup(split.tree, split.newLeafId));
+    const moved = moveGroupTab(
+      split.tree,
+      split.newLeafId,
+      browser.id,
+      root.id,
+      1,
+    );
+
+    expect(getLeaves(moved).map((pane) => pane.id)).toEqual([root.id]);
+    expect(findGroup(moved, root.id).tabs).toEqual([root.tabs[0], browser]);
+    expect(getActiveGroupTab(findGroup(moved, root.id))).toBe(browser);
+  });
+
+  test("extracts a tab without disposing or cloning it", () => {
+    const root = group("pane", { kind: "agent" });
+    const file = createGroupTab(
+      "editor-buffer",
+      { kind: "file", path: "notes.md" },
+      "notes.md",
+    );
+    const stacked = addTabToGroup(root, root.id, file);
+    const result = extractGroupTab(stacked, root.id, file.id);
+
+    expect(result.tab).toBe(file);
+    expect(findGroup(result.tree, root.id).tabs).toEqual(root.tabs);
   });
 });

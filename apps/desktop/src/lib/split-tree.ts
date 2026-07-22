@@ -287,11 +287,23 @@ export function addTabToGroup(
   groupId: string,
   tab: GroupTab,
 ): SplitNode {
-  return updateGroup(tree, groupId, (group) => ({
-    ...group,
-    tabs: [...group.tabs, tab],
-    activeTabId: tab.id,
-  }));
+  return insertGroupTab(tree, groupId, tab);
+}
+
+/** Insert an existing tab into a group without changing its identity. */
+export function insertGroupTab(
+  tree: SplitNode,
+  groupId: string,
+  tab: GroupTab,
+  index?: number,
+): SplitNode {
+  if (findGroupTab(tree, tab.id) || !findGroup(tree, groupId)) return tree;
+  return updateGroup(tree, groupId, (group) => {
+    const tabs = [...group.tabs];
+    const insertionIndex = Math.max(0, Math.min(index ?? tabs.length, tabs.length));
+    tabs.splice(insertionIndex, 0, tab);
+    return { ...group, tabs, activeTabId: tab.id };
+  });
 }
 
 export function setActiveGroupTab(
@@ -328,6 +340,58 @@ export function removeGroupTab(
     })),
     removed,
   };
+}
+
+/** Extract a tab while leaving its backing PTY, webview, or editor buffer untouched. */
+export function extractGroupTab(
+  tree: SplitNode,
+  groupId: string,
+  tabId: string,
+): { tree: SplitNode | null; tab: GroupTab | null } {
+  const result = removeGroupTab(tree, groupId, tabId);
+  return { tree: result.tree, tab: result.removed };
+}
+
+/** Move a tab within or between groups, collapsing an emptied source group. */
+export function moveGroupTab(
+  tree: SplitNode,
+  sourceGroupId: string,
+  tabId: string,
+  targetGroupId: string,
+  index?: number,
+): SplitNode {
+  const source = findGroup(tree, sourceGroupId);
+  const target = findGroup(tree, targetGroupId);
+  const tab = source?.tabs.find((candidate) => candidate.id === tabId);
+  if (!source || !target || !tab) return tree;
+
+  if (sourceGroupId === targetGroupId) {
+    const fromIndex = source.tabs.indexOf(tab);
+    const toIndex = Math.max(
+      0,
+      Math.min(index ?? source.tabs.length - 1, source.tabs.length - 1),
+    );
+    if (fromIndex === toIndex) return tree;
+    return updateGroup(tree, sourceGroupId, (group) => {
+      const tabs = [...group.tabs];
+      tabs.splice(fromIndex, 1);
+      tabs.splice(toIndex, 0, tab);
+      return { ...group, tabs, activeTabId: tab.id };
+    });
+  }
+
+  const extracted = extractGroupTab(tree, sourceGroupId, tabId);
+  if (!extracted.tree || !extracted.tab) return tree;
+  return insertGroupTab(extracted.tree, targetGroupId, extracted.tab, index);
+}
+
+export function reorderGroupTabs(
+  tree: SplitNode,
+  groupId: string,
+  tabId: string,
+  index: number,
+): SplitNode {
+  return moveGroupTab(tree, groupId, tabId, groupId, index);
 }
 
 function replaceNode(
