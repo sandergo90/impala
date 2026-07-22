@@ -336,6 +336,25 @@ export function renameUserTab(
   uiState.updateWorktreeNavState(worktreePath, { userTabs: next });
 }
 
+export function renameAgentGroupTab(
+  worktreePath: string,
+  groupTabId: string,
+  label: string,
+): void {
+  const trimmed = label.trim();
+  if (!trimmed || groupTabId === AGENT_PANE_ID) return;
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+  if (!findGroupTab(tree, groupTabId)) return;
+  uiState.updateWorktreeNavState(worktreePath, {
+    agentTabSplitTree: updateGroupTab(tree, groupTabId, (tab) => ({
+      ...tab,
+      label: trimmed,
+    })),
+  });
+}
+
 export function reorderUserTabs(
   worktreePath: string,
   fromTabId: string,
@@ -426,6 +445,10 @@ export function moveWorkspaceTab(
         }
       : target;
 
+  if (source.type === "group-tab" && source.groupTabId === AGENT_PANE_ID) {
+    return false;
+  }
+
   if (source.type === "top-level" && normalizedTarget.type === "top-level") {
     const fromIndex = nav.userTabs.findIndex((tab) => tab.id === source.topTabId);
     if (fromIndex < 0) return false;
@@ -442,7 +465,6 @@ export function moveWorkspaceTab(
   }
 
   if (source.type === "group-tab" && normalizedTarget.type === "top-level") {
-    if (source.groupTabId === AGENT_PANE_ID) return false;
     const isAgentOwner = source.ownerTopTabId === AGENT_PANE_ID;
     const ownerTab = isAgentOwner
       ? null
@@ -452,7 +474,7 @@ export function moveWorkspaceTab(
       : ownerTab
         ? getEffectiveUserTabSplitTree(ownerTab)
         : null;
-    if (!tree || getLeaves(tree)[0]?.id === source.groupId) return false;
+    if (!tree) return false;
     const extracted = extractGroupTab(tree, source.groupId, source.groupTabId);
     if (!extracted.tree || !extracted.tab) return false;
 
@@ -506,12 +528,13 @@ export function moveWorkspaceTab(
   if (!targetTree) return false;
   const primaryGroupId = getLeaves(targetTree)[0]?.id;
   const targetIsPrimary = primaryGroupId === normalizedTarget.groupId;
-  // Center drops would create invisible group tabs in the primary pane. Left
-  // and top edge drops would replace the first group and move the workspace's
-  // top-level/system strip into the dragged content. Preserve that invariant.
+  // Agent-owned primary group tabs are visible in the workspace strip. Other
+  // primary groups still use their owner's top-level descriptor, so center
+  // drops there would remain invisible. Left/top edges would replace the
+  // first group and move the workspace strip into dragged content.
   if (
     targetIsPrimary &&
-    (edge === null || edge === "left" || edge === "top")
+    ((!targetIsAgent && edge === null) || edge === "left" || edge === "top")
   ) {
     return false;
   }
@@ -563,7 +586,6 @@ export function moveWorkspaceTab(
   }
 
   if (source.ownerTopTabId !== normalizedTarget.ownerTopTabId) return false;
-  if (getLeaves(targetTree)[0]?.id === source.groupId) return false;
   const sourceGroup = findLeaf(targetTree, source.groupId);
   if (!sourceGroup) return false;
   if (edge && source.groupId === normalizedTarget.groupId && sourceGroup.tabs.length === 1) {
@@ -755,10 +777,60 @@ export function addTabToActivePane(
 }
 
 /**
+ * Add a content tab to the original Agent pane without replacing its split
+ * layout. The workspace-level strip is the primary pane's tab bar, so tabs
+ * created from that strip belong to the Agent tree's first group.
+ */
+export function addTabToAgentPrimaryPane(
+  worktreePath: string,
+  content: PaneContent,
+  initialPrompt?: string,
+  initialAgent?: Agent,
+): GroupTab {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+  const primaryGroup = getLeaves(tree)[0];
+  const created = createGroup(content).tabs[0];
+  const prefix = content.kind === "shell"
+    ? "Terminal"
+    : content.kind === "agent"
+      ? "Agent"
+      : content.kind === "browser"
+        ? "Browser"
+        : created.label;
+  const used = new Set<number>();
+  for (const tab of [
+    ...getLeaves(tree).flatMap((group) => group.tabs),
+    ...nav.userTabs,
+  ]) {
+    const number = parseLabelNumber(tab.label, prefix);
+    if (number !== null) used.add(number);
+  }
+  const startAt = content.kind === "agent" ? 2 : 1;
+  const newTab = {
+    ...created,
+    label: `${prefix} ${smallestUnused(used, startAt)}`,
+  };
+  const prompt = initialPrompt?.trim();
+  if (content.kind === "agent" && prompt) {
+    pendingAgentLaunches.set(newTab.id, { prompt, agent: initialAgent });
+  }
+
+  uiState.updateWorktreeNavState(worktreePath, {
+    activeTab: "terminal",
+    activeTerminalsTab: AGENT_PANE_ID,
+    agentTabSplitTree: addTabToGroup(tree, primaryGroup.id, newTab),
+    agentTabFocusedPaneId: primaryGroup.id,
+  });
+  return newTab;
+}
+
+/**
  * Create an MCP-requested agent tab next to the agent that made the request.
- * Secondary split panes own their local tab strip; the primary pane continues
- * to use the top-level tab strip. Sessions created before IMPALA_PANE_ID was
- * introduced fall back to the currently focused pane.
+ * Each split pane owns its local tabs. The Agent tree's primary group is
+ * projected into the workspace strip; sessions created before IMPALA_PANE_ID
+ * was introduced fall back to the currently focused pane.
  */
 export function createAgentTabFromRequest(
   worktreePath: string,
@@ -774,6 +846,7 @@ export function createAgentTabFromRequest(
     tree: SplitNode,
     update: (nextTree: SplitNode, groupId: string) => void,
     fallbackGroupId?: string,
+    allowPrimary = false,
   ): string | null => {
     const sourceGroup = sourcePaneId
       ? findGroupTab(tree, sourcePaneId)?.group
@@ -787,9 +860,7 @@ export function createAgentTabFromRequest(
         ? getHorizontalNeighborGroupId(tree, sourceGroup.id, placement)
         : sourceGroup.id;
     if (!targetGroupId) return null;
-    // The first group's tabs are represented by the workspace's top-level
-    // strip. Adding an inner tab there would make it active but invisible.
-    if (getLeaves(tree)[0]?.id === targetGroupId) {
+    if (!allowPrimary && getLeaves(tree)[0]?.id === targetGroupId) {
       return null;
     }
 
@@ -819,6 +890,7 @@ export function createAgentTabFromRequest(
           nav.agentTabFocusedPaneId,
         )
       : undefined,
+    true,
   );
   if (agentPaneTabId) return agentPaneTabId;
 
@@ -906,10 +978,12 @@ function getActivePaneContext(worktreePath: string): {
 export function shouldCreateTabInFocusedPane(worktreePath: string): boolean {
   const context = getActivePaneContext(worktreePath);
   if (!context) return false;
-  // The first pane uses the top-level Run / Agent / user-tab strip as its
-  // native tab bar. Cmd+T there should therefore keep creating top-level
-  // tabs; only secondary split panes own group-local tabs.
-  if (getLeaves(context.tree)[0]?.id === context.groupId) return false;
+  // The Agent tree's first group is projected into the workspace strip, so
+  // shortcuts can create local tabs there. User-owned primary groups still
+  // have only their top-level descriptor in that strip.
+  if (getLeaves(context.tree)[0]?.id === context.groupId && !context.isAgent) {
+    return false;
+  }
   return shouldUseGroupTabs(context.tree, context.groupId);
 }
 
@@ -920,7 +994,9 @@ export function focusAdjacentActiveGroupTab(
 ): boolean {
   const context = getActivePaneContext(worktreePath);
   if (!context) return false;
-  if (getLeaves(context.tree)[0]?.id === context.groupId) return false;
+  if (getLeaves(context.tree)[0]?.id === context.groupId && !context.isAgent) {
+    return false;
+  }
   const group = findLeaf(context.tree, context.groupId);
   if (!group) return false;
   const nextId = getAdjacentGroupTabId(group, direction);

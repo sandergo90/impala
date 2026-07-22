@@ -46,10 +46,10 @@ import {
   runPtySessionId,
 } from "../lib/pane-ids";
 import {
-  createUserTab,
-  createBrowserTab,
+  addTabToAgentPrimaryPane,
   closeUserTab,
   renameUserTab,
+  renameAgentGroupTab,
   getPendingAgentLaunch,
   clearPendingAgentLaunch,
   setUserTabFocusedPane,
@@ -90,6 +90,7 @@ interface TabDescriptor {
   isPrimaryAgent: boolean;
   paneId: string;
   isSystem: boolean;
+  agentGroupId?: string;
 }
 
 interface WorkspaceTabDragData {
@@ -119,7 +120,8 @@ const workspaceCollisionDetection: CollisionDetection = (args) => {
  * Tabbed terminals view for a single worktree.
  *
  * System tabs: Agent (always) and Run (when config.setup is set or any actions exist).
- * User tabs: from nav.userTabs, created via the plus button.
+ * The primary Agent group's tabs share this strip with Run and any promoted
+ * workspace tabs. Tabs created from the strip stay in that primary group.
  */
 export const TabbedTerminals = memo(function TabbedTerminals({
   worktreePath,
@@ -133,6 +135,9 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
   const userTabs = useUIStore(
     (s) => s.worktreeNavStates[worktreePath]?.userTabs ?? EMPTY_USER_TABS,
+  );
+  const agentTabSplitTree = useUIStore(
+    (s) => s.worktreeNavStates[worktreePath]?.agentTabSplitTree,
   );
   // Subscribe to just paneSessions, not the whole data-state object, so
   // unrelated field updates (agentStatus, commits, ...) don't re-render the
@@ -158,6 +163,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
 
   const { active: browserAgentActive } = useBrowserAgentActivity(worktreePath);
+
+  const agentTree = useMemo(
+    () => getEffectiveAgentTabSplitTree(agentTabSplitTree),
+    [agentTabSplitTree],
+  );
+  const agentPrimaryGroup = getLeaves(agentTree)[0];
 
   useEffect(() => {
     if (!hasRunTab) return;
@@ -208,14 +219,17 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         isSystem: true,
       });
     }
-    out.push({
-      id: AGENT_PANE_ID,
-      label: "Agent",
-      kind: "agent",
-      isPrimaryAgent: true,
-      paneId: AGENT_PANE_ID,
-      isSystem: true,
-    });
+    for (const groupTab of agentPrimaryGroup.tabs) {
+      out.push({
+        id: groupTab.id,
+        label: groupTab.label,
+        kind: groupTab.content.kind === "shell" ? "terminal" : groupTab.content.kind,
+        isPrimaryAgent: groupTab.id === AGENT_PANE_ID,
+        paneId: groupTab.id,
+        isSystem: groupTab.id === AGENT_PANE_ID,
+        agentGroupId: agentPrimaryGroup.id,
+      });
+    }
     for (const t of userTabs) {
       out.push({
         id: t.id,
@@ -227,7 +241,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       });
     }
     return out;
-  }, [hasRunTab, userTabs]);
+  }, [agentPrimaryGroup, hasRunTab, userTabs]);
 
   // Map of tab id -> whether it's an unpinned file preview tab. Used to
   // render preview labels in italic.
@@ -262,23 +276,41 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     return m;
   }, [userTabs, dirtyDocKeys, worktreePath]);
 
-  const activeId: string = tabs.some((t) => t.id === activeTerminalsTab)
-    ? activeTerminalsTab
-    : AGENT_PANE_ID;
+  const activeId: string = activeTerminalsTab === AGENT_PANE_ID
+    ? agentPrimaryGroup.activeTabId
+    : tabs.some((t) => t.id === activeTerminalsTab)
+      ? activeTerminalsTab
+      : AGENT_PANE_ID;
 
   const setActive = useCallback(
     (id: string) => {
+      const tab = tabs.find((candidate) => candidate.id === id);
+      if (tab?.agentGroupId) {
+        useUIStore.getState().updateWorktreeNavState(worktreePath, {
+          activeTerminalsTab: AGENT_PANE_ID,
+        });
+        setAgentGroupActiveTab(worktreePath, tab.agentGroupId, tab.id);
+        return;
+      }
       if (id === activeTerminalsTab) return;
       useUIStore
         .getState()
         .updateWorktreeNavState(worktreePath, { activeTerminalsTab: id });
     },
-    [worktreePath, activeTerminalsTab],
+    [tabs, worktreePath, activeTerminalsTab],
   );
 
   const handleCloseUserTab = useCallback(
-    (tabId: string) => closeUserTab(worktreePath, tabId),
-    [worktreePath],
+    (tabId: string) => {
+      const tab = tabs.find((candidate) => candidate.id === tabId);
+      if (tab?.agentGroupId) {
+        setAgentGroupActiveTab(worktreePath, tab.agentGroupId, tab.id);
+        closeAgentTabFocusedPane(worktreePath);
+        return;
+      }
+      closeUserTab(worktreePath, tabId);
+    },
+    [tabs, worktreePath],
   );
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -294,9 +326,13 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const userTabIds = useMemo(
-    () => userTabs.map((t) => topTabDndId(t.id)),
-    [userTabs],
+  const sortableTabIds = useMemo(
+    () => tabs
+      .filter((tab) => !tab.isSystem)
+      .map((tab) => tab.agentGroupId
+        ? groupTabDndId(AGENT_PANE_ID, tab.agentGroupId, tab.id)
+        : topTabDndId(tab.id)),
+    [tabs],
   );
 
   const [dragPreview, setDragPreview] = useState<{
@@ -342,11 +378,16 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   const commitRename = useCallback(() => {
     if (editingTabId !== null) {
-      renameUserTab(worktreePath, editingTabId, editingLabel);
+      const tab = tabs.find((candidate) => candidate.id === editingTabId);
+      if (tab?.agentGroupId) {
+        renameAgentGroupTab(worktreePath, editingTabId, editingLabel);
+      } else {
+        renameUserTab(worktreePath, editingTabId, editingLabel);
+      }
     }
     setEditingTabId(null);
     setEditingLabel("");
-  }, [worktreePath, editingTabId, editingLabel]);
+  }, [tabs, worktreePath, editingTabId, editingLabel]);
 
   const cancelRename = useCallback(() => {
     setEditingTabId(null);
@@ -376,17 +417,17 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
   const handleNewTerminal = useCallback(() => {
     setMenuOpen(false);
-    createUserTab(worktreePath, "terminal");
+    addTabToAgentPrimaryPane(worktreePath, { kind: "shell" });
   }, [worktreePath]);
 
   const handleNewAgent = useCallback(() => {
     setMenuOpen(false);
-    createUserTab(worktreePath, "agent");
+    addTabToAgentPrimaryPane(worktreePath, { kind: "agent" });
   }, [worktreePath]);
 
   const handleNewBrowser = useCallback(() => {
     setMenuOpen(false);
-    createBrowserTab(worktreePath);
+    addTabToAgentPrimaryPane(worktreePath, { kind: "browser" });
   }, [worktreePath]);
 
   const renderTabInner = (t: TabDescriptor): ReactNode => {
@@ -492,21 +533,37 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         ))}
 
         <SortableContext
-          items={userTabIds}
+          items={sortableTabIds}
           strategy={horizontalListSortingStrategy}
         >
             {userTabDescriptors.map((t, index) => (
               <SortableWorkspaceTab
                 key={t.id}
-                dndId={topTabDndId(t.id)}
+                dndId={t.agentGroupId
+                  ? groupTabDndId(AGENT_PANE_ID, t.agentGroupId, t.id)
+                  : topTabDndId(t.id)}
                 disabled={editingTabId === t.id}
                 className={baseTabClass(t)}
                 dragData={{
-                  source: { type: "top-level", topTabId: t.id },
+                  source: t.agentGroupId
+                    ? {
+                        type: "group-tab",
+                        ownerTopTabId: AGENT_PANE_ID,
+                        groupId: t.agentGroupId,
+                        groupTabId: t.id,
+                      }
+                    : { type: "top-level", topTabId: t.id },
                   label: t.label,
                   kind: t.kind,
                 }}
-                dropTarget={{ type: "top-level", index }}
+                dropTarget={t.agentGroupId
+                  ? {
+                      type: "group",
+                      ownerTopTabId: AGENT_PANE_ID,
+                      groupId: t.agentGroupId,
+                      index: agentPrimaryGroup.tabs.findIndex((tab) => tab.id === t.id),
+                    }
+                  : { type: "top-level", index }}
               >
                 {renderTabInner(t)}
               </SortableWorkspaceTab>
@@ -597,7 +654,11 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           // period and TUIs get a real SIGWINCH if dims
           // actually changed. The cached terminal entry survives because it
           // lives in a module-level Map, not React state.
-          const t = tabs.find((tab) => tab.id === activeId);
+          const layoutId = activeTerminalsTab === RUN_PANE_ID ||
+              userTabs.some((tab) => tab.id === activeTerminalsTab)
+            ? activeTerminalsTab
+            : AGENT_PANE_ID;
+          const t = tabs.find((tab) => tab.id === layoutId);
           if (!t) return null;
           const userTab = !t.isSystem
             ? userTabs.find((u) => u.id === t.id) ?? null

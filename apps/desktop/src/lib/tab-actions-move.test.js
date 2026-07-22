@@ -15,7 +15,12 @@ globalThis.localStorage = {
 globalThis.window = globalThis;
 
 const { useUIStore } = await import("../store.ts");
-const { moveWorkspaceTab } = await import("./tab-actions.ts");
+const {
+  addTabToAgentPrimaryPane,
+  getEffectiveAgentTabSplitTree,
+  moveWorkspaceTab,
+  shouldCreateTabInFocusedPane,
+} = await import("./tab-actions.ts");
 
 const groupTab = (id, content, label = id) => ({
   id,
@@ -359,5 +364,78 @@ describe("moveWorkspaceTab", () => {
       ),
     ).toBe(false);
     expect(useUIStore.getState().getWorktreeNavState(worktreePath)).toEqual(before);
+  });
+});
+
+describe("addTabToAgentPrimaryPane", () => {
+  test("adds a new terminal to the original Agent pane without replacing its split", () => {
+    const primary = group("tab-agent", groupTab("tab-agent", { kind: "agent" }));
+    const secondary = group(
+      "secondary",
+      groupTab("browser-session", { kind: "browser" }),
+    );
+    setTabs([], "tab-agent", {
+      agentTabSplitTree: split(primary, secondary),
+      agentTabFocusedPaneId: primary.id,
+    });
+
+    const created = addTabToAgentPrimaryPane(worktreePath, { kind: "shell" });
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const leaves = getLeaves(getEffectiveAgentTabSplitTree(nav.agentTabSplitTree));
+    expect(nav.userTabs).toEqual([]);
+    expect(leaves.map((pane) => pane.id)).toEqual([primary.id, secondary.id]);
+    expect(leaves[0].tabs.map((tab) => tab.id)).toEqual(["tab-agent", created.id]);
+    expect(leaves[0].activeTabId).toBe(created.id);
+    expect(created.label).toBe("Terminal 1");
+    expect(nav.activeTerminalsTab).toBe("tab-agent");
+    expect(nav.agentTabFocusedPaneId).toBe(leaves[0].id);
+    expect(shouldCreateTabInFocusedPane(worktreePath)).toBe(true);
+  });
+
+  test("keeps new primary tabs draggable into another pane", () => {
+    const primary = {
+      type: "group",
+      id: "tab-agent",
+      tabs: [
+        groupTab("tab-agent", { kind: "agent" }),
+        groupTab("local-shell", { kind: "shell" }),
+      ],
+      activeTabId: "local-shell",
+    };
+    const secondary = group(
+      "secondary",
+      groupTab("browser-session", { kind: "browser" }),
+    );
+    setTabs([], "tab-agent", {
+      agentTabSplitTree: split(primary, secondary),
+      agentTabFocusedPaneId: primary.id,
+    });
+
+    expect(
+      moveWorkspaceTab(
+        worktreePath,
+        {
+          type: "group-tab",
+          ownerTopTabId: "tab-agent",
+          groupId: primary.id,
+          groupTabId: "local-shell",
+        },
+        {
+          type: "group",
+          ownerTopTabId: "tab-agent",
+          groupId: secondary.id,
+          index: 1,
+        },
+      ),
+    ).toBe(true);
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const leaves = getLeaves(getEffectiveAgentTabSplitTree(nav.agentTabSplitTree));
+    expect(leaves[0].tabs.map((tab) => tab.id)).toEqual(["tab-agent"]);
+    expect(leaves[1].tabs.map((tab) => tab.id)).toEqual([
+      "browser-session",
+      "local-shell",
+    ]);
   });
 });
