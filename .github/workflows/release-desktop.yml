@@ -68,7 +68,7 @@ jobs:
       - name: Collect commits for changelog
         id: commits
         run: |
-          git fetch --tags
+          git fetch --tags --force
           PREV_TAG=$(git tag --sort=-version:refname | grep '^desktop-v' | head -2 | tail -1)
           if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "${{ github.ref_name }}" ]; then
             COMMITS=$(git log --pretty=format:"%s" "$PREV_TAG".."${{ github.ref_name }}" -- . ':!.github')
