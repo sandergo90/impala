@@ -38,6 +38,8 @@ pub struct UpdateAutomation {
     pub prompt: Option<String>,
     pub agent: Option<String>,
     pub schedule: Option<String>,
+    /// Moving the automation to another project.
+    pub repo_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -223,13 +225,14 @@ pub fn update_automation_row(
     let agent = changes.agent.unwrap_or(existing.agent);
     validate_agent(&agent)?;
     let schedule = changes.schedule.unwrap_or(existing.schedule);
+    let repo_path = changes.repo_path.unwrap_or(existing.repo_path);
     // Recompute unconditionally: cheap, and correct whether or not the
     // schedule changed (an unchanged schedule recomputes to the same slot).
     let next_run_at = next_occurrence(&schedule, now)?;
     let ts = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE automations SET name = ?1, prompt = ?2, agent = ?3, schedule = ?4, next_run_at = ?5, updated_at = ?6 WHERE id = ?7",
-        params![name, prompt, agent, schedule, next_run_at, ts, id],
+        "UPDATE automations SET name = ?1, prompt = ?2, agent = ?3, schedule = ?4, repo_path = ?5, next_run_at = ?6, updated_at = ?7 WHERE id = ?8",
+        params![name, prompt, agent, schedule, repo_path, next_run_at, ts, id],
     )
     .map_err(|e| format!("Failed to update automation: {}", e))?;
     get_automation(conn, id)
@@ -750,11 +753,42 @@ mod tests {
                 prompt: None,
                 agent: None,
                 schedule: Some("*/5 * * * *".into()),
+                repo_path: None,
             },
             now,
         )
         .unwrap();
         assert!(updated.next_run_at - now <= 300);
+
+        // Moving to another project re-scopes list queries
+        update_automation_row(
+            &conn,
+            &created.id,
+            UpdateAutomation {
+                name: None,
+                prompt: None,
+                agent: None,
+                schedule: None,
+                repo_path: Some("/other".into()),
+            },
+            now,
+        )
+        .unwrap();
+        assert!(list_by_repo(&conn, "/repo").unwrap().is_empty());
+        assert_eq!(list_by_repo(&conn, "/other").unwrap().len(), 1);
+        update_automation_row(
+            &conn,
+            &created.id,
+            UpdateAutomation {
+                name: None,
+                prompt: None,
+                agent: None,
+                schedule: None,
+                repo_path: Some("/repo".into()),
+            },
+            now,
+        )
+        .unwrap();
 
         // Run dedup on (automation_id, scheduled_for)
         let run = insert_run(&conn, &created.id, 1000).unwrap().unwrap();

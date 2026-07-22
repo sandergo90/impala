@@ -429,9 +429,11 @@ function AutomationEditor({
   onOpenRun: (run: AutomationRun) => void;
 }) {
   const isNew = automation === null;
+  const projects = useDataStore((s) => s.projects);
   const initialSchedule = automation?.schedule ?? template?.schedule ?? "0 9 * * *";
   const initial = matchPreset(initialSchedule);
 
+  const [targetRepo, setTargetRepo] = useState(automation?.repo_path ?? repoPath);
   const [name, setName] = useState(automation?.name ?? template?.name ?? "");
   const [prompt, setPrompt] = useState(automation?.prompt ?? template?.prompt ?? "");
   const [agent, setAgent] = useState<"claude" | "codex">(automation?.agent ?? "claude");
@@ -471,6 +473,7 @@ function AutomationEditor({
       prompt?: string;
       agent?: string;
       schedule?: string;
+      repo_path?: string;
     }) => {
       if (!automation) return;
       invoke("update_automation", { id: automation.id, changes }).catch((e) =>
@@ -495,8 +498,14 @@ function AutomationEditor({
     setSaving(true);
     try {
       const created = await invoke<Automation>("create_automation", {
-        automation: { repo_path: repoPath, name: name.trim(), prompt, agent, schedule },
+        automation: { repo_path: targetRepo, name: name.trim(), prompt, agent, schedule },
       });
+      if (targetRepo !== repoPath) {
+        // The list shows the selected project — the new automation lives
+        // elsewhere, so it won't appear here.
+        const target = projects.find((p) => p.path === targetRepo);
+        toast.success(`Created in ${target?.name ?? targetRepo}`);
+      }
       onCreated(created);
     } catch (e) {
       toast.error(String(e));
@@ -624,6 +633,29 @@ function AutomationEditor({
           Details
         </div>
         <div className="divide-y divide-border/40 rounded-lg border border-border/60">
+          <DetailRow label="Project">
+            <select
+              value={targetRepo}
+              onChange={(e) => {
+                setTargetRepo(e.target.value);
+                if (automation) persist({ repo_path: e.target.value });
+              }}
+              className={rowSelectClass}
+            >
+              {/* Keep the current value selectable even if its project was
+                  removed from the tracked list. */}
+              {!projects.some((p) => p.path === targetRepo) && (
+                <option value={targetRepo}>
+                  {targetRepo.split("/").pop() ?? targetRepo}
+                </option>
+              )}
+              {projects.map((p) => (
+                <option key={p.path} value={p.path}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </DetailRow>
           <DetailRow label="Agent">
             <select
               value={agent}
