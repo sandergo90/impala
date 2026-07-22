@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@/lib/invoke";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -75,6 +76,7 @@ import { useShallow } from "zustand/shallow";
 import { buildDocumentKey } from "../lib/editor-buffer-registry";
 import { useBrowserAgentActivity } from "../hooks/useBrowserAgentActivity";
 import { selectWorkspaceDropCollision } from "../lib/workspace-drop-collision";
+import { positionFloatingMenu } from "../lib/floating-menu-position";
 
 type TabKind = "terminal" | "agent" | "file" | "browser";
 
@@ -130,6 +132,8 @@ const workspaceCollisionDetection: CollisionDetection = (args) => {
   // navigation for them.
   return args.pointerCoordinates ? [] : closestCenter(args);
 };
+
+const NEW_TAB_MENU_SIZE = { width: 160, height: 104 };
 
 /**
  * Tabbed terminals view for a single worktree.
@@ -329,6 +333,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   );
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState("");
 
@@ -410,6 +415,22 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   }, []);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const caretRef = useRef<HTMLButtonElement | null>(null);
+  const toggleNewTabMenu = useCallback(() => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    const rect = caretRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMenuPosition(
+      positionFloatingMenu(
+        rect,
+        { width: window.innerWidth, height: window.innerHeight },
+        NEW_TAB_MENU_SIZE,
+      ),
+    );
+    setMenuOpen(true);
+  }, [menuOpen]);
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -606,7 +627,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           <button
             ref={caretRef}
             type="button"
-            onClick={() => setMenuOpen((o) => !o)}
+            onClick={toggleNewTabMenu}
             className="flex h-8 w-5 items-center justify-center rounded-r-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             aria-label="New tab menu"
             aria-expanded={menuOpen}
@@ -621,10 +642,16 @@ export const TabbedTerminals = memo(function TabbedTerminals({
               />
             </svg>
           </button>
-          {menuOpen && (
+          {menuOpen && menuPosition && createPortal(
             <div
               ref={menuRef}
-              className="absolute top-full left-0 mt-1 z-20 min-w-[160px] rounded border border-border bg-popover text-popover-foreground shadow-lg py-1"
+              style={{
+                position: "fixed",
+                left: menuPosition.left,
+                top: menuPosition.top,
+                zIndex: 50,
+              }}
+              className="min-w-[160px] rounded border border-border bg-popover text-popover-foreground shadow-lg py-1"
             >
               <button
                 onClick={handleNewTerminal}
@@ -644,7 +671,8 @@ export const TabbedTerminals = memo(function TabbedTerminals({
               >
                 New browser tab
               </button>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
 
