@@ -33,6 +33,12 @@ const FLUSH_CHUNK: usize = 128 * 1024;
 const FLUSH_INTERVAL_MS: u64 = 16;
 const BACKPRESSURE_HIGH: usize = 1024 * 1024;
 const BACKPRESSURE_LOW: usize = 256 * 1024;
+// vt100 0.16.2 underflows while wrapping output in a one-row grid. Tiny
+// transient layouts can occur while panes are being moved, so keep the
+// parser and the backing PTY at the smallest dimensions vt100 can safely
+// scroll and wrap.
+const MIN_PTY_ROWS: u16 = 2;
+const MIN_PTY_COLS: u16 = 2;
 /// Per-session ring buffer of raw PTY bytes used for replay on reattach.
 /// Capped to bound memory; we keep the *last* N bytes since the most
 /// recent output is what users want to scroll through after a reload.
@@ -42,6 +48,10 @@ const MAX_OUTPUT_BUFFER: usize = 5 * 1024 * 1024;
 /// this in the byte stream, drop everything before the last occurrence
 /// so post-reload replay matches the user's mental model.
 const ED3_SEQUENCE: &[u8] = b"\x1b[3J";
+
+fn safe_pty_size(rows: u16, cols: u16) -> (u16, u16) {
+    (rows.max(MIN_PTY_ROWS), cols.max(MIN_PTY_COLS))
+}
 
 fn find_last_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
@@ -176,16 +186,28 @@ fn spawn_session(
     cols: u16,
     rows: u16,
 ) -> Response {
-    {
+    let (rows, cols) = safe_pty_size(rows, cols);
+    let existing_state = {
         let sessions = registry.sessions.lock().unwrap();
-        if let Some(existing) = sessions.get(&session_id) {
-            let state = existing.state.lock().unwrap();
-            return Response::Spawned {
-                session_id: session_id.clone(),
-                already_existed: true,
-                scrollback_b64: STANDARD.encode(&state.output_buffer),
-                seq_upto: state.total_bytes,
-            };
+        sessions
+            .get(&session_id)
+            .map(|existing| Arc::clone(&existing.state))
+    };
+    if let Some(existing_state) = existing_state {
+        match existing_state.lock() {
+            Ok(state) => {
+                return Response::Spawned {
+                    session_id: session_id.clone(),
+                    already_existed: true,
+                    scrollback_b64: STANDARD.encode(&state.output_buffer),
+                    seq_upto: state.total_bytes,
+                };
+            }
+            Err(_) => {
+                return Response::Error {
+                    message: format!("terminal parser unavailable for session {session_id}"),
+                };
+            }
         }
     }
 
@@ -652,22 +674,36 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
             cols,
             rows,
         } => {
-            let sessions = registry.sessions.lock().unwrap();
-            match sessions.get(&session_id) {
+            let handles = {
+                let sessions = registry.sessions.lock().unwrap();
+                sessions
+                    .get(&session_id)
+                    .map(|s| (Arc::clone(&s.state), Arc::clone(&s.master)))
+            };
+            match handles {
                 None => Response::Error {
                     message: format!("no session {session_id}"),
                 },
-                Some(s) => {
+                Some((state, master)) => {
+                    let (rows, cols) = safe_pty_size(rows, cols);
                     // Resize the parser first so subsequent snapshots
                     // reflect the new grid; vt100 rewraps the current
-                    // screen under the hood.
-                    s.state
-                        .lock()
-                        .unwrap()
-                        .parser
-                        .screen_mut()
-                        .set_size(rows, cols);
-                    let master = s.master.lock().unwrap();
+                    // screen under the hood. The registry lock has already
+                    // been released so a session-local parser failure cannot
+                    // poison every future spawn request.
+                    let mut state = match state.lock() {
+                        Ok(state) => state,
+                        Err(_) => {
+                            return Response::Error {
+                                message: format!(
+                                    "terminal parser unavailable for session {session_id}"
+                                ),
+                            };
+                        }
+                    };
+                    state.parser.screen_mut().set_size(rows, cols);
+                    drop(state);
+                    let master = master.lock().unwrap();
                     match master.resize(PtySize {
                         rows,
                         cols,
@@ -716,19 +752,26 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
             Response::Alive { alive }
         }
         Request::GetBuffer { session_id } => {
-            let sessions = registry.sessions.lock().unwrap();
-            match sessions.get(&session_id) {
+            let state = {
+                let sessions = registry.sessions.lock().unwrap();
+                sessions
+                    .get(&session_id)
+                    .map(|session| Arc::clone(&session.state))
+            };
+            match state {
                 None => Response::Error {
                     message: format!("no session {session_id}"),
                 },
-                Some(s) => {
-                    let state = s.state.lock().unwrap();
-                    Response::Buffer {
+                Some(state) => match state.lock() {
+                    Ok(state) => Response::Buffer {
                         session_id: session_id.clone(),
                         data_b64: STANDARD.encode(&state.output_buffer),
                         seq_upto: state.total_bytes,
-                    }
-                }
+                    },
+                    Err(_) => Response::Error {
+                        message: format!("terminal parser unavailable for session {session_id}"),
+                    },
+                },
             }
         }
         Request::Shutdown => Response::ShutdownAck,
@@ -975,4 +1018,26 @@ async fn main() -> Result<()> {
     let _ = fs::remove_file(&paths.sock).await;
     let _ = fs::remove_file(&paths.pid).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_pty_size;
+
+    #[test]
+    fn tiny_viewport_is_safe_for_vt100_wrapping() {
+        let result = std::panic::catch_unwind(|| {
+            let (rows, cols) = safe_pty_size(1, 1);
+            let mut parser = vt100::Parser::new(24, 80, 0);
+            parser.screen_mut().set_size(rows, cols);
+            parser.process("界界".as_bytes());
+        });
+
+        assert!(result.is_ok(), "tiny terminal output must not panic");
+    }
+
+    #[test]
+    fn regular_viewport_dimensions_are_preserved() {
+        assert_eq!(safe_pty_size(24, 80), (24, 80));
+    }
 }
