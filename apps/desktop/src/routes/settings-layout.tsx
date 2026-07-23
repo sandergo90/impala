@@ -10,9 +10,9 @@ const navItems = [
 ];
 
 const navLinkClass =
-  "px-4 py-1.5 text-md text-left w-full rounded-md mx-0 text-muted-foreground hover:text-foreground";
+  "px-4 py-1.5 text-sm text-left w-full rounded-md mx-0 text-muted-foreground hover:text-foreground";
 const navLinkActiveClass =
-  "px-4 py-1.5 text-md text-left w-full rounded-md mx-0 text-foreground font-medium bg-primary/15";
+  "px-4 py-1.5 text-sm text-left w-full rounded-md mx-0 text-foreground font-medium bg-primary/15";
 
 export function SettingsLayout() {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export function SettingsLayout() {
       >
         <div className="absolute inset-0" data-tauri-drag-region />
         <div
-          className="flex-1 flex items-center justify-center text-md text-muted-foreground font-medium"
+          className="flex-1 flex items-center justify-center text-sm text-muted-foreground font-medium"
           data-tauri-drag-region
         >
           Settings
@@ -38,7 +38,7 @@ export function SettingsLayout() {
         <div className="w-[200px] border-r border-border/50 py-4 flex flex-col shrink-0">
           <button
             onClick={() => navigate({ to: "/" })}
-            className="flex items-center gap-2 px-4 pb-4 text-md text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-2 px-4 pb-4 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
               <path
@@ -52,7 +52,7 @@ export function SettingsLayout() {
             Back
           </button>
 
-          <div className="px-4 pb-1.5 pt-2 text-md font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="px-4 pb-1.5 pt-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             General
           </div>
 
@@ -67,12 +67,12 @@ export function SettingsLayout() {
             </Link>
           ))}
 
-          <div className="px-4 pb-1.5 pt-4 text-md font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="px-4 pb-1.5 pt-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Projects
           </div>
 
           {projects.length === 0 ? (
-            <div className="px-4 py-1.5 text-md text-muted-foreground/60">
+            <div className="px-4 py-1.5 text-sm text-muted-foreground">
               No projects added
             </div>
           ) : (
@@ -81,10 +81,10 @@ export function SettingsLayout() {
                 key={project.path}
                 to="/settings/project/$projectId"
                 params={{ projectId: encodeURIComponent(project.path) }}
-                className="px-4 py-1.5 text-md text-left w-full rounded-md mx-0 text-muted-foreground hover:text-foreground"
+                className="px-4 py-1.5 text-sm text-left w-full rounded-md mx-0 text-muted-foreground hover:text-foreground"
                 activeProps={{
                   className:
-                    "px-4 py-1.5 text-md text-left w-full rounded-md mx-0 text-foreground font-medium bg-primary/15",
+                    "px-4 py-1.5 text-sm text-left w-full rounded-md mx-0 text-foreground font-medium bg-primary/15",
                 }}
               >
                 {project.name}

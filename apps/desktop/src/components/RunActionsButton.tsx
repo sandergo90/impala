@@ -45,8 +45,8 @@ export function RunActionsButton({
   const playDisabled = !resolved && !isActive;
   const showDropdown = actions.length !== 1;
   const variantClasses = isActive
-    ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
-    : "text-green-400 bg-green-500/15 hover:bg-green-500/25";
+    ? "text-danger bg-danger/15 hover:bg-danger/25"
+    : "text-success bg-success/15 hover:bg-success/25";
 
   const handleEditActions = () => {
     if (!projectPath) return;
@@ -57,7 +57,7 @@ export function RunActionsButton({
   };
 
   return (
-    <div className="flex h-9 items-stretch overflow-hidden rounded-md ring-1 ring-inset ring-black/20">
+    <div className="flex h-9 items-stretch overflow-hidden rounded-md ring-1 ring-inset ring-foreground/15">
       <button
         onClick={() => toggleRunScript()}
         disabled={isStopping || playDisabled}
@@ -80,7 +80,7 @@ export function RunActionsButton({
         <Menu.Root>
           <Menu.Trigger
             aria-label="Pick an action"
-            className={`flex w-7 items-center justify-center border-l border-black/20 transition-colors ${variantClasses}`}
+            className={`flex w-7 items-center justify-center border-l border-foreground/15 transition-colors ${variantClasses}`}
           >
             <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
               <path d="M2 4l4 4 4-4z" />
@@ -90,8 +90,8 @@ export function RunActionsButton({
             <Menu.Positioner sideOffset={6} align="start" className="z-50">
               <Menu.Popup
                 className={[
-                  "bg-popover text-popover-foreground border border-border/80 rounded-lg shadow-xl shadow-black/30",
-                  "py-1 min-w-[200px] text-md outline-none",
+                  "bg-popover text-popover-foreground border border-border/80 rounded-lg shadow-lg",
+                  "py-1 min-w-[200px] text-sm outline-none",
                   "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
                   "data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
                 ].join(" ")}
@@ -105,7 +105,7 @@ export function RunActionsButton({
                   </Menu.Item>
                 ) : (
                   <>
-                    <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">
+                    <div className="px-3 pt-1 pb-1 text-xs uppercase tracking-[1.2px] text-muted-foreground font-semibold">
                       Actions
                     </div>
                     {actions.map((action) => {
@@ -133,7 +133,7 @@ export function RunActionsButton({
                             height="9"
                             viewBox="0 0 16 16"
                             fill="currentColor"
-                            className="text-green-400/80 shrink-0"
+                            className="text-success/80 shrink-0"
                           >
                             <path d="M4 2l10 6-10 6V2z" />
                           </svg>

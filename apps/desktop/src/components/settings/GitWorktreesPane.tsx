@@ -142,16 +142,16 @@ export function GitWorktreesPane() {
       <h2 className="text-base font-semibold text-foreground">
         Git & Worktrees
       </h2>
-      <p className="text-md text-muted-foreground mt-1 mb-6">
+      <p className="text-sm text-muted-foreground mt-1 mb-6">
         Configure git branch and worktree behavior
       </p>
 
       <div className="flex items-center justify-between max-w-2xl">
         <div>
-          <div className="text-md font-medium">
+          <div className="text-sm font-medium">
             Delete local branch on workspace removal
           </div>
-          <div className="text-md text-muted-foreground mt-0.5">
+          <div className="text-sm text-muted-foreground mt-0.5">
             Also delete the local git branch when deleting a worktree workspace
           </div>
         </div>
@@ -172,10 +172,10 @@ export function GitWorktreesPane() {
       <div className="mt-8 max-w-2xl">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-md font-medium">Branch Prefix</div>
-            <div className="text-md text-muted-foreground mt-0.5">
+            <div className="text-sm font-medium">Branch Prefix</div>
+            <div className="text-sm text-muted-foreground mt-0.5">
               Preview:{" "}
-              <code className="bg-muted px-1.5 py-0.5 rounded text-foreground text-md">
+              <code className="bg-muted px-1.5 py-0.5 rounded text-foreground text-sm">
                 {previewPrefix
                   ? `${previewPrefix}/branch-name`
                   : "branch-name"}
@@ -218,10 +218,10 @@ export function GitWorktreesPane() {
 
       <div className="mt-8 flex items-center justify-between max-w-2xl">
         <div>
-          <div className="text-md font-medium">
+          <div className="text-sm font-medium">
             Only show worktrees in this location
           </div>
-          <div className="text-md text-muted-foreground mt-0.5">
+          <div className="text-sm text-muted-foreground mt-0.5">
             Hide git worktrees that live outside the directory below. The
             main checkout always stays visible.
           </div>
@@ -241,8 +241,8 @@ export function GitWorktreesPane() {
       </div>
 
       <div className="mt-8 max-w-2xl">
-        <div className="text-md font-medium">Worktree location</div>
-        <div className="text-md text-muted-foreground mt-0.5 mb-2">
+        <div className="text-sm font-medium">Worktree location</div>
+        <div className="text-sm text-muted-foreground mt-0.5 mb-2">
           Base directory for new worktrees
         </div>
         <div className="flex items-center gap-2">

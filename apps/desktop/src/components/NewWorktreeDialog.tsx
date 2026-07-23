@@ -207,7 +207,7 @@ export function NewWorktreeDialog({
       base = projectBaseBranch;
     } else if (tab === "existing") {
       if (!selectedBranch) {
-        toast.error("Please specify a branch name");
+        toast.error("Please select a branch from the list");
         return;
       }
       name = selectedBranch;
@@ -323,7 +323,7 @@ export function NewWorktreeDialog({
         {tab === "new" && (
           <div className="space-y-3">
             <div>
-              <label className="block text-md text-muted-foreground mb-1">
+              <label className="block text-sm text-muted-foreground mb-1">
                 Branch name
               </label>
               <div className="flex w-full border rounded bg-popover overflow-hidden">
@@ -348,7 +348,7 @@ export function NewWorktreeDialog({
 
         {tab === "existing" && (
           <div>
-            <label className="block text-md text-muted-foreground mb-1">
+            <label className="block text-sm text-muted-foreground mb-1">
               Branch
             </label>
             <div className="relative" ref={existingComboboxRef}>
@@ -358,7 +358,7 @@ export function NewWorktreeDialog({
                   <button
                     type="button"
                     onClick={() => setSelectedBranch("")}
-                    className="text-muted-foreground hover:text-foreground text-md shrink-0"
+                    className="text-muted-foreground hover:text-foreground text-sm shrink-0"
                   >
                     &times;
                   </button>
@@ -394,7 +394,7 @@ export function NewWorktreeDialog({
               {existingComboboxOpen && !selectedBranch && (
                 <div className="absolute z-10 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto border rounded bg-popover shadow-lg">
                   {filteredBranches.length === 0 ? (
-                    <div className="px-3 py-2 text-md text-muted-foreground">
+                    <div className="px-3 py-2 text-sm text-muted-foreground">
                       {branches ? "No matching branches" : "Loading..."}
                     </div>
                   ) : (
@@ -409,9 +409,9 @@ export function NewWorktreeDialog({
                         }}
                         className="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2"
                       >
-                        <span className="font-mono text-md truncate flex-1">{b.name}</span>
+                        <span className="font-mono text-sm truncate flex-1">{b.name}</span>
                         {b.is_remote && (
-                          <span className="text-md text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
+                          <span className="text-xs text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
                             remote
                           </span>
                         )}
@@ -442,7 +442,7 @@ export function NewWorktreeDialog({
                           params: { projectId: encodeURIComponent(repoPath) },
                         });
                       }}
-                      className="text-md text-blue-400 hover:text-blue-300"
+                      className="text-sm text-[var(--color-link)] hover:underline"
                     >
                       Open Project Settings
                     </button>
@@ -458,7 +458,7 @@ export function NewWorktreeDialog({
                         onCancel();
                         navigate({ to: "/settings" });
                       }}
-                      className="text-md text-blue-400 hover:text-blue-300"
+                      className="text-sm text-[var(--color-link)] hover:underline"
                     >
                       Open Settings
                     </button>
@@ -468,13 +468,13 @@ export function NewWorktreeDialog({
             ) : (
               <>
                 <div>
-                  <label className="block text-md text-muted-foreground mb-1">
+                  <label className="block text-sm text-muted-foreground mb-1">
                     Issue
                   </label>
                   <div className="relative" ref={comboboxRef}>
                     {selectedIssue ? (
                       <div className="flex items-center gap-2 w-full px-3 py-1.5 border rounded text-sm bg-popover">
-                        <span className="font-mono text-md text-muted-foreground">
+                        <span className="font-mono text-sm text-muted-foreground">
                           {selectedIssue.identifier}
                         </span>
                         <span className="truncate flex-1">{selectedIssue.title}</span>
@@ -484,7 +484,7 @@ export function NewWorktreeDialog({
                             setSelectedIssue(null);
                             setIssueBranchName("");
                           }}
-                          className="text-muted-foreground hover:text-foreground text-md shrink-0"
+                          className="text-muted-foreground hover:text-foreground text-sm shrink-0"
                         >
                           &times;
                         </button>
@@ -509,7 +509,7 @@ export function NewWorktreeDialog({
                     {comboboxOpen && !selectedIssue && (
                       <div className="absolute z-10 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto border rounded bg-popover shadow-lg">
                         {displayedIssues.length === 0 ? (
-                          <div className="px-3 py-2 text-md text-muted-foreground">
+                          <div className="px-3 py-2 text-sm text-muted-foreground">
                             {issuesLoading ? "Loading..." : issueQuery ? "No results" : "No issues found"}
                           </div>
                         ) : (
@@ -520,11 +520,11 @@ export function NewWorktreeDialog({
                               onClick={() => selectIssue(issue)}
                               className="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2"
                             >
-                              <span className="font-mono text-md text-muted-foreground shrink-0">
+                              <span className="font-mono text-sm text-muted-foreground shrink-0">
                                 {issue.identifier}
                               </span>
-                              <span className="text-md truncate flex-1">{issue.title}</span>
-                              <span className="text-md text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
+                              <span className="text-sm truncate flex-1">{issue.title}</span>
+                              <span className="text-xs text-muted-foreground shrink-0 px-1.5 py-0.5 rounded bg-accent">
                                 {issue.status}
                               </span>
                             </button>
@@ -536,7 +536,7 @@ export function NewWorktreeDialog({
                 </div>
 
                 <div>
-                  <label className="block text-md text-muted-foreground mb-1">
+                  <label className="block text-sm text-muted-foreground mb-1">
                     Branch name
                   </label>
                   <div className="flex w-full border rounded bg-popover overflow-hidden">

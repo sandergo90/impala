@@ -131,23 +131,9 @@ export function MainView() {
     () => {
       if (!wtPath) return;
       if (shouldCreateTabInFocusedPane(wtPath)) {
-        addTabToActivePane(wtPath, { kind: "shell" });
+        addTabToActivePane(wtPath, { kind: "terminal", launch: "shell" });
       } else {
-        createUserTab(wtPath, "terminal");
-      }
-    },
-    { enabled: isWorktreeTerminalActive },
-    [wtPath, isWorktreeTerminalActive],
-  );
-
-  useAppHotkey(
-    "NEW_AGENT_TAB",
-    () => {
-      if (!wtPath) return;
-      if (shouldCreateTabInFocusedPane(wtPath)) {
-        addTabToActivePane(wtPath, { kind: "agent" });
-      } else {
-        createUserTab(wtPath, "agent");
+        createUserTab(wtPath, "shell");
       }
     },
     { enabled: isWorktreeTerminalActive },
@@ -240,15 +226,16 @@ export function MainView() {
 
   return (
     <>
-      {/* Title bar */}
+      {/* Title bar. Three-column grid so the centered cluster can never overlap
+          the breadcrumb: `minmax(0,1fr)` outer tracks let `truncate` engage. */}
       <div
-        className="relative flex items-center h-16 shrink-0 border-b border-border/50 bg-background"
+        className="relative grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center h-16 shrink-0 border-b border-border/50 bg-background"
         style={{ paddingLeft: "88px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
 
         {/* Left: sidebar toggle + breadcrumb */}
-        <div className="relative flex items-center gap-2 h-full">
+        <div className="relative flex items-center gap-2 h-full min-w-0">
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="relative text-muted-foreground hover:text-foreground p-1.5 rounded hover:bg-accent"
@@ -273,14 +260,14 @@ export function MainView() {
             return (
               <div className="flex flex-col justify-center min-w-0">
                 <span
-                  className={`truncate max-w-[420px] text-[15px] font-semibold text-foreground ${isMain ? "font-mono" : ""}`}
+                  className={`truncate max-w-[420px] text-base font-semibold text-foreground ${isMain ? "font-mono" : ""}`}
                   title={primary}
                 >
                   {primary}
                 </span>
                 {metaParts.length > 0 && (
                   <span
-                    className="truncate max-w-[420px] text-[11px] text-muted-foreground/80 font-mono"
+                    className="truncate max-w-[420px] text-sm text-muted-foreground font-mono"
                     title={metaParts.join(" · ")}
                   >
                     {metaParts.join(" · ")}
@@ -291,10 +278,14 @@ export function MainView() {
           })()}
         </div>
 
-        {/* Center: run + tabs */}
-        {selectedWorktree && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingLeft: "88px" }}>
-            <div className="relative flex items-center gap-1.5 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
+        {/* Center: run + tabs. The cell is always rendered so the right cluster
+            can never auto-place into this column when no worktree is selected. */}
+        <div
+          className="relative flex items-center justify-center gap-1.5"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {selectedWorktree && (
+            <>
               <RunActionsButton
                 projectPath={selectedProject?.path ?? null}
                 worktreePath={selectedWorktree?.path ?? null}
@@ -303,9 +294,9 @@ export function MainView() {
               <button
                 type="button"
                 onClick={openWorkspace}
-                className={`relative flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
+                className={`relative flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold outline-none transition-colors ${
                   activeTab === "terminal"
-                    ? "bg-accent text-foreground shadow-sm"
+                    ? "bg-accent text-foreground"
                     : "text-foreground/70 hover:bg-accent/60 hover:text-foreground"
                 }`}
                 aria-pressed={activeTab === "terminal"}
@@ -313,15 +304,15 @@ export function MainView() {
                 <SquareTerminal aria-hidden="true" className="size-4" />
                 Workspace
                 {hasUnreadRunFailure && (
-                  <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-red-500" aria-label="Run failed" />
+                  <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-danger" aria-label="Run failed" />
                 )}
               </button>
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </div>
 
         {/* Right: open + sidebar */}
-        <div className="relative flex items-center gap-1.5 pr-4 ml-auto shrink-0">
+        <div className="relative flex items-center gap-1.5 pr-4 justify-self-end shrink-0">
           {selectedWorktree && (
             <OpenInEditorButton worktreePath={selectedWorktree.path} tooltip={openInEditorTooltip} />
           )}

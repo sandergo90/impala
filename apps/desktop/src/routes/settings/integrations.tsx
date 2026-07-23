@@ -6,6 +6,7 @@ import { LinearPane } from "../../components/settings/LinearPane";
 export function IntegrationsRoute() {
   return (
     <div className="space-y-8">
+      <h2 className="text-base font-semibold text-foreground">Integrations</h2>
       <AgentIntegrationPane />
       <GithubPane />
       <BitbucketPane />

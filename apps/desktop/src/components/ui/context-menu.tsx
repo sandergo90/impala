@@ -38,7 +38,11 @@ export function ContextMenu({ children, items, className }: ContextMenuProps) {
               <ContextMenuPrimitive.Item
                 key={item.label}
                 onClick={() => item.onSelect()}
-                className="px-3 py-1.5 cursor-pointer select-none outline-none text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+                // `bg-accent` is a no-op on a popover surface — Default Dark
+                // resolves --accent and --popover to the same hex. Tinting with
+                // the foreground token instead derives a real step from
+                // whatever surface the row actually sits on, in every theme.
+                className="px-3 py-1.5 cursor-pointer select-none outline-none text-foreground data-highlighted:bg-foreground/10"
               >
                 {item.label}
               </ContextMenuPrimitive.Item>

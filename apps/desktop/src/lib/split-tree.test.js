@@ -14,6 +14,7 @@ import {
   insertGroupTab,
   insertGroupAtEdge,
   moveGroupTab,
+  openUrlInBrowserSplit,
   removeGroupTab,
   removeNode,
   setActiveGroupTab,
@@ -30,6 +31,166 @@ const group = (id, content) => ({
   activeTabId: id,
 });
 
+describe("openUrlInBrowserSplit", () => {
+  test("creates a browser immediately to the right of the source group", () => {
+    const root = group("terminal-pane", {
+      kind: "terminal",
+      launch: "agent",
+    });
+    const result = openUrlInBrowserSplit(
+      root,
+      root.id,
+      "https://example.com/docs",
+    );
+
+    expect(result.created).toBe(true);
+    expect(result.tree.orientation).toBe("vertical");
+    expect(getLeaves(result.tree).map((pane) => pane.id)).toEqual([
+      root.id,
+      result.browserGroupId,
+    ]);
+    expect(findGroupTab(result.tree, result.browserTabId).tab.content).toEqual({
+      kind: "browser",
+      url: "https://example.com/docs",
+    });
+  });
+
+  test("reuses a visible browser pane without adding another split", () => {
+    const root = group("terminal-pane", {
+      kind: "terminal",
+      launch: "shell",
+    });
+    const split = splitNode(root, root.id, "vertical", {
+      kind: "browser",
+      url: "https://old.example",
+    });
+    const result = openUrlInBrowserSplit(
+      split.tree,
+      root.id,
+      "https://new.example",
+    );
+
+    expect(result.created).toBe(false);
+    expect(getLeaves(result.tree)).toHaveLength(2);
+    expect(findGroupTab(result.tree, result.browserTabId).tab.content).toEqual({
+      kind: "browser",
+      url: "https://new.example",
+    });
+  });
+
+  test("opens a browser tab in an existing split pane", () => {
+    const root = group("terminal-pane", {
+      kind: "terminal",
+      launch: "agent",
+    });
+    const split = splitNode(root, root.id, "vertical", {
+      kind: "terminal",
+      launch: "shell",
+    });
+    const targetGroup = findGroup(split.tree, split.newLeafId);
+    const result = openUrlInBrowserSplit(
+      split.tree,
+      root.id,
+      "https://example.com/docs",
+    );
+
+    expect(result.created).toBe(true);
+    expect(result.browserGroupId).toBe(targetGroup.id);
+    expect(getLeaves(result.tree)).toHaveLength(2);
+    expect(findGroup(result.tree, targetGroup.id).tabs).toHaveLength(2);
+    expect(getActiveGroupTab(findGroup(result.tree, targetGroup.id)).content).toEqual(
+      {
+        kind: "browser",
+        url: "https://example.com/docs",
+      },
+    );
+  });
+
+  test("activates a hidden browser tab in an existing split pane", () => {
+    const root = group("terminal-pane", {
+      kind: "terminal",
+      launch: "agent",
+    });
+    const split = splitNode(root, root.id, "vertical", {
+      kind: "terminal",
+      launch: "shell",
+    });
+    const targetGroup = findGroup(split.tree, split.newLeafId);
+    const browser = createGroupTab("existing-browser", {
+      kind: "browser",
+      url: "https://old.example",
+    });
+    const withBrowser = setActiveGroupTab(
+      addTabToGroup(split.tree, targetGroup.id, browser),
+      targetGroup.id,
+      targetGroup.activeTabId,
+    );
+    const result = openUrlInBrowserSplit(
+      withBrowser,
+      root.id,
+      "https://new.example",
+    );
+
+    expect(result.created).toBe(false);
+    expect(getLeaves(result.tree)).toHaveLength(2);
+    expect(findGroup(result.tree, targetGroup.id).tabs).toHaveLength(2);
+    expect(getActiveGroupTab(findGroup(result.tree, targetGroup.id)).id).toBe(
+      browser.id,
+    );
+    expect(findGroupTab(result.tree, browser.id).tab.content.url).toBe(
+      "https://new.example",
+    );
+  });
+
+  test("does not replace the source terminal with a hidden browser tab", () => {
+    const root = group("terminal-pane", {
+      kind: "terminal",
+      launch: "shell",
+    });
+    const browser = createGroupTab("hidden-browser", {
+      kind: "browser",
+      url: "https://old.example",
+    });
+    const stacked = setActiveGroupTab(
+      addTabToGroup(root, root.id, browser),
+      root.id,
+      root.tabs[0].id,
+    );
+    const result = openUrlInBrowserSplit(
+      stacked,
+      root.id,
+      "https://new.example",
+    );
+
+    expect(result.created).toBe(true);
+    expect(getLeaves(result.tree)).toHaveLength(2);
+    expect(getActiveGroupTab(findGroup(result.tree, root.id)).content.kind).toBe(
+      "terminal",
+    );
+  });
+
+  test("does not reuse a browser tab in the source group as a split pane", () => {
+    const source = group("left-pane", {
+      kind: "browser",
+      url: "https://old.example",
+    });
+    const result = openUrlInBrowserSplit(
+      source,
+      source.id,
+      "https://new.example",
+    );
+
+    expect(result.created).toBe(true);
+    expect(getLeaves(result.tree)).toHaveLength(2);
+    expect(getActiveGroupTab(findGroup(result.tree, source.id)).content.url).toBe(
+      "https://old.example",
+    );
+    expect(findGroupTab(result.tree, result.browserTabId).tab.content.url).toBe(
+      "https://new.example",
+    );
+  });
+});
+
 describe("normalizeSplitTree", () => {
   test("upgrades legacy leaves to identity-preserving groups", () => {
     const tree = normalizeLegacySplitTree({
@@ -40,9 +201,11 @@ describe("normalizeSplitTree", () => {
       second: { type: "leaf", id: "shell-pane", paneType: "shell" },
     });
 
-    expect(getLeaves(tree).map((pane) => getActiveGroupTab(pane).content.kind)).toEqual([
-      "agent",
-      "shell",
+    expect(
+      getLeaves(tree).map((pane) => getActiveGroupTab(pane).content),
+    ).toEqual([
+      { kind: "terminal", launch: "agent" },
+      { kind: "terminal", launch: "shell" },
     ]);
     expect(getLeaves(tree).map((pane) => pane.activeTabId)).toEqual([
       "agent-pane",

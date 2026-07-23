@@ -60,30 +60,17 @@ export function GeneralTerminalLeaf({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- onSessionSpawned excluded: backend deduplicates spawns
   }, [paneId, sessionId, spawnCwd]);
 
-  return (
-    <>
-      {isFocused && (
-        <div
-          className="absolute inset-0 pointer-events-none z-10"
-          style={{
-            boxShadow: "inset 0 0 0 1px var(--accent)",
-            borderRadius: "2px",
-          }}
-        />
-      )}
-      {sessionId ? (
-        <XtermTerminal
-          key={sessionId}
-          sessionId={sessionId}
-          baseDir={worktreePath}
-          isFocused={isFocused}
-          onRestart={handleRestart}
-        />
-      ) : (
-        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-          Starting terminal...
-        </div>
-      )}
-    </>
+  return sessionId ? (
+    <XtermTerminal
+      key={sessionId}
+      sessionId={sessionId}
+      baseDir={worktreePath}
+      isFocused={isFocused}
+      onRestart={handleRestart}
+    />
+  ) : (
+    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+      Starting terminal...
+    </div>
   );
 }

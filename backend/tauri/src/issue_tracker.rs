@@ -80,7 +80,9 @@ impl TrackerConfig {
                 base_url,
                 email,
                 token,
-            } => Some(Box::new(crate::jira::JiraTracker::new(base_url, email, token))),
+            } => Some(Box::new(crate::jira::JiraTracker::new(
+                base_url, email, token,
+            ))),
         }
     }
 }
@@ -116,8 +118,10 @@ fn selected_kind(conn: &Connection, project_path: &str) -> Result<String, String
 }
 
 fn linear_key(conn: &Connection) -> Result<Option<String>, String> {
-    Ok(crate::settings::get_setting(conn, "linearApiKey", "global")?
-        .filter(|k| !k.trim().is_empty()))
+    Ok(
+        crate::settings::get_setting(conn, "linearApiKey", "global")?
+            .filter(|k| !k.trim().is_empty()),
+    )
 }
 
 fn jira_field(conn: &Connection, project_path: &str, key: &str) -> Result<Option<String>, String> {
@@ -144,10 +148,7 @@ pub fn tracker_info(conn: &Connection, project_path: &str) -> Result<IssueTracke
 /// Resolve a project to a usable tracker + credentials. Returns
 /// `TrackerConfig::None` when no tracker is selected or its credentials are
 /// incomplete, so callers degrade gracefully instead of erroring.
-pub fn read_tracker_config(
-    conn: &Connection,
-    project_path: &str,
-) -> Result<TrackerConfig, String> {
+pub fn read_tracker_config(conn: &Connection, project_path: &str) -> Result<TrackerConfig, String> {
     match selected_kind(conn, project_path)?.as_str() {
         "linear" => match linear_key(conn)? {
             Some(api_key) => Ok(TrackerConfig::Linear { api_key }),

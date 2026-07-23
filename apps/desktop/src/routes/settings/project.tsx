@@ -187,7 +187,7 @@ export function ProjectSettingsRoute() {
   return (
     <div className="max-w-2xl space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">{projectName}</h2>
+        <h2 className="text-base font-semibold text-foreground">{projectName}</h2>
         <p className="text-sm text-muted-foreground mt-1">{projectPath}</p>
       </div>
 
@@ -196,7 +196,7 @@ export function ProjectSettingsRoute() {
 
         <div className="space-y-1.5">
           <label className="text-sm font-medium">Setup</label>
-          <p className="text-md text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Runs automatically after creating a new worktree.
           </p>
           <textarea
@@ -210,7 +210,7 @@ export function ProjectSettingsRoute() {
 
         <div className="space-y-1.5">
           <label className="text-sm font-medium">Teardown</label>
-          <p className="text-md text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Runs in the worktree just before it's deleted.
           </p>
           <textarea
@@ -225,7 +225,7 @@ export function ProjectSettingsRoute() {
 
       <div className="p-4 rounded-lg border border-border bg-card space-y-3">
         <h3 className="text-sm font-medium">Base branch</h3>
-        <p className="text-md text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           New worktrees are forked from this branch. Auto-detected from your
           repo — clear it to fork from the current HEAD instead.
         </p>
@@ -241,7 +241,7 @@ export function ProjectSettingsRoute() {
 
       <div className="p-4 rounded-lg border border-border bg-card space-y-3">
         <h3 className="text-sm font-medium">Issue tracker</h3>
-        <p className="text-md text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Choose where this project's issues live. New worktrees can be created
           from issues in the selected tracker.
         </p>
@@ -256,7 +256,7 @@ export function ProjectSettingsRoute() {
         </select>
 
         {issueTracker === "linear" && (
-          <p className="text-md text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Linear is connected with a global API key in{" "}
             <span className="font-mono text-foreground">Settings &gt; Integrations</span>.
           </p>
@@ -296,7 +296,7 @@ export function ProjectSettingsRoute() {
                 className="w-full px-3 py-1.5 border rounded text-sm bg-background font-mono"
                 spellCheck={false}
               />
-              <p className="text-md text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 Create one at{" "}
                 <span className="font-mono text-foreground">
                   id.atlassian.com &gt; Security &gt; API tokens
@@ -321,7 +321,7 @@ export function ProjectSettingsRoute() {
 
       <div className="p-4 rounded-lg border border-border bg-card space-y-3">
         <h3 className="text-sm font-medium">Claude Flags</h3>
-        <p className="text-md text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           CLI flags passed to <code className="font-mono text-foreground">claude</code> when
           starting a session in this project. Leave empty to use the global default.
         </p>
@@ -336,7 +336,7 @@ export function ProjectSettingsRoute() {
 
       <div className="p-4 rounded-lg border border-border bg-card space-y-3">
         <h3 className="text-sm font-medium">Codex Flags</h3>
-        <p className="text-md text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           CLI flags passed to <code className="font-mono text-foreground">codex</code> on launch in this project. Leave empty to use the global default.
         </p>
         <input
@@ -350,21 +350,21 @@ export function ProjectSettingsRoute() {
 
       <div className="space-y-2">
         <h3 className="text-sm font-medium">Environment variables</h3>
-        <p className="text-md text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           These variables are available in your scripts:
         </p>
         <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
           <div className="flex items-baseline gap-2">
-            <code className="text-md font-mono text-foreground">$IMPALA_PROJECT_PATH</code>
-            <span className="text-md text-muted-foreground">— Main repository root</span>
+            <code className="text-sm font-mono text-foreground">$IMPALA_PROJECT_PATH</code>
+            <span className="text-sm text-muted-foreground">— Main repository root</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <code className="text-md font-mono text-foreground">$IMPALA_WORKTREE_PATH</code>
-            <span className="text-md text-muted-foreground">— Worktree directory (also the working directory)</span>
+            <code className="text-sm font-mono text-foreground">$IMPALA_WORKTREE_PATH</code>
+            <span className="text-sm text-muted-foreground">— Worktree directory (also the working directory)</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <code className="text-md font-mono text-foreground">$IMPALA_BRANCH</code>
-            <span className="text-md text-muted-foreground">— Branch name</span>
+            <code className="text-sm font-mono text-foreground">$IMPALA_BRANCH</code>
+            <span className="text-sm text-muted-foreground">— Branch name</span>
           </div>
         </div>
       </div>

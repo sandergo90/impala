@@ -113,3 +113,54 @@ export function migrateUserTabsToV8(userTabs: any[]): any[] {
     return { ...tab, splitTree };
   });
 }
+
+function migratePaneContentToV10(content: any): any {
+  if (content?.kind === "agent") return { kind: "terminal", launch: "agent" };
+  if (content?.kind === "shell") return { kind: "terminal", launch: "shell" };
+  if (content?.kind === "terminal") {
+    return {
+      ...content,
+      launch: content.launch === "agent" ? "agent" : "shell",
+    };
+  }
+  return content;
+}
+
+export function migrateSplitTreeToV10(node: any): any {
+  if (!node || typeof node !== "object") return node;
+  if (node.type === "group") {
+    return {
+      ...node,
+      tabs: Array.isArray(node.tabs)
+        ? node.tabs.map((tab: any) => ({
+            ...tab,
+            content: migratePaneContentToV10(tab.content),
+          }))
+        : node.tabs,
+    };
+  }
+  return {
+    ...node,
+    first: migrateSplitTreeToV10(node.first),
+    second: migrateSplitTreeToV10(node.second),
+  };
+}
+
+export function migrateUserTabsToV10(userTabs: any[]): any[] {
+  return userTabs.map((tab) => {
+    const wasAgent = tab.kind === "agent";
+    return {
+      ...tab,
+      kind: wasAgent ? "terminal" : tab.kind,
+      ...(tab.kind === "terminal" || wasAgent
+        ? {
+            terminalLaunch:
+              tab.terminalLaunch === "agent" || wasAgent ? "agent" : "shell",
+          }
+        : {}),
+      splitTree: tab.splitTree
+        ? migrateSplitTreeToV10(tab.splitTree)
+        : tab.splitTree,
+    };
+  });
+}

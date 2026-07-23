@@ -93,7 +93,10 @@ export function getDiffViewerStyle(theme: Theme, fontSize: number = 14, fontFami
     "--diffs-bg-hover-override": theme.terminal.background,
     "--diffs-bg-context-override": theme.terminal.background,
     "--diffs-bg-separator-override": theme.ui.border,
-    "--diffs-fg-number-override": isDark ? theme.terminal.brightBlack : theme.terminal.white,
+    // Gutter line numbers intentionally left to Pierre's own default,
+    // color-mix(in lab, var(--diffs-fg) 65%, var(--diffs-bg)), which is already
+    // driven by the --diffs-dark/--diffs-light pairs set above. Overriding it
+    // with terminal.brightBlack drops it to ~1.6:1 in dark themes.
     "--diffs-addition-color-override": additionColor,
     "--diffs-deletion-color-override": deletionColor,
     "--diffs-selection-color-override": theme.terminal.selectionBackground,
@@ -104,9 +107,7 @@ export function getDiffViewerStyle(theme: Theme, fontSize: number = 14, fontFami
 
 /** CSS variable overrides for the @pierre/trees FileTree component. */
 export function getTreesStyle(theme: Theme): CSSProperties {
-  const t = theme.terminal;
   const resolved = resolveTheme(theme);
-  const isDark = theme.type === "dark";
   return {
     colorScheme: theme.type,
     "--trees-bg-override": resolved.sidebar,
@@ -115,16 +116,16 @@ export function getTreesStyle(theme: Theme): CSSProperties {
     "--trees-fg-muted-override": resolved.mutedForeground,
     "--trees-accent-override": resolved.accent,
     "--trees-border-color-override": resolved.sidebarBorder,
-    "--trees-focus-ring-color-override": resolved.sidebarRing,
+    "--trees-focus-ring-color-override": "transparent",
     "--trees-search-bg-override": resolved.input,
     "--trees-search-fg-override": resolved.foreground,
     "--trees-selected-bg-override": resolved.sidebarAccent,
     "--trees-selected-fg-override": resolved.sidebarAccentForeground,
-    "--trees-status-added-override": isDark ? t.brightGreen : t.green,
-    "--trees-status-modified-override": isDark ? t.brightBlue : t.blue,
-    "--trees-status-deleted-override": isDark ? t.brightRed : t.red,
-    "--trees-status-renamed-override": isDark ? t.brightYellow : t.yellow,
-    "--trees-status-untracked-override": isDark ? t.brightGreen : t.green,
+    "--trees-status-added-override": resolved.success,
+    "--trees-status-modified-override": resolved.info,
+    "--trees-status-deleted-override": resolved.danger,
+    "--trees-status-renamed-override": resolved.warning,
+    "--trees-status-untracked-override": resolved.success,
     "--trees-status-ignored-override": resolved.mutedForeground,
     // Make hover/selected highlights span the full sidebar width by removing
     // the default inline padding around rows. Square the corners too.
@@ -142,6 +143,7 @@ export function getTreesStyle(theme: Theme): CSSProperties {
 
 export function resolveTheme(theme: Theme): ResolvedCSS {
   const ui = theme.ui;
+  const t = theme.terminal;
   const { background, foreground, primary, border, accent } = ui;
   const isDark = theme.type === "dark";
   const mix = (color: string, pct: number, base: string = background) =>
@@ -159,7 +161,10 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
     secondary: ui.secondary ?? accent,
     secondaryForeground: ui.secondaryForeground ?? foreground,
     muted: ui.muted ?? accent,
-    mutedForeground: ui.mutedForeground ?? mix(foreground, isDark ? 55 : 45),
+    // 72/64 is the floor at which every built-in theme clears WCAG AA (4.5:1)
+    // on its worst surface (popover/accent), while keeping 1.76-2.91:1 of
+    // separation from --foreground so the token still reads as recessed.
+    mutedForeground: ui.mutedForeground ?? mix(foreground, isDark ? 72 : 64),
     accent,
     accentForeground: ui.accentForeground ?? foreground,
     destructive: ui.destructive ?? (isDark ? "#FC6B83" : "#cf222e"),
@@ -171,7 +176,11 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
     chart3: ui.chart3 ?? mix(foreground, 45),
     chart4: ui.chart4 ?? mix(foreground, 35),
     chart5: ui.chart5 ?? mix(foreground, 25),
-    sidebar: ui.sidebar ?? (isDark ? mix(background, 80, "#000000") : accent),
+    // Light themes previously aliased `sidebar` straight to `accent`, which made
+    // every selected/hover highlight land at 1.00:1 on sidebar-painted chrome.
+    // Step it one rung off `accent` so the interaction token stays perceptible
+    // while keeping the theme's own hue.
+    sidebar: ui.sidebar ?? (isDark ? mix(background, 80, "#000000") : mix("#000000", 2, accent)),
     sidebarForeground: ui.sidebarForeground ?? foreground,
     sidebarPrimary: ui.sidebarPrimary ?? primary,
     sidebarPrimaryForeground: ui.sidebarPrimaryForeground ?? "#ffffff",
@@ -184,6 +193,14 @@ export function resolveTheme(theme: Theme): ResolvedCSS {
     link: ui.link ?? primary,
     codeBackground: ui.codeBackground ?? ui.muted ?? accent,
     editorSelection: ui.editorSelection ?? `color-mix(in srgb, ${primary} 35%, transparent)`,
+    // Semantic status ramp, derived from the terminal ANSI palette using the
+    // same bright/base selection the file tree and diff viewer already use.
+    // These are the single source of truth for added/modified/deleted/renamed,
+    // pass/fail run states, and PR status — never a Tailwind palette class.
+    success: isDark ? t.brightGreen : t.green,
+    warning: isDark ? t.brightYellow : t.yellow,
+    info: isDark ? t.brightBlue : t.blue,
+    danger: isDark ? t.brightRed : t.red,
   };
 }
 
@@ -225,6 +242,10 @@ const CSS_VAR_MAP: Record<keyof ResolvedCSS, string> = {
   link: "--color-link",
   codeBackground: "--color-code-background",
   editorSelection: "--color-editor-selection",
+  success: "--success",
+  warning: "--warning",
+  info: "--info",
+  danger: "--danger",
 };
 
 /** Alpha applied to surface CSS variables when the vibrancy material is active. */

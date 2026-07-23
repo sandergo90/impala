@@ -10,14 +10,14 @@ export function NotificationsPane() {
   return (
     <div>
       <h2 className="text-base font-semibold text-foreground">Notifications</h2>
-      <p className="text-md text-muted-foreground mt-1 mb-6">
+      <p className="text-sm text-muted-foreground mt-1 mb-6">
         Configure how you're notified when an agent finishes its task.
       </p>
 
       <div className="flex items-center justify-between max-w-lg">
         <div>
-          <div className="text-md font-medium">Notification sounds</div>
-          <div className="text-md text-muted-foreground mt-0.5">
+          <div className="text-sm font-medium">Notification sounds</div>
+          <div className="text-sm text-muted-foreground mt-0.5">
             Play a sound when an agent completes
           </div>
         </div>
@@ -35,20 +35,31 @@ export function NotificationsPane() {
         </button>
       </div>
 
-      <div className={`mt-6 max-w-lg ${soundMuted ? "opacity-50 pointer-events-none" : ""}`}>
-        <div className="text-md font-medium mb-3">Notification sound</div>
+      {/* Native radios so arrow-key navigation, roving focus and the
+          radiogroup announcement come for free. `disabled` — not
+          `pointer-events-none` — is what actually removes muted rows from the
+          tab order. */}
+      <fieldset className={`mt-6 max-w-lg ${soundMuted ? "opacity-50" : ""}`}>
+        <legend className="text-sm font-medium mb-3">Notification sound</legend>
         <div className="space-y-1">
           {NOTIFICATION_SOUNDS.map((sound) => (
             <div
               key={sound.id}
-              className={`flex items-center justify-between px-3 py-2 rounded-md cursor-pointer transition-colors ${
+              className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors ${
                 selectedSoundId === sound.id
                   ? "bg-primary/15 text-foreground"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
               }`}
-              onClick={() => setSelectedSoundId(sound.id)}
             >
-              <div className="flex items-center gap-3">
+              <label className="flex flex-1 items-center gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="notification-sound"
+                  className="sr-only"
+                  checked={selectedSoundId === sound.id}
+                  disabled={soundMuted}
+                  onChange={() => setSelectedSoundId(sound.id)}
+                />
                 <div
                   className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
                     selectedSoundId === sound.id
@@ -60,21 +71,19 @@ export function NotificationsPane() {
                     <div className="w-1.5 h-1.5 rounded-full bg-primary" />
                   )}
                 </div>
-                <span className="text-md">{sound.name}</span>
-              </div>
+                <span className="text-sm">{sound.name}</span>
+              </label>
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  playNotificationSound(sound.id);
-                }}
-                className="text-md text-muted-foreground hover:text-foreground px-2 py-0.5 rounded hover:bg-muted/50 transition-colors"
+                onClick={() => playNotificationSound(sound.id)}
+                disabled={soundMuted}
+                className="text-sm text-muted-foreground hover:text-foreground px-2 py-0.5 rounded hover:bg-muted/50 transition-colors"
               >
                 Preview
               </button>
             </div>
           ))}
         </div>
-      </div>
+      </fieldset>
     </div>
   );
 }

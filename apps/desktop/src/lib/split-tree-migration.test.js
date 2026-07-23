@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   migrateSplitTreeToV8,
+  migrateSplitTreeToV10,
   migrateUserTabsToV7,
   migrateUserTabsToV8,
+  migrateUserTabsToV10,
 } from "./split-tree-migration.ts";
 
 describe("v6 to v7 user-tab migration", () => {
@@ -51,6 +53,81 @@ describe("v6 to v7 user-tab migration", () => {
       type: "leaf",
       id: "tab-user-file-1",
       content: { kind: "file", path: "src/App.tsx" },
+    });
+  });
+});
+
+describe("v9 to v10 unified terminal migration", () => {
+  test("converts agent and shell pane kinds into terminal launch profiles", () => {
+    const tree = migrateSplitTreeToV10({
+      type: "split",
+      orientation: "vertical",
+      ratio: 0.5,
+      first: {
+        type: "group",
+        id: "agent-group",
+        activeTabId: "agent-pane",
+        tabs: [
+          {
+            id: "agent-pane",
+            label: "Agent",
+            content: { kind: "agent" },
+            createdAt: 1,
+          },
+        ],
+      },
+      second: {
+        type: "group",
+        id: "shell-group",
+        activeTabId: "shell-pane",
+        tabs: [
+          {
+            id: "shell-pane",
+            label: "Terminal",
+            content: { kind: "shell" },
+            createdAt: 2,
+          },
+        ],
+      },
+    });
+
+    expect(tree.first.tabs[0].content).toEqual({
+      kind: "terminal",
+      launch: "agent",
+    });
+    expect(tree.second.tabs[0].content).toEqual({
+      kind: "terminal",
+      launch: "shell",
+    });
+  });
+
+  test("keeps agent launch intent while collapsing the legacy user-tab kind", () => {
+    const [tab] = migrateUserTabsToV10([
+      {
+        id: "agent-2",
+        kind: "agent",
+        label: "Agent 2",
+        splitTree: {
+          type: "group",
+          id: "tab-user-agent-2",
+          activeTabId: "tab-user-agent-2",
+          tabs: [
+            {
+              id: "tab-user-agent-2",
+              label: "Agent 2",
+              content: { kind: "agent" },
+              createdAt: 3,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(tab.kind).toBe("terminal");
+    expect(tab.terminalLaunch).toBe("agent");
+    expect(tab.splitTree.tabs[0].content).toEqual({
+      kind: "terminal",
+      launch: "agent",
     });
   });
 });

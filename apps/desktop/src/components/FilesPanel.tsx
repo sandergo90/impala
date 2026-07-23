@@ -726,7 +726,7 @@ function NewItemDialog({
             placeholder={placeholder}
             spellCheck={false}
             autoComplete="off"
-            className="w-full px-3 py-1.5 border rounded text-sm bg-background outline-none focus:border-foreground/30"
+            className="w-full px-3 py-1.5 border rounded text-sm bg-background outline-none"
           />
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

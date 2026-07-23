@@ -9,6 +9,7 @@ import { toast } from "sonner";
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const LAST_SEEN_VERSION_KEY = "impala:lastSeenVersion";
 const RELEASE_URL = "https://github.com/sandergo90/impala/releases/tag/desktop-v";
+const RELEASES_LATEST_URL = "https://github.com/sandergo90/impala/releases/latest";
 
 export function UpdateChecker() {
   const checking = useRef(false);
@@ -47,13 +48,24 @@ export function UpdateChecker() {
               toast.loading("Restarting...", { id: installToast });
               await relaunch();
             } catch (e) {
-              toast.error(`Update failed: ${e}`, { id: installToast });
+              // Reuse the loading toast's id — loading toasts never auto-dismiss,
+              // so a fresh toast would strand "Downloading update..." on screen.
+              toast.error("Couldn't install the update", {
+                id: installToast,
+                description: String(e),
+                duration: Infinity,
+                action: {
+                  label: "Download manually",
+                  onClick: () => openUrl(RELEASES_LATEST_URL),
+                },
+              });
             }
           },
         },
       });
     } catch (e) {
-      if (manual) toast.error(`Update check failed: ${e}`);
+      if (manual)
+        toast.error("Couldn't check for updates", { description: String(e) });
     } finally {
       checking.current = false;
     }

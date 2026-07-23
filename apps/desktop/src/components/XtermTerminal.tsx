@@ -21,6 +21,7 @@ import {
 } from "../lib/terminal-url-underline";
 import { encodePtyInput } from "../lib/encode-pty";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
+import { isTerminalInterruptInput } from "../lib/terminal-input";
 import {
   DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_SIZE,
@@ -95,6 +96,9 @@ interface CachedTerminal {
   exitedRef: { current: boolean };
   exitCode: number | null;
   onExitHandler: ((code: number) => void) | null;
+  onInterruptHandler: (() => void) | null;
+  onOpenUrlHandler: ((url: string) => void) | null;
+  openUrlHandlerRef: { current: ((url: string) => void) | null };
   writeQueue: Uint8Array[];
   writeScheduled: boolean;
   isFocusedRef: { current: boolean };
@@ -120,6 +124,18 @@ async function createCachedTerminal(
   const fontSize =
     uiState.terminalFontSize ?? uiState.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
 
+  const openUrlHandlerRef = {
+    current: null as ((url: string) => void) | null,
+  };
+  const handleOpenUrl = (url: string) => {
+    const handler = openUrlHandlerRef.current;
+    if (handler) {
+      handler(url);
+      return;
+    }
+    openUrl(url).catch(() => {});
+  };
+
   const terminal = new Terminal({
     scrollback,
     cursorBlink: true,
@@ -133,11 +149,12 @@ async function createCachedTerminal(
     // by xterm's built-in OscLinkProvider, which suppresses our custom URL
     // link provider for those cells. Without a linkHandler, xterm falls back to
     // a default handler that no-ops inside the Tauri webview. Route OSC links
-    // through the same Tauri shell `open()` as plain-text URLs so they open in
-    // the system browser.
+    // through the same handler as plain-text URLs. Worktree terminals route
+    // that handler into a built-in browser split; standalone terminals retain
+    // the system-browser fallback.
     linkHandler: {
       activate(_event, text) {
-        openUrl(text).catch(() => {});
+        handleOpenUrl(text);
       },
     },
   });
@@ -185,7 +202,7 @@ async function createCachedTerminal(
     createFileLinkProvider(terminal, () => baseDirRef.current),
   );
   const urlLinkDisposable = terminal.registerLinkProvider(
-    createUrlLinkProvider(terminal),
+    createUrlLinkProvider(terminal, handleOpenUrl),
   );
   const urlUnderlineManager = createUrlUnderlineManager(
     terminal,
@@ -227,6 +244,9 @@ async function createCachedTerminal(
     exitedRef: { current: false },
     exitCode: null,
     onExitHandler: null,
+    onInterruptHandler: null,
+    onOpenUrlHandler: null,
+    openUrlHandlerRef,
     writeQueue: [],
     writeScheduled: false,
     isFocusedRef: { current: true },
@@ -236,6 +256,9 @@ async function createCachedTerminal(
     if (entry.exitedRef.current) return;
     const encoded = encodePtyInput(text);
     invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
+    if (isTerminalInterruptInput(text)) {
+      entry.onInterruptHandler?.();
+    }
   }
 
   entry.onDataDisposable = terminal.onData((data: string) => writeToPty(data));
@@ -403,6 +426,9 @@ interface XtermTerminalProps {
   isFocused?: boolean;
   onFocus?: () => void;
   onRestart?: () => void;
+  onExit?: (code: number) => void;
+  onInterrupt?: () => void;
+  onOpenUrl?: (url: string) => void;
   scrollback?: number;
 }
 
@@ -412,10 +438,19 @@ function XtermTerminalInner({
   isFocused = true,
   onFocus,
   onRestart,
+  onExit,
+  onInterrupt,
+  onOpenUrl,
   scrollback = 10000,
 }: XtermTerminalProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const entryRef = useRef<CachedTerminal | null>(null);
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
+  const onInterruptRef = useRef(onInterrupt);
+  onInterruptRef.current = onInterrupt;
+  const onOpenUrlRef = useRef(onOpenUrl);
+  onOpenUrlRef.current = onOpenUrl;
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [searchVisible, setSearchVisible] = useState(false);
@@ -467,6 +502,16 @@ function XtermTerminalInner({
       // awaits), so without this line baseDirRef stays null until the next
       // remount — file paths in the terminal aren't clickable on first mount.
       entry.baseDirRef.current = baseDir ?? null;
+      entry.onInterruptHandler = () => onInterruptRef.current?.();
+      entry.onOpenUrlHandler = (url) => {
+        const handler = onOpenUrlRef.current;
+        if (handler) {
+          handler(url);
+          return;
+        }
+        openUrl(url).catch(() => {});
+      };
+      entry.openUrlHandlerRef.current = entry.onOpenUrlHandler;
 
       host.appendChild(entry.wrapper);
       entry.fitAddon.fit();
@@ -519,8 +564,14 @@ function XtermTerminalInner({
       });
       resizeObserver.observe(host);
 
-      entry.onExitHandler = (code) => setExited(code);
-      if (entry.exitCode !== null) setExited(entry.exitCode);
+      entry.onExitHandler = (code) => {
+        setExited(code);
+        onExitRef.current?.(code);
+      };
+      if (entry.exitCode !== null) {
+        setExited(entry.exitCode);
+        onExitRef.current?.(entry.exitCode);
+      }
 
       // Apply the current focus state now that entryRef is set. The dedicated
       // focus effect below bailed earlier (entryRef was null while attach was
@@ -547,6 +598,9 @@ function XtermTerminalInner({
       resizeObserver?.disconnect();
       if (attachedEntry) {
         attachedEntry.onExitHandler = null;
+        attachedEntry.onInterruptHandler = null;
+        attachedEntry.onOpenUrlHandler = null;
+        attachedEntry.openUrlHandlerRef.current = null;
         // Park the wrapper outside the DOM. Keeping the instance alive is the
         // whole point of the cache.
         attachedEntry.wrapper.remove();
@@ -644,23 +698,29 @@ function XtermTerminalInner({
             }}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search..."
-            className="bg-transparent text-foreground text-md outline-none w-40 placeholder:text-muted-foreground"
+            className="bg-transparent text-foreground text-sm outline-none w-40 placeholder:text-muted-foreground"
           />
           <button
+            type="button"
+            aria-label="Find previous"
             onClick={() => entryRef.current?.searchAddon.findPrevious(searchQuery)}
-            className="text-muted-foreground hover:text-foreground text-md px-1"
+            className="text-muted-foreground hover:text-foreground text-sm px-1"
           >
             &#9650;
           </button>
           <button
+            type="button"
+            aria-label="Find next"
             onClick={() => entryRef.current?.searchAddon.findNext(searchQuery)}
-            className="text-muted-foreground hover:text-foreground text-md px-1"
+            className="text-muted-foreground hover:text-foreground text-sm px-1"
           >
             &#9660;
           </button>
           <button
+            type="button"
+            aria-label="Close search"
             onClick={closeSearch}
-            className="text-muted-foreground hover:text-foreground text-md px-1"
+            className="text-muted-foreground hover:text-foreground text-sm px-1"
           >
             &times;
           </button>
@@ -673,8 +733,8 @@ function XtermTerminalInner({
       )}
       <div ref={hostRef} className="h-full w-full" />
       {exited !== null && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-20">
-          <div className="text-center text-muted-foreground">
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-20">
+          <div className="text-center text-foreground">
             <p className="text-sm">Process exited with code {exited}</p>
             {onRestart && (
               <button

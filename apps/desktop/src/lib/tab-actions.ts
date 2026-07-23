@@ -26,27 +26,32 @@ import {
   insertGroupTab,
   insertGroupAtEdge,
   moveGroupTab,
+  openUrlInBrowserSplit,
 } from "./split-tree";
 import type { PaneEdge } from "./split-tree";
 import { basename } from "./path-utils";
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { buildDocumentKey } from "./editor-buffer-registry";
-import type { GroupTab, PaneContent, SplitNode, UserTab, WorktreeNavState } from "../types";
+import type {
+  GroupTab,
+  PaneContent,
+  SplitNode,
+  TerminalLaunchProfile,
+  UserTab,
+  WorktreeNavState,
+} from "../types";
 import type { Agent } from "./agent";
 
-// The pane content a single-leaf tab shows, derived from its `kind` + the
-// `path`/`url` mirror. Keep in sync with the leaf `content` written at
-// creation and the v7 migration.
+// The pane content a single-leaf tab shows, derived from its top-level fields.
+// Keep in sync with the leaf content written at creation and the migrations.
 function contentForTab(tab: UserTab): PaneContent {
   switch (tab.kind) {
-    case "agent":
-      return { kind: "agent" };
     case "file":
       return { kind: "file", path: tab.path ?? "" };
     case "browser":
       return { kind: "browser", url: tab.url };
     default:
-      return { kind: "shell" };
+      return { kind: "terminal", launch: tab.terminalLaunch ?? "shell" };
   }
 }
 
@@ -87,6 +92,7 @@ function getPrimaryGroupTabId(tab: UserTab): string {
 function killPaneSession(worktreePath: string, paneId: string): void {
   const dataStore = useDataStore.getState();
   const dataState = dataStore.getWorktreeDataState(worktreePath);
+  invoke("clear_agent_pane_status", { worktreePath, paneId }).catch(() => {});
   const sessionId = dataState.paneSessions[paneId];
   if (!sessionId) return;
   invoke("pty_kill", { sessionId }).catch(() => {});
@@ -113,7 +119,7 @@ function parseLabelNumber(label: string, prefix: string): number | null {
 
 export function createUserTab(
   worktreePath: string,
-  kind: "terminal" | "agent",
+  launch: TerminalLaunchProfile,
   initialPrompt?: string,
   initialAgent?: Agent,
 ): UserTab {
@@ -123,25 +129,26 @@ export function createUserTab(
   // Slot = smallest positive integer not already in use by another tab of
   // this kind. Agent starts at 2 because the primary Agent pane is
   // conceptually "Agent 1". Renamed tabs don't occupy a slot.
-  const prefix = kind === "terminal" ? "Terminal" : "Agent";
-  const startAt = kind === "terminal" ? 1 : 2;
+  const prefix = launch === "shell" ? "Terminal" : "Agent";
+  const startAt = launch === "shell" ? 1 : 2;
   const used = new Set<number>();
   for (const t of nav.userTabs) {
-    if (t.kind !== kind) continue;
+    if (t.kind !== "terminal" || (t.terminalLaunch ?? "shell") !== launch) continue;
     const n = parseLabelNumber(t.label, prefix);
     if (n !== null) used.add(n);
   }
   const slot = smallestUnused(used, startAt);
   const label = `${prefix} ${slot}`;
-  const tabId = `${kind}-${slot}-${Date.now()}`;
+  const tabId = `${launch === "agent" ? "agent" : "terminal"}-${slot}-${Date.now()}`;
   const rootLeaf = singleGroup(
     userTabPaneId(tabId),
-    kind === "agent" ? { kind: "agent" } : { kind: "shell" },
+    { kind: "terminal", launch },
     label,
   );
   const newTab: UserTab = {
     id: tabId,
-    kind,
+    kind: "terminal",
+    terminalLaunch: launch,
     label,
     createdAt: Date.now(),
     splitTree: rootLeaf,
@@ -149,7 +156,7 @@ export function createUserTab(
   };
 
   const prompt = initialPrompt?.trim();
-  if (kind === "agent" && prompt) {
+  if (launch === "agent" && prompt) {
     pendingAgentLaunches.set(rootLeaf.id, { prompt, agent: initialAgent });
   }
 
@@ -241,6 +248,61 @@ export function openBrowserTabAt(worktreePath: string, url: string): void {
   } else {
     createBrowserTab(worktreePath, url);
     uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
+  }
+}
+
+/**
+ * Open a terminal hyperlink beside the terminal that produced it. Reuse a
+ * visible browser pane in the same top-level tab; otherwise create a right
+ * split rooted at the source terminal's group.
+ */
+export function openTerminalUrlInBrowserPane(
+  worktreePath: string,
+  topTabId: string,
+  sourceGroupId: string,
+  url: string,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+
+  if (topTabId === AGENT_PANE_ID) {
+    const result = openUrlInBrowserSplit(
+      getEffectiveAgentTabSplitTree(nav.agentTabSplitTree),
+      sourceGroupId,
+      url,
+    );
+    if (!result) return;
+    uiState.updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: result.tree,
+      agentTabFocusedPaneId: result.browserGroupId,
+    });
+    if (!result.created) {
+      invoke("browser_navigate", { id: result.browserTabId, url }).catch(() => {});
+    }
+    return;
+  }
+
+  const topTab = nav.userTabs.find((tab) => tab.id === topTabId);
+  if (!topTab) return;
+  const result = openUrlInBrowserSplit(
+    getEffectiveUserTabSplitTree(topTab),
+    sourceGroupId,
+    url,
+  );
+  if (!result) return;
+  uiState.updateWorktreeNavState(worktreePath, {
+    userTabs: nav.userTabs.map((tab) =>
+      tab.id === topTabId
+        ? {
+            ...tab,
+            splitTree: result.tree,
+            focusedPaneId: result.browserGroupId,
+          }
+        : tab,
+    ),
+  });
+  if (!result.created) {
+    invoke("browser_navigate", { id: result.browserTabId, url }).catch(() => {});
   }
 }
 
@@ -683,7 +745,7 @@ export function splitUserTabPane(
   worktreePath: string,
   tabId: string,
   orientation: "horizontal" | "vertical",
-  content: PaneContent = { kind: "shell" },
+  content: PaneContent = { kind: "terminal", launch: "shell" },
 ): string | null {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
@@ -719,7 +781,7 @@ export function canSplitTerminalsTab(
 export function splitActiveTabPane(
   worktreePath: string,
   orientation: "horizontal" | "vertical",
-  content: PaneContent = { kind: "shell" },
+  content: PaneContent = { kind: "terminal", launch: "shell" },
 ): string | null {
   const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
   if (nav.activeTerminalsTab === AGENT_PANE_ID) {
@@ -746,7 +808,7 @@ export function addTabToActivePane(
   const nav = uiState.getWorktreeNavState(worktreePath);
   const newTab = createGroup(content).tabs[0];
   const prompt = initialPrompt?.trim();
-  if (content.kind === "agent" && prompt) {
+  if (content.kind === "terminal" && content.launch === "agent" && prompt) {
     pendingAgentLaunches.set(newTab.id, { prompt, agent: initialAgent });
   }
 
@@ -792,10 +854,8 @@ export function addTabToAgentPrimaryPane(
   const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
   const primaryGroup = getLeaves(tree)[0];
   const created = createGroup(content).tabs[0];
-  const prefix = content.kind === "shell"
-    ? "Terminal"
-    : content.kind === "agent"
-      ? "Agent"
+  const prefix = content.kind === "terminal"
+    ? content.launch === "agent" ? "Agent" : "Terminal"
       : content.kind === "browser"
         ? "Browser"
         : created.label;
@@ -807,13 +867,14 @@ export function addTabToAgentPrimaryPane(
     const number = parseLabelNumber(tab.label, prefix);
     if (number !== null) used.add(number);
   }
-  const startAt = content.kind === "agent" ? 2 : 1;
+  const startAt =
+    content.kind === "terminal" && content.launch === "agent" ? 2 : 1;
   const newTab = {
     ...created,
     label: `${prefix} ${smallestUnused(used, startAt)}`,
   };
   const prompt = initialPrompt?.trim();
-  if (content.kind === "agent" && prompt) {
+  if (content.kind === "terminal" && content.launch === "agent" && prompt) {
     pendingAgentLaunches.set(newTab.id, { prompt, agent: initialAgent });
   }
 
@@ -864,7 +925,7 @@ export function createAgentTabFromRequest(
       return null;
     }
 
-    const newTab = createGroup({ kind: "agent" }).tabs[0];
+    const newTab = createGroup({ kind: "terminal", launch: "agent" }).tabs[0];
     const prompt = initialPrompt.trim();
     if (prompt) {
       pendingAgentLaunches.set(newTab.id, { prompt, agent: initialAgent });
@@ -923,7 +984,7 @@ export function createAgentTabFromRequest(
   ) {
     const paneTabId = addTabToActivePane(
       worktreePath,
-      { kind: "agent" },
+      { kind: "terminal", launch: "agent" },
       initialPrompt,
       initialAgent,
     );
@@ -1049,7 +1110,7 @@ export function setAgentGroupActiveTab(
 }
 
 function userKindForContent(content: PaneContent): UserTab["kind"] {
-  return content.kind === "shell" ? "terminal" : content.kind;
+  return content.kind;
 }
 
 function withPrimaryContent(tab: UserTab, tree: SplitNode): UserTab {
@@ -1064,6 +1125,7 @@ function withPrimaryContent(tab: UserTab, tree: SplitNode): UserTab {
   return {
     ...rest,
     kind: userKindForContent(primary),
+    ...(primary.kind === "terminal" ? { terminalLaunch: primary.launch } : {}),
     label: primaryTab.label,
     ...(primary.kind === "file"
       ? { path: primary.path, ...(primaryTab.pinned ? { pinned: true } : {}) }
@@ -1073,9 +1135,9 @@ function withPrimaryContent(tab: UserTab, tree: SplitNode): UserTab {
   };
 }
 
-// Tear down one pane's resource by content kind: kill its PTY for
-// terminal/agent leaves, close the native webview for a browser leaf. File
-// leaves need no teardown. Also drops any pending agent-launch handoff.
+// Tear down one pane's resource by content kind: kill its PTY for terminal
+// content, close the native webview for browser content. File content needs no
+// teardown. Also drops any pending agent-launch handoff.
 function disposeGroupTab(
   worktreePath: string,
   tab: GroupTab,
@@ -1083,7 +1145,7 @@ function disposeGroupTab(
   clearPendingAgentLaunch(tab.id);
   if (tab.content.kind === "browser") {
     invoke("browser_close", { id: tab.id }).catch(() => {});
-  } else if (tab.content.kind === "agent" || tab.content.kind === "shell") {
+  } else if (tab.content.kind === "terminal") {
     killPaneSession(worktreePath, tab.id);
   } else if (tab.content.kind === "file") {
     useEditorDocsStore
@@ -1281,8 +1343,9 @@ export function setUserTabFocusedPane(
 export function getEffectiveAgentTabSplitTree(
   splitTree: SplitNode | undefined,
 ): SplitNode {
-  if (splitTree) return normalizeLegacySplitTree(splitTree, { kind: "agent" });
-  return singleGroup(AGENT_PANE_ID, { kind: "agent" }, "Agent");
+  const agentContent = { kind: "terminal", launch: "agent" } as const;
+  if (splitTree) return normalizeLegacySplitTree(splitTree, agentContent);
+  return singleGroup(AGENT_PANE_ID, agentContent, "Agent");
 }
 
 export function getEffectiveAgentTabFocusedPaneId(
@@ -1297,7 +1360,7 @@ export function getEffectiveAgentTabFocusedPaneId(
 export function splitAgentTabPane(
   worktreePath: string,
   orientation: "horizontal" | "vertical",
-  content: PaneContent = { kind: "shell" },
+  content: PaneContent = { kind: "terminal", launch: "shell" },
 ): string | null {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
@@ -1353,7 +1416,11 @@ export function closeAgentTabFocusedPane(worktreePath: string): void {
     if (!confirmGroupTabClose(worktreePath, activeGroupTab)) return;
     disposeGroupTab(worktreePath, activeGroupTab);
     uiState.updateWorktreeNavState(worktreePath, {
-      agentTabSplitTree: singleGroup(AGENT_PANE_ID, { kind: "agent" }, "Agent"),
+      agentTabSplitTree: singleGroup(
+        AGENT_PANE_ID,
+        { kind: "terminal", launch: "agent" },
+        "Agent",
+      ),
       agentTabFocusedPaneId: AGENT_PANE_ID,
     });
     return;

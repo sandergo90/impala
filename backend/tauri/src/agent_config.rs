@@ -37,8 +37,12 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
     // IMPALA_HOOK_PORT and IMPALA_WORKTREE_PATH from env, so it is
     // already worktree-aware.
     let events: &[(&str, bool)] = &[
+        ("SessionStart", false),
         ("UserPromptSubmit", false),
+        ("PreToolUse", true),
         ("Stop", false),
+        ("SubagentStart", true),
+        ("SubagentStop", true),
         ("PostToolUse", true),
         ("PostToolUseFailure", true),
         ("PermissionRequest", false),
@@ -278,10 +282,7 @@ fn trust_codex_hook(
     Ok(())
 }
 
-fn upsert_codex_mcp_server(
-    root: &mut toml::value::Table,
-    mcp_binary: &str,
-) -> Result<(), String> {
+fn upsert_codex_mcp_server(root: &mut toml::value::Table, mcp_binary: &str) -> Result<(), String> {
     use toml::Value;
 
     let mcp_servers = root
@@ -302,8 +303,11 @@ fn write_codex_commands(codex_home: &Path) -> Result<(), String> {
     fs::create_dir_all(&commands_dir).map_err(|e| format!("mkdir codex commands: {}", e))?;
     fs::write(commands_dir.join("impala-review.md"), IMPALA_REVIEW_COMMAND)
         .map_err(|e| format!("write codex impala-review.md: {}", e))?;
-    fs::write(commands_dir.join("impala-browser.md"), IMPALA_BROWSER_COMMAND)
-        .map_err(|e| format!("write codex impala-browser.md: {}", e))?;
+    fs::write(
+        commands_dir.join("impala-browser.md"),
+        IMPALA_BROWSER_COMMAND,
+    )
+    .map_err(|e| format!("write codex impala-browser.md: {}", e))?;
     fs::write(
         commands_dir.join("impala-automations.md"),
         IMPALA_AUTOMATIONS_COMMAND,
@@ -380,8 +384,7 @@ fn ensure_user_codex_hooks() -> Result<Vec<CodexHookRegistration>, String> {
 /// Write/merge Impala's status hooks into <codex_dir>/hooks.json, returning
 /// registrations keyed to that file.
 fn ensure_codex_hooks_in(codex_dir: &Path) -> Result<Vec<CodexHookRegistration>, String> {
-    fs::create_dir_all(codex_dir)
-        .map_err(|e| format!("mkdir {}: {}", codex_dir.display(), e))?;
+    fs::create_dir_all(codex_dir).map_err(|e| format!("mkdir {}: {}", codex_dir.display(), e))?;
 
     let hooks_path = codex_dir.join("hooks.json");
     let mut root: serde_json::Value = if hooks_path.exists() {
@@ -409,7 +412,9 @@ fn ensure_codex_hooks_in(codex_dir: &Path) -> Result<Vec<CodexHookRegistration>,
 
     let mut registrations = Vec::new();
     for event_name in [
+        "SessionStart",
         "UserPromptSubmit",
+        "PreToolUse",
         "Stop",
         "PostToolUse",
         "PostToolUseFailure",
@@ -446,7 +451,10 @@ fn ensure_codex_hooks_in(codex_dir: &Path) -> Result<Vec<CodexHookRegistration>,
                 // Rewrite a stale command in place: the trusted hash below is
                 // computed from `cmd`, so the file must carry the same string
                 // or Codex refuses the hook as untrusted.
-                if let Some(hs) = groups[index].get_mut("hooks").and_then(|h| h.as_array_mut()) {
+                if let Some(hs) = groups[index]
+                    .get_mut("hooks")
+                    .and_then(|h| h.as_array_mut())
+                {
                     for hook in hs.iter_mut() {
                         let is_impala = hook
                             .get("command")
@@ -607,6 +615,7 @@ mod tests {
     fn codex_hook_event_label_supports_all_registered_events() {
         for event_name in [
             "UserPromptSubmit",
+            "PreToolUse",
             "Stop",
             "PostToolUse",
             "PostToolUseFailure",

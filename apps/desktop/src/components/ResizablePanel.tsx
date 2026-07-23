@@ -76,6 +76,25 @@ export function ResizablePanel({
     onResizingChange(false);
   }, [isResizing, onResizingChange, flushPendingWidth]);
 
+  // The separator is focusable and reports aria-value*, so it must be operable
+  // from the keyboard too. Mirrors the mouse path's handleSide inversion and
+  // reuses the same clamp.
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const step = e.shiftKey ? 64 : 16;
+      const grow = handleSide === "left" ? -1 : 1;
+      let next: number | null = null;
+      if (e.key === "ArrowLeft") next = width - step * grow;
+      else if (e.key === "ArrowRight") next = width + step * grow;
+      else if (e.key === "Home") next = minWidth;
+      else if (e.key === "End") next = maxWidth;
+      if (next === null) return;
+      e.preventDefault();
+      onWidthChange(Math.max(minWidth, Math.min(maxWidth, next)));
+    },
+    [width, handleSide, minWidth, maxWidth, onWidthChange],
+  );
+
   useEffect(() => {
     if (!isResizing) return;
     document.addEventListener("mousemove", handleMouseMove);
@@ -112,12 +131,14 @@ export function ResizablePanel({
         aria-valuemin={minWidth}
         aria-valuemax={maxWidth}
         tabIndex={0}
+        aria-label="Resize panel"
         onMouseDown={handleMouseDown}
+        onKeyDown={handleKeyDown}
         onDoubleClick={onDoubleClickHandle}
         className={cn(
           "absolute top-0 w-5 h-full cursor-col-resize z-10",
           "after:absolute after:top-0 after:w-1 after:h-full after:transition-colors",
-          "hover:after:bg-border focus:outline-none focus:after:bg-border",
+          "hover:after:bg-border",
           isResizing && "after:bg-border",
           handleSide === "left"
             ? "-left-2 after:right-2"

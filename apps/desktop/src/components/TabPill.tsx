@@ -13,12 +13,11 @@ export function TabPill({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-2.5 py-1 text-md font-medium rounded-[5px] transition-colors ${
+      className={`px-2.5 py-1 text-sm font-medium rounded-[5px] outline-none transition-colors ${
         isActive
-          ? "text-foreground"
+          ? "bg-accent text-foreground"
           : "text-muted-foreground hover:text-foreground"
       } disabled:opacity-30 disabled:cursor-not-allowed`}
-      style={isActive ? { background: "var(--accent)" } : undefined}
     >
       {label}
     </button>

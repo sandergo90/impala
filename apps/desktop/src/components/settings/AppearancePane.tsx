@@ -74,10 +74,10 @@ export function AppearancePane() {
   return (
     <div>
       <h2 className="text-base font-semibold text-foreground">Appearance</h2>
-      <p className="text-md text-muted-foreground mt-1 mb-6">Customize the look and feel of Impala</p>
+      <p className="text-sm text-muted-foreground mt-1 mb-6">Customize the look and feel of Impala</p>
 
       {/* Dark themes */}
-      <div className="text-md font-semibold uppercase tracking-wider text-muted-foreground mb-3">Dark</div>
+      <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Dark</div>
       <div className="flex flex-wrap gap-3 mb-6">
         {darkThemes.map((theme) => (
           <ThemeCard
@@ -90,7 +90,7 @@ export function AppearancePane() {
       </div>
 
       {/* Light themes */}
-      <div className="text-md font-semibold uppercase tracking-wider text-muted-foreground mb-3">Light</div>
+      <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Light</div>
       <div className="flex flex-wrap gap-3 mb-6">
         {lightThemes.map((theme) => (
           <ThemeCard
@@ -103,7 +103,7 @@ export function AppearancePane() {
       </div>
 
       {/* Custom themes */}
-      <div className="text-md font-semibold uppercase tracking-wider text-muted-foreground mb-3">Custom Themes</div>
+      <div className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Custom Themes</div>
       <div className="flex flex-wrap gap-3 mb-4">
         {customThemes.map((theme) => (
           <ThemeCard
@@ -128,25 +128,25 @@ export function AppearancePane() {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted-foreground">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <span className="text-md text-muted-foreground">Import Theme</span>
+          <span className="text-sm text-muted-foreground">Import Theme</span>
         </button>
       </div>
 
       {/* Download template link */}
       <button
         onClick={handleDownloadTemplate}
-        className="text-md text-muted-foreground underline hover:text-foreground transition-colors"
+        className="text-sm text-muted-foreground underline hover:text-foreground transition-colors"
       >
         Download template
       </button>
-      <span className="text-md text-muted-foreground/90 ml-2">JSON file with all tokens</span>
+      <span className="text-sm text-muted-foreground/90 ml-2">JSON file with all tokens</span>
 
       {/* Font size */}
       <div className="mt-8 border-t border-border pt-6">
         <div className="flex items-center justify-between max-w-lg">
           <div>
-            <div className="text-md font-medium">Font size</div>
-            <div className="text-md text-muted-foreground mt-0.5">
+            <div className="text-sm font-medium">Font size</div>
+            <div className="text-sm text-muted-foreground mt-0.5">
               Adjust the size of all text in the app
             </div>
           </div>
@@ -173,8 +173,8 @@ export function AppearancePane() {
       {/* Window translucency (macOS vibrancy) */}
       <div className="mt-8 border-t border-border pt-6">
         <div className="max-w-lg">
-          <div className="text-md font-medium">Window translucency</div>
-          <div className="text-md text-muted-foreground mt-0.5 mb-3">
+          <div className="text-sm font-medium">Window translucency</div>
+          <div className="text-sm text-muted-foreground mt-0.5 mb-3">
             Blur the desktop behind the app (macOS only)
           </div>
           <div className="grid grid-cols-4 gap-2">
@@ -190,7 +190,7 @@ export function AppearancePane() {
                       : "border-border hover:bg-accent/30"
                   }`}
                 >
-                  <span className="text-md font-medium text-foreground">{option.label}</span>
+                  <span className="text-sm font-medium text-foreground">{option.label}</span>
                   <span className="text-xs text-muted-foreground">{option.description}</span>
                 </button>
               );

@@ -87,15 +87,18 @@ export interface AutomationRun {
   /** Unix seconds of the slot this run covers. */
   scheduled_for: number;
   worktree_path?: string | null;
+  /** Immutable Markdown snapshot supplied to the agent for this run. */
+  instructions_path?: string | null;
   status: "pending" | "launched" | "completed" | "failed" | "aborted" | "skipped";
   error?: string | null;
   created_at: string;
 }
 
+export type TerminalLaunchProfile = "shell" | "agent";
+
 /** What fills a single pane. The leaf's content is the source of truth for it. */
 export type PaneContent =
-  | { kind: "agent" }
-  | { kind: "shell" }
+  | { kind: "terminal"; launch: TerminalLaunchProfile }
   | { kind: "file"; path: string }
   | { kind: "browser"; url?: string };
 
@@ -121,10 +124,12 @@ export interface UserTab {
   /** Stable ID, used as the paneId key (`tab-user-${id}`) in single-leaf mode. Never reused. */
   id: string;
   /**
-   * What to run inside the tab. Terminal = shell; Agent = `claude` command;
-   * File = static file viewer (no PTY); Browser = native child webview (no PTY).
+   * The top-level surface. Terminal startup is described by `terminalLaunch`;
+   * File is a static viewer; Browser is a native child webview.
    */
-  kind: "terminal" | "agent" | "file" | "browser";
+  kind: "terminal" | "file" | "browser";
+  /** Initial process launched by a terminal tab. Live agent activity is runtime state. */
+  terminalLaunch?: TerminalLaunchProfile;
   /** Display label shown on the tab. Auto-numbered at creation time (monotonic). */
   label: string;
   /** Creation timestamp; stable ordering. */
@@ -139,8 +144,8 @@ export interface UserTab {
    * Recursive split tree of panes inside this tab; the leaves' `content` is
    * the source of truth for what each pane shows. Optional for backward
    * compatibility: when absent, `getEffectiveUserTabSplitTree` synthesizes a
-   * single leaf (id `tab-user-${id}`) whose content is derived from `kind` +
-   * `path`/`url`.
+   * single leaf (id `tab-user-${id}`) whose content is derived from `kind`,
+   * `terminalLaunch`, and `path`/`url`.
    */
   splitTree?: SplitNode;
   /**
@@ -213,6 +218,8 @@ export interface WorktreeDataState {
   hasLastTurnSnapshot: boolean;
   annotations: Annotation[];
   agentStatus: "idle" | "working" | "permission";
+  /** Live agent activity keyed by terminal pane id. */
+  agentPaneStatuses: Record<string, "working" | "permission">;
   hasUnseenResult: boolean;
   /** GitHub PR status for this worktree's branch. Undefined until first fetched. */
   prStatus?: PrStatus;

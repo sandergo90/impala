@@ -8,8 +8,10 @@ import { applyTheme, applyWindowVibrancy, initThemeFromStore, resolveThemeById }
 import { createLeaf } from "./lib/split-tree";
 import {
   migrateSplitTreeToV8,
+  migrateSplitTreeToV10,
   migrateUserTabsToV7,
   migrateUserTabsToV8,
+  migrateUserTabsToV10,
 } from "./lib/split-tree-migration";
 import { isAutomationsProject } from "./lib/automations-project";
 
@@ -31,7 +33,10 @@ function createDefaultNavState(): WorktreeNavState {
   };
 }
 
-const defaultGeneralTerminalLeaf = createLeaf({ kind: "shell" });
+const defaultGeneralTerminalLeaf = createLeaf({
+  kind: "terminal",
+  launch: "shell",
+});
 
 const defaultDataState: WorktreeDataState = {
   paneSessions: {},
@@ -47,6 +52,7 @@ const defaultDataState: WorktreeDataState = {
   hasLastTurnSnapshot: false,
   annotations: [],
   agentStatus: "idle" as const,
+  agentPaneStatuses: {},
   hasUnseenResult: false,
 };
 
@@ -122,8 +128,11 @@ interface UIState {
   // beneath the palette (BrowserPane occlusion).
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
-  // True while a sidebar edge drag is in progress. The native browser webview
-  // hides during drags so the cursor never gets captured by it mid-drag.
+  // In-memory; native browser webviews hide while terminal menus overlay them.
+  terminalMenuOpen: boolean;
+  setTerminalMenuOpen: (open: boolean) => void;
+  // True while an overlay or drag must occlude the native browser webview.
+  // Native child webviews composite above the DOM regardless of CSS z-index.
   panelDragActive: boolean;
   setPanelDragActive: (active: boolean) => void;
   // worktreePath -> recent agent browser activity (hook-server /browser/*
@@ -274,6 +283,8 @@ export const useUIStore = create<UIState>()(
       setFileFinderOpen: (open) => set({ fileFinderOpen: open }),
       commandPaletteOpen: false,
       setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+      terminalMenuOpen: false,
+      setTerminalMenuOpen: (open) => set({ terminalMenuOpen: open }),
       panelDragActive: false,
       setPanelDragActive: (active) => set({ panelDragActive: active }),
       browserAgentActivity: {},
@@ -293,7 +304,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 9,
+      version: 10,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};
@@ -373,6 +384,19 @@ export const useUIStore = create<UIState>()(
             delete nav.splitRightPane;
           }
         }
+        if (fromVersion < 10 && persistedState?.worktreeNavStates) {
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (!nav) continue;
+            if (Array.isArray(nav.userTabs)) {
+              nav.userTabs = migrateUserTabsToV10(nav.userTabs);
+            }
+            if (nav.agentTabSplitTree) {
+              nav.agentTabSplitTree = migrateSplitTreeToV10(
+                nav.agentTabSplitTree,
+              );
+            }
+          }
+        }
         return persistedState;
       },
       partialize: (state) => {
@@ -387,6 +411,7 @@ export const useUIStore = create<UIState>()(
           pendingTreeReveal,
           fileFinderOpen,
           commandPaletteOpen,
+          terminalMenuOpen,
           panelDragActive,
           browserAgentActivity,
           worktreeNavStates,

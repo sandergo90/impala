@@ -136,12 +136,6 @@ export const HOTKEYS = {
     default: "meta+t",
     category: "Terminal",
   },
-  NEW_AGENT_TAB: {
-    label: "New Agent Tab",
-    description: "Open a new Agent tab in the focused pane",
-    default: "meta+shift+t",
-    category: "Terminal",
-  },
   NEW_BROWSER_TAB: {
     label: "New Browser Tab",
     description: "Open a new browser tab in the focused pane",

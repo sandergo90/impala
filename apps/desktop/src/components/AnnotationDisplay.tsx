@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import { Check, X } from "lucide-react";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { openFileTab } from "../lib/tab-actions";
 import type { Annotation } from "../types";
@@ -7,6 +8,7 @@ import { formatRelativeTime } from "../lib/utils";
 
 interface AnnotationDisplayProps {
   annotation: Annotation;
+  onJump: () => void;
   onResolve: (id: string, resolved: boolean) => void;
   onDelete: (id: string) => void;
 }
@@ -23,6 +25,7 @@ function parseContext(raw: string | undefined): ContextLine[] {
 
 export const AnnotationDisplay = memo(function AnnotationDisplay({
   annotation,
+  onJump,
   onResolve,
   onDelete,
 }: AnnotationDisplayProps) {
@@ -48,45 +51,60 @@ export const AnnotationDisplay = memo(function AnnotationDisplay({
   };
 
   return (
-    <div className={`group px-3 py-2 ${resolved ? "opacity-50" : ""}`}>
+    <div role="listitem" className="group px-3 py-2">
       {context.length > 0 ? (
-        <div className="flex flex-col gap-px">
+        // The code-anchor block is the jump control, so the primary action is
+        // reachable by keyboard and named for assistive tech.
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onJump();
+          }}
+          aria-label={`Jump to line ${annotation.line_number}`}
+          className="flex w-full cursor-pointer flex-col gap-px rounded-sm text-left"
+        >
           {context.map((line) => {
             const isHit = line.lineNumber === annotation.line_number;
             return (
-              <div key={line.lineNumber} className="flex gap-2">
-                <span className="w-7 shrink-0 select-none text-right font-mono text-xs text-muted-foreground/60">
+              <span key={line.lineNumber} className="flex w-full gap-2">
+                <span className="w-7 shrink-0 select-none text-right font-mono text-xs text-muted-foreground">
                   {line.lineNumber}
                 </span>
                 <span
                   className={`min-w-0 flex-1 truncate rounded-sm px-1.5 font-mono text-xs ${
                     isHit
-                      ? "bg-green-500/10 text-green-300"
+                      ? "bg-success/15 text-foreground"
                       : "text-muted-foreground"
                   }`}
                 >
                   {line.text || " "}
                 </span>
-              </div>
+              </span>
             );
           })}
-        </div>
+        </button>
       ) : (
-        <span
-          className="cursor-pointer font-mono text-xs text-blue-400 hover:underline"
+        <button
+          type="button"
+          className="cursor-pointer font-mono text-xs text-[var(--color-link)] hover:underline"
           title="Click to open in Impala. Cmd+click to open in your IDE."
           onClick={openLocation}
         >
           {sideLabel}:{annotation.line_number}
-        </span>
+        </button>
       )}
 
       <div className="mt-1.5 flex items-start gap-2">
-        <p className="min-w-0 flex-1 whitespace-pre-wrap break-words border-l-2 border-border pl-2 text-foreground">
+        <p
+          className={`min-w-0 flex-1 whitespace-pre-wrap break-words ${
+            resolved ? "text-muted-foreground line-through" : "text-foreground"
+          }`}
+        >
           {annotation.body}
         </p>
         <div className="flex shrink-0 flex-col items-end gap-0.5">
-          <span className="text-xs text-muted-foreground/60">
+          <span className="text-xs text-muted-foreground">
             {formatRelativeTime(annotation.created_at)}
           </span>
           {resolved ? (
@@ -96,21 +114,24 @@ export const AnnotationDisplay = memo(function AnnotationDisplay({
                 onResolve(annotation.id, false);
               }}
               title="Unresolve"
-              className="text-xs text-green-400"
+              aria-label="Unresolve annotation"
+              className="flex items-center gap-1 rounded px-1 text-xs text-success hover:bg-foreground/10"
             >
-              ✓ Resolved
+              <Check aria-hidden="true" className="size-3.5" />
+              Resolved
             </button>
           ) : (
-            <div className="flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <div className="flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onResolve(annotation.id, true);
                 }}
                 title="Resolve"
-                className="text-xs text-green-400 hover:text-green-300"
+                aria-label="Resolve annotation"
+                className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-success"
               >
-                ✓
+                <Check aria-hidden="true" className="size-3.5" />
               </button>
               <button
                 onClick={(e) => {
@@ -118,9 +139,10 @@ export const AnnotationDisplay = memo(function AnnotationDisplay({
                   onDelete(annotation.id);
                 }}
                 title="Delete"
-                className="text-xs text-muted-foreground hover:text-red-400"
+                aria-label="Delete annotation"
+                className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-destructive"
               >
-                ✕
+                <X aria-hidden="true" className="size-3.5" />
               </button>
             </div>
           )}

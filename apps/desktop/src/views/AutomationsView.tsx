@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { listen } from "@tauri-apps/api/event";
+import { ArrowLeft, Bot, PanelRightOpen, X } from "lucide-react";
 import { toast } from "sonner";
 import { invoke } from "@/lib/invoke";
 import {
@@ -14,13 +15,14 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { useDataStore, useUIStore } from "../store";
-import { selectWorktree, selectProject } from "../hooks/useWorktreeActions";
 import { Sidebar } from "../components/Sidebar";
+import { ResizablePanel } from "../components/ResizablePanel";
+import { XtermTerminal } from "../components/XtermTerminal";
+import { AGENT_PANE_ID, agentPtySessionId } from "../lib/pane-ids";
 import {
   AUTOMATION_TEMPLATES,
   type AutomationTemplate,
 } from "../lib/automation-templates";
-import { AUTOMATIONS_PROJECT } from "../lib/automations-project";
 import type { Automation, AutomationRun, Worktree } from "../types";
 
 const DEFAULT_SIDEBAR_WIDTH = 280;
@@ -106,19 +108,25 @@ function formatWhen(unixSeconds: number): string {
 }
 
 const RUN_STATUS_META: Record<AutomationRun["status"], { dot: string; label: string }> = {
-  pending: { dot: "bg-amber-500", label: "starting" },
-  launched: { dot: "bg-blue-500", label: "running" },
-  completed: { dot: "bg-emerald-500", label: "completed" },
-  failed: { dot: "bg-red-500", label: "failed" },
+  pending: { dot: "bg-warning", label: "starting" },
+  launched: { dot: "bg-info", label: "running" },
+  completed: { dot: "bg-success", label: "completed" },
+  failed: { dot: "bg-danger", label: "failed" },
   aborted: { dot: "bg-muted-foreground/40", label: "aborted" },
   skipped: { dot: "bg-muted-foreground/40", label: "skipped" },
 };
 
 export function AutomationsView() {
   const navigate = useNavigate();
+  const router = useRouter();
   const project = useUIStore((s) => s.selectedProject);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [runs, setRuns] = useState<AutomationRun[]>([]);
+  const [automationWorktrees, setAutomationWorktrees] = useState<Worktree[]>([]);
+  const [inspectedWorktree, setInspectedWorktree] =
+    useState<Worktree | null>(null);
+  const [worktreePaneWidth, setWorktreePaneWidth] = useState(720);
+  const [isWorktreePaneResizing, setIsWorktreePaneResizing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState<{
     template: AutomationTemplate | null;
@@ -133,6 +141,9 @@ export function AutomationsView() {
     invoke<AutomationRun[]>("list_automation_runs")
       .then(setRuns)
       .catch(() => setRuns([]));
+    invoke<Worktree[]>("list_recent_automation_worktrees")
+      .then(setAutomationWorktrees)
+      .catch(() => setAutomationWorktrees([]));
     // The user is looking at the runs — clear the sidebar badge. Emits (and
     // re-triggers this refresh) only when rows actually flip.
     invoke("mark_automation_runs_seen").catch(() => {});
@@ -156,7 +167,6 @@ export function AutomationsView() {
     }
     return map;
   }, [runs]);
-
   const selected = automations.find((a) => a.id === selectedId) ?? null;
 
   const projects = useDataStore((s) => s.projects);
@@ -165,55 +175,63 @@ export function AutomationsView() {
     async (run: AutomationRun, automation?: Automation) => {
       if (!run.worktree_path) return;
       try {
-        // Global runs live in scratch repos under the virtual Automations
-        // project — switch to it so the sidebar shows the run's siblings.
-        if (automation?.repo_path === "") {
-          await selectProject(AUTOMATIONS_PROJECT);
-          const wt = useDataStore
-            .getState()
-            .worktrees.find((w) => w.path === run.worktree_path) ?? {
-            path: run.worktree_path,
-            branch: "automation",
-            head_commit: "",
-            title: automation.name,
-          };
-          useUIStore.getState().setGeneralTerminalActive(false);
-          await selectWorktree(wt);
-          navigate({ to: "/" });
+        const existingWorktree = automationWorktrees.find(
+          (worktree) => worktree.path === run.worktree_path,
+        );
+        if (existingWorktree) {
+          setInspectedWorktree(existingWorktree);
           return;
         }
-        // The run may belong to a different project than the selected one —
-        // switch first so the sidebar and worktree list line up.
+        if (automation?.repo_path === "") {
+          toast.error("The run's worktree no longer exists");
+          return;
+        }
         const repo = automation?.repo_path ?? project?.path;
         if (!repo) return;
-        if (project?.path !== repo) {
-          const target =
-            projects.find((p) => p.path === repo) ??
-            ({ path: repo, name: repo.split("/").pop() ?? repo });
-          await selectProject(target);
-        }
         const wts = await invoke<Worktree[]>("list_worktrees", {
           repoPath: repo,
         });
-        useDataStore.getState().setWorktrees(wts);
         const wt = wts.find((w) => w.path === run.worktree_path);
         if (!wt) {
           toast.error("The run's worktree no longer exists");
           return;
         }
-        useUIStore.getState().setGeneralTerminalActive(false);
-        await selectWorktree(wt);
-        navigate({ to: "/" });
+        setInspectedWorktree(wt);
       } catch (e) {
         toast.error(`Failed to open worktree: ${e}`);
       }
     },
-    [project, projects, navigate],
+    [automationWorktrees, project],
   );
 
   const openCreate = (template: AutomationTemplate | null) => {
+    setInspectedWorktree(null);
     setSelectedId(null);
     setCreating({ template });
+  };
+
+  const goBack = useCallback(() => {
+    if (router.history.canGoBack()) {
+      router.history.back();
+    } else {
+      navigate({ to: "/" });
+    }
+  }, [navigate, router]);
+
+  const handleEscape = (event: React.KeyboardEvent) => {
+    if (
+      event.key !== "Escape" ||
+      event.defaultPrevented ||
+      (event.target as Element).closest("[data-sidebar]")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    if (inspectedWorktree) {
+      setInspectedWorktree(null);
+      return;
+    }
+    goBack();
   };
 
   // Template prompts are repo-flavored ("this repository") — only suggest
@@ -226,16 +244,30 @@ export function AutomationsView() {
   const sidebarWidth = useUIStore((s) => s.sidebarWidth) ?? DEFAULT_SIDEBAR_WIDTH;
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div
+      className="flex h-screen flex-col bg-background text-foreground"
+      onKeyDown={handleEscape}
+    >
       <div
         className="relative flex h-16 shrink-0 items-center gap-3 border-b border-border/50 pr-4"
         style={{ paddingLeft: "88px" }}
       >
         <div className="absolute inset-0" data-tauri-drag-region />
+        <button
+          type="button"
+          onClick={goBack}
+          aria-keyshortcuts="Escape"
+          title="Back (Esc)"
+          className="relative flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ArrowLeft aria-hidden="true" className="size-4" />
+          <span>Back</span>
+          <kbd className="ml-1 text-xs text-muted-foreground">Esc</kbd>
+        </button>
         <div className="flex-1" />
         <button
           onClick={() => openCreate(null)}
-          className="relative rounded-md border border-border px-2.5 py-1 text-sm hover:bg-accent"
+          className="relative rounded-md border border-border px-2.5 py-1 text-sm transition-colors hover:bg-accent"
         >
           + New automation
         </button>
@@ -268,10 +300,11 @@ export function AutomationsView() {
                       <button
                         key={a.id}
                         onClick={() => {
+                          setInspectedWorktree(null);
                           setCreating(null);
                           setSelectedId(a.id);
                         }}
-                        className={`flex items-center gap-3.5 rounded-lg px-3 py-3 text-left ${
+                        className={`flex items-center gap-3.5 rounded-lg px-3 py-3 text-left transition-colors ${
                           isSelected ? "bg-accent/60" : "hover:bg-accent/30"
                         }`}
                       >
@@ -280,13 +313,13 @@ export function AutomationsView() {
                             !a.enabled
                               ? "bg-muted-foreground/40"
                               : lastRun?.status === "failed"
-                                ? "bg-red-500"
-                                : "bg-emerald-500"
+                                ? "bg-danger"
+                                : "bg-success"
                           }`}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="truncate text-[15px] font-medium">
+                            <span className="truncate text-base font-medium">
                               {a.name}
                             </span>
                             {!a.enabled && (
@@ -295,7 +328,7 @@ export function AutomationsView() {
                               </span>
                             )}
                           </div>
-                          <div className="mt-0.5 truncate text-[13px] text-muted-foreground">
+                          <div className="mt-0.5 truncate text-sm text-muted-foreground">
                             {a.repo_path === ""
                               ? "Global"
                               : projects.find((p) => p.path === a.repo_path)
@@ -315,6 +348,79 @@ export function AutomationsView() {
                 </div>
               )}
 
+              {automationWorktrees.length > 0 && (
+                <section className="mt-10" aria-labelledby="automation-worktrees-heading">
+                  <div className="mb-6 border-t border-border/50" />
+                  <h2
+                    id="automation-worktrees-heading"
+                    className="px-3 text-xs font-semibold uppercase tracking-[1.2px] text-muted-foreground"
+                  >
+                    Worktrees from automation runs
+                  </h2>
+                  <div className="mt-2 flex flex-col">
+                    {automationWorktrees.map((worktree) => {
+                      const run = runs.find(
+                        (candidate) =>
+                          candidate.worktree_path === worktree.path,
+                      );
+                      const automation = automations.find(
+                        (candidate) => candidate.id === run?.automation_id,
+                      );
+                      const meta = run ? RUN_STATUS_META[run.status] : null;
+                      const isOpen =
+                        inspectedWorktree?.path === worktree.path;
+
+                      return (
+                        <button
+                          key={worktree.path}
+                          type="button"
+                          disabled={!run || !automation}
+                          onClick={() =>
+                            run &&
+                            automation &&
+                            openRunWorktree(run, automation)
+                          }
+                          className={`flex items-center gap-3.5 rounded-lg px-3 py-3 text-left transition-colors disabled:cursor-default ${
+                            isOpen
+                              ? "bg-accent/60"
+                              : "enabled:hover:bg-accent/30"
+                          }`}
+                        >
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              meta?.dot ?? "bg-muted-foreground/40"
+                            }`}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-base font-medium">
+                              {worktree.title ??
+                                automation?.name ??
+                                "Automation worktree"}
+                            </span>
+                            <span className="mt-0.5 block truncate text-sm text-muted-foreground">
+                              {automation?.repo_path === ""
+                                ? "Global"
+                                : projects.find(
+                                      (candidate) =>
+                                        candidate.path ===
+                                        automation?.repo_path,
+                                    )?.name ??
+                                  automation?.repo_path.split("/").pop() ??
+                                  "Unknown project"}
+                              {meta && <> · {meta.label}</>}
+                              {run && <> · {formatWhen(run.scheduled_for)}</>}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-sm text-muted-foreground">
+                            Open
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
               {suggestions.length > 0 && (
                 <>
                   {automations.length > 0 ? (
@@ -322,7 +428,7 @@ export function AutomationsView() {
                   ) : (
                     <div className="mt-8" />
                   )}
-                  <div className="px-3 text-[15px] font-medium text-muted-foreground">
+                  <div className="px-3 text-xs font-semibold uppercase tracking-[1.2px] text-muted-foreground">
                     Suggestions
                   </div>
                   <div className="mt-2 flex flex-col">
@@ -330,21 +436,21 @@ export function AutomationsView() {
                       <button
                         key={t.name}
                         onClick={() => openCreate(t)}
-                        className="flex items-start gap-3.5 rounded-lg px-3 py-3 text-left hover:bg-accent/30"
+                        className="flex items-start gap-3.5 rounded-lg px-3 py-3 text-left transition-colors hover:bg-accent/30"
                       >
                         <span className="mt-0.5 text-base leading-none">
                           {t.emoji}
                         </span>
                         <span className="min-w-0">
                           <span className="flex items-baseline gap-2.5">
-                            <span className="truncate text-[15px] font-medium">
+                            <span className="truncate text-base font-medium">
                               {t.name}
                             </span>
-                            <span className="shrink-0 text-[13px] text-muted-foreground">
+                            <span className="shrink-0 text-sm text-muted-foreground">
                               {describeSchedule(t.schedule)}
                             </span>
                           </span>
-                          <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
+                          <span className="mt-0.5 block truncate text-sm text-muted-foreground">
                             {t.description}
                           </span>
                         </span>
@@ -353,11 +459,47 @@ export function AutomationsView() {
                   </div>
                 </>
               )}
+
+              {/* Suggestions are empty without a project, so this is the only
+                  thing in the column then — point at the create flow and say
+                  the non-obvious part: automations don't need a project. */}
+              {automations.length === 0 && suggestions.length === 0 && (
+                <div className="mt-8 px-3">
+                  <p className="text-sm text-muted-foreground">
+                    No automations yet. They don't need a project — a global
+                    automation runs in a fresh scratch repo each time.
+                  </p>
+                  <button
+                    onClick={() => openCreate(null)}
+                    className="mt-3 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    Create your first automation
+                  </button>
+                </div>
+              )}
             </div>
           }
         </div>
 
-        {(selected || creating) && (
+        {inspectedWorktree && (
+          <ResizablePanel
+            width={worktreePaneWidth}
+            onWidthChange={setWorktreePaneWidth}
+            isResizing={isWorktreePaneResizing}
+            onResizingChange={setIsWorktreePaneResizing}
+            minWidth={420}
+            maxWidth={window.innerWidth * 0.75}
+            handleSide="left"
+            onDoubleClickHandle={() => setWorktreePaneWidth(720)}
+          >
+            <AutomationWorktreePane
+              worktree={inspectedWorktree}
+              onClose={() => setInspectedWorktree(null)}
+            />
+          </ResizablePanel>
+        )}
+
+        {!inspectedWorktree && (selected || creating) && (
           <AutomationEditor
             key={selected ? selected.id : "new"}
             repoPath={project?.path ?? ""}
@@ -416,6 +558,59 @@ export function AutomationsView() {
   );
 }
 
+function AutomationWorktreePane({
+  worktree,
+  onClose,
+}: {
+  worktree: Worktree;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex h-full min-w-0 flex-col bg-background">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/50 px-3">
+        <Bot aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold">
+            Agent
+          </div>
+          <div className="truncate text-xs text-muted-foreground">
+            {worktree.title ?? worktree.branch}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close worktree pane"
+          title="Close"
+          className={iconButtonClass}
+        >
+          <X aria-hidden="true" className="size-4" />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1">
+        <XtermTerminal
+          sessionId={agentPtySessionId(worktree.path)}
+          baseDir={worktree.path}
+          isFocused
+          onExit={() => {
+            invoke("clear_agent_pane_status", {
+              worktreePath: worktree.path,
+              paneId: AGENT_PANE_ID,
+            }).catch(() => {});
+          }}
+          onInterrupt={() => {
+            invoke("interrupt_agent_turn", {
+              worktreePath: worktree.path,
+              paneId: AGENT_PANE_ID,
+            }).catch(() => {});
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function DetailRow({
   label,
   children,
@@ -432,7 +627,11 @@ function DetailRow({
 }
 
 const rowSelectClass =
-  "rounded-md bg-transparent px-1.5 py-1 text-right text-sm outline-none hover:bg-accent";
+  "rounded-md bg-transparent px-1.5 py-1 text-right text-sm outline-none transition-colors hover:bg-accent";
+
+/** The app's 28px icon-button form (Sidebar, FilesPanel, settings panes). */
+const iconButtonClass =
+  "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
 /**
  * Codex-style detail pane: status + title, big prompt editor, Details and
@@ -553,7 +752,7 @@ function AutomationEditor({
             isNew
               ? "text-muted-foreground"
               : automation.enabled
-                ? "text-emerald-500"
+                ? "text-success"
                 : "text-muted-foreground"
           }`}
         >
@@ -568,7 +767,7 @@ function AutomationEditor({
                   .then(() => toast.success(`Running "${automation.name}" now`))
                   .catch((e) => toast.error(String(e)))
               }
-              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className={iconButtonClass}
               title="Run now"
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
@@ -582,7 +781,7 @@ function AutomationEditor({
                   enabled: !automation.enabled,
                 }).catch((e) => toast.error(String(e)))
               }
-              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className={iconButtonClass}
               title={automation.enabled ? "Pause" : "Resume"}
             >
               {automation.enabled ? (
@@ -598,7 +797,7 @@ function AutomationEditor({
             </button>
             <button
               onClick={onDelete}
-              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
               title="Delete"
             >
               <svg
@@ -617,7 +816,7 @@ function AutomationEditor({
         )}
         <button
           onClick={onClose}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className={iconButtonClass}
           title="Close"
         >
           <svg
@@ -645,7 +844,7 @@ function AutomationEditor({
           }}
           placeholder="Automation title"
           autoFocus={isNew}
-          className="mt-1 w-full bg-transparent text-lg font-semibold outline-none placeholder:text-muted-foreground/50"
+          className="-mx-1 mt-1 w-[calc(100%+0.5rem)] rounded-md bg-transparent px-1 text-lg font-semibold outline-none placeholder:text-muted-foreground"
         />
 
         <textarea
@@ -656,9 +855,15 @@ function AutomationEditor({
               persist({ prompt });
             }
           }}
-          placeholder="Add the prompt each run starts with — make it self-contained, and have it write its output into files so the diff carries the result."
-          className="mt-3 h-72 w-full resize-y rounded-lg border border-border/60 bg-muted/20 px-3.5 py-3 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50 focus:border-primary/40"
+          placeholder="Prompt each run starts with"
+          className="mt-3 h-72 w-full resize-y rounded-lg border border-border/60 bg-muted/20 px-3.5 py-3 text-sm leading-relaxed outline-none transition-colors placeholder:text-muted-foreground"
         />
+        {/* The guidance used to live in the placeholder, where it disappeared on
+            the first keystroke and was never recoverable. */}
+        <p className="mt-1.5 px-1 text-xs text-muted-foreground">
+          Make it self-contained, and have it write its output into files so
+          the diff carries the result.
+        </p>
 
         <div className="mt-4 mb-1.5 px-1 text-xs font-medium text-muted-foreground">
           Details
@@ -757,7 +962,7 @@ function AutomationEditor({
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
                 onBlur={() => persistSchedule(preset, time, weekday, custom)}
-                className="rounded-md bg-transparent px-1.5 py-1 text-right text-sm outline-none hover:bg-accent"
+                className={rowSelectClass}
               />
             </DetailRow>
           )}
@@ -768,7 +973,7 @@ function AutomationEditor({
                 onChange={(e) => setCustom(e.target.value)}
                 onBlur={() => persistSchedule(preset, time, weekday, custom)}
                 placeholder="0 9 * * 1-5"
-                className="w-32 rounded-md bg-transparent px-1.5 py-1 text-right font-mono text-sm outline-none hover:bg-accent"
+                className={`${rowSelectClass} w-32 font-mono`}
               />
             </DetailRow>
           )}
@@ -776,10 +981,10 @@ function AutomationEditor({
 
         <div className="mt-1.5 min-h-[1.1rem] px-1 text-xs">
           {scheduleError ? (
-            <span className="text-red-500">{scheduleError}</span>
+            <span className="text-danger">{scheduleError}</span>
           ) : (
             preview.length > 0 && (
-              <span className="text-muted-foreground/70">
+              <span className="text-muted-foreground">
                 Next:{" "}
                 {preview
                   .map((t) =>
@@ -801,7 +1006,7 @@ function AutomationEditor({
           <button
             onClick={create}
             disabled={saving || !!scheduleError}
-            className="mt-4 w-full rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            className="mt-4 w-full rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {saving ? "Creating…" : "Create automation"}
           </button>
@@ -817,22 +1022,29 @@ function AutomationEditor({
                   return (
                     <button
                       key={run.id}
+                      type="button"
                       onClick={() => onOpenRun(run)}
                       disabled={!run.worktree_path}
-                      title={run.error ?? undefined}
-                      className="flex items-center gap-2 rounded px-1.5 py-1.5 text-left text-sm enabled:hover:bg-accent/40 disabled:cursor-default"
+                      title={run.error ?? "Open agent run"}
+                      className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm transition-colors enabled:cursor-pointer enabled:hover:bg-accent/40 disabled:cursor-default"
                     >
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dot}`} />
                       <span className="truncate">{meta.label}</span>
                       {run.error && (
-                        <span className="truncate text-xs text-red-500/80">
+                        <span className="truncate text-xs text-danger">
                           {run.error}
                         </span>
                       )}
                       <div className="flex-1" />
-                      <span className="shrink-0 text-xs text-muted-foreground/70">
+                      <span className="shrink-0 text-xs text-muted-foreground">
                         {formatWhen(run.scheduled_for)}
                       </span>
+                      {run.worktree_path && (
+                        <PanelRightOpen
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0 text-muted-foreground"
+                        />
+                      )}
                     </button>
                   );
                 })}

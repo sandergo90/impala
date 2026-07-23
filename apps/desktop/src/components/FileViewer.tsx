@@ -285,7 +285,7 @@ export function FileViewer({
           <div className="flex items-center gap-1 shrink-0 ml-2">
             <button
               onClick={() => setHtmlSourceMode(true)}
-              className="px-2 py-0.5 rounded border text-xs hover:bg-accent"
+              className="inline-flex items-center h-6 px-2 rounded border text-xs hover:bg-accent"
             >
               View source
             </button>
@@ -370,10 +370,10 @@ export function FileViewer({
           </span>
           <div className="flex items-center gap-1 shrink-0 ml-2">
             {isMarkdown && (
-              <div className="flex items-center rounded border border-border overflow-hidden mr-1">
+              <div className="flex items-stretch h-6 rounded border border-border overflow-hidden mr-1">
                 <button
                   onClick={() => setMarkdownView("preview")}
-                  className={`px-2 py-0.5 ${
+                  className={`flex items-center px-2 ${
                     markdownView === "preview"
                       ? "bg-accent text-foreground"
                       : "text-muted-foreground hover:bg-accent/50"
@@ -383,7 +383,7 @@ export function FileViewer({
                 </button>
                 <button
                   onClick={() => setMarkdownView("source")}
-                  className={`px-2 py-0.5 border-l border-border ${
+                  className={`flex items-center px-2 border-l border-border ${
                     markdownView === "source"
                       ? "bg-accent text-foreground"
                       : "text-muted-foreground hover:bg-accent/50"
@@ -399,20 +399,23 @@ export function FileViewer({
         </div>
       )}
       {doc.hasExternalDiskChange && (
-        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border bg-accent text-xs">
+        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-destructive/30 bg-destructive/10 text-xs">
           <span>This file changed on disk while you were editing it.</span>
+          {/* Keeping the draft is the non-destructive option, so it reads first
+              and carries the prominent treatment; reloading discards unsaved
+              work and stays reachable but recessive. */}
           <div className="flex items-center gap-2">
             <button
-              onClick={() => void reloadFromDisk(docKey!)}
-              className="px-2 py-0.5 rounded border hover:bg-foreground/5"
-            >
-              Reload from disk
-            </button>
-            <button
               onClick={() => setExternalChange(docKey!, false)}
-              className="px-2 py-0.5 rounded border hover:bg-foreground/5"
+              className="inline-flex items-center h-6 px-2 rounded border border-border bg-background hover:bg-muted"
             >
               Keep my changes
+            </button>
+            <button
+              onClick={() => void reloadFromDisk(docKey!)}
+              className="inline-flex items-center h-6 px-2 rounded text-destructive hover:bg-destructive/10"
+            >
+              Reload from disk
             </button>
           </div>
         </div>

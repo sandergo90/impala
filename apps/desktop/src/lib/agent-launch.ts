@@ -50,6 +50,7 @@ export async function launchAgentHeadless(opts: {
       IMPALA_HOOK_PORT: String(hookPort),
       IMPALA_WORKTREE_PATH: worktreePath,
       IMPALA_PANE_ID: AGENT_PANE_ID,
+      IMPALA_AGENT_PROVIDER: agent,
     },
   });
 

@@ -75,7 +75,8 @@ function CodeBlock({
 
   return (
     <div className="relative group my-4">
-      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Keep the toolbar visible while its copy button has keyboard focus. */}
+      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
         {language !== "text" && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-background/80 text-muted-foreground border border-border backdrop-blur">
             {language}
@@ -89,7 +90,7 @@ function CodeBlock({
           className="h-6 w-6 flex items-center justify-center rounded border border-border bg-background/80 hover:bg-accent text-muted-foreground backdrop-blur"
         >
           {copied ? (
-            <Check className="h-3.5 w-3.5 text-green-500" />
+            <Check className="h-3.5 w-3.5 text-success" />
           ) : (
             <Copy className="h-3.5 w-3.5" />
           )}
@@ -251,8 +252,11 @@ export const markdownComponents: Partial<Components> = {
     );
   },
   pre: ({ children }) => <>{children}</>,
+  // Scrollbars are hidden app-wide; `show-scrollbar` opts this back in so a
+  // table wider than the pane advertises the columns it is clipping (as
+  // DiffView does).
   table: ({ children }) => (
-    <div className="overflow-x-auto my-4">
+    <div className="overflow-x-auto show-scrollbar my-4">
       <table className="w-max min-w-full divide-y divide-border">
         {children}
       </table>
@@ -269,7 +273,7 @@ export const markdownComponents: Partial<Components> = {
     </td>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-4">
+    <blockquote className="border-l border-border bg-muted/50 py-2 pl-4 italic my-4">
       {children}
     </blockquote>
   ),

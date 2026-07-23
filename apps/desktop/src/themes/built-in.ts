@@ -18,7 +18,6 @@ export const defaultDark: Theme = {
     secondary: "#33332F",
     secondaryForeground: "#E4E4E4",
     muted: "#33332F",
-    mutedForeground: "#898987",
     accentForeground: "#E4E4E4",
     destructive: "#E34671",
     destructiveForeground: "#FC6B83",

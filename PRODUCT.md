@@ -30,4 +30,4 @@ Avoid cramped low-contrast controls, tiny labels, ornamental dashboard styling, 
 
 ## Accessibility & Inclusion
 
-No additional compliance target is specified. Preserve visible keyboard focus, theme-aware contrast, reduced-motion-friendly state changes, and non-color cues for selected state.
+No additional compliance target is specified. Preserve theme-aware contrast, reduced-motion-friendly state changes, and non-color cues for selected state.

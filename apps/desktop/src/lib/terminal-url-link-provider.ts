@@ -3,7 +3,12 @@ import type { Terminal, ILinkProvider, ILink } from "@xterm/xterm";
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]}]/g;
 
-export function createUrlLinkProvider(terminal: Terminal): ILinkProvider {
+export function createUrlLinkProvider(
+  terminal: Terminal,
+  onOpenUrl: (url: string) => void = (url) => {
+    openUrl(url).catch(() => {});
+  },
+): ILinkProvider {
   return {
     provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
       const line = terminal.buffer.active.getLine(bufferLineNumber - 1);
@@ -25,7 +30,7 @@ export function createUrlLinkProvider(terminal: Terminal): ILinkProvider {
           },
           text: url,
           activate(_event: MouseEvent, target: string) {
-            openUrl(target).catch(() => {});
+            onOpenUrl(target);
           },
         });
       }

@@ -183,7 +183,13 @@ pub fn get_diverged_commits(
     let range = format!("{}..HEAD", base);
     let limit = format!("-{}", BASE_BRANCH_LOG_LIMIT);
     let log_args: Vec<&str> = if head_is_base_branch(worktree_path, &base) {
-        vec!["log", &limit, "HEAD", "--shortstat", "--format=%H%n%s%n%an%n%aI"]
+        vec![
+            "log",
+            &limit,
+            "HEAD",
+            "--shortstat",
+            "--format=%H%n%s%n%an%n%aI",
+        ]
     } else {
         vec!["log", &range, "--shortstat", "--format=%H%n%s%n%an%n%aI"]
     };
@@ -960,7 +966,11 @@ mod tests {
         git(&repo, &["config", "user.email", "t@example.com"]);
         git(&repo, &["config", "user.name", "Tester"]);
 
-        std::fs::write(repo.join(".gitignore"), ".env\nconfig/secrets.json\n*.log\n").unwrap();
+        std::fs::write(
+            repo.join(".gitignore"),
+            ".env\nconfig/secrets.json\n*.log\n",
+        )
+        .unwrap();
         std::fs::write(
             repo.join(".worktreeinclude"),
             ".env\nconfig/secrets.json\nnotes.txt\n",
@@ -988,14 +998,20 @@ mod tests {
         .unwrap();
 
         // Matched + gitignored → copied.
-        assert_eq!(std::fs::read_to_string(wt.join(".env")).unwrap(), "SECRET=1");
+        assert_eq!(
+            std::fs::read_to_string(wt.join(".env")).unwrap(),
+            "SECRET=1"
+        );
         assert_eq!(
             std::fs::read_to_string(wt.join("config/secrets.json")).unwrap(),
             "{}",
             "nested gitignored file is copied with its directory",
         );
         // Gitignored but not listed → skipped.
-        assert!(!wt.join("debug.log").exists(), "unlisted file must not copy");
+        assert!(
+            !wt.join("debug.log").exists(),
+            "unlisted file must not copy"
+        );
         // Listed but not gitignored → skipped (and never tracked, so absent).
         assert!(
             !wt.join("notes.txt").exists(),

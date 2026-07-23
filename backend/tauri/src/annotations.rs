@@ -157,9 +157,8 @@ pub fn list_browser_annotations(
     repo_path: &str,
     include_resolved: bool,
 ) -> Result<Vec<BrowserAnnotation>, String> {
-    let mut sql = format!(
-        "SELECT {BROWSER_ANNOTATION_COLS} FROM browser_annotations WHERE repo_path = ?1"
-    );
+    let mut sql =
+        format!("SELECT {BROWSER_ANNOTATION_COLS} FROM browser_annotations WHERE repo_path = ?1");
     if !include_resolved {
         sql.push_str(" AND resolved = 0");
     }
@@ -203,11 +202,8 @@ pub fn delete_browser_annotation(conn: &Connection, id: &str) -> Result<Option<S
             |row| row.get(0),
         )
         .map_err(|_| format!("Browser annotation not found: {}", id))?;
-    conn.execute(
-        "DELETE FROM browser_annotations WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| format!("Failed to delete browser annotation: {}", e))?;
+    conn.execute("DELETE FROM browser_annotations WHERE id = ?1", params![id])
+        .map_err(|e| format!("Failed to delete browser annotation: {}", e))?;
     Ok(screenshot_path)
 }
 
@@ -253,7 +249,9 @@ mod tests {
         assert!(resolve_browser_annotation(&conn, "missing").is_err());
 
         assert_eq!(
-            delete_browser_annotation(&conn, &created.id).unwrap().as_deref(),
+            delete_browser_annotation(&conn, &created.id)
+                .unwrap()
+                .as_deref(),
             Some("/tmp/shot.png")
         );
         assert!(list_browser_annotations(&conn, "/wt", true)

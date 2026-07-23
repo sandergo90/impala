@@ -81,14 +81,14 @@ export function FontFamilyCombobox({
     const visible = search.trim() ? items : items.slice(0, MAX_VISIBLE);
     return (
       <>
-        <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+        <div className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {heading}
         </div>
         {visible.map((font) => (
           <button
             key={font.family}
             type="button"
-            className={`w-full text-left px-2 py-1.5 text-md rounded-sm truncate transition-colors hover:bg-accent/50 ${
+            className={`w-full text-left px-2 py-1.5 text-sm rounded-sm truncate transition-colors hover:bg-accent/50 ${
               font.family === selectedFamily ? "bg-accent/30 text-foreground" : "text-foreground/80"
             }`}
             style={{ fontFamily: `"${font.family}"` }}
@@ -113,7 +113,7 @@ export function FontFamilyCombobox({
     <div ref={containerRef} className="relative flex-1" onBlur={handleBlur}>
       <button
         type="button"
-        className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md border border-border bg-background text-md text-foreground hover:bg-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md border border-border bg-background text-sm text-foreground hover:bg-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         disabled={disabled || fontsLoading}
         onClick={() => {
           setOpen(!open);
@@ -140,7 +140,7 @@ export function FontFamilyCombobox({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search fonts..."
-              className="w-full px-2 py-1 text-md bg-transparent text-foreground outline-none placeholder:text-muted-foreground/50"
+              className="w-full px-2 py-1 text-sm bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   setOpen(false);
@@ -155,7 +155,7 @@ export function FontFamilyCombobox({
             {!hasExactMatch && search.trim() && (
               <button
                 type="button"
-                className="w-full text-left px-2 py-1.5 text-md rounded-sm text-foreground/80 hover:bg-accent/50 transition-colors"
+                className="w-full text-left px-2 py-1.5 text-sm rounded-sm text-foreground/80 hover:bg-accent/50 transition-colors"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   selectFont(search.trim());
@@ -168,7 +168,7 @@ export function FontFamilyCombobox({
             {renderGroup("Monospace", filteredFonts.monoFonts)}
             {renderGroup("Other", filteredFonts.otherFonts)}
             {totalFiltered === 0 && hasExactMatch && (
-              <div className="px-2 py-3 text-md text-muted-foreground text-center">
+              <div className="px-2 py-3 text-sm text-muted-foreground text-center">
                 No fonts found.
               </div>
             )}

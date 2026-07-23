@@ -114,8 +114,7 @@ fn row_to_issue(row: &rusqlite::Row) -> rusqlite::Result<WorktreeIssue> {
     })
 }
 
-const SELECT_COLS: &str =
-    "worktree_path, issue_id, identifier, provider, url, created_at";
+const SELECT_COLS: &str = "worktree_path, issue_id, identifier, provider, url, created_at";
 
 pub fn get_issue_for_worktree(
     conn: &Connection,

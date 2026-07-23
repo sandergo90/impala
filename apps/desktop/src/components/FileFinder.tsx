@@ -71,6 +71,13 @@ export function FileFinder({
   // value directly; we derive it from the active [data-selected="true"] item
   // inside the list at the time the key is pressed.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Tab") {
+      // The palette has exactly one tabbable node (the input); contain focus
+      // rather than letting Tab walk into the app behind the scrim.
+      e.preventDefault();
+      inputRef.current?.focus();
+      return;
+    }
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -94,8 +101,11 @@ export function FileFinder({
 
   return (
     <div className="fixed inset-0 z-50" onClick={onClose}>
-      <div className="fixed inset-0 bg-black/40" />
+      <div className="fixed inset-0 bg-black/40" aria-hidden="true" />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search files"
         className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-[640px]"
         onClick={(e) => e.stopPropagation()}
       >
@@ -115,7 +125,7 @@ export function FileFinder({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="shrink-0 text-muted-foreground/90 mr-2"
+              className="shrink-0 text-muted-foreground mr-2"
             >
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.3-4.3" />
@@ -129,18 +139,18 @@ export function FileFinder({
                   ? "Search files by name..."
                   : "Select a worktree to search files"
               }
-              className="flex h-10 w-full bg-transparent py-3 text-sm text-foreground placeholder:text-muted-foreground/90 outline-none"
+              className="flex h-10 w-full bg-transparent py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none"
             />
           </div>
           <Command.List className="max-h-[400px] overflow-y-auto p-1.5">
             {showResults && results.length === 0 && (
-              <Command.Empty className="py-6 text-center text-md text-muted-foreground">
+              <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
                 {loading ? "Indexing files..." : "No files match."}
               </Command.Empty>
             )}
 
             {!showResults && !showRecents && (
-              <Command.Empty className="py-6 text-center text-md text-muted-foreground">
+              <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
                 {loading
                   ? "Indexing files..."
                   : worktreePath
@@ -152,7 +162,7 @@ export function FileFinder({
             {showRecents && (
               <Command.Group
                 heading="Recent"
-                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-md [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[1.2px] [&_[cmdk-group-heading]]:text-muted-foreground/60 [&_[cmdk-group-heading]]:font-semibold"
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-sm [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[1.2px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:font-semibold"
               >
                 {recents.map((path) => (
                   <FileItem
@@ -172,7 +182,7 @@ export function FileFinder({
             {showResults && results.length > 0 && (
               <Command.Group
                 heading="Files"
-                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-md [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[1.2px] [&_[cmdk-group-heading]]:text-muted-foreground/60 [&_[cmdk-group-heading]]:font-semibold"
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-sm [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[1.2px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:font-semibold"
               >
                 {results.map((r) => (
                   <FileItem
@@ -189,7 +199,7 @@ export function FileFinder({
               </Command.Group>
             )}
           </Command.List>
-          <div className="flex items-center justify-end gap-3 border-t border-border px-3 py-1.5 text-md text-muted-foreground/80">
+          <div className="flex items-center justify-end gap-3 border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
             <span>
               <kbd className="font-mono">↵</kbd> open
             </span>
@@ -232,7 +242,7 @@ function FileItem({
         }
       }}
       data-path={path}
-      className="flex items-center gap-2 px-2 py-1.5 rounded-md text-md cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
+      className="group flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer data-[selected=true]:bg-[var(--color-editor-selection)]"
     >
       <svg
         width="12"
@@ -243,14 +253,14 @@ function FileItem({
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="shrink-0 text-muted-foreground/90"
+        className="shrink-0 text-muted-foreground"
       >
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
         <polyline points="14 2 14 8 20 8" />
       </svg>
       <span className="text-foreground truncate">{name}</span>
       {dir && (
-        <span className="ml-auto text-muted-foreground/80 truncate pl-2">
+        <span className="ml-auto text-muted-foreground truncate pl-2 group-data-[selected=true]:text-foreground">
           {dir}
         </span>
       )}

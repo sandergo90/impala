@@ -10,8 +10,11 @@ import { ChangedFileContextMenu } from "./ChangedFileContextMenu";
 import { basename } from "../lib/path-utils";
 import type { ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
 
+// Same mapping the file tree uses (see `getTreesStyle` in themes/apply.ts): the
+// status tokens are derived per-theme from the terminal palette, so added stays
+// green and modified stays blue in both panels and in user-imported themes.
 const statusColor: Record<string, string> = {
-  M: "text-green-500", A: "text-emerald-500", D: "text-red-500", R: "text-yellow-500",
+  A: "text-success", M: "text-info", D: "text-danger", R: "text-warning",
 };
 
 const AUTO_REFRESH_DELAY_MS = 750;
@@ -474,7 +477,7 @@ export function CommitPanel() {
     <div className="flex flex-col h-full text-sm overflow-hidden">
       {/* Commits section — top half */}
       <div className="flex flex-col min-h-0 flex-1">
-        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-b border-border">
+        <div className="flex items-center gap-1.5 px-3.5 py-2.5 text-sm uppercase tracking-[1.2px] text-muted-foreground font-semibold shrink-0 border-b border-border">
           Commits on <span className="font-mono text-sm text-muted-foreground normal-case tracking-normal">{selectedWorktree.branch}</span>
           {commits.length > 0 && (
             <span className="ml-auto text-sm bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{commits.length}</span>
@@ -498,9 +501,9 @@ export function CommitPanel() {
             <span>{hasLastTurnSnapshot ? "Since last prompt" : "No turn recorded yet"}</span>
             {(lastTurnStats.additions > 0 || lastTurnStats.deletions > 0) && (
               <span className="ml-auto">
-                <span className="text-green-500">+{lastTurnStats.additions}</span>
+                <span className="text-success">+{lastTurnStats.additions}</span>
                 {" "}
-                <span className="text-red-500">-{lastTurnStats.deletions}</span>
+                <span className="text-danger">-{lastTurnStats.deletions}</span>
               </span>
             )}
           </div>
@@ -522,9 +525,9 @@ export function CommitPanel() {
             <span>Working tree</span>
             {(uncommittedStats.additions > 0 || uncommittedStats.deletions > 0) && (
               <span className="ml-auto">
-                <span className="text-green-500">+{uncommittedStats.additions}</span>
+                <span className="text-success">+{uncommittedStats.additions}</span>
                 {" "}
-                <span className="text-red-500">-{uncommittedStats.deletions}</span>
+                <span className="text-danger">-{uncommittedStats.deletions}</span>
               </span>
             )}
           </div>
@@ -546,9 +549,9 @@ export function CommitPanel() {
             <span>vs {baseBranch || "base"}</span>
             {(allChangesStats.additions > 0 || allChangesStats.deletions > 0) && (
               <span className="ml-auto">
-                <span className="text-green-500">+{allChangesStats.additions}</span>
+                <span className="text-success">+{allChangesStats.additions}</span>
                 {" "}
-                <span className="text-red-500">-{allChangesStats.deletions}</span>
+                <span className="text-danger">-{allChangesStats.deletions}</span>
               </span>
             )}
           </div>
@@ -577,9 +580,9 @@ export function CommitPanel() {
                   <span>{commit.hash.slice(0, 7)} &middot; {commit.date.split("T")[0]} {commit.date.split("T")[1]?.slice(0, 5)}</span>
                   {(commit.additions > 0 || commit.deletions > 0) && (
                     <span className="ml-auto">
-                      <span className="text-green-500">+{commit.additions}</span>
+                      <span className="text-success">+{commit.additions}</span>
                       {" "}
-                      <span className="text-red-500">-{commit.deletions}</span>
+                      <span className="text-danger">-{commit.deletions}</span>
                     </span>
                   )}
                 </div>
@@ -592,7 +595,7 @@ export function CommitPanel() {
 
       {/* Changed Files — bottom half */}
       <div className="flex flex-col min-h-0 flex-1">
-        <div className="flex items-center px-3.5 py-2 text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold shrink-0 border-y border-border">
+        <div className="flex items-center px-3.5 py-2 text-sm uppercase tracking-[1.2px] text-muted-foreground font-semibold shrink-0 border-y border-border">
           Changed Files
           {changedFiles.length > 0 && (
             <span className="ml-auto text-sm bg-accent rounded-full px-1.5 py-0.5 text-muted-foreground normal-case tracking-normal font-normal">{changedFiles.length}</span>

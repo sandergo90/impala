@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@/lib/invoke";
 import { launchAgentHeadless } from "./agent-launch";
+import { createAutomationRunDispatcher } from "./automation-run-dispatcher";
 import { runPtySessionId, RUN_PANE_ID } from "./pane-ids";
 import { encodePtyInput } from "./encode-pty";
 import { useDataStore, useUIStore } from "../store";
@@ -10,7 +11,17 @@ import type { Automation, Worktree } from "../types";
 export interface AutomationDueEvent {
   run_id: string;
   automation: Automation;
+  instructions_path: string;
+  worktree_path?: string | null;
 }
+
+const dispatchAutomationRun = createAutomationRunDispatcher(
+  (payload: AutomationDueEvent) => {
+    executeRun(payload).catch((e) =>
+      console.error("automation run failed:", e),
+    );
+  },
+);
 
 function slugify(name: string): string {
   return (
@@ -31,28 +42,59 @@ function branchStamp(): string {
 /**
  * Executes automation runs dispatched by the Rust scheduler: fresh worktree,
  * setup script (fire-and-forget, mirrors the New Worktree flow), headless
- * agent launch with the automation's prompt. Called once from App.
+ * agent launch pointed at the run's immutable Markdown instructions. Called
+ * once from App.
  */
 export function startAutomationExecutor(): () => void {
+  let cancelled = false;
   const unlisten = listen<AutomationDueEvent>("automation-due", (event) => {
-    executeRun(event.payload).catch((e) =>
-      console.error("automation run failed:", e),
-    );
+    dispatchAutomationRun(event.payload);
+  }).then(async (stopListening) => {
+    if (cancelled) {
+      stopListening();
+      return undefined;
+    }
+
+    try {
+      const pending = await invoke<AutomationDueEvent[]>(
+        "list_pending_automation_runs",
+      );
+      if (!cancelled) {
+        for (const run of pending) dispatchAutomationRun(run);
+      }
+    } catch (e) {
+      console.error("failed to recover pending automation runs:", e);
+    }
+
+    return stopListening;
   });
+
   return () => {
-    unlisten.then((fn) => fn());
+    cancelled = true;
+    unlisten.then((fn) => fn?.());
   };
 }
 
-async function executeRun({ run_id, automation }: AutomationDueEvent) {
+async function executeRun({
+  run_id,
+  automation,
+  instructions_path,
+  worktree_path,
+}: AutomationDueEvent) {
   try {
     let runPath: string;
-    if (automation.repo_path === "") {
+    if (worktree_path) {
+      // Recovery after the run directory/worktree was allocated but before
+      // launch was reported. Reuse it so the immutable instructions keep the
+      // same worktree context.
+      runPath = worktree_path;
+    } else if (automation.repo_path === "") {
       // Global automation — no project to branch from. Runs in a fresh
       // scratch git repo so the agent's output is reviewable as an
       // uncommitted diff when the run is opened.
       runPath = await invoke<string>("prepare_automation_run_dir", {
         name: automation.name,
+        runId: run_id,
       });
       // Scratch dirs have no creation-time agent setting (create_worktree
       // writes it for project worktrees) — persist it so a pane relaunch
@@ -71,6 +113,7 @@ async function executeRun({ run_id, automation }: AutomationDueEvent) {
         existing: false,
         initialTitle: automation.name,
         agent: automation.agent,
+        automationRunId: run_id,
       });
       runPath = worktree.path;
 
@@ -85,13 +128,18 @@ async function executeRun({ run_id, automation }: AutomationDueEvent) {
       runSetupScript(automation.repo_path, worktree).catch(() => {});
     }
 
+    await invoke("finalize_automation_run_instructions", {
+      runId: run_id,
+      worktreePath: runPath,
+    });
+
     await launchAgentHeadless({
       worktreePath: runPath,
       // Global runs have no project; the scratch dir itself scopes agent
       // flag resolution (falls through to global-scope settings).
       projectPath: automation.repo_path || runPath,
       agent: automation.agent,
-      prompt: automation.prompt,
+      prompt: `Read and execute the automation instructions in \`${instructions_path}\`.`,
     });
 
     await invoke("report_automation_run", {

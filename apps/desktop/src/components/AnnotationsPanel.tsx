@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Check, X } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useUIStore, useDataStore } from "../store";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
@@ -93,8 +94,8 @@ export function AnnotationsPanel() {
   // Empty state
   if (!hasAnnotations) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground/90 gap-2 px-4">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/90">
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2 px-4">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
         <span className="text-sm text-center">Click on lines to add annotations</span>
@@ -119,7 +120,7 @@ export function AnnotationsPanel() {
         {hasUnresolved && (
           <button
             onClick={handleSendAllToAgent}
-            className="px-2 py-0.5 rounded text-sm text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 ml-auto"
+            className="px-2 py-0.5 rounded text-sm text-[var(--color-link)] hover:bg-accent ml-auto"
           >
             Send to Agent
           </button>
@@ -129,20 +130,20 @@ export function AnnotationsPanel() {
       {/* Annotations list */}
       <div className="overflow-y-auto flex-1 min-h-0">
         {scoped.length === 0 && visibleBrowser.length === 0 ? (
-          <div className="px-3 py-4 text-sm text-muted-foreground/90 text-center">
+          <div className="px-3 py-4 text-sm text-muted-foreground text-center">
             {showResolved ? "No annotations" : "No unresolved annotations"}
           </div>
         ) : scoped.length === 0 ? null : selectedFile ? (
           // Single file: flat list
-          <div className="flex flex-col">
+          <div className="flex flex-col" role="list">
             {scoped.map((a) => (
-              <div key={a.id} className="cursor-pointer" onClick={() => scrollToLine(a)}>
-                <AnnotationDisplay
-                  annotation={a}
-                  onResolve={handleResolve}
-                  onDelete={handleDelete}
-                />
-              </div>
+              <AnnotationDisplay
+                key={a.id}
+                annotation={a}
+                onJump={() => scrollToLine(a)}
+                onResolve={handleResolve}
+                onDelete={handleDelete}
+              />
             ))}
           </div>
         ) : (
@@ -151,22 +152,22 @@ export function AnnotationsPanel() {
             {[...grouped.entries()].map(([filePath, fileAnnotations]) => (
               <div key={filePath}>
                 <div className="flex items-center gap-2 border-b border-border/50 px-3 py-1.5">
-                  <span className="truncate font-mono text-sm font-semibold tracking-[1.2px] text-muted-foreground/60">
+                  <span className="truncate font-mono text-sm font-semibold tracking-[1.2px] text-muted-foreground">
                     {filePath.split("/").pop()}
                   </span>
-                  <span className="shrink-0 rounded-full bg-muted px-1.5 text-xs text-muted-foreground/70">
+                  <span className="shrink-0 rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
                     {fileAnnotations.length}
                   </span>
                 </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col" role="list">
                   {fileAnnotations.map((a) => (
-                    <div key={a.id} className="cursor-pointer" onClick={() => scrollToLine(a)}>
-                      <AnnotationDisplay
-                        annotation={a}
-                        onResolve={handleResolve}
-                        onDelete={handleDelete}
-                      />
-                    </div>
+                    <AnnotationDisplay
+                      key={a.id}
+                      annotation={a}
+                      onJump={() => scrollToLine(a)}
+                      onResolve={handleResolve}
+                      onDelete={handleDelete}
+                    />
                   ))}
                 </div>
               </div>
@@ -176,67 +177,71 @@ export function AnnotationsPanel() {
         {visibleBrowser.length > 0 && (
           <div>
             <div className="flex items-center gap-2 border-b border-border/50 px-3 py-1.5">
-              <span className="truncate font-mono text-sm font-semibold tracking-[1.2px] text-muted-foreground/60">
+              <span className="truncate font-mono text-sm font-semibold tracking-[1.2px] text-muted-foreground">
                 Browser
               </span>
-              <span className="shrink-0 rounded-full bg-muted px-1.5 text-xs text-muted-foreground/70">
+              <span className="shrink-0 rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
                 {visibleBrowser.length}
               </span>
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col" role="list">
               {visibleBrowser.map((a) => (
                 <div
                   key={a.id}
-                  className="flex gap-2 px-3 py-2 border-b border-border/30 cursor-pointer hover:bg-accent/30"
-                  onClick={() => openBrowserTabAt(a.repo_path, a.url)}
-                  title={a.url}
+                  role="listitem"
+                  className="flex items-start gap-2 px-3 py-2 border-b border-border/30 hover:bg-accent/30"
                 >
-                  {a.screenshot_path && (
-                    <img
-                      src={convertFileSrc(a.screenshot_path)}
-                      alt=""
-                      className="h-10 w-14 shrink-0 rounded border border-border/50 object-cover"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className="truncate font-mono text-xs text-muted-foreground/70"
-                      title={a.selector}
-                    >
-                      {a.selector}
+                  <button
+                    type="button"
+                    onClick={() => openBrowserTabAt(a.repo_path, a.url)}
+                    title={a.url}
+                    className="flex min-w-0 flex-1 cursor-pointer gap-2 rounded-sm text-left"
+                  >
+                    {a.screenshot_path && (
+                      <img
+                        src={convertFileSrc(a.screenshot_path)}
+                        alt=""
+                        className="h-10 w-14 shrink-0 rounded border border-border/50 object-cover"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className="truncate font-mono text-xs text-muted-foreground"
+                        title={a.selector}
+                      >
+                        {a.selector}
+                      </div>
+                      <div
+                        className={`text-sm ${
+                          a.resolved ? "line-through text-muted-foreground" : ""
+                        }`}
+                      >
+                        {a.body}
+                      </div>
                     </div>
-                    <div
-                      className={`text-sm ${
-                        a.resolved
-                          ? "line-through text-muted-foreground/60"
-                          : ""
-                      }`}
-                    >
-                      {a.body}
-                    </div>
-                  </div>
+                  </button>
                   <div className="flex shrink-0 gap-0.5 self-start">
                     {!a.resolved && (
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           resolveBrowserAnnotation(a.id).catch(() => {});
                         }}
-                        className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-success"
                         title="Resolve"
+                        aria-label="Resolve annotation"
                       >
-                        ✓
+                        <Check aria-hidden="true" className="size-3.5" />
                       </button>
                     )}
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      onClick={() => {
                         deleteBrowserAnnotation(a.id).catch(() => {});
                       }}
-                      className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                      className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-destructive"
                       title="Delete (removes screenshot)"
+                      aria-label="Delete annotation"
                     >
-                      ✕
+                      <X aria-hidden="true" className="size-3.5" />
                     </button>
                   </div>
                 </div>

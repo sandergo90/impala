@@ -1,6 +1,7 @@
 mod agent_config;
 mod annotations;
 mod automations;
+mod bitbucket;
 mod browser;
 mod config;
 mod daemon_client;
@@ -8,7 +9,6 @@ mod file_io;
 mod file_tree;
 mod fonts;
 mod git;
-mod bitbucket;
 mod github;
 mod hook_server;
 mod hotkeys;
@@ -21,6 +21,7 @@ mod observability;
 mod pty;
 mod settings;
 mod shell_wrappers;
+mod subagents;
 mod viewed_files;
 mod watcher;
 mod worktree_issues;
@@ -273,7 +274,10 @@ async fn get_full_branch_diff(
             .0
             .lock()
             .map_err(|e| format!("Cache lock error: {}", e))?;
-        c.put(format!("branch:{}:{}", worktree_path, token), result.clone());
+        c.put(
+            format!("branch:{}:{}", worktree_path, token),
+            result.clone(),
+        );
     }
     Ok(result)
 }
@@ -394,6 +398,7 @@ async fn create_worktree(
     existing: bool,
     initial_title: Option<String>,
     agent: String,
+    automation_run_id: Option<String>,
 ) -> Result<git::Worktree, String> {
     if agent != "claude" && agent != "codex" {
         return Err(format!("Invalid agent: {}", agent));
@@ -457,6 +462,9 @@ async fn create_worktree(
             worktrees::upsert_title(&conn, &worktree.path, &title)?;
             worktree.title = Some(title);
         }
+        if let Some(run_id) = automation_run_id.as_deref() {
+            automations::assign_run_worktree(&conn, run_id, &worktree.path)?;
+        }
     }
 
     Ok(worktree)
@@ -495,6 +503,7 @@ async fn delete_worktree(
         .0
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
+    automations::remove_instructions_for_worktree(&conn, &worktree_path)?;
     if automations::abort_runs_for_worktree(&conn, &worktree_path)? {
         let _ = app.emit("automation-runs-changed", ());
     }
@@ -782,20 +791,19 @@ async fn prepare_agent_config(
     let env = tokio::task::spawn_blocking(
         move || -> Result<std::collections::HashMap<String, String>, String> {
             let mut env = std::collections::HashMap::new();
-            match agent.as_str() {
-                "claude" => {
-                    setup_claude_integration_sync()?;
-                    agent_config::write_claude_config(&path)?;
-                }
-                "codex" => {
-                    let codex_home = agent_config::write_codex_config(&path, &mcp_binary)?;
-                    env.insert(
-                        "CODEX_HOME".to_string(),
-                        codex_home.to_string_lossy().to_string(),
-                    );
-                }
-                other => return Err(format!("unknown agent: {}", other)),
+            if agent != "claude" && agent != "codex" {
+                return Err(format!("unknown agent: {}", agent));
             }
+            // Agent panes are shells: users can quit one CLI and start the
+            // other without recreating the pane. Prepare both integrations so
+            // that runtime switch remains pane-aware.
+            setup_claude_integration_sync()?;
+            agent_config::write_claude_config(&path)?;
+            let codex_home = agent_config::write_codex_config(&path, &mcp_binary)?;
+            env.insert(
+                "CODEX_HOME".to_string(),
+                codex_home.to_string_lossy().to_string(),
+            );
             Ok(env)
         },
     )
@@ -1014,6 +1022,95 @@ fn get_agent_statuses(
 }
 
 #[tauri::command]
+fn get_agent_pane_statuses(
+    state: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
+) -> Vec<hook_server::AgentPaneStatusEvent> {
+    state.snapshot()
+}
+
+#[tauri::command]
+fn clear_agent_pane_status(
+    app: tauri::AppHandle,
+    statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
+    pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
+    caffeinators: tauri::State<'_, Arc<hook_server::Caffeinators>>,
+    worktree_path: String,
+    pane_id: String,
+) {
+    let Some(aggregate_status) = pane_statuses.clear(&worktree_path, &pane_id) else {
+        return;
+    };
+    hook_server::publish_agent_pane_event(&app, &worktree_path, &pane_id, "idle");
+    hook_server::publish_agent_status(
+        &app,
+        &statuses,
+        &caffeinators,
+        &worktree_path,
+        &aggregate_status,
+    );
+}
+
+#[tauri::command]
+fn clear_agent_worktree_status(
+    app: tauri::AppHandle,
+    statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
+    pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
+    caffeinators: tauri::State<'_, Arc<hook_server::Caffeinators>>,
+    worktree_path: String,
+) {
+    if !pane_statuses.clear_worktree(&worktree_path) {
+        return;
+    }
+    hook_server::publish_agent_status(&app, &statuses, &caffeinators, &worktree_path, "idle");
+}
+
+#[tauri::command]
+fn interrupt_agent_turn(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, DbState>,
+    statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
+    pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
+    caffeinators: tauri::State<'_, Arc<hook_server::Caffeinators>>,
+    interrupted_turns: tauri::State<'_, Arc<hook_server::InterruptedAgentTurns>>,
+    worktree_path: String,
+    pane_id: String,
+) -> Result<(), String> {
+    let Some(aggregate_status) = pane_statuses.interrupt(&worktree_path, &pane_id) else {
+        return Ok(());
+    };
+
+    let interrupted_automation = if pane_id == "tab-agent" {
+        let conn = db.0.lock().map_err(|e| format!("DB lock error: {e}"))?;
+        automations::fail_run_for_worktree(&conn, &worktree_path, "Interrupted by user")?
+    } else {
+        None
+    };
+
+    if interrupted_automation.is_some() {
+        let _ = app.emit("automation-runs-changed", ());
+    }
+    interrupted_turns.mark(&worktree_path, &pane_id);
+    hook_server::publish_agent_pane_event(&app, &worktree_path, &pane_id, "idle");
+    hook_server::publish_agent_status(
+        &app,
+        &statuses,
+        &caffeinators,
+        &worktree_path,
+        &aggregate_status,
+    );
+    Ok(())
+}
+
+#[tauri::command]
+fn get_subagents(
+    state: tauri::State<'_, Arc<subagents::SubagentRegistry>>,
+    worktree_path: String,
+    pane_id: String,
+) -> subagents::SubagentSnapshot {
+    state.snapshot(&worktree_path, &pane_id)
+}
+
+#[tauri::command]
 async fn check_generated_files(
     worktree_path: String,
     files: Vec<String>,
@@ -1029,7 +1126,10 @@ fn tracker_config_for(
     state: &tauri::State<'_, DbState>,
     project_path: &str,
 ) -> Result<issue_tracker::TrackerConfig, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     issue_tracker::read_tracker_config(&conn, project_path)
 }
 
@@ -1039,7 +1139,10 @@ fn get_project_issue_tracker(
     state: tauri::State<'_, DbState>,
     project_path: String,
 ) -> Result<issue_tracker::IssueTrackerInfo, String> {
-    let conn = state.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
     issue_tracker::tracker_info(&conn, &project_path)
 }
 
@@ -1120,7 +1223,14 @@ fn link_worktree_issue(
         .0
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
-    worktree_issues::link_worktree(&conn, &worktree_path, &issue_id, &identifier, &provider, &url)
+    worktree_issues::link_worktree(
+        &conn,
+        &worktree_path,
+        &issue_id,
+        &identifier,
+        &provider,
+        &url,
+    )
 }
 
 #[tauri::command]
@@ -1738,20 +1848,41 @@ pub fn run() {
                 std::num::NonZeroUsize::new(50).unwrap(),
             ))));
 
-            let agent_statuses = Arc::new(hook_server::AgentStatuses(Mutex::new(HashMap::new())));
+            let agent_pane_statuses = Arc::new(hook_server::AgentPaneStatuses::load_persisted());
+            let restored_agent_statuses = agent_pane_statuses.aggregate_snapshot();
+            let agent_statuses = Arc::new(hook_server::AgentStatuses(Mutex::new(
+                restored_agent_statuses.clone(),
+            )));
             let last_turn_snapshots =
                 Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
             let caffeinators = Arc::new(hook_server::Caffeinators::new());
+            let interrupted_turns = Arc::new(hook_server::InterruptedAgentTurns::load_persisted());
+            let subagent_registry = Arc::new(subagents::SubagentRegistry::default());
             let hook_port = hook_server::start(
                 app.handle().clone(),
                 agent_statuses.clone(),
+                agent_pane_statuses.clone(),
                 last_turn_snapshots.clone(),
                 caffeinators.clone(),
+                interrupted_turns.clone(),
+                subagent_registry.clone(),
             );
+            for (worktree_path, status) in restored_agent_statuses {
+                hook_server::publish_agent_status(
+                    app.handle(),
+                    &agent_statuses,
+                    &caffeinators,
+                    &worktree_path,
+                    &status,
+                );
+            }
             app.manage(HookPort(hook_port));
             app.manage(agent_statuses);
+            app.manage(agent_pane_statuses);
             app.manage(last_turn_snapshots);
             app.manage(caffeinators);
+            app.manage(interrupted_turns);
+            app.manage(subagent_registry);
 
             automations::start_scheduler(app.handle().clone());
 
@@ -1897,12 +2028,15 @@ pub fn run() {
             automations::set_automation_enabled,
             automations::run_automation_now,
             automations::list_automation_runs,
+            automations::list_pending_automation_runs,
             automations::report_automation_run,
+            automations::finalize_automation_run_instructions,
             automations::cron_next_occurrences,
             automations::count_unseen_automation_runs,
             automations::mark_automation_runs_seen,
             automations::prepare_automation_run_dir,
             automations::list_automation_run_worktrees,
+            automations::list_recent_automation_worktrees,
             automations::delete_automation_run_dir,
             get_pr_status,
             refresh_pr_status,
@@ -1947,6 +2081,11 @@ pub fn run() {
             resolve_file_path,
             get_hook_port,
             get_agent_statuses,
+            get_agent_pane_statuses,
+            clear_agent_pane_status,
+            clear_agent_worktree_status,
+            interrupt_agent_turn,
+            get_subagents,
             watcher::watch_worktree,
             watcher::unwatch_worktree,
             file_io::read_file_with_revision,
@@ -2070,7 +2209,14 @@ mod tests {
         let wt = tmp.path().join("wt");
         git(
             &repo,
-            &["worktree", "add", "-q", "-b", "smoke-branch", wt.to_str().unwrap()],
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "smoke-branch",
+                wt.to_str().unwrap(),
+            ],
         );
 
         let repo_s = repo.to_str().unwrap().to_string();

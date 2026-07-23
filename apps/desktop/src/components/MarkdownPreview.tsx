@@ -186,7 +186,7 @@ export function MarkdownPreview({
 
   return (
     <div
-      className={`markdown-preview overflow-auto select-text ${className ?? ""}`}
+      className={`markdown-preview overflow-auto show-scrollbar select-text ${className ?? ""}`}
       // External links render as plain <a target="_blank"> in the shared
       // markdownComponents; intercept them here so http(s) open in the system
       // browser. Internal links stopPropagation before reaching this handler.
@@ -200,7 +200,10 @@ export function MarkdownPreview({
         }
       }}
     >
-      <article className="max-w-[70%] px-8 py-6">
+      {/* Cap the measure in `ch`, not a percentage of the pane: a percentage is
+          ~150ch maximized and ~30ch in a narrow split. `ch` tracks the user's
+          root font size, and `mx-auto` keeps the column centered at any width. */}
+      <article className="mx-auto w-full max-w-[72ch] px-8 py-6">
         {frontmatter && <FrontmatterBlock data={frontmatter} />}
         <MarkdownImageContext.Provider value={resolveImageSrc}>
           <MarkdownLinkContext.Provider value={handleLinkClick}>

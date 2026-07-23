@@ -70,13 +70,13 @@ beforeEach(() => {
 
 describe("moveWorkspaceTab", () => {
   test("demotes a simple top-level tab without changing its content identity", () => {
-    const primary = group("primary", groupTab("agent-session", { kind: "agent" }));
+    const primary = group("primary", groupTab("agent-session", { kind: "terminal", launch: "agent" }));
     const secondary = group(
       "secondary",
       groupTab("browser-session", { kind: "browser" }),
     );
     const owner = userTab("owner", split(primary, secondary));
-    const movedSession = groupTab("shell-session", { kind: "shell" }, "Terminal");
+    const movedSession = groupTab("shell-session", { kind: "terminal", launch: "shell" }, "Terminal");
     const simple = userTab("simple", group("simple-pane", movedSession));
     setTabs([owner, simple], owner.id, { tabHistory: [simple.id, "older"] });
 
@@ -104,7 +104,7 @@ describe("moveWorkspaceTab", () => {
   });
 
   test("promotes a secondary browser tab and collapses its empty group", () => {
-    const primary = group("primary", groupTab("shell-session", { kind: "shell" }));
+    const primary = group("primary", groupTab("shell-session", { kind: "terminal", launch: "shell" }));
     const browser = groupTab(
       "browser-session",
       { kind: "browser", url: "https://example.com" },
@@ -141,8 +141,8 @@ describe("moveWorkspaceTab", () => {
   });
 
   test("moves between secondary groups and collapses an emptied source", () => {
-    const primary = group("primary", groupTab("agent-session", { kind: "agent" }));
-    const movedSession = groupTab("shell-session", { kind: "shell" });
+    const primary = group("primary", groupTab("agent-session", { kind: "terminal", launch: "agent" }));
+    const movedSession = groupTab("shell-session", { kind: "terminal", launch: "shell" });
     const source = group("source", movedSession);
     const target = group("target", groupTab("browser-session", { kind: "browser" }));
     const owner = userTab("owner", split(primary, split(source, target)));
@@ -176,17 +176,17 @@ describe("moveWorkspaceTab", () => {
   test("rejects complex top-level tabs and invalid system sources as no-ops", () => {
     const targetPrimary = group(
       "target-primary",
-      groupTab("target-primary-tab", { kind: "agent" }),
+      groupTab("target-primary-tab", { kind: "terminal", launch: "agent" }),
     );
     const targetSecondary = group(
       "target-secondary",
-      groupTab("target-secondary-tab", { kind: "shell" }),
+      groupTab("target-secondary-tab", { kind: "terminal", launch: "shell" }),
     );
     const targetOwner = userTab("target-owner", split(targetPrimary, targetSecondary));
     const complex = userTab(
       "complex",
       split(
-        group("complex-a", groupTab("complex-a-tab", { kind: "shell" })),
+        group("complex-a", groupTab("complex-a-tab", { kind: "terminal", launch: "shell" })),
         group("complex-b", groupTab("complex-b-tab", { kind: "browser" })),
       ),
     );
@@ -220,13 +220,13 @@ describe("moveWorkspaceTab", () => {
   });
 
   test("splits a simple top-level tab onto a pane edge without changing content identity", () => {
-    const primary = group("primary", groupTab("agent-session", { kind: "agent" }));
+    const primary = group("primary", groupTab("agent-session", { kind: "terminal", launch: "agent" }));
     const secondary = group(
       "secondary",
       groupTab("browser-session", { kind: "browser" }),
     );
     const owner = userTab("owner", split(primary, secondary));
-    const movedSession = groupTab("shell-session", { kind: "shell" }, "Terminal");
+    const movedSession = groupTab("shell-session", { kind: "terminal", launch: "shell" }, "Terminal");
     const simple = userTab("simple", group("simple-pane", movedSession));
     setTabs([owner, simple], owner.id, { tabHistory: [simple.id] });
 
@@ -257,8 +257,8 @@ describe("moveWorkspaceTab", () => {
   });
 
   test("splits one local group tab onto its own pane edge and supports center drops", () => {
-    const primary = group("primary", groupTab("agent-session", { kind: "agent" }));
-    const shell = groupTab("shell-session", { kind: "shell" }, "Terminal");
+    const primary = group("primary", groupTab("agent-session", { kind: "terminal", launch: "agent" }));
+    const shell = groupTab("shell-session", { kind: "terminal", launch: "shell" }, "Terminal");
     const browser = groupTab("browser-session", { kind: "browser" }, "Browser");
     const secondary = {
       type: "group",
@@ -319,7 +319,7 @@ describe("moveWorkspaceTab", () => {
   });
 
   test("preserves the primary-pane strip invariant and rejects splitting an only tab onto itself", () => {
-    const primary = group("primary", groupTab("agent-session", { kind: "agent" }));
+    const primary = group("primary", groupTab("agent-session", { kind: "terminal", launch: "agent" }));
     const secondary = group(
       "secondary",
       groupTab("browser-session", { kind: "browser" }),
@@ -327,7 +327,7 @@ describe("moveWorkspaceTab", () => {
     const owner = userTab("owner", split(primary, secondary));
     const simple = userTab(
       "simple",
-      group("simple-pane", groupTab("shell-session", { kind: "shell" })),
+      group("simple-pane", groupTab("shell-session", { kind: "terminal", launch: "shell" })),
     );
     setTabs([owner, simple], owner.id);
     const before = useUIStore.getState().getWorktreeNavState(worktreePath);
@@ -369,7 +369,7 @@ describe("moveWorkspaceTab", () => {
 
 describe("addTabToAgentPrimaryPane", () => {
   test("adds a new terminal to the original Agent pane without replacing its split", () => {
-    const primary = group("tab-agent", groupTab("tab-agent", { kind: "agent" }));
+    const primary = group("tab-agent", groupTab("tab-agent", { kind: "terminal", launch: "agent" }));
     const secondary = group(
       "secondary",
       groupTab("browser-session", { kind: "browser" }),
@@ -379,7 +379,7 @@ describe("addTabToAgentPrimaryPane", () => {
       agentTabFocusedPaneId: primary.id,
     });
 
-    const created = addTabToAgentPrimaryPane(worktreePath, { kind: "shell" });
+    const created = addTabToAgentPrimaryPane(worktreePath, { kind: "terminal", launch: "shell" });
 
     const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
     const leaves = getLeaves(getEffectiveAgentTabSplitTree(nav.agentTabSplitTree));
@@ -398,8 +398,8 @@ describe("addTabToAgentPrimaryPane", () => {
       type: "group",
       id: "tab-agent",
       tabs: [
-        groupTab("tab-agent", { kind: "agent" }),
-        groupTab("local-shell", { kind: "shell" }),
+        groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+        groupTab("local-shell", { kind: "terminal", launch: "shell" }),
       ],
       activeTabId: "local-shell",
     };

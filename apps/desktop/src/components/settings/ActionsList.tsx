@@ -91,7 +91,7 @@ export function ActionsList({ actions, onChange }: ActionsListProps) {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-medium">Actions</h3>
-          <p className="text-md text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Named scripts surfaced in the worktree's run dropdown. Triggered by the
             play button or Cmd+Shift+R.
           </p>
@@ -99,14 +99,14 @@ export function ActionsList({ actions, onChange }: ActionsListProps) {
         <button
           type="button"
           onClick={addAction}
-          className="px-3 py-1.5 text-md font-medium rounded border border-border bg-background hover:bg-accent transition-colors"
+          className="px-3 py-1.5 text-sm font-medium rounded border border-border bg-background hover:bg-accent transition-colors"
         >
           Add action
         </button>
       </div>
 
       {actions.length === 0 ? (
-        <div className="p-4 rounded-lg border border-dashed border-border text-md text-muted-foreground text-center">
+        <div className="p-4 rounded-lg border border-dashed border-border text-sm text-muted-foreground text-center">
           No actions configured. Click <span className="font-medium">Add action</span> to create one.
         </div>
       ) : (

@@ -47,7 +47,11 @@ impl JiraTracker {
             .text()
             .map_err(|e| format!("Failed to read Jira response: {}", e))?;
         if !status.is_success() {
-            return Err(format!("Jira API returned status {}: {}", status, first_error(&text)));
+            return Err(format!(
+                "Jira API returned status {}: {}",
+                status,
+                first_error(&text)
+            ));
         }
         serde_json::from_str(&text).map_err(|e| format!("Failed to parse Jira response: {}", e))
     }
@@ -64,7 +68,11 @@ impl JiraTracker {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().unwrap_or_default();
-            return Err(format!("Jira API returned status {}: {}", status, first_error(&text)));
+            return Err(format!(
+                "Jira API returned status {}: {}",
+                status,
+                first_error(&text)
+            ));
         }
         Ok(())
     }
@@ -88,8 +96,16 @@ impl JiraTracker {
     }
 
     fn node_to_issue(&self, node: &Value) -> Issue {
-        let id = node.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let key = node.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = node
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let key = node
+            .get("key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let fields = node.get("fields");
         let title = fields
             .and_then(|f| f.get("summary"))
@@ -295,7 +311,10 @@ fn looks_like_issue_key(s: &str) -> bool {
     };
     !number.is_empty()
         && number.chars().all(|c| c.is_ascii_digit())
-        && project.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && project
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
         && project.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
@@ -552,7 +571,7 @@ mod tests {
         assert!(looks_like_issue_key("SBSTR-7"));
         assert!(looks_like_issue_key("sbstr-7")); // uppercased before the JQL
         assert!(looks_like_issue_key("RAC2-45")); // digits allowed in project key
-        // Free text, partial keys, and malformed keys fall through to text search.
+                                                  // Free text, partial keys, and malformed keys fall through to text search.
         assert!(!looks_like_issue_key("opname start"));
         assert!(!looks_like_issue_key("SBSTR-"));
         assert!(!looks_like_issue_key("SBSTR"));

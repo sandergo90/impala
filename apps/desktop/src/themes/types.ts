@@ -116,4 +116,9 @@ export interface ResolvedCSS {
   link: string;
   codeBackground: string;
   editorSelection: string;
+  /** Semantic status ramp, derived from the theme's terminal ANSI palette. */
+  success: string;
+  warning: string;
+  info: string;
+  danger: string;
 }

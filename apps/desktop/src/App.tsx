@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { invoke } from "@/lib/invoke";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Outlet, useRouter, useMatchRoute } from "@tanstack/react-router";
 import { useInvoke } from "./hooks/useInvoke";
 import { useAppHotkey } from "./hooks/useAppHotkey";
@@ -214,7 +215,10 @@ export function RootLayout() {
 
     if (!selectedWorktreePath) return;
     // ⌘D / ⇧⌘D stay the fast path and create a shell.
-    splitActiveTabPane(selectedWorktreePath, direction, { kind: "shell" });
+    splitActiveTabPane(selectedWorktreePath, direction, {
+      kind: "terminal",
+      launch: "shell",
+    });
   };
 
   const handleFocusAdjacentPane = (direction: 1 | -1) => {
@@ -348,12 +352,15 @@ export function RootLayout() {
     return (
       <div className="flex items-center justify-center h-screen bg-background text-foreground">
         <div className="text-center">
-          <h2 className="text-lg font-semibold mb-2">Git Not Found</h2>
+          <h1 className="text-lg font-semibold mb-2">Git Not Found</h1>
           <p className="text-muted-foreground">
-            Please install Git to use Impala.
-          </p>
-          <p className="text-muted-foreground text-md mt-2">
-            https://git-scm.com/download
+            Impala needs Git to read worktree changes.{" "}
+            <button
+              onClick={() => openUrl("https://git-scm.com/download")}
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Install Git from git-scm.com
+            </button>
           </p>
         </div>
       </div>

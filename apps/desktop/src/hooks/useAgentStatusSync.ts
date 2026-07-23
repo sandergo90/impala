@@ -39,7 +39,12 @@ export function useAgentStatusSync() {
   }, []);
 
   useEffect(() => {
-    invoke<Record<string, string>>("get_agent_statuses").then((statuses) => {
+    Promise.all([
+      invoke<Record<string, string>>("get_agent_statuses"),
+      invoke<
+        Array<{ worktree_path: string; pane_id: string; status: string }>
+      >("get_agent_pane_statuses"),
+    ]).then(([statuses, paneStatuses]) => {
       for (const [path, status] of Object.entries(statuses)) {
         if (isAgentStatus(status)) {
           useDataStore.getState().updateWorktreeDataState(path, {
@@ -47,13 +52,23 @@ export function useAgentStatusSync() {
           });
         }
       }
+      for (const { worktree_path, pane_id, status } of paneStatuses) {
+        if (status !== "working" && status !== "permission") continue;
+        const current =
+          useDataStore.getState().getWorktreeDataState(worktree_path);
+        useDataStore.getState().updateWorktreeDataState(worktree_path, {
+          agentPaneStatuses: {
+            ...current.agentPaneStatuses,
+            [pane_id]: status,
+          },
+        });
+      }
     });
   }, []);
 
   useEffect(() => {
-    const unlisten = listen<{ worktree_path: string; status: string }>(
-      "agent-status",
-      (event) => {
+    const unlisteners = Promise.all([
+      listen<{ worktree_path: string; status: string }>("agent-status", (event) => {
         const { worktree_path, status } = event.payload;
         if (!isAgentStatus(status)) return;
 
@@ -81,10 +96,26 @@ export function useAgentStatusSync() {
             .getState()
             .updateWorktreeDataState(worktree_path, updates);
         }
-      },
-    );
+      }),
+      listen<{
+        worktree_path: string;
+        pane_id: string;
+        status: string;
+      }>("agent-pane-status", (event) => {
+        const { worktree_path, pane_id, status } = event.payload;
+        if (!pane_id || !isAgentStatus(status)) return;
+        const current =
+          useDataStore.getState().getWorktreeDataState(worktree_path);
+        const next = { ...current.agentPaneStatuses };
+        if (status === "idle") delete next[pane_id];
+        else next[pane_id] = status;
+        useDataStore.getState().updateWorktreeDataState(worktree_path, {
+          agentPaneStatuses: next,
+        });
+      }),
+    ]);
     return () => {
-      unlisten.then((fn) => fn());
+      unlisteners.then((fns) => fns.forEach((fn) => fn()));
     };
   }, []);
 

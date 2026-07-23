@@ -1,10 +1,243 @@
-use serde::Serialize;
-use std::collections::HashMap;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Response, Server};
 
 pub struct AgentStatuses(pub Mutex<HashMap<String, String>>);
+
+pub struct AgentPaneStatuses {
+    panes: Mutex<HashMap<(String, String), String>>,
+    persist: bool,
+}
+
+fn runtime_state_path(file_name: &str) -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(".impala").join(file_name))
+}
+
+fn read_runtime_state<T: DeserializeOwned>(file_name: &str) -> Option<T> {
+    let path = runtime_state_path(file_name)?;
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn write_runtime_state<T: Serialize>(file_name: &str, value: &T) {
+    let Some(path) = runtime_state_path(file_name) else {
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let Ok(bytes) = serde_json::to_vec(value) else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let temporary = path.with_extension("tmp");
+    if std::fs::write(&temporary, bytes).is_ok() {
+        if std::fs::rename(&temporary, &path).is_err() {
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::rename(&temporary, &path);
+        }
+    }
+}
+
+impl AgentPaneStatuses {
+    pub fn load_persisted() -> Self {
+        let events: Vec<AgentPaneStatusEvent> =
+            read_runtime_state("agent-pane-statuses.json").unwrap_or_default();
+        Self {
+            panes: Mutex::new(
+                events
+                    .into_iter()
+                    .filter(|event| event.status != "idle")
+                    .map(|event| ((event.worktree_path, event.pane_id), event.status))
+                    .collect(),
+            ),
+            persist: true,
+        }
+    }
+
+    fn persist(&self, panes: &HashMap<(String, String), String>) {
+        if !self.persist {
+            return;
+        }
+        let events: Vec<_> = panes
+            .iter()
+            .map(|((worktree_path, pane_id), status)| AgentPaneStatusEvent {
+                worktree_path: worktree_path.clone(),
+                pane_id: pane_id.clone(),
+                status: status.clone(),
+            })
+            .collect();
+        write_runtime_state("agent-pane-statuses.json", &events);
+    }
+
+    fn aggregate(map: &HashMap<(String, String), String>, worktree_path: &str) -> String {
+        let statuses = map
+            .iter()
+            .filter(|((path, _), _)| path == worktree_path)
+            .map(|(_, status)| status.as_str());
+        if statuses.clone().any(|status| status == "permission") {
+            "permission".to_owned()
+        } else if statuses.clone().any(|status| status == "working") {
+            "working".to_owned()
+        } else {
+            "idle".to_owned()
+        }
+    }
+
+    pub fn observe(&self, worktree_path: &str, pane_id: &str, status: &str) -> String {
+        let Ok(mut panes) = self.panes.lock() else {
+            return status.to_owned();
+        };
+        let key = (worktree_path.to_owned(), pane_id.to_owned());
+        if status == "idle" {
+            panes.remove(&key);
+        } else {
+            panes.insert(key, status.to_owned());
+        }
+        let aggregate = Self::aggregate(&panes, worktree_path);
+        self.persist(&panes);
+        aggregate
+    }
+
+    pub fn interrupt(&self, worktree_path: &str, pane_id: &str) -> Option<String> {
+        self.clear(worktree_path, pane_id)
+    }
+
+    pub fn clear(&self, worktree_path: &str, pane_id: &str) -> Option<String> {
+        let Ok(mut panes) = self.panes.lock() else {
+            return None;
+        };
+        let key = (worktree_path.to_owned(), pane_id.to_owned());
+        panes.remove(&key)?;
+        let aggregate = Self::aggregate(&panes, worktree_path);
+        self.persist(&panes);
+        Some(aggregate)
+    }
+
+    pub fn clear_worktree(&self, worktree_path: &str) -> bool {
+        let Ok(mut panes) = self.panes.lock() else {
+            return false;
+        };
+        let previous_len = panes.len();
+        panes.retain(|(path, _), _| path != worktree_path);
+        if panes.len() == previous_len {
+            return false;
+        }
+        self.persist(&panes);
+        true
+    }
+
+    pub fn snapshot(&self) -> Vec<AgentPaneStatusEvent> {
+        let Ok(panes) = self.panes.lock() else {
+            return Vec::new();
+        };
+        panes
+            .iter()
+            .map(|((worktree_path, pane_id), status)| AgentPaneStatusEvent {
+                worktree_path: worktree_path.clone(),
+                pane_id: pane_id.clone(),
+                status: status.clone(),
+            })
+            .collect()
+    }
+
+    pub fn aggregate_snapshot(&self) -> HashMap<String, String> {
+        let Ok(panes) = self.panes.lock() else {
+            return HashMap::new();
+        };
+        let worktrees: HashSet<_> = panes.keys().map(|(path, _)| path.clone()).collect();
+        worktrees
+            .into_iter()
+            .map(|path| {
+                let status = Self::aggregate(&panes, &path);
+                (path, status)
+            })
+            .collect()
+    }
+}
+
+impl Default for AgentPaneStatuses {
+    fn default() -> Self {
+        Self {
+            panes: Mutex::new(HashMap::new()),
+            persist: false,
+        }
+    }
+}
+
+pub struct InterruptedAgentTurns {
+    panes: Mutex<HashSet<(String, String)>>,
+    persist: bool,
+}
+
+impl InterruptedAgentTurns {
+    pub fn load_persisted() -> Self {
+        let keys: Vec<AgentPaneKey> =
+            read_runtime_state("interrupted-agent-turns.json").unwrap_or_default();
+        Self {
+            panes: Mutex::new(
+                keys.into_iter()
+                    .map(|key| (key.worktree_path, key.pane_id))
+                    .collect(),
+            ),
+            persist: true,
+        }
+    }
+
+    fn persist(&self, panes: &HashSet<(String, String)>) {
+        if !self.persist {
+            return;
+        }
+        let keys: Vec<_> = panes
+            .iter()
+            .map(|(worktree_path, pane_id)| AgentPaneKey {
+                worktree_path: worktree_path.clone(),
+                pane_id: pane_id.clone(),
+            })
+            .collect();
+        write_runtime_state("interrupted-agent-turns.json", &keys);
+    }
+
+    pub fn mark(&self, worktree_path: &str, pane_id: &str) {
+        if let Ok(mut panes) = self.panes.lock() {
+            panes.insert((worktree_path.to_owned(), pane_id.to_owned()));
+            self.persist(&panes);
+        }
+    }
+
+    fn suppresses(&self, worktree_path: &str, pane_id: &str, event_type: &str) -> bool {
+        let Ok(mut panes) = self.panes.lock() else {
+            return false;
+        };
+        let key = (worktree_path.to_owned(), pane_id.to_owned());
+        if matches!(event_type, "SessionStart" | "UserPromptSubmit") {
+            panes.remove(&key);
+            self.persist(&panes);
+            return false;
+        }
+        panes.contains(&key)
+    }
+}
+
+impl Default for InterruptedAgentTurns {
+    fn default() -> Self {
+        Self {
+            panes: Mutex::new(HashSet::new()),
+            persist: false,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct AgentPaneKey {
+    worktree_path: String,
+    pane_id: String,
+}
 
 /// Per-worktree git tree sha captured when the user submits a prompt. Powers
 /// the "Last turn" diff view. Persists in memory until the next prompt
@@ -38,6 +271,155 @@ pub struct AgentStatusEvent {
     pub status: String,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+pub struct AgentPaneStatusEvent {
+    pub worktree_path: String,
+    pub pane_id: String,
+    pub status: String,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+struct AutomationTurnActivity {
+    turn_id: Option<String>,
+    active_tool_ids: HashSet<String>,
+    stop_seen: bool,
+}
+
+/// A Stop hook means the lead turn stopped, but Codex may still have yielded
+/// shell tools running in the background. Keep the run active until every
+/// PreToolUse has a matching PostToolUse/PostToolUseFailure.
+#[derive(Default)]
+struct AutomationCompletionTracker {
+    turns: HashMap<(String, String), AutomationTurnActivity>,
+    persist: bool,
+}
+
+impl AutomationCompletionTracker {
+    fn load_persisted() -> Self {
+        let turns: Vec<PersistedAutomationTurn> =
+            read_runtime_state("automation-turns.json").unwrap_or_default();
+        Self {
+            turns: turns
+                .into_iter()
+                .map(|turn| ((turn.worktree_path, turn.pane_id), turn.activity))
+                .collect(),
+            persist: true,
+        }
+    }
+
+    fn persist(&self) {
+        if !self.persist {
+            return;
+        }
+        let turns: Vec<_> = self
+            .turns
+            .iter()
+            .map(
+                |((worktree_path, pane_id), activity)| PersistedAutomationTurn {
+                    worktree_path: worktree_path.clone(),
+                    pane_id: pane_id.clone(),
+                    activity: activity.clone(),
+                },
+            )
+            .collect();
+        write_runtime_state("automation-turns.json", &turns);
+    }
+
+    fn observe(
+        &mut self,
+        worktree_path: &str,
+        pane_id: &str,
+        event_type: &str,
+        payload: &str,
+    ) -> bool {
+        let key = (worktree_path.to_owned(), pane_id.to_owned());
+        let payload: serde_json::Value =
+            serde_json::from_str(payload).unwrap_or(serde_json::Value::Null);
+        let turn_id = payload
+            .get("turn_id")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned);
+        let tool_use_id = payload
+            .get("tool_use_id")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned);
+
+        let should_complete = match event_type {
+            "SessionStart" => {
+                self.turns.remove(&key);
+                false
+            }
+            "UserPromptSubmit" => {
+                self.turns.insert(
+                    key,
+                    AutomationTurnActivity {
+                        turn_id,
+                        ..Default::default()
+                    },
+                );
+                false
+            }
+            "PreToolUse" => {
+                let activity = self.turns.entry(key).or_default();
+                if activity.turn_id.is_none() {
+                    activity.turn_id = turn_id;
+                }
+                if let Some(tool_use_id) = tool_use_id {
+                    activity.active_tool_ids.insert(tool_use_id);
+                }
+                false
+            }
+            "PostToolUse" | "PostToolUseFailure" => {
+                let Some(activity) = self.turns.get_mut(&key) else {
+                    return false;
+                };
+                if let Some(tool_use_id) = tool_use_id {
+                    activity.active_tool_ids.remove(&tool_use_id);
+                }
+                let should_complete = activity.stop_seen && activity.active_tool_ids.is_empty();
+                if should_complete {
+                    self.turns.remove(&key);
+                }
+                should_complete
+            }
+            "Stop" => {
+                let Some(activity) = self.turns.get_mut(&key) else {
+                    // After a hook-server restart we cannot prove that an
+                    // already-running turn has no background tools. Keep its
+                    // automation launched instead of reporting false success.
+                    return false;
+                };
+                if activity.turn_id.is_some() && turn_id.is_some() && activity.turn_id != turn_id {
+                    return false;
+                }
+                activity.stop_seen = true;
+                let should_complete = activity.active_tool_ids.is_empty();
+                if should_complete {
+                    self.turns.remove(&key);
+                }
+                should_complete
+            }
+            _ => false,
+        };
+        self.persist();
+        should_complete
+    }
+
+    fn has_active_tools(&self, worktree_path: &str, pane_id: &str) -> bool {
+        self.turns
+            .get(&(worktree_path.to_owned(), pane_id.to_owned()))
+            .map(|activity| !activity.active_tool_ids.is_empty())
+            .unwrap_or(false)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct PersistedAutomationTurn {
+    worktree_path: String,
+    pane_id: String,
+    activity: AutomationTurnActivity,
+}
+
 #[derive(Clone, Serialize)]
 pub struct LastTurnSnapshotEvent {
     pub worktree_path: String,
@@ -59,7 +441,7 @@ pub fn hook_command_public(event_type: &str) -> String {
 /// sure neither sees the HTTP response body.
 fn hook_command(event_type: &str) -> String {
     format!(
-        "cat >/dev/null 2>&1; [ -n \"$IMPALA_WORKTREE_PATH\" ] && IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null) && [ -n \"$IMPALA_HOOK_PORT\" ] && curl -sG \"http://127.0.0.1:${{IMPALA_HOOK_PORT}}/hook\" --data-urlencode \"event_type={}\" --data-urlencode \"worktree_path=${{IMPALA_WORKTREE_PATH}}\" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 || true",
+        "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${{IMPALA_HOOK_PORT}}/hook\" --url-query \"event_type={}\" --url-query \"worktree_path=${{IMPALA_WORKTREE_PATH}}\" --url-query \"pane_id=${{IMPALA_PANE_ID}}\" --url-query \"agent_provider=${{IMPALA_AGENT_PROVIDER}}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
         event_type
     )
 }
@@ -301,6 +683,42 @@ fn apply_caffeinate(caffeinators: &Caffeinators, worktree_path: &str, status: &s
 
 #[cfg(not(target_os = "macos"))]
 fn apply_caffeinate(_caffeinators: &Caffeinators, _worktree_path: &str, _status: &str) {}
+
+pub fn publish_agent_status(
+    app_handle: &AppHandle,
+    statuses: &AgentStatuses,
+    caffeinators: &Caffeinators,
+    worktree_path: &str,
+    status: &str,
+) {
+    if let Ok(mut map) = statuses.0.lock() {
+        map.insert(worktree_path.to_owned(), status.to_owned());
+    }
+    apply_caffeinate(caffeinators, worktree_path, status);
+    let _ = app_handle.emit(
+        "agent-status",
+        AgentStatusEvent {
+            worktree_path: worktree_path.to_owned(),
+            status: status.to_owned(),
+        },
+    );
+}
+
+pub fn publish_agent_pane_event(
+    app_handle: &AppHandle,
+    worktree_path: &str,
+    pane_id: &str,
+    status: &str,
+) {
+    let _ = app_handle.emit(
+        "agent-pane-status",
+        AgentPaneStatusEvent {
+            worktree_path: worktree_path.to_owned(),
+            pane_id: pane_id.to_owned(),
+            status: status.to_owned(),
+        },
+    );
+}
 
 /// Dispatch a /browser/* request. Every response is a JSON object with an
 /// `ok` flag; errors carry `error`.
@@ -579,8 +997,11 @@ fn handle_agent_request(
 pub fn start(
     app_handle: AppHandle,
     statuses: Arc<AgentStatuses>,
+    pane_statuses: Arc<AgentPaneStatuses>,
     snapshots: Arc<LastTurnSnapshots>,
     caffeinators: Arc<Caffeinators>,
+    interrupted_turns: Arc<InterruptedAgentTurns>,
+    subagents: Arc<crate::subagents::SubagentRegistry>,
 ) -> u16 {
     let server = Arc::new(Server::http("127.0.0.1:0").expect("Failed to start hook server"));
     let port = server.server_addr().to_ip().unwrap().port();
@@ -594,7 +1015,8 @@ pub fn start(
     }
 
     std::thread::spawn(move || {
-        for request in server.incoming_requests() {
+        let mut automation_completion = AutomationCompletionTracker::load_persisted();
+        for mut request in server.incoming_requests() {
             let url = request.url().to_string();
             let path = url.splitn(2, '?').next().unwrap_or("").to_string();
 
@@ -648,18 +1070,65 @@ pub fn start(
 
             let event_type = params.get("event_type").map(|s| s.as_str()).unwrap_or("");
             let worktree_path = params.get("worktree_path").cloned().unwrap_or_default();
+            let pane_id = params
+                .get("pane_id")
+                .filter(|value| !value.is_empty())
+                .cloned()
+                .unwrap_or_else(|| "tab-agent".to_owned());
+            let provider = params
+                .get("agent_provider")
+                .map(String::as_str)
+                .unwrap_or_default();
+            let mut hook_payload = String::new();
+            let _ = request.as_reader().read_to_string(&mut hook_payload);
 
-            let status = match event_type {
-                "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" => "working",
-                "Stop" => "idle",
-                "PermissionRequest" => "permission",
-                _ => "",
+            subagents.ingest_hook(
+                &app_handle,
+                &worktree_path,
+                &pane_id,
+                provider,
+                event_type,
+                &hook_payload,
+            );
+
+            let suppress_interrupted_event =
+                interrupted_turns.suppresses(&worktree_path, &pane_id, event_type);
+            let automation_should_complete = if worktree_path.is_empty()
+                || pane_id != "tab-agent"
+                || suppress_interrupted_event
+            {
+                false
+            } else {
+                automation_completion.observe(&worktree_path, &pane_id, event_type, &hook_payload)
+            };
+            let status = if suppress_interrupted_event {
+                ""
+            } else {
+                match event_type {
+                    "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => {
+                        if automation_should_complete {
+                            "idle"
+                        } else {
+                            "working"
+                        }
+                    }
+                    "Stop" => {
+                        if automation_completion.has_active_tools(&worktree_path, &pane_id) {
+                            "working"
+                        } else {
+                            "idle"
+                        }
+                    }
+                    "PermissionRequest" => "permission",
+                    _ => "",
+                }
             };
 
-            // The agent finishing a turn completes any launched automation
-            // run in that worktree. Emitted before agent-status so the
-            // frontend can specialize the completion notification.
-            if event_type == "Stop" && !worktree_path.is_empty() {
+            // A stopped lead turn completes its launched automation only
+            // after any yielded background tools have also finished. Emitted
+            // before agent-status so the frontend can specialize the
+            // completion notification.
+            if automation_should_complete && !worktree_path.is_empty() {
                 use tauri::Manager;
                 let state = app_handle.state::<crate::DbState>();
                 let completed_name = state
@@ -683,16 +1152,14 @@ pub fn start(
             }
 
             if !status.is_empty() && !worktree_path.is_empty() {
-                if let Ok(mut map) = statuses.0.lock() {
-                    map.insert(worktree_path.clone(), status.to_string());
-                }
-                apply_caffeinate(&caffeinators, &worktree_path, status);
-                let _ = app_handle.emit(
-                    "agent-status",
-                    AgentStatusEvent {
-                        worktree_path: worktree_path.clone(),
-                        status: status.to_string(),
-                    },
+                let aggregate_status = pane_statuses.observe(&worktree_path, &pane_id, status);
+                publish_agent_pane_event(&app_handle, &worktree_path, &pane_id, status);
+                publish_agent_status(
+                    &app_handle,
+                    &statuses,
+                    &caffeinators,
+                    &worktree_path,
+                    &aggregate_status,
                 );
             }
 
@@ -726,4 +1193,256 @@ pub fn start(
     });
 
     port
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns};
+
+    #[test]
+    fn stop_waits_for_background_tools_before_completing_an_automation_turn() {
+        let mut tracker = AutomationCompletionTracker::default();
+        let worktree = "/worktrees/automation";
+        let pane = "tab-agent";
+
+        assert!(!tracker.observe(
+            worktree,
+            pane,
+            "UserPromptSubmit",
+            r#"{"turn_id":"turn-1"}"#,
+        ));
+        assert!(!tracker.observe(
+            worktree,
+            pane,
+            "PreToolUse",
+            r#"{"turn_id":"turn-1","tool_use_id":"tool-1"}"#,
+        ));
+
+        // Codex can stop the lead turn while a yielded exec is still running.
+        assert!(!tracker.observe(worktree, pane, "Stop", r#"{"turn_id":"turn-1"}"#));
+
+        // Completion becomes eligible only when the outstanding tool finishes.
+        assert!(tracker.observe(
+            worktree,
+            pane,
+            "PostToolUse",
+            r#"{"turn_id":"turn-1","tool_use_id":"tool-1"}"#,
+        ));
+    }
+
+    #[test]
+    fn stop_completes_immediately_when_the_turn_has_no_active_tools() {
+        let mut tracker = AutomationCompletionTracker::default();
+        let worktree = "/worktrees/automation";
+        let pane = "tab-agent";
+
+        tracker.observe(
+            worktree,
+            pane,
+            "UserPromptSubmit",
+            r#"{"turn_id":"turn-1"}"#,
+        );
+
+        assert!(tracker.observe(worktree, pane, "Stop", r#"{"turn_id":"turn-1"}"#));
+        assert!(!tracker.has_active_tools(worktree, pane));
+    }
+
+    #[test]
+    fn background_completion_waits_for_every_active_tool() {
+        let mut tracker = AutomationCompletionTracker::default();
+        let worktree = "/worktrees/automation";
+        let pane = "tab-agent";
+
+        tracker.observe(
+            worktree,
+            pane,
+            "UserPromptSubmit",
+            r#"{"turn_id":"turn-1"}"#,
+        );
+        tracker.observe(
+            worktree,
+            pane,
+            "PreToolUse",
+            r#"{"turn_id":"turn-1","tool_use_id":"tool-1"}"#,
+        );
+        tracker.observe(
+            worktree,
+            pane,
+            "PreToolUse",
+            r#"{"turn_id":"turn-1","tool_use_id":"tool-2"}"#,
+        );
+        assert!(!tracker.observe(worktree, pane, "Stop", r#"{"turn_id":"turn-1"}"#));
+        assert!(!tracker.observe(
+            worktree,
+            pane,
+            "PostToolUse",
+            r#"{"turn_id":"turn-1","tool_use_id":"tool-1"}"#,
+        ));
+        assert!(tracker.has_active_tools(worktree, pane));
+        assert!(tracker.observe(
+            worktree,
+            pane,
+            "PostToolUseFailure",
+            r#"{"turn_id":"turn-1","tool_use_id":"tool-2"}"#,
+        ));
+    }
+
+    #[test]
+    fn stale_stop_cannot_complete_a_newer_turn() {
+        let mut tracker = AutomationCompletionTracker::default();
+        let worktree = "/worktrees/automation";
+        let pane = "tab-agent";
+
+        tracker.observe(
+            worktree,
+            pane,
+            "UserPromptSubmit",
+            r#"{"turn_id":"turn-2"}"#,
+        );
+
+        assert!(!tracker.observe(worktree, pane, "Stop", r#"{"turn_id":"turn-1"}"#));
+    }
+
+    #[test]
+    fn an_unobserved_stop_cannot_prove_automation_completion() {
+        let mut tracker = AutomationCompletionTracker::default();
+
+        assert!(!tracker.observe(
+            "/worktrees/restarted-automation",
+            "tab-agent",
+            "Stop",
+            r#"{"turn_id":"turn-before-restart"}"#,
+        ));
+    }
+
+    #[test]
+    fn automation_completion_activity_is_isolated_by_pane() {
+        let mut tracker = AutomationCompletionTracker::default();
+        let worktree = "/worktrees/automation";
+
+        tracker.observe(
+            worktree,
+            "tab-agent",
+            "UserPromptSubmit",
+            r#"{"turn_id":"automation"}"#,
+        );
+        tracker.observe(
+            worktree,
+            "secondary-agent",
+            "UserPromptSubmit",
+            r#"{"turn_id":"manual"}"#,
+        );
+        tracker.observe(
+            worktree,
+            "tab-agent",
+            "PreToolUse",
+            r#"{"turn_id":"automation","tool_use_id":"tool-1"}"#,
+        );
+
+        assert!(tracker.observe(
+            worktree,
+            "secondary-agent",
+            "Stop",
+            r#"{"turn_id":"manual"}"#,
+        ));
+        assert!(!tracker.observe(worktree, "tab-agent", "Stop", r#"{"turn_id":"automation"}"#,));
+        assert!(tracker.observe(
+            worktree,
+            "tab-agent",
+            "PostToolUse",
+            r#"{"turn_id":"automation","tool_use_id":"tool-1"}"#,
+        ));
+    }
+
+    #[test]
+    fn a_child_turn_can_finish_its_background_tool_after_the_lead_stops() {
+        let mut tracker = AutomationCompletionTracker::default();
+        let worktree = "/worktrees/automation";
+        let pane = "tab-agent";
+
+        tracker.observe(worktree, pane, "UserPromptSubmit", r#"{"turn_id":"lead"}"#);
+        tracker.observe(
+            worktree,
+            pane,
+            "PreToolUse",
+            r#"{"turn_id":"child","tool_use_id":"tool-1"}"#,
+        );
+        assert!(!tracker.observe(worktree, pane, "Stop", r#"{"turn_id":"lead"}"#));
+        assert!(tracker.observe(
+            worktree,
+            pane,
+            "PostToolUse",
+            r#"{"turn_id":"child","tool_use_id":"tool-1"}"#,
+        ));
+    }
+
+    #[test]
+    fn late_hooks_stay_suppressed_until_a_new_turn_starts() {
+        let interrupted = InterruptedAgentTurns::default();
+        let worktree = "/worktrees/interrupted";
+        let pane = "pane-1";
+
+        interrupted.mark(worktree, pane);
+        assert!(interrupted.suppresses(worktree, pane, "PostToolUseFailure"));
+        assert!(interrupted.suppresses(worktree, pane, "Stop"));
+        assert!(!interrupted.suppresses(worktree, pane, "UserPromptSubmit"));
+        assert!(!interrupted.suppresses(worktree, pane, "PostToolUse"));
+    }
+
+    #[test]
+    fn interrupted_turn_suppression_is_scoped_to_one_pane() {
+        let interrupted = InterruptedAgentTurns::default();
+        let worktree = "/worktrees/interrupted";
+
+        interrupted.mark(worktree, "pane-1");
+
+        assert!(interrupted.suppresses(worktree, "pane-1", "Stop"));
+        assert!(!interrupted.suppresses(worktree, "pane-2", "Stop"));
+    }
+
+    #[test]
+    fn pane_statuses_keep_the_worktree_active_until_every_agent_is_idle() {
+        let panes = AgentPaneStatuses::default();
+        let worktree = "/worktrees/multiple-agents";
+
+        assert_eq!(panes.observe(worktree, "pane-1", "working"), "working");
+        assert_eq!(panes.observe(worktree, "pane-2", "working"), "working");
+        assert_eq!(
+            panes.interrupt(worktree, "pane-1"),
+            Some("working".to_owned())
+        );
+        assert_eq!(panes.interrupt(worktree, "pane-2"), Some("idle".to_owned()));
+    }
+
+    #[test]
+    fn shell_interrupts_do_not_change_agent_lifecycle() {
+        let panes = AgentPaneStatuses::default();
+
+        assert_eq!(panes.interrupt("/worktrees/shell", "terminal-pane"), None);
+    }
+
+    #[test]
+    fn clearing_a_worktree_drops_every_persisted_pane_activity() {
+        let panes = AgentPaneStatuses::default();
+        let worktree = "/worktrees/removed";
+        panes.observe(worktree, "pane-1", "working");
+        panes.observe(worktree, "pane-2", "permission");
+
+        assert!(panes.clear_worktree(worktree));
+        assert!(panes.snapshot().is_empty());
+        assert!(!panes.clear_worktree(worktree));
+    }
+
+    #[test]
+    fn permission_has_priority_in_the_worktree_aggregate() {
+        let panes = AgentPaneStatuses::default();
+        let worktree = "/worktrees/permissions";
+
+        panes.observe(worktree, "pane-1", "working");
+        assert_eq!(
+            panes.observe(worktree, "pane-2", "permission"),
+            "permission"
+        );
+        assert_eq!(panes.observe(worktree, "pane-2", "idle"), "working");
+    }
 }

@@ -38,7 +38,7 @@ function DiscardButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onClick(); }}
-      className="text-muted-foreground/60 hover:text-red-500 transition-colors shrink-0"
+      className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
       title="Discard changes"
     >
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -53,7 +53,7 @@ function OpenFileButton({ onClick }: { onClick: (e: React.MouseEvent) => void })
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onClick(e); }}
-      className="text-muted-foreground/60 hover:text-foreground transition-colors shrink-0"
+      className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
       title="Click to open in Impala. Cmd+click to open in your IDE."
     >
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -84,7 +84,11 @@ function ChangeTypeIcon({ type }: { type: string }) {
   // modified, rename, etc.
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" className="shrink-0">
-      <circle cx="8" cy="8" r="4" fill="none" stroke="var(--diffs-modified-base, #d29922)" strokeWidth="1.5" />
+      {/* Pierre defines --diffs-modified-base on its own shadow host and we never
+          override it, so it always painted Pierre's blue and never the theme.
+          --info is the same terminal-derived color the file tree uses for
+          modified files. */}
+      <circle cx="8" cy="8" r="4" fill="none" stroke="var(--info)" strokeWidth="1.5" />
     </svg>
   );
 }
@@ -111,18 +115,18 @@ function ViewedButton({ isViewed, onClick }: { isViewed: boolean; onClick: (e: R
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 text-md px-2 py-0.5 rounded border transition-colors ${
+      className={`flex items-center gap-1.5 text-sm px-2 py-0.5 rounded border transition-colors ${
         isViewed
-          ? "border-blue-500/60 text-blue-400"
+          ? "border-info/60 text-info"
           : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
       }`}
     >
       <span className={`w-3.5 h-3.5 rounded flex items-center justify-center ${
-        isViewed ? "bg-blue-500" : "border border-muted-foreground"
+        isViewed ? "bg-info" : "border border-muted-foreground"
       }`}>
         {isViewed && (
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-            <path d="M2 5L4 7L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M2 5L4 7L8 3" stroke="var(--background)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         )}
       </span>
@@ -385,13 +389,13 @@ export function DiffView() {
       const a = meta.annotation;
       if (a.resolved && !showResolved) return null;
       return (
-        <div className="px-3 py-1.5 border-t border-border bg-card/60 text-md">
+        <div className="px-3 py-1.5 border-t border-border bg-card/60 text-sm">
           <span className="font-mono text-muted-foreground mr-2">
             {a.side === "left" ? "L" : "R"}:{a.line_number}
           </span>
           <span className="text-foreground">{a.body}</span>
           {a.resolved && (
-            <span className="ml-2 text-green-400 text-md">(resolved)</span>
+            <span className="ml-2 text-success text-sm">(resolved)</span>
           )}
         </div>
       );
@@ -560,7 +564,7 @@ export function DiffView() {
 
   const toolbar = (
     <div className="flex items-center gap-3 px-3 py-2 border-b shrink-0">
-      <div className="flex items-center gap-1 text-md">
+      <div className="flex items-center gap-1 text-sm">
         <button
           onClick={() => useUIStore.getState().setDiffStyle("split")}
           className={`px-2 py-0.5 rounded ${
@@ -594,7 +598,7 @@ export function DiffView() {
         </button>
       </div>
       <div className="flex-1" />
-      <div className="flex items-center gap-1 text-md">
+      <div className="flex items-center gap-1 text-sm">
         {showAllFiles && changedFiles.length > 0 && (
           <>
             <span className="mx-1 text-border">|</span>
@@ -603,7 +607,7 @@ export function DiffView() {
             </span>
             <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden">
               <div
-                className="h-full rounded-full bg-green-500 transition-all duration-300"
+                className="h-full rounded-full bg-info transition-all duration-300"
                 style={{ width: `${changedFiles.length > 0 ? (viewedFiles.size / changedFiles.length) * 100 : 0}%` }}
               />
             </div>
@@ -689,11 +693,19 @@ export function DiffView() {
         style={{ gap: 10 }}
         onClick={() => toggleCollapse(filePath)}
       >
-        <span className="text-md text-muted-foreground shrink-0">
+        {/* Real button so collapse/expand is reachable by keyboard; the row's
+            own onClick stays as a redundant mouse affordance. */}
+        <button
+          type="button"
+          aria-expanded={!isCollapsed}
+          aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${fileDiff.name}`}
+          onClick={(e) => { e.stopPropagation(); toggleCollapse(filePath); }}
+          className="text-xs text-muted-foreground shrink-0"
+        >
           {isCollapsed ? "▶" : "▼"}
-        </span>
+        </button>
         <ChangeTypeIcon type={fileDiff.type} />
-        <span className="truncate min-w-0 text-start text-[13px]" style={{ direction: "rtl" }}>
+        <span className="truncate min-w-0 text-start text-sm" style={{ direction: "rtl" }}>
           <bdi>
             <span className="text-muted-foreground">{dir}</span>
             <span style={{ color: nameColor, fontWeight: 500 }}>{basename}</span>
@@ -714,12 +726,12 @@ export function DiffView() {
         )}
         <div className="flex-1" />
         {isGenerated && (
-          <span className="text-md px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+          <span className="text-sm px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
             Generated
           </span>
         )}
         <ChangeBar additions={additions} deletions={deletions} />
-        <span className="text-muted-foreground text-[11px] font-mono shrink-0">
+        <span className="text-muted-foreground text-xs font-mono shrink-0">
           {deletions > 0 && <span style={{ color: "var(--diffs-deletion-base, #f85149)" }}>-{deletions}</span>}
           {deletions > 0 && additions > 0 && " "}
           {additions > 0 && <span style={{ color: "var(--diffs-addition-base, #3fb950)" }}>+{additions}</span>}
@@ -770,7 +782,7 @@ export function DiffView() {
             {viewMode === 'uncommitted' && (
               <DiscardButton onClick={() => requestDiscard(revealPath)} />
             )}
-            <span className="text-md px-1.5 py-0.5 rounded bg-muted">
+            <span className="text-sm px-1.5 py-0.5 rounded bg-muted">
               {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
             </span>
             <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
@@ -800,20 +812,20 @@ export function DiffView() {
           {toolbar}
           <div className="flex-1 flex items-center justify-center p-8">
             <div className="flex flex-col items-center gap-3 text-center max-w-sm">
-              <div className="w-14 h-14 rounded-full bg-green-500/10 flex items-center justify-center">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-500">
+              <div className="w-14 h-14 rounded-full bg-success/10 flex items-center justify-center">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-success">
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
               </div>
               <div className="space-y-0.5">
                 <div className="text-sm font-medium text-foreground">All caught up</div>
-                <div className="text-md text-muted-foreground">
+                <div className="text-sm text-muted-foreground">
                   {changedFiles.length} {changedFiles.length === 1 ? "file" : "files"} marked as viewed
                 </div>
               </div>
               <button
                 onClick={() => setHideViewed(false)}
-                className="mt-1 px-3 py-1 text-md rounded border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+                className="mt-1 px-3 py-1 text-sm rounded border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
               >
                 Show viewed files
               </button>

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/shallow";
 import { invoke } from "@/lib/invoke";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -16,7 +16,12 @@ import {
   selectProject as sharedSelectProject,
   activateGeneralTerminal,
 } from "../hooks/useWorktreeActions";
-import type { Worktree, Project, WorktreeIssue, PrStatus } from "../types";
+import type {
+  Worktree,
+  Project,
+  WorktreeIssue,
+  PrStatus,
+} from "../types";
 import { usePrStatusSync } from "../hooks/usePrStatusSync";
 import { PrBadge } from "./PrBadge";
 import { useAppHotkey } from "../hooks/useAppHotkey";
@@ -35,10 +40,7 @@ import {
 import { ContextMenu } from "@/components/ui/context-menu";
 
 import { cn, projectColor } from "../lib/utils";
-import {
-  AUTOMATIONS_PROJECT,
-  isAutomationsProject,
-} from "../lib/automations-project";
+import { isAutomationsProject } from "../lib/automations-project";
 import { encodePtyInput } from "../lib/encode-pty";
 import {
   RUN_PANE_ID,
@@ -82,7 +84,7 @@ function BranchIcon({ active }: { active: boolean }) {
       height="14"
       viewBox="0 0 16 16"
       fill="none"
-      className={`shrink-0 ${active ? "text-primary" : "text-muted-foreground/20"}`}
+      className={`shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`}
     >
       <circle
         cx="4"
@@ -144,10 +146,13 @@ function SidebarNavButton({
       aria-label={compact ? label : undefined}
       title={compact ? label : undefined}
       className={cn(
-        "relative flex items-center rounded-md text-[13px] font-medium outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring",
+        "relative flex items-center rounded-md text-sm font-medium outline-none transition-colors duration-150",
         compact ? "size-8 justify-center" : "h-9 w-full gap-2 px-2.5",
+        // Anchored elements get a border, never a shadow. The ring also keeps the
+        // active state visible in light themes, where `accent` and `sidebar`
+        // resolve close enough that the tonal fill alone reads as nothing.
         active
-          ? "bg-accent text-foreground shadow-sm"
+          ? "bg-accent text-foreground ring-1 ring-border"
           : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
       )}
     >
@@ -158,7 +163,7 @@ function SidebarNavButton({
           <span
             className={cn(
               "absolute right-1 top-1 size-1.5 rounded-full",
-              badge.failed ? "bg-red-500" : "bg-primary",
+              badge.failed ? "bg-danger" : "bg-primary",
             )}
             aria-label={`${badge.count} automation runs to review`}
           />
@@ -167,7 +172,7 @@ function SidebarNavButton({
             className={cn(
               "ml-auto min-w-5 rounded-full px-1.5 text-center text-[11px] leading-5",
               badge.failed
-                ? "bg-red-500/15 text-red-500"
+                ? "bg-accent/60 text-danger"
                 : "bg-primary/15 text-primary",
             )}
             title={`${badge.count} finished automation run${badge.count === 1 ? "" : "s"} to review`}
@@ -186,6 +191,9 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   });
   const automationBadge = useAutomationBadge();
   const selectedProject = useUIStore((s) => s.selectedProject);
+  const visibleProject = isAutomationsProject(selectedProject)
+    ? null
+    : selectedProject;
   const projectIcons = useDataStore((s) => s.projectIcons);
   const worktrees = useFilteredWorktrees();
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -220,8 +228,8 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
     }),
   );
 
-  const iconUrl = selectedProject
-    ? projectIcons[selectedProject.path]
+  const iconUrl = visibleProject
+    ? projectIcons[visibleProject.path]
     : undefined;
 
   return (
@@ -250,16 +258,16 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
       </div>
 
       {/* Project badge */}
-      {selectedProject ? (
+      {visibleProject ? (
         iconUrl ? (
           <button
             onClick={onExpand}
             className="w-7 h-7 rounded-[6px] overflow-hidden shrink-0 mb-2 hover:opacity-80 transition-opacity"
-            title={selectedProject.name}
+            title={visibleProject.name}
           >
             <img
               src={iconUrl}
-              alt={`${selectedProject.name} icon`}
+              alt={`${visibleProject.name} icon`}
               className="w-full h-full object-cover"
             />
           </button>
@@ -267,10 +275,10 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
           <button
             onClick={onExpand}
             className="w-7 h-7 rounded-[6px] flex items-center justify-center text-white text-sm font-bold shrink-0 mb-2 hover:opacity-80 transition-opacity"
-            style={{ background: projectColor(selectedProject.name) }}
-            title={selectedProject.name}
+            style={{ background: projectColor(visibleProject.name) }}
+            title={visibleProject.name}
           >
-            {selectedProject.name[0]?.toUpperCase()}
+            {visibleProject.name[0]?.toUpperCase()}
           </button>
         )
       ) : (
@@ -302,24 +310,30 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
             <button
               key={wt.path}
               onClick={() => sharedSelectWorktree(wt)}
+              aria-pressed={isSelected}
+              // The status-dot branches below replace BranchIcon, which is the
+              // only non-color selection cue. The inset ring survives them, so
+              // the active worktree stays marked in every state.
               className={`relative w-7 h-7 rounded-[5px] flex items-center justify-center transition-colors ${
-                isSelected ? "bg-primary/15" : "hover:bg-accent"
+                isSelected
+                  ? "bg-primary/15 ring-1 ring-inset ring-primary"
+                  : "hover:bg-accent"
               }`}
               title={wt.title ?? wt.branch}
             >
               {isActive ? (
                 <span className="w-3.5 h-3.5 flex items-center justify-center">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
                 </span>
               ) : hasUnseen ? (
                 <span className="w-3.5 h-3.5 flex items-center justify-center">
-                  <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
+                  <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-warning" : "bg-success"}`} />
                 </span>
               ) : (
                 <BranchIcon active={isSelected} />
               )}
               {hasRunFailure && (
-                <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-red-500 pointer-events-none" />
+                <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-danger pointer-events-none" />
               )}
             </button>
           );
@@ -351,6 +365,9 @@ export function Sidebar() {
   const projectIcons = useDataStore((s) => s.projectIcons);
   const setProjectIcon = useDataStore((s) => s.setProjectIcon);
   const selectedProject = useUIStore((s) => s.selectedProject);
+  const visibleProject = isAutomationsProject(selectedProject)
+    ? null
+    : selectedProject;
   const worktrees = useFilteredWorktrees();
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
@@ -418,6 +435,20 @@ export function Sidebar() {
   );
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const projectTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // The `fixed inset-0` catcher below only dismisses on pointer. Escape closes
+  // the dropdown and returns focus to the trigger so the keyboard path is whole.
+  useEffect(() => {
+    if (!showDropdown) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setShowDropdown(false);
+      projectTriggerRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showDropdown]);
 
   const startRename = (wt: Worktree) => {
     setEditingPath(wt.path);
@@ -494,7 +525,7 @@ export function Sidebar() {
         for (const tab of nav.userTabs) {
           for (const group of getLeaves(getEffectiveUserTabSplitTree(tab))) {
             for (const groupTab of group.tabs) {
-              if (groupTab.content.kind === "agent" || groupTab.content.kind === "shell") {
+              if (groupTab.content.kind === "terminal") {
                 sessionIds.add(panePtySessionId(wt.path, groupTab.id));
               }
             }
@@ -506,6 +537,9 @@ export function Sidebar() {
         });
         await Promise.all([
           ...ptyKills,
+          invoke("clear_agent_worktree_status", {
+            worktreePath: wt.path,
+          }).catch(() => {}),
           invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
           viewedFilesProvider.clearForWorktree(wt.path).catch(() => {}),
           invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(
@@ -739,7 +773,10 @@ export function Sidebar() {
   };
 
   return (
-    <div className="flex flex-col h-full text-sm overflow-hidden relative bg-sidebar">
+    <div
+      data-sidebar
+      className="flex flex-col h-full text-sm overflow-hidden relative bg-sidebar"
+    >
       <nav
         aria-label="Workspace navigation"
         className="mx-2.5 mt-2.5 mb-2 flex flex-col gap-0.5 rounded-lg bg-accent/35 p-1"
@@ -766,22 +803,26 @@ export function Sidebar() {
 
       <div className="relative mx-2.5 mb-1.5">
         {/* Project Switcher */}
-        <div
+        <button
+          type="button"
+          ref={projectTriggerRef}
+          aria-haspopup="true"
+          aria-expanded={showDropdown}
           onClick={() =>
             projects.length === 0
               ? openProject()
               : setShowDropdown(!showDropdown)
           }
-          className="flex w-full items-center gap-2 rounded-md bg-accent px-2.5 py-1.5 cursor-pointer hover:bg-accent/80"
+          className="flex w-full items-center gap-2 rounded-md bg-accent px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent/80"
         >
-          {selectedProject ? (
+          {visibleProject ? (
             <>
               <ProjectBadge
-                name={selectedProject.name}
-                iconUrl={projectIcons[selectedProject.path]}
+                name={visibleProject.name}
+                iconUrl={projectIcons[visibleProject.path]}
               />
               <span className="text-foreground text-sm font-medium truncate">
-                {selectedProject.name}
+                {visibleProject.name}
               </span>
             </>
           ) : (
@@ -789,10 +830,10 @@ export function Sidebar() {
               Select project
             </span>
           )}
-          <span className="ml-auto text-muted-foreground/90 text-sm">
+          <span className="ml-auto text-muted-foreground text-sm">
             &#9662;
           </span>
-        </div>
+        </button>
 
       {/* Project Dropdown */}
       {showDropdown && (
@@ -801,58 +842,44 @@ export function Sidebar() {
             className="fixed inset-0 z-20"
             onClick={() => setShowDropdown(false)}
           />
-          <div
-            className="absolute left-0 right-0 top-[calc(100%+0.125rem)] z-30 rounded-md border border-border py-1 shadow-2xl ring-1 ring-black/30"
-            style={{
-              background:
-                "color-mix(in srgb, var(--popover) 100%, white 6%)",
-            }}
-          >
+          <div className="absolute left-0 right-0 top-[calc(100%+0.125rem)] z-30 rounded-md border border-border bg-popover py-1 shadow-2xl">
             {projects.map((project) => (
               <div
                 key={project.path}
-                onClick={() => {
-                  selectProject(project);
-                  setShowDropdown(false);
-                }}
-                className="group flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-accent"
+                className="group relative flex items-center"
               >
-                <ProjectBadge
-                  name={project.name}
-                  iconUrl={projectIcons[project.path]}
-                />
-                <span
-                  className={`text-sm truncate ${selectedProject?.path === project.path ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                <button
+                  type="button"
+                  onClick={() => {
+                    selectProject(project);
+                    setShowDropdown(false);
+                  }}
+                  aria-current={selectedProject?.path === project.path}
+                  className="flex w-full items-center gap-2 px-2.5 py-2 text-left cursor-pointer hover:bg-accent"
                 >
-                  {project.name}
-                </span>
-                <span
+                  <ProjectBadge
+                    name={project.name}
+                    iconUrl={projectIcons[project.path]}
+                  />
+                  <span
+                    className={`text-sm truncate ${selectedProject?.path === project.path ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                  >
+                    {project.name}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${project.name}`}
                   onClick={(e) => handleRemoveProject(e, project.path)}
-                  className="ml-auto opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground px-1 text-sm"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 size-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-sm"
                 >
                   &times;
-                </span>
+                </button>
               </div>
             ))}
-            {/* Virtual project: global automation runs' scratch repos. */}
-            <div
-              onClick={() => {
-                selectProject(AUTOMATIONS_PROJECT);
-                setShowDropdown(false);
-              }}
-              className="flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-accent"
-            >
-              <div className="w-5 h-5 rounded-[5px] flex items-center justify-center bg-accent text-muted-foreground shrink-0">
-                <Clock3 aria-hidden="true" className="size-3" />
-              </div>
-              <span
-                className={`text-sm truncate ${isAutomationsProject(selectedProject) ? "text-foreground font-medium" : "text-muted-foreground"}`}
-              >
-                {AUTOMATIONS_PROJECT.name}
-              </span>
-            </div>
-            <div
-              className="border-t border-border mt-1 pt-2 flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-accent text-muted-foreground text-sm"
+            <button
+              type="button"
+              className="border-t border-border mt-1 pt-2 flex w-full items-center gap-2 px-2.5 py-2 text-left cursor-pointer hover:bg-accent text-muted-foreground text-sm"
               onClick={() => {
                 openProject();
                 setShowDropdown(false);
@@ -867,7 +894,7 @@ export function Sidebar() {
                 />
               </svg>
               Open Project
-            </div>
+            </button>
           </div>
         </>
       )}
@@ -884,7 +911,7 @@ export function Sidebar() {
             }),
           )
         }
-        className="mx-2.5 mb-1 px-2.5 py-1.5 rounded-md flex items-center gap-2 bg-accent/60 hover:bg-accent text-muted-foreground/90 hover:text-muted-foreground transition-colors"
+        className="mx-2.5 mb-1 px-2.5 py-1.5 rounded-md flex items-center gap-2 bg-accent/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
       >
         <svg
           width="12"
@@ -912,18 +939,18 @@ export function Sidebar() {
         <div className="flex flex-col min-h-0 flex-1">
           <div className="mx-3 mb-1.5 border-b border-border/30" />
           <div className="flex items-center justify-between px-3.5 pt-1 pb-1 shrink-0">
-            <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground/60 font-semibold">
-              {isAutomationsProject(selectedProject) ? "Runs" : "Worktrees"}
+            <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground font-semibold">
+              Worktrees
             </span>
           </div>
           {!isAutomationsProject(selectedProject) && (
             <div className="px-2 pt-0.5 pb-2.5 shrink-0">
               <button
                 onClick={() => setShowNewWorktree(true)}
-                className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-[5px] border border-border/50 text-sm text-muted-foreground/90 hover:text-muted-foreground hover:border-border hover:bg-accent/50 transition-colors"
+                className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-[5px] border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:border-border hover:bg-accent/50 transition-colors"
               >
                 <span>+ New Worktree</span>
-                <kbd className="text-[10px] text-muted-foreground/40 ml-auto">
+                <kbd className="text-xs text-muted-foreground ml-auto">
                   ⌘N
                 </kbd>
               </button>
@@ -947,12 +974,13 @@ export function Sidebar() {
                 ? ""
                 : isSelected
                   ? "border border-primary/30"
-                  : "border border-white/5";
+                  : "border border-border/50";
 
               const row = (
                 <div className="group relative mx-2 my-1.5">
                   <button
                     onClick={() => selectWorktree(wt)}
+                    aria-pressed={isSelected}
                     className={`flex items-start gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${cardBorder} ${
                       isSelected ? "bg-primary/15" : "hover:bg-accent"
                     }`}
@@ -960,11 +988,11 @@ export function Sidebar() {
                     <div className="relative shrink-0 mt-0.5">
                       {isActive ? (
                         <span className="w-4 h-4 flex items-center justify-center">
-                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                          <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
                         </span>
                       ) : hasUnseen ? (
                         <span className="w-4 h-4 flex items-center justify-center">
-                          <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-amber-500" : "bg-green-500"}`} />
+                          <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-warning" : "bg-success"}`} />
                         </span>
                       ) : (
                         <BranchIcon active={isSelected} />
@@ -995,7 +1023,7 @@ export function Sidebar() {
                             }}
                             onBlur={() => commitRename(wt)}
                             onClick={(e) => e.stopPropagation()}
-                            className="text-sm bg-background border border-border rounded px-1 py-0.5 min-w-0 flex-1 outline-none focus:border-primary"
+                            className="text-sm bg-background border border-border rounded px-1 py-0.5 min-w-0 flex-1 outline-none"
                           />
                         ) : (
                           <>
@@ -1010,17 +1038,17 @@ export function Sidebar() {
                         <span className="relative ml-auto shrink-0">
                           {/* Stats badge — visible by default, invisible on hover (keeps layout space) */}
                           <span
-                            className={`flex items-center gap-0.5 text-[10px] font-mono rounded px-1.5 py-0.5 ${
+                            className={`flex items-center gap-0.5 text-xs font-mono rounded px-1.5 py-0.5 ${
                               stats &&
                               (stats.additions > 0 || stats.deletions > 0)
                                 ? "bg-accent/60 group-hover:invisible"
                                 : "invisible"
                             }`}
                           >
-                            <span className="text-green-500">
+                            <span className="text-success">
                               +{stats?.additions ?? 0}
                             </span>
-                            <span className="text-red-500">
+                            <span className="text-danger">
                               -{stats?.deletions ?? 0}
                             </span>
                           </span>
@@ -1031,7 +1059,7 @@ export function Sidebar() {
                                 e.stopPropagation();
                                 setWorktreeToDelete(wt);
                               }}
-                              className="absolute inset-y-0 right-0 hidden group-hover:flex items-center justify-center text-muted-foreground/90 hover:!text-destructive text-sm transition-colors"
+                              className="absolute right-0 top-1/2 -translate-y-1/2 size-6 hidden group-hover:flex items-center justify-center text-muted-foreground hover:!text-destructive text-sm transition-colors"
                             >
                               ×
                             </span>
@@ -1041,12 +1069,12 @@ export function Sidebar() {
                       {!isMain && editingPath !== wt.path && (
                         <div className="mt-1 flex items-center gap-1 flex-wrap">
                           {isActive && (
-                            <span className="inline-flex items-center gap-1 font-mono text-[10px] bg-amber-500/20 text-amber-400 rounded px-1.5 py-0.5">
+                            <span className="inline-flex items-center gap-1 font-mono text-xs bg-accent/60 text-warning rounded px-1.5 py-0.5">
                               ▶ running
                             </span>
                           )}
                           <span
-                            className="font-mono text-[10px] bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground truncate max-w-[140px]"
+                            className="font-mono text-xs bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground truncate max-w-[140px]"
                             title={wt.branch}
                           >
                             {wt.branch.split("/").pop() || wt.branch}
@@ -1057,7 +1085,7 @@ export function Sidebar() {
                                 e.stopPropagation();
                                 openUrl(worktreeIssues[wt.path].url);
                               }}
-                              className="font-mono text-[10px] bg-blue-500/15 text-blue-400 hover:text-blue-300 rounded px-1.5 py-0.5 cursor-pointer"
+                              className="font-mono text-xs bg-accent/60 text-info hover:text-foreground rounded px-1.5 py-0.5 cursor-pointer"
                             >
                               {worktreeIssues[wt.path].identifier}
                             </span>
@@ -1079,6 +1107,30 @@ export function Sidebar() {
                   key={wt.path}
                   items={[
                     { label: "Rename", onSelect: () => startRename(wt) },
+                    ...(worktreeIssues[wt.path]
+                      ? [
+                          {
+                            label: "Open issue",
+                            onSelect: () =>
+                              openUrl(worktreeIssues[wt.path].url),
+                          },
+                        ]
+                      : []),
+                    ...(prStatus?.kind === "has_pr"
+                      ? [
+                          {
+                            label: "Open pull request",
+                            onSelect: () => {
+                              if (prStatus?.kind === "has_pr")
+                                openUrl(prStatus.url);
+                            },
+                          },
+                        ]
+                      : []),
+                    {
+                      label: "Delete worktree",
+                      onSelect: () => setWorktreeToDelete(wt),
+                    },
                   ]}
                 >
                   {row}

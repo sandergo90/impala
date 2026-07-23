@@ -31,7 +31,13 @@ import { FileViewer } from "./FileViewer";
 import { BrowserPane } from "./BrowserPane";
 import { SplitTreeRenderer } from "./SplitTreeRenderer";
 import { useUIStore, useDataStore } from "../store";
-import type { PaneContent, ProjectConfig, UserTab, WorktreeIssue } from "../types";
+import type {
+  PaneContent,
+  ProjectConfig,
+  TerminalLaunchProfile,
+  UserTab,
+  WorktreeIssue,
+} from "../types";
 import type { SplitGroup } from "../lib/split-tree";
 import { getActiveGroupTab, getLeaves } from "../lib/split-tree";
 import { encodePtyInput } from "../lib/encode-pty";
@@ -64,6 +70,7 @@ import {
   splitActiveTabPane,
   setUserGroupActiveTab,
   setAgentGroupActiveTab,
+  openTerminalUrlInBrowserPane,
   closeUserTabFocusedPane,
   closeAgentTabFocusedPane,
   moveWorkspaceTab,
@@ -77,14 +84,32 @@ import { buildDocumentKey } from "../lib/editor-buffer-registry";
 import { useBrowserAgentActivity } from "../hooks/useBrowserAgentActivity";
 import { selectWorkspaceDropCollision } from "../lib/workspace-drop-collision";
 import { positionFloatingMenu } from "../lib/floating-menu-position";
+import {
+  getPaneBodyKey,
+  getWorkspaceRendererKey,
+} from "../lib/workspace-renderer-key";
+import { SubagentMenu } from "./SubagentMenu";
 
 type TabKind = "terminal" | "agent" | "file" | "browser";
+
+interface PrimaryTerminalOverride {
+  paneId: string;
+  launch: TerminalLaunchProfile;
+  isPrimaryAgent: boolean;
+}
+
+function presentationKind(content: PaneContent): TabKind {
+  return content.kind === "terminal" && content.launch === "agent"
+    ? "agent"
+    : content.kind;
+}
 
 // Stable empty array — returning `[]` from the userTabs selector would create
 // a new reference every call, breaking Zustand's useSyncExternalStore snapshot
 // equality and triggering an infinite re-render loop.
 const EMPTY_USER_TABS: UserTab[] = [];
 const EMPTY_PANE_SESSIONS: Record<string, string> = {};
+const EMPTY_AGENT_PANE_STATUSES: Record<string, "working" | "permission"> = {};
 
 interface TabDescriptor {
   id: string;
@@ -105,6 +130,9 @@ interface WorkspaceTabDragData {
 interface WorkspaceTabDropData {
   dropTarget: WorkspaceTabDropTarget;
 }
+
+// Only the active top-level tab is mounted, so all of them point at one panel.
+const TOP_LEVEL_PANEL_ID = "workspace-panel";
 
 const topTabDndId = (tabId: string) => `top-tab:${tabId}`;
 const groupTabDndId = (ownerTopTabId: string, groupId: string, tabId: string) =>
@@ -133,7 +161,11 @@ const workspaceCollisionDetection: CollisionDetection = (args) => {
   return args.pointerCoordinates ? [] : closestCenter(args);
 };
 
-const NEW_TAB_MENU_SIZE = { width: 160, height: 104 };
+const NEW_TAB_MENU_SIZE = { width: 160, height: 72 };
+const SPLIT_CONTENT_OPTIONS = [
+  { label: "Terminal", content: { kind: "terminal", launch: "shell" } },
+  { label: "Browser", content: { kind: "browser" } },
+] as const;
 
 /**
  * Tabbed terminals view for a single worktree.
@@ -163,6 +195,11 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   // terminal tree.
   const paneSessions = useDataStore(
     (s) => s.worktreeDataStates[worktreePath]?.paneSessions ?? EMPTY_PANE_SESSIONS,
+  );
+  const agentPaneStatuses = useDataStore(
+    (s) =>
+      s.worktreeDataStates[worktreePath]?.agentPaneStatuses ??
+      EMPTY_AGENT_PANE_STATUSES,
   );
 
   const [config, setConfig] = useState<ProjectConfig | null>(null);
@@ -242,7 +279,10 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       out.push({
         id: groupTab.id,
         label: groupTab.label,
-        kind: groupTab.content.kind === "shell" ? "terminal" : groupTab.content.kind,
+        kind:
+          agentPaneStatuses[groupTab.id] !== undefined
+            ? "agent"
+            : presentationKind(groupTab.content),
         isPrimaryAgent: groupTab.id === AGENT_PANE_ID,
         paneId: groupTab.id,
         isSystem: groupTab.id === AGENT_PANE_ID,
@@ -253,14 +293,18 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       out.push({
         id: t.id,
         label: t.label,
-        kind: t.kind,
+        kind:
+          agentPaneStatuses[userTabPaneId(t.id)] !== undefined ||
+          (t.kind === "terminal" && t.terminalLaunch === "agent")
+            ? "agent"
+            : t.kind,
         isPrimaryAgent: false,
         paneId: userTabPaneId(t.id),
         isSystem: false,
       });
     }
     return out;
-  }, [agentPrimaryGroup, hasRunTab, userTabs]);
+  }, [agentPaneStatuses, agentPrimaryGroup, hasRunTab, userTabs]);
 
   // Map of tab id -> whether it's an unpinned file preview tab. Used to
   // render preview labels in italic.
@@ -415,9 +459,13 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   }, []);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const caretRef = useRef<HTMLButtonElement | null>(null);
+  const closeNewTabMenu = useCallback(() => {
+    setMenuOpen(false);
+    useUIStore.getState().setTerminalMenuOpen(false);
+  }, []);
   const toggleNewTabMenu = useCallback(() => {
     if (menuOpen) {
-      setMenuOpen(false);
+      closeNewTabMenu();
       return;
     }
     const rect = caretRef.current?.getBoundingClientRect();
@@ -429,8 +477,9 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         NEW_TAB_MENU_SIZE,
       ),
     );
+    useUIStore.getState().setTerminalMenuOpen(true);
     setMenuOpen(true);
-  }, [menuOpen]);
+  }, [closeNewTabMenu, menuOpen]);
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -438,33 +487,32 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       if (!target) return;
       if (menuRef.current?.contains(target)) return;
       if (caretRef.current?.contains(target)) return;
-      setMenuOpen(false);
+      closeNewTabMenu();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
+      if (e.key === "Escape") closeNewTabMenu();
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      useUIStore.getState().setTerminalMenuOpen(false);
     };
-  }, [menuOpen]);
+  }, [closeNewTabMenu, menuOpen]);
 
   const handleNewTerminal = useCallback(() => {
-    setMenuOpen(false);
-    addTabToAgentPrimaryPane(worktreePath, { kind: "shell" });
-  }, [worktreePath]);
-
-  const handleNewAgent = useCallback(() => {
-    setMenuOpen(false);
-    addTabToAgentPrimaryPane(worktreePath, { kind: "agent" });
-  }, [worktreePath]);
+    closeNewTabMenu();
+    addTabToAgentPrimaryPane(worktreePath, {
+      kind: "terminal",
+      launch: "shell",
+    });
+  }, [closeNewTabMenu, worktreePath]);
 
   const handleNewBrowser = useCallback(() => {
-    setMenuOpen(false);
+    closeNewTabMenu();
     addTabToAgentPrimaryPane(worktreePath, { kind: "browser" });
-  }, [worktreePath]);
+  }, [closeNewTabMenu, worktreePath]);
 
   const renderTabInner = (t: TabDescriptor): ReactNode => {
     const TabIcon =
@@ -494,20 +542,22 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           }}
           onBlur={commitRename}
           onFocus={(e) => e.currentTarget.select()}
-          className="mx-2 h-7 min-w-0 flex-1 rounded border border-border bg-background px-1.5 text-[0.9375rem] font-medium outline-none focus:ring-1 focus:ring-primary"
+          className="mx-2 h-7 min-w-0 flex-1 rounded border border-border bg-background px-1.5 text-sm font-medium outline-none"
         />
       ) : (
         <button
           type="button"
           role="tab"
+          id={`toptab-${t.id}`}
           aria-selected={activeId === t.id}
+          aria-controls={TOP_LEVEL_PANEL_ID}
           onClick={() => setActive(t.id)}
           onDoubleClick={() => {
             // Don't rename file tabs — their label is the file basename and
             // is auto-managed by openFileTab.
             if (!t.isSystem && t.kind !== "file") startRenaming(t.id, t.label);
           }}
-          className={`flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-l-md pl-3 text-left text-[0.9375rem] font-medium leading-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+          className={`flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-l-md pl-3 text-left text-sm font-medium leading-none outline-none ${
             isPreviewById.get(t.id) ? "italic" : ""
           }`}
           title={t.label}
@@ -527,6 +577,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
           <span className="truncate">{t.label}</span>
         </button>
       )}
+      {t.kind === "agent" ? (
+        <SubagentMenu
+          worktreePath={worktreePath}
+          paneId={t.paneId}
+        />
+      ) : null}
       {!t.isSystem && (
         <button
           type="button"
@@ -535,7 +591,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             handleCloseUserTab(t.id);
           }}
           onPointerDown={(e) => e.stopPropagation()}
-          className={`mr-1.5 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-opacity hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${
+          className={`mr-1.5 flex size-6 shrink-0 items-center justify-center rounded text-foreground outline-none transition-opacity hover:bg-background/70 hover:text-foreground ${
             activeId === t.id
               ? "opacity-70"
               : "opacity-0 group-hover:opacity-70 focus:opacity-70"
@@ -556,12 +612,17 @@ export const TabbedTerminals = memo(function TabbedTerminals({
   const baseTabClass = (t: TabDescriptor) =>
     `group flex h-9 min-w-[132px] max-w-[280px] shrink-0 items-center rounded-md transition-colors ${
       activeId === t.id
-        ? "bg-accent text-foreground shadow-sm"
-        : "text-foreground/70 hover:bg-accent/60 hover:text-foreground"
+        ? "bg-accent text-foreground border border-border"
+        : "text-foreground/70 hover:bg-accent/60 hover:text-foreground border border-transparent"
     }`;
 
   const topLevelTabList = (
       <TopLevelDropZone appendIndex={userTabs.length}>
+        <div
+          role="tablist"
+          aria-label="Left pane tabs"
+          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"
+        >
         {systemTabs.map((t) => (
           <div key={t.id} className={baseTabClass(t)}>
             {renderTabInner(t)}
@@ -605,13 +666,13 @@ export const TabbedTerminals = memo(function TabbedTerminals({
               </SortableWorkspaceTab>
             ))}
         </SortableContext>
-
+        </div>
 
         <div className="relative ml-0.5 flex shrink-0 items-center">
           <button
             type="button"
             onClick={handleNewTerminal}
-            className="flex size-8 items-center justify-center rounded-l-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex size-8 items-center justify-center rounded-l-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground"
             aria-label="New terminal tab"
             title="New terminal tab"
           >
@@ -628,7 +689,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             ref={caretRef}
             type="button"
             onClick={toggleNewTabMenu}
-            className="flex h-8 w-5 items-center justify-center rounded-r-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-8 w-5 items-center justify-center rounded-r-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground"
             aria-label="New tab menu"
             aria-expanded={menuOpen}
           >
@@ -649,7 +710,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                 position: "fixed",
                 left: menuPosition.left,
                 top: menuPosition.top,
-                zIndex: 50,
+                zIndex: 100,
               }}
               className="min-w-[160px] rounded border border-border bg-popover text-popover-foreground shadow-lg py-1"
             >
@@ -658,12 +719,6 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
               >
                 New terminal tab
-              </button>
-              <button
-                onClick={handleNewAgent}
-                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
-              >
-                New Agent tab
               </button>
               <button
                 onClick={handleNewBrowser}
@@ -707,10 +762,17 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             ? userTabs.find((u) => u.id === t.id) ?? null
             : null;
           return (
-            <div key={t.id} className="absolute inset-0">
+            <div
+              key={getWorkspaceRendererKey(t.id, userTab !== null)}
+              role="tabpanel"
+              id={TOP_LEVEL_PANEL_ID}
+              tabIndex={-1}
+              aria-labelledby={`toptab-${layoutId}`}
+              className="absolute inset-0"
+            >
               {userTab ? (
                 // Every user tab renders through its split tree; the leaf
-                // renderer dispatches on content.kind (agent/shell/file/browser).
+                // renderer dispatches on terminal/file/browser content.
                 <UserTabSplitRenderer
                   tab={userTab}
                   worktreePath={worktreePath}
@@ -718,32 +780,25 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                   isActive={isActive}
                   primaryTabList={topLevelTabList}
                 />
-              ) : t.id === AGENT_PANE_ID ? (
-                // The Agent system tab is splittable too (agent + shell side by
-                // side is the headline case); its split state lives on nav.
+              ) : (
+                // Run and Agent are two primary contents of the same left pane.
+                // Both render through the Agent split tree so secondary panes
+                // stay visible when the selected primary tab changes.
                 <AgentTabSplitRenderer
                   worktreePath={worktreePath}
                   paneSessions={paneSessions}
                   isActive={isActive}
                   primaryTabList={topLevelTabList}
+                  primaryTerminalOverride={
+                    t.id === RUN_PANE_ID
+                      ? {
+                          paneId: t.paneId,
+                          launch: "shell",
+                          isPrimaryAgent: false,
+                        }
+                      : undefined
+                  }
                 />
-              ) : (
-                // The Run tab is unsplittable but still owns the same left-pane tab row.
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="flex h-11 shrink-0 items-center border-b border-border/70 bg-sidebar px-2 py-1">
-                    {topLevelTabList}
-                  </div>
-                  <div className="relative min-h-0 flex-1">
-                    <TabBody
-                      paneId={t.paneId}
-                      kind={t.kind === "agent" ? "agent" : "terminal"}
-                      isPrimaryAgent={t.isPrimaryAgent}
-                      worktreePath={worktreePath}
-                      sessionId={paneSessions[t.paneId] ?? null}
-                      isActive={isActive}
-                    />
-                  </div>
-                </div>
               )}
             </div>
           );
@@ -759,21 +814,25 @@ export const TabbedTerminals = memo(function TabbedTerminals({
 
 /**
  * Renders one tab body. Lazy-spawns the PTY on first mount.
- * Agent tabs additionally write the agent's launch command on first spawn.
+ * Agent launch profiles additionally write the agent command on first spawn.
  * `isPrimaryAgent` marks the worktree's main Agent tab — the one auto-launched
  * once (on first open) and given the linked issue's initial prompt. Secondary
  * agent panes always launch bare.
  */
 const TabBody = memo(function TabBody({
   paneId,
-  kind,
+  topTabId,
+  sourceGroupId,
+  launch,
   isPrimaryAgent,
   worktreePath,
   sessionId,
   isActive,
 }: {
   paneId: string;
-  kind: "terminal" | "agent";
+  topTabId?: string;
+  sourceGroupId?: string;
+  launch: TerminalLaunchProfile;
   isPrimaryAgent: boolean;
   worktreePath: string;
   sessionId: string | null;
@@ -789,7 +848,7 @@ const TabBody = memo(function TabBody({
     // feeds the agent's initial prompt on a fresh launch, and its issue_id
     // feeds the context-file refresh.
     const issuePromise: Promise<WorktreeIssue | null> =
-      kind === "agent" && isPrimaryAgent
+      launch === "agent" && isPrimaryAgent
         ? invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath }).catch(
             () => null,
           )
@@ -799,7 +858,7 @@ const TabBody = memo(function TabBody({
     // backend-side, so usually a no-op. We await it later before building
     // the launch command so the file is current when the agent reads it.
     const refreshPromise: Promise<void> = (async () => {
-      if (kind !== "agent" || !isPrimaryAgent) return;
+      if (launch !== "agent" || !isPrimaryAgent) return;
       const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
       const issue = await issuePromise;
       if (!issue) return;
@@ -827,7 +886,7 @@ const TabBody = memo(function TabBody({
       } catch (err) {
         console.warn("Failed to prepare agent config:", err);
       }
-      const launch = await invoke<{
+      const shellLaunch = await invoke<{
         shell_path: string;
         shell_args: string[];
         env: Record<string, string>;
@@ -836,14 +895,15 @@ const TabBody = memo(function TabBody({
         sessionId: ptyId,
         cwd: worktreePath,
         command: null,
-        shellPath: launch.shell_path,
-        shellArgs: launch.shell_args,
+        shellPath: shellLaunch.shell_path,
+        shellArgs: shellLaunch.shell_args,
         envVars: {
-          ...launch.env,
+          ...shellLaunch.env,
           ...extraEnv,
           IMPALA_HOOK_PORT: String(hookPort),
           IMPALA_WORKTREE_PATH: worktreePath,
           IMPALA_PANE_ID: paneId,
+          IMPALA_AGENT_PROVIDER: agent,
         },
       })
         .then(async (isNew) => {
@@ -858,7 +918,7 @@ const TabBody = memo(function TabBody({
             markShellReady(ptyId);
           }
 
-          if (kind === "agent" && isNew) {
+          if (launch === "agent" && isNew) {
             const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
 
             // The PTY daemon keeps live agent sessions across normal app
@@ -918,10 +978,11 @@ const TabBody = memo(function TabBody({
           spawningRef.current = false;
         });
     });
-  }, [paneId, kind, isPrimaryAgent, worktreePath, sessionId]);
+  }, [paneId, launch, isPrimaryAgent, worktreePath, sessionId]);
 
   const handleRestart = useCallback(() => {
     if (!sessionId) return;
+    invoke("clear_agent_pane_status", { worktreePath, paneId }).catch(() => {});
     invoke("pty_kill", { sessionId }).catch(() => {});
     releaseCachedTerminal(sessionId);
     const data = useDataStore.getState().getWorktreeDataState(worktreePath);
@@ -930,6 +991,22 @@ const TabBody = memo(function TabBody({
       .getState()
       .updateWorktreeDataState(worktreePath, { paneSessions: remaining });
   }, [sessionId, paneId, worktreePath]);
+
+  const handleInterrupt = useCallback(() => {
+    invoke("interrupt_agent_turn", { worktreePath, paneId }).catch(() => {});
+  }, [worktreePath, paneId]);
+
+  const handleExit = useCallback(() => {
+    invoke("clear_agent_pane_status", { worktreePath, paneId }).catch(() => {});
+  }, [worktreePath, paneId]);
+
+  const handleOpenUrl = useCallback(
+    (url: string) => {
+      if (!topTabId || !sourceGroupId) return;
+      openTerminalUrlInBrowserPane(worktreePath, topTabId, sourceGroupId, url);
+    },
+    [sourceGroupId, topTabId, worktreePath],
+  );
 
   useAppHotkey("RESTART_SESSION", handleRestart, { enabled: isActive }, [handleRestart]);
 
@@ -948,6 +1025,9 @@ const TabBody = memo(function TabBody({
       baseDir={worktreePath}
       isFocused={isActive}
       onRestart={handleRestart}
+      onExit={handleExit}
+      onInterrupt={handleInterrupt}
+      onOpenUrl={topTabId && sourceGroupId ? handleOpenUrl : undefined}
     />
   );
 });
@@ -1009,7 +1089,7 @@ function PaneSplitControl({
           onFocus();
           setOpen((current) => !current);
         }}
-        className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground"
         aria-label="Split this pane"
         title="Split this pane"
         aria-expanded={open}
@@ -1025,26 +1105,26 @@ function PaneSplitControl({
           className="absolute right-0 top-full z-30 mt-1 min-w-[180px] rounded border border-border bg-popover py-1 text-popover-foreground shadow-lg"
         >
           <div className="px-3 py-1 text-xs text-muted-foreground">Split right with</div>
-          {(["agent", "shell", "browser"] as const).map((kind) => (
+          {SPLIT_CONTENT_OPTIONS.map(({ label, content }) => (
             <button
-              key={`vertical-${kind}`}
+              key={`vertical-${label}`}
               type="button"
-              onClick={() => split("vertical", { kind })}
+              onClick={() => split("vertical", content)}
               className="block w-full px-3 py-1.5 text-left text-sm hover:bg-accent"
             >
-              {kind === "shell" ? "Terminal" : kind[0].toUpperCase() + kind.slice(1)}
+              {label}
             </button>
           ))}
           <div className="my-1 border-t border-border/60" />
           <div className="px-3 py-1 text-xs text-muted-foreground">Split down with</div>
-          {(["agent", "shell", "browser"] as const).map((kind) => (
+          {SPLIT_CONTENT_OPTIONS.map(({ label, content }) => (
             <button
-              key={`horizontal-${kind}`}
+              key={`horizontal-${label}`}
               type="button"
-              onClick={() => split("horizontal", { kind })}
+              onClick={() => split("horizontal", content)}
               className="block w-full px-3 py-1.5 text-left text-sm hover:bg-accent"
             >
-              {kind === "shell" ? "Terminal" : kind[0].toUpperCase() + kind.slice(1)}
+              {label}
             </button>
           ))}
         </div>
@@ -1067,6 +1147,7 @@ function PaneTabGroup({
   isSplitLayout,
   isPrimaryGroup,
   primaryTabList,
+  primaryTerminalOverride,
 }: {
   group: SplitGroup;
   topTabId: string;
@@ -1084,12 +1165,37 @@ function PaneTabGroup({
   isSplitLayout: boolean;
   isPrimaryGroup: boolean;
   primaryTabList: ReactNode;
+  primaryTerminalOverride?: PrimaryTerminalOverride;
 }) {
+  const agentPaneStatuses = useDataStore(
+    (state) =>
+      state.worktreeDataStates[worktreePath]?.agentPaneStatuses ??
+      EMPTY_AGENT_PANE_STATUSES,
+  );
   const activeTab = getActiveGroupTab(group);
   const content = activeTab.content;
+  // Only one tab in a group is mounted at a time, so the group shares a single
+  // panel (the APG single-panel form). Ids are derived from the group, not the
+  // active tab, so an inactive tab's `aria-controls` never dangles.
+  const panePanelId = `panepanel-${topTabId}-${group.id}`;
+  const paneTabId = (groupTabId: string) =>
+    `panetab-${topTabId}-${group.id}-${groupTabId}`;
 
   let body: ReactNode;
-  if (content.kind === "file") {
+  if (primaryTerminalOverride) {
+    body = (
+      <TabBody
+        paneId={primaryTerminalOverride.paneId}
+        topTabId={AGENT_PANE_ID}
+        sourceGroupId={group.id}
+        launch={primaryTerminalOverride.launch}
+        isPrimaryAgent={primaryTerminalOverride.isPrimaryAgent}
+        worktreePath={worktreePath}
+        sessionId={paneSessions[primaryTerminalOverride.paneId] ?? null}
+        isActive={isActive && isFocused}
+      />
+    );
+  } else if (content.kind === "file") {
     body = <FileViewer worktreePath={worktreePath} path={content.path} />;
   } else if (content.kind === "browser") {
     body = (
@@ -1106,7 +1212,9 @@ function PaneTabGroup({
     body = (
       <TabBody
         paneId={activeTab.id}
-        kind={content.kind === "agent" ? "agent" : "terminal"}
+        topTabId={topTabId}
+        sourceGroupId={group.id}
+        launch={content.launch}
         isPrimaryAgent={activeTab.id === AGENT_PANE_ID}
         worktreePath={worktreePath}
         sessionId={paneSessions[activeTab.id] ?? null}
@@ -1143,8 +1251,12 @@ function PaneTabGroup({
             const selected = tab.id === activeTab.id;
             const canClose =
               topTabId !== AGENT_PANE_ID || isSplitLayout || group.tabs.length > 1;
+            const isAgent =
+              agentPaneStatuses[tab.id] !== undefined ||
+              (tab.content.kind === "terminal" &&
+                tab.content.launch === "agent");
             const TabIcon =
-              tab.content.kind === "agent"
+              isAgent
                 ? Bot
                 : tab.content.kind === "file"
                   ? FileText
@@ -1165,7 +1277,7 @@ function PaneTabGroup({
                     groupTabId: tab.id,
                   },
                   label: tab.label,
-                  kind: tab.content.kind === "shell" ? "terminal" : tab.content.kind,
+                  kind: isAgent ? "agent" : presentationKind(tab.content),
                 }}
                 dropTarget={{
                   type: "group",
@@ -1175,16 +1287,18 @@ function PaneTabGroup({
                 }}
                 className={`group/pane-tab flex h-9 min-w-[132px] max-w-[280px] shrink-0 items-center rounded-md transition-colors ${
                   selected
-                    ? "bg-accent text-foreground shadow-sm"
-                    : "text-foreground/70 hover:bg-accent/60 hover:text-foreground"
+                    ? "bg-accent text-foreground border border-border"
+                    : "text-foreground/70 hover:bg-accent/60 hover:text-foreground border border-transparent"
                 }`}
               >
                 <button
                   type="button"
                   role="tab"
+                  id={paneTabId(tab.id)}
                   aria-selected={selected}
+                  aria-controls={panePanelId}
                   onClick={() => onActivate(tab.id)}
-                  className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-l-md pl-3 text-left text-[0.9375rem] font-medium leading-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                  className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-l-md pl-3 text-left text-sm font-medium leading-none outline-none"
                   title={tab.label}
                 >
                   <TabIcon
@@ -1193,6 +1307,12 @@ function PaneTabGroup({
                   />
                   <span className="truncate">{tab.label}</span>
                 </button>
+                {isAgent ? (
+                  <SubagentMenu
+                    worktreePath={worktreePath}
+                    paneId={tab.id}
+                  />
+                ) : null}
                 {canClose && (
                   <button
                     type="button"
@@ -1202,7 +1322,7 @@ function PaneTabGroup({
                       onClose(tab.id);
                     }}
                     onPointerDown={(event) => event.stopPropagation()}
-                    className={`mr-1.5 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-opacity hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${
+                    className={`mr-1.5 flex size-6 shrink-0 items-center justify-center rounded text-foreground outline-none transition-opacity hover:bg-background/70 hover:text-foreground ${
                       selected
                         ? "opacity-70"
                         : "opacity-0 group-hover/pane-tab:opacity-70 focus:opacity-70"
@@ -1220,7 +1340,21 @@ function PaneTabGroup({
         )}
         <PaneSplitControl onFocus={onFocus} onSplit={onSplit} />
       </div>
-      <div className="relative min-h-0 flex-1" key={activeTab.id}>
+      {/* The primary group renders the top-level tab strip instead of its own,
+          so its body is already inside the top-level tabpanel; only a
+          secondary group owns a panel of its own. */}
+      <div
+        className="relative min-h-0 flex-1"
+        key={getPaneBodyKey(activeTab.id, primaryTerminalOverride?.paneId)}
+        {...(isPrimaryGroup
+          ? {}
+          : {
+              role: "tabpanel",
+              tabIndex: -1,
+              id: panePanelId,
+              "aria-labelledby": paneTabId(activeTab.id),
+            })}
+      >
         <PaneBodyDropZones
           ownerTopTabId={topTabId}
           groupId={group.id}
@@ -1292,11 +1426,13 @@ function AgentTabSplitRenderer({
   paneSessions,
   isActive,
   primaryTabList,
+  primaryTerminalOverride,
 }: {
   worktreePath: string;
   paneSessions: Record<string, string>;
   isActive: boolean;
   primaryTabList: ReactNode;
+  primaryTerminalOverride?: PrimaryTerminalOverride;
 }) {
   const splitTree = useUIStore(
     (s) => s.worktreeNavStates[worktreePath]?.agentTabSplitTree,
@@ -1332,6 +1468,9 @@ function AgentTabSplitRenderer({
           isSplitLayout={isSplitLayout}
           isPrimaryGroup={group.id === primaryGroupId}
           primaryTabList={primaryTabList}
+          primaryTerminalOverride={
+            group.id === primaryGroupId ? primaryTerminalOverride : undefined
+          }
           onFocus={() => setAgentTabFocusedPane(worktreePath, group.id)}
           onSplit={(orientation, content) => {
             setAgentTabFocusedPane(worktreePath, group.id);
@@ -1362,13 +1501,14 @@ function TopLevelDropZone({
     data: { dropTarget: { type: "top-level", index: appendIndex } },
   });
   return (
+    // The droppable spans the whole strip (including the trailing +/caret) so
+    // the append drop target keeps its full hit area; the tablist role lives on
+    // an inner wrapper because an ARIA tablist may only own `role="tab"`.
     <div
       ref={setNodeRef}
-      className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto rounded ${
+      className={`flex min-w-0 flex-1 items-center gap-1.5 rounded ${
         isOver ? "ring-1 ring-primary/50" : ""
       }`}
-      role="tablist"
-      aria-label="Left pane tabs"
     >
       {children}
     </div>
@@ -1528,7 +1668,7 @@ function SortableWorkspaceTab({
         ref={setActivatorNodeRef}
         type="button"
         disabled={disabled}
-        className={`ml-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-60 outline-none hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${
+        className={`ml-1 flex size-6 shrink-0 items-center justify-center rounded text-foreground/60 outline-none hover:bg-background/70 hover:text-foreground ${
           disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
         }`}
         aria-label={`Drag ${dragData.label}`}
@@ -1558,7 +1698,7 @@ function WorkspaceTabDragPreview({
           ? Globe2
           : Terminal;
   return (
-    <div className="flex h-9 max-w-[280px] items-center gap-2.5 rounded-md border border-border bg-accent px-3 text-[0.9375rem] font-medium text-foreground shadow-lg">
+    <div className="flex h-9 max-w-[280px] items-center gap-2.5 rounded-md border border-border bg-accent px-3 text-sm font-medium text-foreground shadow-lg">
       <Icon aria-hidden="true" className="size-4 shrink-0 opacity-90" />
       <span className="truncate">{label}</span>
     </div>

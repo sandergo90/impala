@@ -11,7 +11,8 @@ use impala_daemon_shared::wire::{
 };
 use impala_daemon_shared::PROTOCOL_VERSION;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 #[allow(unused_imports)]
 use std::convert::TryFrom;
 use std::env;
@@ -43,6 +44,9 @@ const MIN_PTY_COLS: u16 = 2;
 /// Capped to bound memory; we keep the *last* N bytes since the most
 /// recent output is what users want to scroll through after a reload.
 const MAX_OUTPUT_BUFFER: usize = 5 * 1024 * 1024;
+/// Finished agent sessions remain reviewable without retaining their PTY
+/// process handles forever. Twenty buffers caps the worst case at 100 MiB.
+const MAX_COMPLETED_SESSION_BUFFERS: usize = 20;
 /// CSI 3 J — "Erase Saved Lines" / clear scrollback. Emitted by the
 /// `clear` command and Cmd+K in most terminals. When the daemon sees
 /// this in the byte stream, drop everything before the last occurrence
@@ -139,17 +143,98 @@ struct Session {
 
 struct Registry {
     sessions: Mutex<HashMap<String, Session>>,
+    completed_buffers: Mutex<HashMap<String, CompletedBuffer>>,
+    completed_order: Mutex<VecDeque<String>>,
     subscribers: Mutex<HashMap<u64, mpsc::UnboundedSender<Event>>>,
     next_client_id: AtomicU64,
+}
+
+#[derive(Clone)]
+struct CompletedBuffer {
+    data: Vec<u8>,
+    seq_upto: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PersistedCompletedBuffer {
+    session_id: String,
+    data_b64: String,
+    seq_upto: u64,
 }
 
 impl Registry {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             sessions: Mutex::new(HashMap::new()),
+            completed_buffers: Mutex::new(HashMap::new()),
+            completed_order: Mutex::new(VecDeque::new()),
             subscribers: Mutex::new(HashMap::new()),
             next_client_id: AtomicU64::new(1),
         })
+    }
+
+    fn archive_completed_buffer(&self, session_id: String, buffer: CompletedBuffer) {
+        let mut buffers = self.completed_buffers.lock().unwrap();
+        let mut order = self.completed_order.lock().unwrap();
+        if buffers.insert(session_id.clone(), buffer).is_some() {
+            order.retain(|id| id != &session_id);
+        }
+        order.push_back(session_id);
+        while order.len() > MAX_COMPLETED_SESSION_BUFFERS {
+            if let Some(oldest) = order.pop_front() {
+                buffers.remove(&oldest);
+            }
+        }
+    }
+
+    fn remove_completed_buffer(&self, session_id: &str) {
+        self.completed_buffers.lock().unwrap().remove(session_id);
+        self.completed_order
+            .lock()
+            .unwrap()
+            .retain(|id| id != session_id);
+    }
+
+    fn completed_buffer_snapshot(&self) -> Vec<PersistedCompletedBuffer> {
+        let buffers = self.completed_buffers.lock().unwrap();
+        self.completed_order
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|session_id| {
+                buffers
+                    .get(session_id)
+                    .cloned()
+                    .map(|buffer| PersistedCompletedBuffer {
+                        session_id: session_id.clone(),
+                        data_b64: STANDARD.encode(buffer.data),
+                        seq_upto: buffer.seq_upto,
+                    })
+            })
+            .collect()
+    }
+
+    fn archive_live_session_buffers(&self) {
+        let snapshots: Vec<_> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(session_id, session)| {
+                session.state.lock().ok().map(|state| {
+                    (
+                        session_id.clone(),
+                        CompletedBuffer {
+                            data: state.output_buffer.clone(),
+                            seq_upto: state.total_bytes,
+                        },
+                    )
+                })
+            })
+            .collect();
+        for (session_id, buffer) in snapshots {
+            self.archive_completed_buffer(session_id, buffer);
+        }
     }
 
     fn subscribe(&self) -> (u64, mpsc::UnboundedReceiver<Event>) {
@@ -169,6 +254,37 @@ impl Registry {
             let _ = tx.send(event.clone());
         }
     }
+}
+
+fn restore_completed_buffers(path: &PathBuf, registry: &Registry) {
+    let Ok(raw) = std::fs::read(path) else {
+        return;
+    };
+    let Ok(saved) = serde_json::from_slice::<Vec<PersistedCompletedBuffer>>(&raw) else {
+        tracing::warn!(path = %path.display(), "ignoring invalid pty history");
+        return;
+    };
+    for item in saved {
+        let Ok(data) = STANDARD.decode(item.data_b64) else {
+            continue;
+        };
+        registry.archive_completed_buffer(
+            item.session_id,
+            CompletedBuffer {
+                data,
+                seq_upto: item.seq_upto,
+            },
+        );
+    }
+}
+
+fn persist_completed_buffers(path: &PathBuf, registry: &Registry) -> Result<()> {
+    let encoded = serde_json::to_vec(&registry.completed_buffer_snapshot())?;
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, encoded)?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    std::fs::rename(tmp, path)?;
+    Ok(())
 }
 
 // --------------------------------------------------------------------
@@ -210,6 +326,9 @@ fn spawn_session(
             }
         }
     }
+    // A deliberate restart with the same deterministic session id supersedes
+    // the archived transcript from the previous process.
+    registry.remove_completed_buffer(&session_id);
 
     let pty_system = native_pty_system();
     let pair = match pty_system.openpty(PtySize {
@@ -537,6 +656,15 @@ fn start_pty_io_threads(
                 session_id: session_id_for_thread.clone(),
                 code: exit_code,
             });
+            if let Ok(state) = state.lock() {
+                registry.archive_completed_buffer(
+                    session_id_for_thread.clone(),
+                    CompletedBuffer {
+                        data: state.output_buffer.clone(),
+                        seq_upto: state.total_bytes,
+                    },
+                );
+            }
             registry
                 .sessions
                 .lock()
@@ -720,6 +848,7 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
         }
         Request::Kill { session_id } => {
             let session = registry.sessions.lock().unwrap().remove(&session_id);
+            registry.remove_completed_buffer(&session_id);
             if let Some(s) = session {
                 let shell_pid = s
                     .child
@@ -759,8 +888,21 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
                     .map(|session| Arc::clone(&session.state))
             };
             match state {
-                None => Response::Error {
-                    message: format!("no session {session_id}"),
+                None => match registry
+                    .completed_buffers
+                    .lock()
+                    .unwrap()
+                    .get(&session_id)
+                    .cloned()
+                {
+                    Some(buffer) => Response::Buffer {
+                        session_id,
+                        data_b64: STANDARD.encode(buffer.data),
+                        seq_upto: buffer.seq_upto,
+                    },
+                    None => Response::Error {
+                        message: format!("no session {session_id}"),
+                    },
                 },
                 Some(state) => match state.lock() {
                     Ok(state) => Response::Buffer {
@@ -959,6 +1101,7 @@ async fn main() -> Result<()> {
     );
 
     let registry = Registry::new();
+    restore_completed_buffers(&paths.history, &registry);
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
@@ -987,6 +1130,19 @@ async fn main() -> Result<()> {
     }
 
     eprintln!("[impala-pty-daemon] shutting down");
+
+    // Keep the last bounded set of terminal transcripts available after a
+    // daemon upgrade/restart. Automation runs are review artifacts, so losing
+    // their agent output merely because the sidecar changed version would
+    // leave the review pane empty.
+    registry.archive_live_session_buffers();
+    if let Err(error) = persist_completed_buffers(&paths.history, &registry) {
+        tracing::warn!(
+            path = %paths.history.display(),
+            error = %error,
+            "failed to persist pty history"
+        );
+    }
 
     // Tear down every live session before we exit, so codex/claude/etc.
     // don't outlive the daemon. Without this, the kernel's SIGHUP-on-
@@ -1022,7 +1178,15 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_pty_size;
+    use std::time::{Duration, Instant};
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use impala_daemon_shared::wire::{Request, Response};
+
+    use super::{
+        handle_request, persist_completed_buffers, restore_completed_buffers, safe_pty_size,
+        CompletedBuffer, Registry,
+    };
 
     #[test]
     fn tiny_viewport_is_safe_for_vt100_wrapping() {
@@ -1039,5 +1203,81 @@ mod tests {
     #[test]
     fn regular_viewport_dimensions_are_preserved() {
         assert_eq!(safe_pty_size(24, 80), (24, 80));
+    }
+
+    #[test]
+    fn completed_session_buffer_remains_available_for_run_review() {
+        let registry = Registry::new();
+        let session_id = "completed-automation-agent".to_string();
+        let spawned = handle_request(
+            &registry,
+            Request::Spawn {
+                session_id: session_id.clone(),
+                cwd: "/tmp".into(),
+                command: Some(vec!["printf automation-agent-output".into()]),
+                shell_path: Some("/bin/sh".into()),
+                shell_args: Some(Vec::new()),
+                env: Vec::new(),
+                cols: 80,
+                rows: 24,
+            },
+        );
+        assert!(matches!(spawned, Response::Spawned { .. }));
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while registry.sessions.lock().unwrap().contains_key(&session_id)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !registry.sessions.lock().unwrap().contains_key(&session_id),
+            "fixture command should have exited"
+        );
+
+        let response = handle_request(
+            &registry,
+            Request::GetBuffer {
+                session_id: session_id.clone(),
+            },
+        );
+        let Response::Buffer { data_b64, .. } = response else {
+            panic!("completed session buffer was unavailable");
+        };
+        let output = STANDARD.decode(data_b64).unwrap();
+        assert!(String::from_utf8_lossy(&output).contains("automation-agent-output"));
+    }
+
+    #[test]
+    fn completed_session_buffer_survives_daemon_restart() {
+        let path =
+            std::env::temp_dir().join(format!("impala-pty-history-{}.json", uuid::Uuid::new_v4()));
+        let registry = Registry::new();
+        registry.archive_completed_buffer(
+            "automation-agent".into(),
+            CompletedBuffer {
+                data: b"persisted-agent-output".to_vec(),
+                seq_upto: 22,
+            },
+        );
+        persist_completed_buffers(&path, &registry).unwrap();
+
+        let restored = Registry::new();
+        restore_completed_buffers(&path, &restored);
+        let response = handle_request(
+            &restored,
+            Request::GetBuffer {
+                session_id: "automation-agent".into(),
+            },
+        );
+        let Response::Buffer { data_b64, .. } = response else {
+            panic!("persisted session buffer was unavailable after restart");
+        };
+        assert_eq!(
+            STANDARD.decode(data_b64).unwrap(),
+            b"persisted-agent-output"
+        );
+
+        std::fs::remove_file(path).unwrap();
     }
 }

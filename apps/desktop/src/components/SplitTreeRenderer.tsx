@@ -67,10 +67,6 @@ function SplitNodeRenderer({
     return (
       <div
         className="h-full w-full relative"
-        style={{
-          opacity: isFocused || !isActive ? 1 : 0.6,
-          transition: "opacity 150ms ease",
-        }}
         onMouseDownCapture={() => {
           if (!isFocused) onFocusPane(node.id);
         }}

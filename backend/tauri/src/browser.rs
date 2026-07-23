@@ -390,10 +390,22 @@ fn resolve_selector(wv: &Webview, selector: &str) -> Result<ResolvedTarget, Stri
         return Err(format!("{err}: {selector}"));
     }
     Ok(ResolvedTarget {
-        x: v.get("x").and_then(|n| n.as_f64()).ok_or("resolve payload missing x")?,
-        y: v.get("y").and_then(|n| n.as_f64()).ok_or("resolve payload missing y")?,
-        tag: v.get("tag").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-        text: v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+        x: v.get("x")
+            .and_then(|n| n.as_f64())
+            .ok_or("resolve payload missing x")?,
+        y: v.get("y")
+            .and_then(|n| n.as_f64())
+            .ok_or("resolve payload missing y")?,
+        tag: v
+            .get("tag")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string(),
+        text: v
+            .get("text")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string(),
     })
 }
 
@@ -417,14 +429,19 @@ fn animate_cursor(app: &AppHandle, wv: &Webview, x: f64, y: f64) {
         Some((sx, sy)) => (sx.to_string(), sy.to_string()),
         None => ("null".to_string(), "null".to_string()),
     };
-    let js = format!(
-        "window.__IMPALA_CURSOR__ && __IMPALA_CURSOR__.moveTo({x}, {y}, {sx}, {sy}); \"\""
-    );
+    let js =
+        format!("window.__IMPALA_CURSOR__ && __IMPALA_CURSOR__.moveTo({x}, {y}, {sx}, {sy}); \"\"");
     if native::eval_js(wv, &js, Duration::from_secs(1)).is_ok() {
         // Matches the 350ms CSS glide in CURSOR_JS.
         std::thread::sleep(Duration::from_millis(400));
     }
-    if let Some(tab) = app.state::<BrowserRegistry>().0.lock().unwrap().get_mut(&id) {
+    if let Some(tab) = app
+        .state::<BrowserRegistry>()
+        .0
+        .lock()
+        .unwrap()
+        .get_mut(&id)
+    {
         tab.cursor = Some((x, y));
     }
 }
@@ -674,8 +691,8 @@ mod native {
     use std::time::Duration;
 
     use block2::RcBlock;
-    use objc2::runtime::AnyObject;
     use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
     use objc2::MainThreadMarker;
     use objc2_app_kit::{
         NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSEvent,
@@ -720,10 +737,7 @@ mod native {
                     let _ = tx.send(Ok(text));
                 });
                 unsafe {
-                    wk.evaluateJavaScript_completionHandler(
-                        &NSString::from_str(&js),
-                        Some(&block),
-                    );
+                    wk.evaluateJavaScript_completionHandler(&NSString::from_str(&js), Some(&block));
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -765,7 +779,11 @@ mod native {
     /// Convert webview-local CSS coordinates (top-left origin, what
     /// getBoundingClientRect returns; WKWebView is 1:1 CSS px ↔ logical
     /// points) to window coordinates, rejecting points outside the viewport.
-    fn window_point(wk: &WKWebView, x: f64, y: f64) -> Result<(NSPoint, Retained<NSWindow>), String> {
+    fn window_point(
+        wk: &WKWebView,
+        x: f64,
+        y: f64,
+    ) -> Result<(NSPoint, Retained<NSWindow>), String> {
         let window = wk
             .window()
             .ok_or("browser webview is not attached to a window")?;
@@ -829,8 +847,7 @@ mod native {
                     let time = NSProcessInfo::processInfo().systemUptime();
                     // The move primes hover state so :hover styles and
                     // mouseover handlers see the pointer before the click.
-                    let moved =
-                        mouse_event(NSEventType::MouseMoved, location, wnum, time, 0, 0.0)?;
+                    let moved = mouse_event(NSEventType::MouseMoved, location, wnum, time, 0, 0.0)?;
                     wk.mouseMoved(&moved);
                     let down =
                         mouse_event(NSEventType::LeftMouseDown, location, wnum, time, 1, 1.0)?;
@@ -967,17 +984,13 @@ mod native {
     }
 
     fn encode_png(image: &NSImage) -> Result<Vec<u8>, String> {
-        let tiff = image
-            .TIFFRepresentation()
-            .ok_or("no TIFF representation")?;
-        let rep =
-            NSBitmapImageRep::imageRepWithData(&tiff).ok_or("could not read bitmap data")?;
+        let tiff = image.TIFFRepresentation().ok_or("no TIFF representation")?;
+        let rep = NSBitmapImageRep::imageRepWithData(&tiff).ok_or("could not read bitmap data")?;
         let props: Retained<NSDictionary<NSBitmapImageRepPropertyKey, AnyObject>> =
             NSDictionary::new();
-        let png = unsafe {
-            rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props)
-        }
-        .ok_or("PNG encoding failed")?;
+        let png =
+            unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props) }
+                .ok_or("PNG encoding failed")?;
         Ok(png.to_vec())
     }
 }

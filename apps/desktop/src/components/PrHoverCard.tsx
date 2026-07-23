@@ -33,8 +33,8 @@ export function PrHoverCard({ pr }: { pr: PrInfo }) {
         {pr.reviewDecision && <div>{reviewLabel(pr.reviewDecision)}</div>}
         {(pr.additions > 0 || pr.deletions > 0) && (
           <div className="font-mono">
-            <span className="text-green-500">+{pr.additions}</span>{" "}
-            <span className="text-red-500">-{pr.deletions}</span>
+            <span className="text-success">+{pr.additions}</span>{" "}
+            <span className="text-danger">-{pr.deletions}</span>
           </div>
         )}
       </div>
@@ -56,16 +56,17 @@ function StatePill({
 }: {
   state: "open" | "closed" | "merged" | "draft";
 }) {
+  // Neutral chip, hue on the label only — see PrBadge's pickVisual.
   const cls = {
-    open: "bg-green-500/15 text-green-400 border-green-500/30",
-    draft: "bg-muted text-muted-foreground border-border",
-    merged: "bg-purple-500/15 text-purple-400 border-purple-500/30",
-    closed: "bg-red-500/15 text-red-400 border-red-500/30",
+    open: "text-success",
+    draft: "text-muted-foreground",
+    merged: "text-info",
+    closed: "text-danger",
   }[state];
   const label = state[0].toUpperCase() + state.slice(1);
   return (
     <span
-      className={`text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded border ${cls}`}
+      className={`text-xs font-medium uppercase tracking-wide px-1.5 py-0.5 rounded border border-border bg-accent/60 ${cls}`}
     >
       {label}
     </span>
@@ -74,16 +75,16 @@ function StatePill({
 
 function ChecksDot({ status }: { status: ChecksStatus }) {
   const cls = {
-    success: "bg-green-500",
-    failure: "bg-red-500",
-    pending: "bg-amber-500 animate-pulse",
+    success: "bg-success",
+    failure: "bg-danger",
+    pending: "bg-warning animate-pulse",
   }[status];
   return <span className={`w-1.5 h-1.5 rounded-full ${cls}`} />;
 }
 
 function reviewLabel(r: ReviewDecision) {
-  if (r === "approved") return <span className="text-green-400">Approved</span>;
+  if (r === "approved") return <span className="text-success">Approved</span>;
   if (r === "changes_requested")
-    return <span className="text-red-400">Changes requested</span>;
+    return <span className="text-danger">Changes requested</span>;
   return <span className="text-muted-foreground">Review requested</span>;
 }

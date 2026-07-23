@@ -4,11 +4,46 @@ export type SplitGroup = Extract<SplitNode, { type: "group" }>;
 
 function defaultLabel(content: PaneContent): string {
   switch (content.kind) {
-    case "agent": return "Agent";
-    case "shell": return "Terminal";
+    case "terminal": return content.launch === "agent" ? "Agent" : "Terminal";
     case "file": return content.path.split("/").pop() || content.path;
     case "browser": return "Browser";
   }
+}
+
+function isCurrentPaneContent(content: unknown): content is PaneContent {
+  const value = content as any;
+  return (
+    (value?.kind === "terminal" &&
+      (value.launch === "shell" || value.launch === "agent")) ||
+    (value?.kind === "file" && typeof value.path === "string") ||
+    (value?.kind === "browser" &&
+      (value.url === undefined || typeof value.url === "string"))
+  );
+}
+
+export function normalizePaneContent(
+  value: unknown,
+  fallback: PaneContent = { kind: "terminal", launch: "shell" },
+): PaneContent {
+  const content = value as any;
+  if (content?.kind === "terminal") {
+    return {
+      kind: "terminal",
+      launch: content.launch === "agent" ? "agent" : "shell",
+    };
+  }
+  if (content?.kind === "agent") return { kind: "terminal", launch: "agent" };
+  if (content?.kind === "shell") return { kind: "terminal", launch: "shell" };
+  if (content?.kind === "file" && typeof content.path === "string") {
+    return { kind: "file", path: content.path };
+  }
+  if (content?.kind === "browser") {
+    return {
+      kind: "browser",
+      ...(typeof content.url === "string" ? { url: content.url } : {}),
+    };
+  }
+  return fallback;
 }
 
 export function createGroupTab(
@@ -22,14 +57,34 @@ export function createGroupTab(
 /** Normalize pre-v8 leaf trees and hot-reloaded legacy paneType trees. */
 export function normalizeSplitTree(
   value: unknown,
-  fallbackContent: PaneContent = { kind: "shell" },
+  fallbackContent: PaneContent = { kind: "terminal", launch: "shell" },
 ): SplitNode {
   const node = value as any;
-  if (node?.type === "group" && typeof node.id === "string") return node;
+  if (node?.type === "group" && typeof node.id === "string") {
+    return {
+      ...node,
+      tabs: Array.isArray(node.tabs)
+        ? node.tabs.map((tab: any) =>
+            isCurrentPaneContent(tab.content)
+              ? tab
+              : {
+                  ...tab,
+                  content: normalizePaneContent(tab.content, fallbackContent),
+                },
+          )
+        : [],
+    };
+  }
   if (node?.type === "leaf" && typeof node.id === "string") {
-    const content: PaneContent = node.content ??
-      (node.paneType === "agent" ? { kind: "agent" } :
-       node.paneType === "shell" ? { kind: "shell" } : fallbackContent);
+    const content = normalizePaneContent(
+      node.content ??
+        (node.paneType === "agent"
+          ? { kind: "agent" }
+          : node.paneType === "shell"
+            ? { kind: "shell" }
+            : fallbackContent),
+      fallbackContent,
+    );
     const tab = createGroupTab(node.id, content);
     return { type: "group", id: node.id, tabs: [tab], activeTabId: tab.id };
   }
@@ -58,7 +113,9 @@ export function paneSessionId(paneId: string): string {
   return `pty-${paneId}`;
 }
 
-export function createGroup(content: PaneContent = { kind: "shell" }): SplitGroup {
+export function createGroup(
+  content: PaneContent = { kind: "terminal", launch: "shell" },
+): SplitGroup {
   const id = `pane-${Date.now()}-${paneCounter++}`;
   const tab = createGroupTab(id, content);
   return { type: "group", id, tabs: [tab], activeTabId: tab.id };
@@ -116,7 +173,7 @@ export function splitNode(
   tree: SplitNode,
   targetId: string,
   orientation: "horizontal" | "vertical",
-  content: PaneContent = { kind: "shell" },
+  content: PaneContent = { kind: "terminal", launch: "shell" },
 ): { tree: SplitNode; newLeafId: string } | null {
   const newGroup = createGroup(content);
   const replaced = replaceNode(tree, targetId, (group) => ({
@@ -267,6 +324,92 @@ export function updateLeafContent(
       tab.id === tabId ? { ...tab, content: update(tab.content) } : tab,
     ),
   }));
+}
+
+/**
+ * Open a URL in another pane. Reuse its browser tab when possible; otherwise
+ * add a browser tab to an existing split pane. Only create a new right split
+ * when the source is the sole pane. Browser tabs in the source group do not
+ * count because activating one would replace the terminal the user clicked.
+ */
+export function openUrlInBrowserSplit(
+  tree: SplitNode,
+  sourceGroupId: string,
+  url: string,
+): {
+  tree: SplitNode;
+  browserGroupId: string;
+  browserTabId: string;
+  created: boolean;
+} | null {
+  const browserGroup = getGroups(tree).find(
+    (group) =>
+      group.id !== sourceGroupId &&
+      getActiveGroupTab(group)?.content.kind === "browser",
+  );
+  if (browserGroup) {
+    const browserTab = getActiveGroupTab(browserGroup);
+    return {
+      tree: updateLeafContent(tree, browserTab.id, (content) =>
+        content.kind === "browser" ? { ...content, url } : content,
+      ),
+      browserGroupId: browserGroup.id,
+      browserTabId: browserTab.id,
+      created: false,
+    };
+  }
+
+  const groups = getGroups(tree);
+  const hiddenBrowser = groups
+    .filter((group) => group.id !== sourceGroupId)
+    .flatMap((group) =>
+      group.tabs
+        .filter((tab) => tab.content.kind === "browser")
+        .map((tab) => ({ group, tab })),
+    )[0];
+  if (hiddenBrowser) {
+    const nextTree = setActiveGroupTab(
+      updateLeafContent(tree, hiddenBrowser.tab.id, (content) =>
+        content.kind === "browser" ? { ...content, url } : content,
+      ),
+      hiddenBrowser.group.id,
+      hiddenBrowser.tab.id,
+    );
+    return {
+      tree: nextTree,
+      browserGroupId: hiddenBrowser.group.id,
+      browserTabId: hiddenBrowser.tab.id,
+      created: false,
+    };
+  }
+
+  const targetGroupId =
+    getHorizontalNeighborGroupId(tree, sourceGroupId, "right") ??
+    groups.find((group) => group.id !== sourceGroupId)?.id;
+  if (targetGroupId) {
+    const browserTab = createGroup({ kind: "browser", url }).tabs[0];
+    return {
+      tree: addTabToGroup(tree, targetGroupId, browserTab),
+      browserGroupId: targetGroupId,
+      browserTabId: browserTab.id,
+      created: true,
+    };
+  }
+
+  const result = splitNode(tree, sourceGroupId, "vertical", {
+    kind: "browser",
+    url,
+  });
+  if (!result) return null;
+  const newGroup = findGroup(result.tree, result.newLeafId);
+  const browserTab = newGroup ? getActiveGroupTab(newGroup) : null;
+  if (!browserTab) return null;
+  return {
+    tree: result.tree,
+    browserGroupId: result.newLeafId,
+    browserTabId: browserTab.id,
+    created: true,
+  };
 }
 
 export function updateGroupTab(

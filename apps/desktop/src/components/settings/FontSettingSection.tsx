@@ -62,8 +62,8 @@ export function FontSettingSection({ variant }: FontSettingSectionProps) {
 
   return (
     <div>
-      <div className="text-md font-medium">{config.title}</div>
-      <div className="text-md text-muted-foreground mt-0.5 mb-3">
+      <div className="text-sm font-medium">{config.title}</div>
+      <div className="text-sm text-muted-foreground mt-0.5 mb-3">
         {config.description}
         {variant === "terminal" && (
           <>
@@ -123,7 +123,7 @@ export function FontSettingSection({ variant }: FontSettingSectionProps) {
               setSize(null);
               setFontSizeDraft(null);
             }}
-            className="text-md text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
           >
             Reset
           </button>

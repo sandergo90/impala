@@ -91,8 +91,14 @@ export const BrowserPane = memo(function BrowserPane({
   // (MainView nulls activeWorktreePath outside terminal mode).
   const paletteOpen = useUIStore((s) => s.commandPaletteOpen);
   const finderOpen = useUIStore((s) => s.fileFinderOpen);
-  const dragActive = useUIStore((s) => s.panelDragActive);
-  const visible = isActive && !paletteOpen && !finderOpen && !dragActive;
+  const terminalMenuOpen = useUIStore((s) => s.terminalMenuOpen);
+  const occlusionActive = useUIStore((s) => s.panelDragActive);
+  const visible =
+    isActive &&
+    !paletteOpen &&
+    !finderOpen &&
+    !terminalMenuOpen &&
+    !occlusionActive;
   const { active: agentActive, kind: agentKind } =
     useBrowserAgentActivity(worktreePath);
   // Read by the async browser_open callback, which may resolve after
@@ -314,10 +320,13 @@ export const BrowserPane = memo(function BrowserPane({
 
   return (
     <div className="flex flex-col h-full">
+      {/* Pane focus reads as accent fill + border step, matching the terminal
+          leaf. `--primary` is reserved for agent activity (the webview frame
+          and the Agent chip) so the two never compete. */}
       <div
         className={`flex shrink-0 items-center gap-1 px-2 py-1.5 border-b transition-colors ${
           isFocused
-            ? "border-primary/70 bg-accent/50"
+            ? "border-border bg-accent/50"
             : "border-border/40 bg-sidebar"
         }`}
       >
@@ -327,7 +336,7 @@ export const BrowserPane = memo(function BrowserPane({
               () => {},
             )
           }
-          className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent"
+          className="size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           aria-label="Back"
           title="Back"
         >
@@ -348,7 +357,7 @@ export const BrowserPane = memo(function BrowserPane({
               direction: "forward",
             }).catch(() => {})
           }
-          className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent"
+          className="size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           aria-label="Forward"
           title="Forward"
         >
@@ -368,8 +377,10 @@ export const BrowserPane = memo(function BrowserPane({
               setLastError(String(e)),
             )
           }
-          className={`p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent ${
-            loading ? "animate-pulse" : ""
+          className={`size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors ${
+            loading
+              ? "animate-pulse motion-reduce:animate-none motion-reduce:opacity-60"
+              : ""
           }`}
           aria-label="Reload"
           title="Reload"
@@ -413,7 +424,7 @@ export const BrowserPane = memo(function BrowserPane({
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
-          className="flex-1 min-w-0 bg-background border border-border rounded px-2 py-1 text-[13px] font-mono outline-none focus:ring-1 focus:ring-primary"
+          className="flex-1 min-w-0 bg-background border border-border rounded px-2 py-1 text-sm font-mono outline-none"
         />
         <button
           onClick={() => {
@@ -421,7 +432,7 @@ export const BrowserPane = memo(function BrowserPane({
               openInSystemBrowser(currentUrl).catch(() => {});
             }
           }}
-          className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent"
+          className="size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           aria-label="Open in system browser"
           title="Open in system browser"
         >
@@ -438,7 +449,7 @@ export const BrowserPane = memo(function BrowserPane({
         <button
           onClick={toggleAnnotate}
           disabled={!hasUrl}
-          className={`p-1 rounded hover:bg-accent disabled:opacity-40 ${
+          className={`size-7 flex items-center justify-center rounded-md hover:bg-accent disabled:opacity-40 transition-colors ${
             annotating
               ? "text-primary"
               : "text-muted-foreground hover:text-foreground"
@@ -458,7 +469,7 @@ export const BrowserPane = memo(function BrowserPane({
         </button>
         {agentActive && (
           <span
-            className="flex shrink-0 items-center rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-medium text-primary animate-pulse"
+            className="flex shrink-0 items-center rounded bg-primary/15 px-1.5 py-0.5 text-xs font-medium text-primary animate-pulse motion-reduce:animate-none"
             title={`Agent is ${AGENT_ACTIVITY_LABELS[agentKind ?? ""] ?? "using the browser"}`}
           >
             Agent
@@ -487,18 +498,18 @@ export const BrowserPane = memo(function BrowserPane({
               }
             }}
             placeholder="Annotate this element…"
-            className="flex-1 min-w-0 bg-background border border-border rounded px-2 py-1 text-[13px] outline-none focus:ring-1 focus:ring-primary"
+            className="flex-1 min-w-0 bg-background border border-border rounded px-2 py-1 text-sm outline-none"
           />
           <button
             onClick={savePendingPick}
             disabled={!comment.trim() || saving}
-            className="px-2 py-1 text-[13px] rounded bg-primary text-primary-foreground disabled:opacity-50"
+            className="px-2 py-1 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50"
           >
             Save
           </button>
           <button
             onClick={cancelPendingPick}
-            className="px-2 py-1 text-[13px] text-muted-foreground hover:text-foreground rounded hover:bg-accent"
+            className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground rounded hover:bg-accent"
           >
             Cancel
           </button>
