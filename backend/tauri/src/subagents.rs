@@ -111,51 +111,50 @@ impl SubagentRegistry {
 
     pub fn snapshot(&self, worktree_path: &str, pane_id: &str) -> SubagentSnapshot {
         let key = pane_key(worktree_path, pane_id);
-        let (mut agents, mut previous_agents) =
-            self.0
-                .lock()
-                .ok()
-                .and_then(|mut sessions| {
-                    let session = sessions.get_mut(&key)?;
-                    if session.provider == "codex" {
-                        let session_files = codex_session_files(worktree_path, &session.session_id);
-                        refresh_codex_session_from_files(session, &session_files);
-                    }
-                    let (current, previous) = session
+        let (mut current, mut previous) = self
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut sessions| {
+                let session = sessions.get_mut(&key)?;
+                if session.provider == "codex" {
+                    let session_files = codex_session_files(worktree_path, &session.session_id);
+                    refresh_codex_session_from_files(session, &session_files);
+                }
+                Some(
+                    session
                         .agents
                         .values()
                         .cloned()
                         .partition::<Vec<_>, _>(|record| {
                             record.summary.status == "running"
                                 || record.started_at >= session.current_turn_started_at
-                        });
-                    Some((current, previous))
-                })
-                .map(|(current, previous)| {
-                    (
-                        current
-                            .into_iter()
-                            .map(|record| record.summary)
-                            .collect::<Vec<_>>(),
-                        previous
-                            .into_iter()
-                            .map(|record| record.summary)
-                            .collect::<Vec<_>>(),
-                    )
-                })
-                .unwrap_or_default();
-        agents.sort_by(|left, right| {
-            status_rank(&left.status)
-                .cmp(&status_rank(&right.status))
-                .then_with(|| right.updated_at.cmp(&left.updated_at))
-                .then_with(|| left.name.cmp(&right.name))
+                        }),
+                )
+            })
+            .unwrap_or_default();
+        current.sort_by(|left, right| {
+            left.started_at
+                .cmp(&right.started_at)
+                .then_with(|| left.summary.name.cmp(&right.summary.name))
+                .then_with(|| left.summary.id.cmp(&right.summary.id))
         });
-        previous_agents.sort_by(|left, right| {
+        previous.sort_by(|left, right| {
             right
+                .summary
                 .updated_at
-                .cmp(&left.updated_at)
-                .then_with(|| left.name.cmp(&right.name))
+                .cmp(&left.summary.updated_at)
+                .then_with(|| left.summary.name.cmp(&right.summary.name))
+                .then_with(|| left.summary.id.cmp(&right.summary.id))
         });
+        let agents = current
+            .into_iter()
+            .map(|record| record.summary)
+            .collect::<Vec<_>>();
+        let previous_agents = previous
+            .into_iter()
+            .map(|record| record.summary)
+            .collect::<Vec<_>>();
         let active_count = agents
             .iter()
             .filter(|agent| agent.status == "running")
@@ -165,14 +164,6 @@ impl SubagentRegistry {
             previous_agents,
             active_count,
         }
-    }
-}
-
-fn status_rank(status: &str) -> u8 {
-    match status {
-        "running" => 0,
-        "waiting" => 1,
-        _ => 2,
     }
 }
 
@@ -585,6 +576,63 @@ mod tests {
         assert_eq!(current_ids, vec!["old-running", "new-done"]);
         assert_eq!(previous_ids, vec!["old-done"]);
         assert_eq!(snapshot.active_count, 1);
+    }
+
+    #[test]
+    fn snapshot_preserves_creation_order_when_an_agent_completes() {
+        fn record(id: &str, status: &str, started_at: i64) -> SubagentRecord {
+            SubagentRecord {
+                summary: SubagentSummary {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    status: status.to_string(),
+                    depth: 1,
+                    updated_at: started_at,
+                },
+                started_at,
+            }
+        }
+
+        let workspace = temp_workspace("stable-row-order");
+        let pane_id = "agent-pane";
+        let key = pane_key(workspace.to_str().unwrap(), pane_id);
+        let registry = SubagentRegistry::default();
+        registry.0.lock().unwrap().insert(
+            key.clone(),
+            PaneSession {
+                session_id: "session".to_string(),
+                provider: "claude".to_string(),
+                current_turn_started_at: 0,
+                agents: HashMap::from([
+                    ("first".to_string(), record("first", "running", 10)),
+                    ("second".to_string(), record("second", "running", 20)),
+                ]),
+            },
+        );
+
+        let agent_ids = || {
+            registry
+                .snapshot(workspace.to_str().unwrap(), pane_id)
+                .agents
+                .into_iter()
+                .map(|agent| agent.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(agent_ids(), vec!["first", "second"]);
+
+        registry
+            .0
+            .lock()
+            .unwrap()
+            .get_mut(&key)
+            .unwrap()
+            .agents
+            .get_mut("second")
+            .unwrap()
+            .summary
+            .status = "done".to_string();
+
+        assert_eq!(agent_ids(), vec!["first", "second"]);
     }
 
     #[test]

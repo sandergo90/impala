@@ -563,11 +563,21 @@ Browser annotations: `url` (the page), `selector` (CSS path to the element), `el
 
 const IMPALA_BROWSER_SKILL: &str = r#"---
 name: impala-browser
-description: Verify or diagnose the running app in Impala's built-in browser. Use when the user wants to check something in the browser, verify a UI or frontend change works, see what a page looks like, or when diagnosing blank pages, console errors, or layout issues in a web app.
-allowed-tools: mcp__impala__browser_page_info, mcp__impala__browser_navigate, mcp__impala__browser_click, mcp__impala__browser_click_at, mcp__impala__browser_scroll, mcp__impala__browser_type, mcp__impala__browser_screenshot, mcp__impala__browser_console
+description: Verify or diagnose the running app in Impala's built-in browser. Use only in an Impala-hosted agent session where the runtime guard succeeds. Never use this skill for browser work outside Impala.
+allowed-tools: Bash(test:*), mcp__impala__browser_page_info, mcp__impala__browser_navigate, mcp__impala__browser_click, mcp__impala__browser_click_at, mcp__impala__browser_scroll, mcp__impala__browser_type, mcp__impala__browser_screenshot, mcp__impala__browser_console
 ---
 
 Impala (the desktop app this worktree is open in) has a built-in browser pane next to the code, driven by the `mcp__impala__browser_*` tools. Prefer them over curl, Playwright, or headless browsers for anything the rendered page can answer — the user watches the same pane you're testing, so what you verify is what they see.
+
+## Runtime guard
+
+Before calling any `mcp__impala__browser_*` tool, run:
+
+```sh
+test -n "${IMPALA_WORKTREE_PATH:-}" && test -n "${IMPALA_PANE_ID:-}"
+```
+
+If the command fails, stop using this skill and do not call any Impala browser tools. Tell the user that the Impala browser is available only from an agent session running inside the Impala app. Do not substitute another browser unless the user asks.
 
 ## The loop
 
@@ -1197,7 +1207,16 @@ pub fn start(
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns};
+    use super::{
+        AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns, IMPALA_BROWSER_SKILL,
+    };
+
+    #[test]
+    fn browser_skill_requires_impala_runtime_context() {
+        assert!(IMPALA_BROWSER_SKILL
+            .contains(r#"test -n "${IMPALA_WORKTREE_PATH:-}" && test -n "${IMPALA_PANE_ID:-}""#));
+        assert!(IMPALA_BROWSER_SKILL.contains("If the command fails, stop using this skill"));
+    }
 
     #[test]
     fn stop_waits_for_background_tools_before_completing_an_automation_turn() {

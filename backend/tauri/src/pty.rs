@@ -25,7 +25,8 @@ pub async fn pty_spawn(
 ) -> Result<bool, String> {
     let env: Vec<(String, String)> = env_vars.unwrap_or_default().into_iter().collect();
     let resp = state
-        .client()?
+        .client()
+        .await?
         .request(Request::Spawn {
             session_id,
             cwd,
@@ -51,7 +52,8 @@ pub async fn pty_get_buffer(
     session_id: String,
 ) -> Result<String, String> {
     let resp = state
-        .client()?
+        .client()
+        .await?
         .request(Request::GetBuffer { session_id })
         .await;
     unwrap_or_err(resp, |r| match r {
@@ -67,7 +69,8 @@ pub async fn pty_write(
     data: String,
 ) -> Result<(), String> {
     let resp = state
-        .client()?
+        .client()
+        .await?
         .request(Request::Write {
             session_id,
             data_b64: data,
@@ -84,7 +87,8 @@ pub async fn pty_resize(
     cols: u16,
 ) -> Result<(), String> {
     let resp = state
-        .client()?
+        .client()
+        .await?
         .request(Request::Resize {
             session_id,
             cols,
@@ -99,7 +103,7 @@ pub async fn pty_kill(
     state: tauri::State<'_, DaemonState>,
     session_id: String,
 ) -> Result<(), String> {
-    let client = state.client()?;
+    let client = state.client().await?;
     let resp = client
         .request(Request::Kill {
             session_id: session_id.clone(),
@@ -115,7 +119,8 @@ pub async fn pty_is_alive(
     session_id: String,
 ) -> Result<bool, String> {
     let resp = state
-        .client()?
+        .client()
+        .await?
         .request(Request::IsAlive { session_id })
         .await;
     unwrap_or_err(resp, |r| match r {

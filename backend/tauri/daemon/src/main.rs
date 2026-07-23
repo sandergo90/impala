@@ -743,18 +743,19 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
             let list = sessions
                 .iter()
                 .map(|(id, s)| {
-                    let alive = s
-                        .child
-                        .lock()
-                        .ok()
-                        .and_then(|mut c| c.try_wait().ok())
-                        .map(|o| o.is_none())
-                        .unwrap_or(false);
+                    let (alive, pid) = s.child.lock().map_or((false, None), |mut child| {
+                        let alive = child
+                            .try_wait()
+                            .ok()
+                            .is_some_and(|outcome| outcome.is_none());
+                        (alive, child.process_id())
+                    });
                     SessionInfo {
                         session_id: id.clone(),
                         cwd: s.cwd.clone(),
                         started_at: s.started_at.clone(),
                         alive,
+                        pid,
                     }
                 })
                 .collect();

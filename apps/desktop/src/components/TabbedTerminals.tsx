@@ -57,6 +57,7 @@ import {
   closeUserTab,
   renameUserTab,
   renameAgentGroupTab,
+  renamePaneGroupTab,
   getPendingAgentLaunch,
   clearPendingAgentLaunch,
   setUserTabFocusedPane,
@@ -68,6 +69,7 @@ import {
   getEffectiveAgentTabSplitTree,
   getEffectiveAgentTabFocusedPaneId,
   splitActiveTabPane,
+  addTabToPane,
   setUserGroupActiveTab,
   setAgentGroupActiveTab,
   openTerminalUrlInBrowserPane,
@@ -89,8 +91,19 @@ import {
   getWorkspaceRendererKey,
 } from "../lib/workspace-renderer-key";
 import { SubagentMenu } from "./SubagentMenu";
+import { useMountEffect } from "../hooks/useMountEffect";
 
 type TabKind = "terminal" | "agent" | "file" | "browser";
+
+function groupTabDisplayLabel(
+  tab: SplitGroup["tabs"][number],
+): string {
+  return tab.userLabel?.trim() || tab.label;
+}
+
+function userTabDisplayLabel(tab: UserTab): string {
+  return tab.userLabel?.trim() || tab.label;
+}
 
 interface PrimaryTerminalOverride {
   paneId: string;
@@ -278,7 +291,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     for (const groupTab of agentPrimaryGroup.tabs) {
       out.push({
         id: groupTab.id,
-        label: groupTab.label,
+        label: groupTabDisplayLabel(groupTab),
         kind:
           agentPaneStatuses[groupTab.id] !== undefined
             ? "agent"
@@ -292,7 +305,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     for (const t of userTabs) {
       out.push({
         id: t.id,
-        label: t.label,
+        label: userTabDisplayLabel(t),
         kind:
           agentPaneStatuses[userTabPaneId(t.id)] !== undefined ||
           (t.kind === "terminal" && t.terminalLaunch === "agent")
@@ -304,7 +317,12 @@ export const TabbedTerminals = memo(function TabbedTerminals({
       });
     }
     return out;
-  }, [agentPaneStatuses, agentPrimaryGroup, hasRunTab, userTabs]);
+  }, [
+    agentPaneStatuses,
+    agentPrimaryGroup,
+    hasRunTab,
+    userTabs,
+  ]);
 
   // Map of tab id -> whether it's an unpinned file preview tab. Used to
   // render preview labels in italic.
@@ -557,7 +575,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
             // is auto-managed by openFileTab.
             if (!t.isSystem && t.kind !== "file") startRenaming(t.id, t.label);
           }}
-          className={`flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-l-md pl-3 text-left text-sm font-medium leading-none outline-none ${
+          className={`flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-l-md px-3 text-left text-sm font-medium leading-none outline-none ${
             isPreviewById.get(t.id) ? "italic" : ""
           }`}
           title={t.label}
@@ -989,7 +1007,9 @@ const TabBody = memo(function TabBody({
     const { [paneId]: _removed, ...remaining } = data.paneSessions;
     useDataStore
       .getState()
-      .updateWorktreeDataState(worktreePath, { paneSessions: remaining });
+      .updateWorktreeDataState(worktreePath, {
+        paneSessions: remaining,
+      });
   }, [sessionId, paneId, worktreePath]);
 
   const handleInterrupt = useCallback(() => {
@@ -1133,6 +1153,147 @@ function PaneSplitControl({
   );
 }
 
+function PaneNewTabControl({
+  onCreate,
+}: {
+  onCreate: (content: PaneContent) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+
+  const closeMenu = useCallback(() => {
+    setOpen(false);
+    useUIStore.getState().setTerminalMenuOpen(false);
+  }, []);
+
+  useMountEffect(
+    () => () => useUIStore.getState().setTerminalMenuOpen(false),
+  );
+
+  const create = (content: PaneContent) => {
+    closeMenu();
+    onCreate(content);
+  };
+
+  return (
+    <div className="relative ml-0.5 flex shrink-0 items-center">
+      <button
+        type="button"
+        onClick={() => create({ kind: "terminal", launch: "shell" })}
+        className="flex size-8 items-center justify-center rounded-l-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground"
+        aria-label="New terminal tab in this pane"
+        title="New terminal tab in this pane"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M8 3V13M3 8H13"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={(event) => {
+          if (open) {
+            closeMenu();
+            return;
+          }
+          const rect = event.currentTarget.getBoundingClientRect();
+          setMenuPosition(
+            positionFloatingMenu(
+              rect,
+              { width: window.innerWidth, height: window.innerHeight },
+              NEW_TAB_MENU_SIZE,
+            ),
+          );
+          useUIStore.getState().setTerminalMenuOpen(true);
+          setOpen(true);
+        }}
+        className="flex h-8 w-5 items-center justify-center rounded-r-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground"
+        aria-label="New tab menu for this pane"
+        aria-expanded={open}
+      >
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M3 6L8 11L13 6"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      {open
+        ? createPortal(
+            <>
+              <PaneMenuDismiss onDismiss={closeMenu} />
+              <div
+                style={{
+                  position: "fixed",
+                  left: menuPosition.left,
+                  top: menuPosition.top,
+                }}
+                className="z-40 min-w-[160px] rounded border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+                role="menu"
+                aria-label="Create tab in this pane"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => create({ kind: "terminal", launch: "shell" })}
+                  className="block w-full px-3 py-1.5 text-left text-sm hover:bg-accent"
+                >
+                  New terminal tab
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => create({ kind: "browser" })}
+                  className="block w-full px-3 py-1.5 text-left text-sm hover:bg-accent"
+                >
+                  New browser tab
+                </button>
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
+function PaneMenuDismiss({ onDismiss }: { onDismiss: () => void }) {
+  useMountEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onDismiss();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  return (
+    <div
+      aria-hidden="true"
+      className="fixed inset-0 z-30"
+      onMouseDown={onDismiss}
+    />
+  );
+}
+
 function PaneTabGroup({
   group,
   topTabId,
@@ -1172,6 +1333,20 @@ function PaneTabGroup({
       state.worktreeDataStates[worktreePath]?.agentPaneStatuses ??
       EMPTY_AGENT_PANE_STATUSES,
   );
+  const [editingPaneTabId, setEditingPaneTabId] = useState<string | null>(null);
+  const [editingPaneLabel, setEditingPaneLabel] = useState("");
+  const commitPaneRename = useCallback(() => {
+    if (editingPaneTabId) {
+      renamePaneGroupTab(
+        worktreePath,
+        topTabId,
+        editingPaneTabId,
+        editingPaneLabel,
+      );
+    }
+    setEditingPaneTabId(null);
+    setEditingPaneLabel("");
+  }, [editingPaneLabel, editingPaneTabId, topTabId, worktreePath]);
   const activeTab = getActiveGroupTab(group);
   const content = activeTab.content;
   // Only one tab in a group is mounted at a time, so the group shares a single
@@ -1255,6 +1430,7 @@ function PaneTabGroup({
               agentPaneStatuses[tab.id] !== undefined ||
               (tab.content.kind === "terminal" &&
                 tab.content.launch === "agent");
+            const displayLabel = groupTabDisplayLabel(tab);
             const TabIcon =
               isAgent
                 ? Bot
@@ -1276,7 +1452,7 @@ function PaneTabGroup({
                     groupId: group.id,
                     groupTabId: tab.id,
                   },
-                  label: tab.label,
+                  label: displayLabel,
                   kind: isAgent ? "agent" : presentationKind(tab.content),
                 }}
                 dropTarget={{
@@ -1291,22 +1467,52 @@ function PaneTabGroup({
                     : "text-foreground/70 hover:bg-accent/60 hover:text-foreground border border-transparent"
                 }`}
               >
-                <button
-                  type="button"
-                  role="tab"
-                  id={paneTabId(tab.id)}
-                  aria-selected={selected}
-                  aria-controls={panePanelId}
-                  onClick={() => onActivate(tab.id)}
-                  className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-l-md pl-3 text-left text-sm font-medium leading-none outline-none"
-                  title={tab.label}
-                >
-                  <TabIcon
-                    aria-hidden="true"
-                    className={`size-4 shrink-0 ${selected ? "opacity-90" : "opacity-75"}`}
+                {editingPaneTabId === tab.id ? (
+                  <input
+                    autoFocus
+                    value={editingPaneLabel}
+                    onChange={(event) =>
+                      setEditingPaneLabel(event.target.value)
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitPaneRename();
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        setEditingPaneTabId(null);
+                        setEditingPaneLabel("");
+                      }
+                    }}
+                    onBlur={commitPaneRename}
+                    onFocus={(event) => event.currentTarget.select()}
+                    className="mx-2 h-7 min-w-0 flex-1 rounded border border-border bg-background px-1.5 text-sm font-medium outline-none"
                   />
-                  <span className="truncate">{tab.label}</span>
-                </button>
+                ) : (
+                  <button
+                    type="button"
+                    role="tab"
+                    id={paneTabId(tab.id)}
+                    aria-selected={selected}
+                    aria-controls={panePanelId}
+                    onClick={() => onActivate(tab.id)}
+                    onDoubleClick={() => {
+                      if (tab.content.kind === "file") return;
+                      setEditingPaneTabId(tab.id);
+                      setEditingPaneLabel(displayLabel);
+                    }}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-l-md px-3 text-left text-sm font-medium leading-none outline-none"
+                    title={displayLabel}
+                  >
+                    <TabIcon
+                      aria-hidden="true"
+                      className={`size-4 shrink-0 ${selected ? "opacity-90" : "opacity-75"}`}
+                    />
+                    <span className="truncate">
+                      {displayLabel}
+                    </span>
+                  </button>
+                )}
                 {isAgent ? (
                   <SubagentMenu
                     worktreePath={worktreePath}
@@ -1316,7 +1522,7 @@ function PaneTabGroup({
                 {canClose && (
                   <button
                     type="button"
-                    aria-label={`Close ${tab.label}`}
+                    aria-label={`Close ${displayLabel}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       onClose(tab.id);
@@ -1327,7 +1533,7 @@ function PaneTabGroup({
                         ? "opacity-70"
                         : "opacity-0 group-hover/pane-tab:opacity-70 focus:opacity-70"
                     }`}
-                    title={`Close ${tab.label}`}
+                    title={`Close ${displayLabel}`}
                   >
                     <X aria-hidden="true" className="size-4" />
                   </button>
@@ -1338,6 +1544,14 @@ function PaneTabGroup({
             </SortableContext>
           </PaneGroupDropZone>
         )}
+        {!isPrimaryGroup ? (
+          <PaneNewTabControl
+            onCreate={(content) => {
+              onFocus();
+              addTabToPane(worktreePath, topTabId, group.id, content);
+            }}
+          />
+        ) : null}
         <PaneSplitControl onFocus={onFocus} onSplit={onSplit} />
       </div>
       {/* The primary group renders the top-level tab strip instead of its own,

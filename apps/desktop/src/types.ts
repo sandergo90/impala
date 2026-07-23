@@ -104,7 +104,10 @@ export type PaneContent =
 
 export interface GroupTab {
   id: string;
+  /** Persisted automatic/fallback label. */
   label: string;
+  /** Explicit user rename. Always takes precedence over runtime titles. */
+  userLabel?: string;
   content: PaneContent;
   createdAt: number;
   pinned?: boolean;
@@ -132,6 +135,8 @@ export interface UserTab {
   terminalLaunch?: TerminalLaunchProfile;
   /** Display label shown on the tab. Auto-numbered at creation time (monotonic). */
   label: string;
+  /** Explicit user rename. Always takes precedence over runtime titles. */
+  userLabel?: string;
   /** Creation timestamp; stable ordering. */
   createdAt: number;
   /** Worktree-relative POSIX path; only set when kind === "file". */

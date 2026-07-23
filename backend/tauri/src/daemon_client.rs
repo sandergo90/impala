@@ -18,24 +18,58 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 
 const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUNDLED_DAEMON_VERSION: &str = env!("BUNDLED_DAEMON_VERSION");
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(3);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub struct DaemonState(pub OnceLock<DaemonClient>);
+pub struct DaemonState {
+    client: OnceLock<DaemonClient>,
+    init_error: Mutex<Option<String>>,
+    initialized: Notify,
+}
 
 impl DaemonState {
     pub fn new() -> Self {
-        Self(OnceLock::new())
+        Self {
+            client: OnceLock::new(),
+            init_error: Mutex::new(None),
+            initialized: Notify::new(),
+        }
     }
 
-    pub fn client(&self) -> Result<&DaemonClient, String> {
-        self.0
-            .get()
-            .ok_or_else(|| "pty daemon not ready".to_string())
+    pub async fn client(&self) -> Result<&DaemonClient, String> {
+        loop {
+            if let Some(client) = self.client.get() {
+                return Ok(client);
+            }
+
+            // Register for the notification before re-checking state so an
+            // initializer completing between the checks cannot be missed.
+            let initialized = self.initialized.notified();
+            if let Some(error) = self.init_error.lock().unwrap().clone() {
+                return Err(error);
+            }
+            if let Some(client) = self.client.get() {
+                return Ok(client);
+            }
+            initialized.await;
+        }
+    }
+
+    pub fn set_ready(&self, client: DaemonClient) -> Result<(), String> {
+        self.client
+            .set(client)
+            .map_err(|_| "pty daemon was initialized more than once".to_string())?;
+        self.initialized.notify_waiters();
+        Ok(())
+    }
+
+    pub fn set_failed(&self, error: String) {
+        *self.init_error.lock().unwrap() = Some(error);
+        self.initialized.notify_waiters();
     }
 }
 
@@ -478,4 +512,28 @@ pub fn sanitize_event_id(id: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DaemonState;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn client_waits_for_initialization_instead_of_failing_not_ready() {
+        let state = DaemonState::new();
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), state.client())
+                .await
+                .is_err(),
+            "client access should remain pending while daemon initialization is in progress"
+        );
+
+        state.set_failed("daemon boot failed".into());
+        match state.client().await {
+            Ok(_) => panic!("failed daemon initialization must not return a client"),
+            Err(error) => assert_eq!(error, "daemon boot failed"),
+        }
+    }
 }

@@ -12,6 +12,10 @@ import {
   migrateUserTabsToV7,
   migrateUserTabsToV8,
   migrateUserTabsToV10,
+  migrateSplitTreeToV11,
+  migrateUserTabsToV11,
+  removeAutomaticTabNamesFromSplitTree,
+  removeAutomaticTabNamesFromUserTabs,
 } from "./lib/split-tree-migration";
 import { isAutomationsProject } from "./lib/automations-project";
 
@@ -304,7 +308,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 10,
+      version: 13,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};
@@ -392,6 +396,43 @@ export const useUIStore = create<UIState>()(
             }
             if (nav.agentTabSplitTree) {
               nav.agentTabSplitTree = migrateSplitTreeToV10(
+                nav.agentTabSplitTree,
+              );
+            }
+          }
+        }
+        if (fromVersion < 11 && persistedState?.worktreeNavStates) {
+          for (const nav of Object.values(persistedState.worktreeNavStates) as any[]) {
+            if (!nav) continue;
+            if (Array.isArray(nav.userTabs)) {
+              nav.userTabs = migrateUserTabsToV11(nav.userTabs);
+            }
+            if (nav.agentTabSplitTree) {
+              nav.agentTabSplitTree = migrateSplitTreeToV11(
+                nav.agentTabSplitTree,
+              );
+            }
+          }
+        }
+        if (fromVersion < 13 && persistedState?.worktreeDataStates) {
+          for (const data of Object.values(
+            persistedState.worktreeDataStates,
+          ) as any[]) {
+            if (!data) continue;
+            delete data.paneTitles;
+            delete data.paneAgentTitles;
+          }
+        }
+        if (fromVersion < 13 && persistedState?.worktreeNavStates) {
+          for (const nav of Object.values(
+            persistedState.worktreeNavStates,
+          ) as any[]) {
+            if (!nav) continue;
+            if (Array.isArray(nav.userTabs)) {
+              nav.userTabs = removeAutomaticTabNamesFromUserTabs(nav.userTabs);
+            }
+            if (nav.agentTabSplitTree) {
+              nav.agentTabSplitTree = removeAutomaticTabNamesFromSplitTree(
                 nav.agentTabSplitTree,
               );
             }

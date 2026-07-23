@@ -16,10 +16,15 @@ globalThis.window = globalThis;
 
 const { useUIStore } = await import("../store.ts");
 const {
+  addTabToPane,
   addTabToAgentPrimaryPane,
+  createUserTab,
   getEffectiveAgentTabSplitTree,
+  getEffectiveUserTabSplitTree,
   moveWorkspaceTab,
   shouldCreateTabInFocusedPane,
+  renameUserTab,
+  renamePaneGroupTab,
 } = await import("./tab-actions.ts");
 
 const groupTab = (id, content, label = id) => ({
@@ -382,7 +387,9 @@ describe("addTabToAgentPrimaryPane", () => {
     const created = addTabToAgentPrimaryPane(worktreePath, { kind: "terminal", launch: "shell" });
 
     const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
-    const leaves = getLeaves(getEffectiveAgentTabSplitTree(nav.agentTabSplitTree));
+    const leaves = getLeaves(
+      getEffectiveAgentTabSplitTree(nav.agentTabSplitTree),
+    );
     expect(nav.userTabs).toEqual([]);
     expect(leaves.map((pane) => pane.id)).toEqual([primary.id, secondary.id]);
     expect(leaves[0].tabs.map((tab) => tab.id)).toEqual(["tab-agent", created.id]);
@@ -437,5 +444,113 @@ describe("addTabToAgentPrimaryPane", () => {
       "browser-session",
       "local-shell",
     ]);
+  });
+});
+
+describe("manual tab renaming", () => {
+  test("records a manual rename as an explicit override", () => {
+    const created = createUserTab(worktreePath, "shell");
+    renameUserTab(worktreePath, created.id, "Dev server");
+
+    const renamed = useUIStore
+      .getState()
+      .getWorktreeNavState(worktreePath)
+      .userTabs.find((tab) => tab.id === created.id);
+    expect(renamed.label).toBe("Dev server");
+    expect(renamed.userLabel).toBe("Dev server");
+  });
+
+  test("records a split-pane rename as an explicit override", () => {
+    const primary = group(
+      "tab-agent",
+      groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+    );
+    const secondary = group(
+      "secondary",
+      groupTab("shell-session", { kind: "terminal", launch: "shell" }),
+    );
+    setTabs([], "tab-agent", {
+      agentTabSplitTree: split(primary, secondary),
+    });
+
+    renamePaneGroupTab(
+      worktreePath,
+      "tab-agent",
+      "shell-session",
+      "Dev server",
+    );
+
+    const tree = getEffectiveAgentTabSplitTree(
+      useUIStore.getState().getWorktreeNavState(worktreePath).agentTabSplitTree,
+    );
+    expect(findGroup(tree, "secondary").tabs[0]).toMatchObject({
+      label: "Dev server",
+      userLabel: "Dev server",
+    });
+  });
+});
+
+describe("addTabToPane", () => {
+  test("adds a terminal directly to the requested Agent split pane", () => {
+    const primary = group(
+      "tab-agent",
+      groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+    );
+    const secondary = group(
+      "secondary",
+      groupTab("browser-session", { kind: "browser" }),
+    );
+    setTabs([], "tab-agent", {
+      agentTabSplitTree: split(primary, secondary),
+      agentTabFocusedPaneId: primary.id,
+    });
+
+    const createdId = addTabToPane(
+      worktreePath,
+      "tab-agent",
+      secondary.id,
+      { kind: "terminal", launch: "shell" },
+    );
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const leaves = getLeaves(getEffectiveAgentTabSplitTree(nav.agentTabSplitTree));
+    expect(leaves[0].tabs.map((tab) => tab.id)).toEqual(["tab-agent"]);
+    expect(leaves[1].tabs.map((tab) => tab.id)).toEqual([
+      "browser-session",
+      createdId,
+    ]);
+    expect(leaves[1].activeTabId).toBe(createdId);
+    expect(nav.agentTabFocusedPaneId).toBe(secondary.id);
+  });
+
+  test("adds a browser directly to the requested user-tab split pane", () => {
+    const primary = group(
+      "user-primary",
+      groupTab("user-primary-tab", { kind: "terminal", launch: "shell" }),
+    );
+    const secondary = group(
+      "user-secondary",
+      groupTab("user-secondary-tab", { kind: "terminal", launch: "shell" }),
+    );
+    const owner = userTab("owner", split(primary, secondary));
+    setTabs([owner], owner.id);
+
+    const createdId = addTabToPane(
+      worktreePath,
+      owner.id,
+      secondary.id,
+      { kind: "browser" },
+    );
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const updatedOwner = nav.userTabs.find((tab) => tab.id === owner.id);
+    const leaves = getLeaves(getEffectiveUserTabSplitTree(updatedOwner));
+    expect(leaves[0].tabs.map((tab) => tab.id)).toEqual(["user-primary-tab"]);
+    expect(leaves[1].tabs.map((tab) => tab.id)).toEqual([
+      "user-secondary-tab",
+      createdId,
+    ]);
+    expect(leaves[1].activeTabId).toBe(createdId);
+    expect(updatedOwner.focusedPaneId).toBe(secondary.id);
   });
 });

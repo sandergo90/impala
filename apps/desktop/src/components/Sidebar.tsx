@@ -38,6 +38,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ContextMenu } from "@/components/ui/context-menu";
+import { RunningServicesMenu } from "./RunningServicesMenu";
 
 import { cn, projectColor } from "../lib/utils";
 import { isAutomationsProject } from "../lib/automations-project";
@@ -196,6 +197,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
     : selectedProject;
   const projectIcons = useDataStore((s) => s.projectIcons);
   const worktrees = useFilteredWorktrees();
+  const projectWorktrees = useDataStore((s) => s.worktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
   const agentStatuses = useDataStore(
@@ -341,7 +343,15 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
 
       <div className="flex-1" />
 
-      <div className="border-t border-border/60 pt-2">
+      <div className="flex flex-col items-center gap-1 border-t border-border/60 pt-2">
+        {selectedProject && projectWorktrees.length > 0 && (
+          <RunningServicesMenu
+            key={`${selectedProject.path}:${projectWorktrees.map((worktree) => worktree.path).join("|")}`}
+            projectPath={selectedProject.path}
+            worktrees={projectWorktrees}
+            compact
+          />
+        )}
         <SidebarNavButton
           compact
           label="Settings"
@@ -369,6 +379,7 @@ export function Sidebar() {
     ? null
     : selectedProject;
   const worktrees = useFilteredWorktrees();
+  const projectWorktrees = useDataStore((s) => s.worktrees);
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
@@ -1144,6 +1155,15 @@ export function Sidebar() {
       {!selectedProject && <div className="flex-1" />}
 
       <div className="mx-2.5 mb-2 border-t border-border/60 pt-2">
+        {selectedProject && projectWorktrees.length > 0 && (
+          <div className="mb-1">
+            <RunningServicesMenu
+              key={`${selectedProject.path}:${projectWorktrees.map((worktree) => worktree.path).join("|")}`}
+              projectPath={selectedProject.path}
+              worktrees={projectWorktrees}
+            />
+          </div>
+        )}
         <SidebarNavButton
           label="Settings"
           icon={<Settings aria-hidden="true" className="size-4" />}

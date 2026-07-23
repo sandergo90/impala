@@ -222,10 +222,102 @@ export function createBrowserTab(worktreePath: string, url?: string): UserTab {
   return newTab;
 }
 
-/** Open (or reuse) the worktree's browser tab at a URL and bring it on screen. */
-export function openBrowserTabAt(worktreePath: string, url: string): void {
+function browserUrlMatches(
+  candidate: string,
+  target: string,
+  matchOrigin: boolean,
+): boolean {
+  try {
+    const candidateUrl = new URL(candidate);
+    const targetUrl = new URL(target);
+    if (!matchOrigin) return candidateUrl.href === targetUrl.href;
+
+    const normalizedOrigin = (url: URL): string => {
+      const hostname = ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+        ? "loopback"
+        : url.hostname;
+      return `${url.protocol}//${hostname}:${url.port}`;
+    };
+    return normalizedOrigin(candidateUrl) === normalizedOrigin(targetUrl);
+  } catch {
+    return candidate === target;
+  }
+}
+
+function findMatchingBrowserTab(
+  tree: SplitNode,
+  url: string,
+  matchOrigin: boolean,
+): { groupId: string; tabId: string } | null {
+  for (const group of getLeaves(tree)) {
+    const tab = group.tabs.find(
+      (candidate) =>
+        candidate.content.kind === "browser" &&
+        typeof candidate.content.url === "string" &&
+        browserUrlMatches(candidate.content.url, url, matchOrigin),
+    );
+    if (tab) return { groupId: group.id, tabId: tab.id };
+  }
+  return null;
+}
+
+/**
+ * Bring an existing matching browser pane on screen, or open/reuse a browser
+ * tab when no match exists. `matchOrigin` is useful for service roots: a tab
+ * at `/dashboard` still belongs to the service already open on that origin.
+ */
+export function openBrowserTabAt(
+  worktreePath: string,
+  url: string,
+  options?: { matchOrigin?: boolean },
+): void {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
+  const matchOrigin = options?.matchOrigin ?? false;
+
+  const focusAgentMatch = (): boolean => {
+    const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+    const match = findMatchingBrowserTab(tree, url, matchOrigin);
+    if (!match) return false;
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTab: "terminal",
+      activeTerminalsTab: AGENT_PANE_ID,
+      agentTabSplitTree: setActiveGroupTab(tree, match.groupId, match.tabId),
+      agentTabFocusedPaneId: match.groupId,
+    });
+    return true;
+  };
+
+  const focusUserMatch = (topTab: UserTab): boolean => {
+    const tree = getEffectiveUserTabSplitTree(topTab);
+    const match = findMatchingBrowserTab(tree, url, matchOrigin);
+    if (!match) return false;
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTab: "terminal",
+      activeTerminalsTab: topTab.id,
+      userTabs: nav.userTabs.map((candidate) =>
+        candidate.id === topTab.id
+          ? {
+              ...candidate,
+              splitTree: setActiveGroupTab(tree, match.groupId, match.tabId),
+              focusedPaneId: match.groupId,
+            }
+          : candidate,
+      ),
+    });
+    return true;
+  };
+
+  if (nav.activeTerminalsTab === AGENT_PANE_ID && focusAgentMatch()) return;
+  const activeUserTab = nav.userTabs.find(
+    (tab) => tab.id === nav.activeTerminalsTab,
+  );
+  if (activeUserTab && focusUserMatch(activeUserTab)) return;
+  for (const topTab of nav.userTabs) {
+    if (topTab.id !== activeUserTab?.id && focusUserMatch(topTab)) return;
+  }
+  if (nav.activeTerminalsTab !== AGENT_PANE_ID && focusAgentMatch()) return;
+
   const existing = nav.userTabs.find((t) => t.kind === "browser");
   if (existing) {
     // The webview label is `browser-{paneId}`; target the tab's primary
@@ -393,7 +485,7 @@ export function renameUserTab(
   const nav = uiState.getWorktreeNavState(worktreePath);
   if (!nav.userTabs.some((t) => t.id === tabId)) return;
   const next = nav.userTabs.map((t) =>
-    t.id === tabId ? { ...t, label: trimmed } : t,
+    t.id === tabId ? { ...t, label: trimmed, userLabel: trimmed } : t,
   );
   uiState.updateWorktreeNavState(worktreePath, { userTabs: next });
 }
@@ -403,17 +495,43 @@ export function renameAgentGroupTab(
   groupTabId: string,
   label: string,
 ): void {
+  renamePaneGroupTab(worktreePath, AGENT_PANE_ID, groupTabId, label);
+}
+
+export function renamePaneGroupTab(
+  worktreePath: string,
+  topTabId: string,
+  groupTabId: string,
+  label: string,
+): void {
   const trimmed = label.trim();
   if (!trimmed || groupTabId === AGENT_PANE_ID) return;
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
-  const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
-  if (!findGroupTab(tree, groupTabId)) return;
-  uiState.updateWorktreeNavState(worktreePath, {
-    agentTabSplitTree: updateGroupTab(tree, groupTabId, (tab) => ({
+  const rename = (tree: SplitNode) =>
+    updateGroupTab(tree, groupTabId, (tab) => ({
       ...tab,
       label: trimmed,
-    })),
+      userLabel: trimmed,
+    }));
+
+  if (topTabId === AGENT_PANE_ID) {
+    const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+    if (!findGroupTab(tree, groupTabId)) return;
+    uiState.updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: rename(tree),
+    });
+    return;
+  }
+
+  const topTab = nav.userTabs.find((tab) => tab.id === topTabId);
+  if (!topTab) return;
+  const tree = getEffectiveUserTabSplitTree(topTab);
+  if (!findGroupTab(tree, groupTabId)) return;
+  uiState.updateWorktreeNavState(worktreePath, {
+    userTabs: nav.userTabs.map((tab) =>
+      tab.id === topTabId ? { ...tab, splitTree: rename(tree) } : tab,
+    ),
   });
 }
 
@@ -832,6 +950,49 @@ export function addTabToActivePane(
     userTabs: nav.userTabs.map((tab) =>
       tab.id === topTab.id
         ? { ...tab, splitTree: addTabToGroup(tree, groupId, newTab) }
+        : tab,
+    ),
+  });
+  return newTab.id;
+}
+
+/** Add a local tab to a specific pane, independent of the currently focused pane. */
+export function addTabToPane(
+  worktreePath: string,
+  topTabId: string,
+  groupId: string,
+  content: PaneContent,
+): string | null {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const newTab = createGroup(content).tabs[0];
+
+  if (topTabId === AGENT_PANE_ID) {
+    const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+    if (!findLeaf(tree, groupId)) return null;
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTab: "terminal",
+      activeTerminalsTab: AGENT_PANE_ID,
+      agentTabSplitTree: addTabToGroup(tree, groupId, newTab),
+      agentTabFocusedPaneId: groupId,
+    });
+    return newTab.id;
+  }
+
+  const topTab = nav.userTabs.find((tab) => tab.id === topTabId);
+  if (!topTab) return null;
+  const tree = getEffectiveUserTabSplitTree(topTab);
+  if (!findLeaf(tree, groupId)) return null;
+  uiState.updateWorktreeNavState(worktreePath, {
+    activeTab: "terminal",
+    activeTerminalsTab: topTabId,
+    userTabs: nav.userTabs.map((tab) =>
+      tab.id === topTabId
+        ? {
+            ...tab,
+            splitTree: addTabToGroup(tree, groupId, newTab),
+            focusedPaneId: groupId,
+          }
         : tab,
     ),
   });

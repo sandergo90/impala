@@ -19,6 +19,7 @@ mod linear;
 mod notifications;
 mod observability;
 mod pty;
+mod running_services;
 mod settings;
 mod shell_wrappers;
 mod subagents;
@@ -1886,10 +1887,9 @@ pub fn run() {
 
             automations::start_scheduler(app.handle().clone());
 
-            // Bring up the detached PTY daemon in the background. Until it
-            // lands, pty_* commands return "pty daemon not ready". The
-            // frontend usually calls them in response to a user action, so
-            // a ~100ms async boot is invisible in practice.
+            // Bring up the detached PTY daemon in the background. Commands
+            // arriving during initialization wait on DaemonState; a startup
+            // failure wakes them with the underlying error.
             {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -1908,11 +1908,19 @@ pub fn run() {
                             if let Some(state) =
                                 app_handle.try_state::<daemon_client::DaemonState>()
                             {
-                                let _ = state.0.set(client);
+                                if let Err(error) = state.set_ready(client) {
+                                    eprintln!("[impala] {error}");
+                                }
                             }
                         }
                         Err(e) => {
-                            eprintln!("[impala] pty daemon failed to start: {e:#}");
+                            let error = format!("pty daemon failed to start: {e:#}");
+                            eprintln!("[impala] {error}");
+                            if let Some(state) =
+                                app_handle.try_state::<daemon_client::DaemonState>()
+                            {
+                                state.set_failed(error);
+                            }
                         }
                     }
                 });
@@ -2076,6 +2084,8 @@ pub fn run() {
             pty::pty_kill,
             pty::pty_is_alive,
             pty::prepare_shell_launch,
+            running_services::list_running_services,
+            running_services::terminate_running_service,
             check_generated_files,
             open_in_editor,
             resolve_file_path,

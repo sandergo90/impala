@@ -259,4 +259,5 @@ pub struct SessionInfo {
     pub cwd: String,
     pub started_at: String,
     pub alive: bool,
+    pub pid: Option<u32>,
 }

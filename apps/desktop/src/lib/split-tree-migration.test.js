@@ -5,6 +5,10 @@ import {
   migrateUserTabsToV7,
   migrateUserTabsToV8,
   migrateUserTabsToV10,
+  migrateSplitTreeToV11,
+  migrateUserTabsToV11,
+  removeAutomaticTabNamesFromSplitTree,
+  removeAutomaticTabNamesFromUserTabs,
 } from "./split-tree-migration.ts";
 
 describe("v6 to v7 user-tab migration", () => {
@@ -187,5 +191,99 @@ describe("v7 to v8 split-tree migration", () => {
       createdAt: 42,
       content: { kind: "file", path: "src/App.tsx" },
     });
+  });
+});
+
+describe("v10 to v11 manual title migration", () => {
+  test("preserves renamed tabs as explicit overrides", () => {
+    const [renamed, automatic] = migrateUserTabsToV11([
+      {
+        id: "one",
+        kind: "terminal",
+        terminalLaunch: "agent",
+        label: "Investigate auth",
+      },
+      {
+        id: "two",
+        kind: "terminal",
+        terminalLaunch: "agent",
+        label: "Agent 2",
+      },
+    ]);
+
+    expect(renamed.userLabel).toBe("Investigate auth");
+    expect(automatic.userLabel).toBeUndefined();
+  });
+
+  test("preserves renamed pane tabs without locking automatic labels", () => {
+    const tree = migrateSplitTreeToV11({
+      type: "group",
+      id: "pane",
+      activeTabId: "agent",
+      tabs: [
+        {
+          id: "agent",
+          label: "Fix CI",
+          content: { kind: "terminal", launch: "agent" },
+        },
+        {
+          id: "shell",
+          label: "Terminal",
+          content: { kind: "terminal", launch: "shell" },
+        },
+      ],
+    });
+
+    expect(tree.tabs[0].userLabel).toBe("Fix CI");
+    expect(tree.tabs[1].userLabel).toBeUndefined();
+  });
+});
+
+describe("automatic title removal", () => {
+  test("restores fixed labels while preserving explicit manual names", () => {
+    const [automatic, manual] = removeAutomaticTabNamesFromUserTabs([
+      {
+        id: "generated",
+        kind: "terminal",
+        terminalLaunch: "agent",
+        label: "Investigate stale terminal titles",
+      },
+      {
+        id: "manual",
+        kind: "terminal",
+        terminalLaunch: "agent",
+        label: "My agent",
+        userLabel: "My agent",
+      },
+    ]);
+
+    expect(automatic.label).toBe("Agent 2");
+    expect(manual.label).toBe("My agent");
+    expect(manual.userLabel).toBe("My agent");
+  });
+
+  test("removes generated pane labels but keeps manual pane labels", () => {
+    const tree = removeAutomaticTabNamesFromSplitTree({
+      type: "group",
+      id: "pane",
+      activeTabId: "generated",
+      tabs: [
+        {
+          id: "generated",
+          label: "$diagnose-local-dev-logs",
+          content: { kind: "terminal", launch: "agent" },
+        },
+        {
+          id: "manual",
+          label: "Dev server",
+          userLabel: "Dev server",
+          content: { kind: "terminal", launch: "shell" },
+        },
+      ],
+    });
+
+    expect(tree.tabs[0].label).toBe("Agent");
+    expect(tree.tabs[1].label).toBe("Dev server");
+    expect(tree.tabs[1].userLabel).toBe("Dev server");
   });
 });

@@ -27,6 +27,7 @@ const FIXED: Record<string, unknown> = {
   get_default_worktree_base_dir: "/tmp/impala-demo",
   read_hotkey_overrides: {}, // store indexes this object by hotkey id
   get_agent_statuses: {},
+  count_unseen_automation_runs: { total: 0, failed: 0 },
   load_projects: [], // overwritten below when POPULATE
 };
 
@@ -63,6 +64,36 @@ if (POPULATE) {
     has_last_turn_snapshot: false,
     get_all_worktree_issues: [],
     get_pr_status: null,
+    list_running_services: [
+      {
+        port: 5173,
+        address: "*",
+        pid: 42421,
+        processName: "vite",
+        worktreePath: WT,
+        sessionId: `pty-tab-agent-${WT}`,
+        managed: true,
+      },
+      {
+        port: 8787,
+        address: "127.0.0.1",
+        pid: 42422,
+        processName: "bun",
+        worktreePath: WT,
+        sessionId: null,
+        managed: false,
+      },
+      {
+        port: 3000,
+        address: "*",
+        pid: 42423,
+        processName: "next-server",
+        worktreePath: PROJECT,
+        sessionId: null,
+        managed: false,
+      },
+    ],
+    terminate_running_service: null,
   });
 }
 
