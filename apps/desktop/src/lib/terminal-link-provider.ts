@@ -2,7 +2,11 @@ import { invoke } from "@/lib/invoke";
 import type { Terminal, ILinkProvider, ILink } from "@xterm/xterm";
 import { parseFileLinks } from "./file-link-parser";
 import { openFileInEditor } from "./open-file-in-editor";
-import { openFileTab } from "./tab-actions";
+import {
+  openFileTab,
+  openFileTabFromPane,
+  type PaneFileOrigin,
+} from "./tab-actions";
 
 const existsCache = new Map<string, { exists: boolean; absPath: string; ts: number }>();
 const CACHE_TTL_MS = 10_000;
@@ -38,6 +42,7 @@ async function resolveAndCache(
 export function createFileLinkProvider(
   terminal: Terminal,
   getBaseDir: () => string | null,
+  getPaneOrigin?: () => PaneFileOrigin | null,
 ): ILinkProvider {
   return {
     provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
@@ -85,6 +90,14 @@ export function createFileLinkProvider(
                 : absPath;
               if (relPath === absPath) {
                 openFileInEditor(absPath, fl.line, fl.col);
+                return;
+              }
+              const origin = getPaneOrigin?.();
+              if (origin) {
+                openFileTabFromPane(baseDir, relPath, origin, {
+                  line: fl.line,
+                  col: fl.col,
+                });
                 return;
               }
               openFileTab(baseDir, relPath, { line: fl.line, col: fl.col });

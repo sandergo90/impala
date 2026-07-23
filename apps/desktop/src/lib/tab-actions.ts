@@ -1650,6 +1650,131 @@ export interface OpenFileTabOptions {
   col?: number;
 }
 
+export interface PaneFileOrigin {
+  topTabId: string;
+  groupId: string;
+}
+
+/**
+ * Open a terminal file link beside the pane that produced it.
+ *
+ * Existing files in the same split layout are focused in place. New files
+ * prefer the nearest pane to the right, then the left, and use pane-local
+ * preview semantics. If the source has no horizontal neighbor (or the target
+ * would be a user tab's projected primary group), fall back to the regular
+ * top-level file tab behavior.
+ */
+export function openFileTabFromPane(
+  worktreePath: string,
+  path: string,
+  origin: PaneFileOrigin,
+  opts: OpenFileTabOptions = {},
+): void {
+  const { pin = false, line, col } = opts;
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const isAgentTree = origin.topTabId === AGENT_PANE_ID;
+  const owner = isAgentTree
+    ? null
+    : nav.userTabs.find((tab) => tab.id === origin.topTabId);
+  const tree = isAgentTree
+    ? getEffectiveAgentTabSplitTree(nav.agentTabSplitTree)
+    : owner
+      ? getEffectiveUserTabSplitTree(owner)
+      : null;
+
+  const fallback = (): void => {
+    openFileTab(worktreePath, path, opts);
+  };
+  if (!tree || !findLeaf(tree, origin.groupId)) {
+    fallback();
+    return;
+  }
+
+  const parkPendingTarget = (): void => {
+    if (line === undefined) return;
+    useEditorDocsStore
+      .getState()
+      .setPendingTarget(buildDocumentKey(worktreePath, path), { line, col });
+  };
+  const applyTree = (nextTree: SplitNode, focusedGroupId: string): void => {
+    if (isAgentTree) {
+      uiState.updateWorktreeNavState(worktreePath, {
+        activeTab: "terminal",
+        activeTerminalsTab: AGENT_PANE_ID,
+        agentTabSplitTree: nextTree,
+        agentTabFocusedPaneId: focusedGroupId,
+      });
+      return;
+    }
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTab: "terminal",
+      activeTerminalsTab: origin.topTabId,
+      userTabs: nav.userTabs.map((tab) =>
+        tab.id === origin.topTabId
+          ? { ...tab, splitTree: nextTree, focusedPaneId: focusedGroupId }
+          : tab,
+      ),
+    });
+  };
+
+  for (const group of getLeaves(tree)) {
+    // Keep the terminal that produced the link visible. A matching file hidden
+    // behind that terminal is not a useful side-by-side destination.
+    if (group.id === origin.groupId) continue;
+    const existing = group.tabs.find(
+      (tab) => tab.content.kind === "file" && tab.content.path === path,
+    );
+    if (!existing) continue;
+    applyTree(setActiveGroupTab(tree, group.id, existing.id), group.id);
+    parkPendingTarget();
+    uiState.revealFileInTree(worktreePath, path);
+    return;
+  }
+
+  const targetGroupId =
+    getHorizontalNeighborGroupId(tree, origin.groupId, "right") ??
+    getHorizontalNeighborGroupId(tree, origin.groupId, "left");
+  const primaryGroupId = getLeaves(tree)[0]?.id;
+  // A user-owned primary group is represented by the workspace-level strip,
+  // not a local tab strip, so inserting a local file there would hide its tab.
+  if (!targetGroupId || (!isAgentTree && targetGroupId === primaryGroupId)) {
+    fallback();
+    return;
+  }
+
+  const targetGroup = findLeaf(tree, targetGroupId);
+  if (!targetGroup) {
+    fallback();
+    return;
+  }
+  const label = basename(path);
+  const preview = targetGroup.tabs.find(
+    (tab) => tab.content.kind === "file" && !tab.pinned,
+  );
+  let nextTree: SplitNode;
+  if (preview) {
+    nextTree = updateGroupTab(tree, preview.id, (tab) => ({
+      ...tab,
+      label,
+      pinned: pin || tab.pinned,
+      content: { kind: "file", path },
+    }));
+    nextTree = setActiveGroupTab(nextTree, targetGroupId, preview.id);
+  } else {
+    const created = createGroup({ kind: "file", path }).tabs[0];
+    nextTree = addTabToGroup(tree, targetGroupId, {
+      ...created,
+      label,
+      ...(pin ? { pinned: true } : {}),
+    });
+  }
+
+  applyTree(nextTree, targetGroupId);
+  parkPendingTarget();
+  uiState.revealFileInTree(worktreePath, path);
+}
+
 /**
  * Open a file in the dynamic tab bar with VS Code preview/pin semantics.
  *

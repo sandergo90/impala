@@ -1048,6 +1048,8 @@ const TabBody = memo(function TabBody({
       onExit={handleExit}
       onInterrupt={handleInterrupt}
       onOpenUrl={topTabId && sourceGroupId ? handleOpenUrl : undefined}
+      fileLinkTopTabId={topTabId}
+      fileLinkGroupId={sourceGroupId}
     />
   );
 });

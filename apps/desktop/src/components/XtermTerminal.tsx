@@ -14,6 +14,7 @@ import { useAppHotkey } from "../hooks/useAppHotkey";
 import { matchesHotkeyEvent } from "../lib/hotkeys";
 import { useHotkeysStore } from "../stores/hotkeys";
 import { createFileLinkProvider } from "../lib/terminal-link-provider";
+import type { PaneFileOrigin } from "../lib/tab-actions";
 import { createUrlLinkProvider } from "../lib/terminal-url-link-provider";
 import {
   createUrlUnderlineManager,
@@ -93,6 +94,7 @@ interface CachedTerminal {
   unlistenExit: UnlistenFn | null;
   unlistenDragDrop: UnlistenFn | null;
   baseDirRef: { current: string | null };
+  fileLinkOriginRef: { current: PaneFileOrigin | null };
   exitedRef: { current: boolean };
   exitCode: number | null;
   onExitHandler: ((code: number) => void) | null;
@@ -198,8 +200,13 @@ async function createCachedTerminal(
   terminal.open(wrapper);
 
   const baseDirRef = { current: null as string | null };
+  const fileLinkOriginRef = { current: null as PaneFileOrigin | null };
   const linkDisposable = terminal.registerLinkProvider(
-    createFileLinkProvider(terminal, () => baseDirRef.current),
+    createFileLinkProvider(
+      terminal,
+      () => baseDirRef.current,
+      () => fileLinkOriginRef.current,
+    ),
   );
   const urlLinkDisposable = terminal.registerLinkProvider(
     createUrlLinkProvider(terminal, handleOpenUrl),
@@ -241,6 +248,7 @@ async function createCachedTerminal(
     unlistenExit: null,
     unlistenDragDrop: null,
     baseDirRef,
+    fileLinkOriginRef,
     exitedRef: { current: false },
     exitCode: null,
     onExitHandler: null,
@@ -429,6 +437,8 @@ interface XtermTerminalProps {
   onExit?: (code: number) => void;
   onInterrupt?: () => void;
   onOpenUrl?: (url: string) => void;
+  fileLinkTopTabId?: string;
+  fileLinkGroupId?: string;
   scrollback?: number;
 }
 
@@ -441,6 +451,8 @@ function XtermTerminalInner({
   onExit,
   onInterrupt,
   onOpenUrl,
+  fileLinkTopTabId,
+  fileLinkGroupId,
   scrollback = 10000,
 }: XtermTerminalProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -502,6 +514,10 @@ function XtermTerminalInner({
       // awaits), so without this line baseDirRef stays null until the next
       // remount — file paths in the terminal aren't clickable on first mount.
       entry.baseDirRef.current = baseDir ?? null;
+      entry.fileLinkOriginRef.current =
+        fileLinkTopTabId && fileLinkGroupId
+          ? { topTabId: fileLinkTopTabId, groupId: fileLinkGroupId }
+          : null;
       entry.onInterruptHandler = () => onInterruptRef.current?.();
       entry.onOpenUrlHandler = (url) => {
         const handler = onOpenUrlRef.current;
@@ -601,23 +617,29 @@ function XtermTerminalInner({
         attachedEntry.onInterruptHandler = null;
         attachedEntry.onOpenUrlHandler = null;
         attachedEntry.openUrlHandlerRef.current = null;
+        attachedEntry.fileLinkOriginRef.current = null;
         // Park the wrapper outside the DOM. Keeping the instance alive is the
         // whole point of the cache.
         attachedEntry.wrapper.remove();
       }
       entryRef.current = null;
     };
-    // baseDir is read inside attach() for the initial sync; later changes are
-    // handled by the dedicated baseDir effect below, so it's not in the deps.
+    // File-link props are read inside attach() for the initial sync; later
+    // changes are handled by the dedicated context effect below, so they are
+    // not in the deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, scrollback]);
 
-  // Keep the cached baseDir in sync so the link provider can resolve paths
-  // after the prop changes without tearing down the terminal.
+  // Keep cached file-link context in sync without tearing down the terminal.
   useEffect(() => {
     const entry = entryRef.current;
-    if (entry) entry.baseDirRef.current = baseDir ?? null;
-  }, [baseDir, sessionId]);
+    if (!entry) return;
+    entry.baseDirRef.current = baseDir ?? null;
+    entry.fileLinkOriginRef.current =
+      fileLinkTopTabId && fileLinkGroupId
+        ? { topTabId: fileLinkTopTabId, groupId: fileLinkGroupId }
+        : null;
+  }, [baseDir, fileLinkGroupId, fileLinkTopTabId, sessionId]);
 
   // onFocus handler lives on the host container (not the cached wrapper) so
   // each mount gets its own callback.

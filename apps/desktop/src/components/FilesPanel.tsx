@@ -15,6 +15,7 @@ import { mapGitStatus } from "../lib/git-status";
 import { openFileTab } from "../lib/tab-actions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { dirname } from "../lib/path-utils";
+import { FileTreeSelectionIntent } from "../lib/file-tree-selection-intent";
 import {
   createDirectory,
   createFile,
@@ -107,10 +108,12 @@ export function FilesPanel() {
   // and the rename handler fresh without rebuilding the model.
   const wtPathRef = useRef<string | null>(wtPath);
   wtPathRef.current = wtPath;
+  const [selectionIntent] = useState(() => new FileTreeSelectionIntent());
 
   const handlerRef = useRef<(selected: readonly string[]) => void>(() => { });
   handlerRef.current = (selected) => {
     if (!wtPath || selected.length === 0) return;
+    if (!selectionIntent.shouldOpenSelection()) return;
     const path = selected[selected.length - 1]!;
     if (path.endsWith("/")) {
       void expand(path.slice(0, -1));
@@ -246,13 +249,15 @@ export function FilesPanel() {
     if (!target || target.wt !== wtPathRef.current) return;
     const item = model.getItem(target.path);
     if (!item) return;
-    for (const p of model.getSelectedPaths()) {
-      if (p !== target.path) model.getItem(p)?.deselect();
-    }
-    item.select();
+    selectionIntent.runProgrammaticSelection(() => {
+      for (const p of model.getSelectedPaths()) {
+        if (p !== target.path) model.getItem(p)?.deselect();
+      }
+      item.select();
+    });
     model.scrollToPath(target.path);
     revealTargetRef.current = null;
-  }, [model]);
+  }, [model, selectionIntent]);
 
   // Set the reveal target and expand its ancestors so the row becomes
   // reachable. Selection itself is applied by applyRevealSelection: directly
