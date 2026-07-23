@@ -18,6 +18,7 @@ import {
   removeAutomaticTabNamesFromUserTabs,
 } from "./lib/split-tree-migration";
 import { isAutomationsProject } from "./lib/automations-project";
+import { filterWorktreesByBaseDir } from "./lib/worktree-visibility";
 
 function createDefaultNavState(): WorktreeNavState {
   return {
@@ -562,9 +563,8 @@ export const useDataStore = create<DataState>()(
  * Worktrees as the user wants to see them.
  *
  * When `worktreeFilterEnabled` is on, hides any worktree whose path doesn't
- * sit under the configured base directory. Main worktrees (the repo root —
- * identified by `title === null`, set in lib.rs::list_worktrees) are always
- * kept so the user never loses access to the primary checkout.
+ * sit under the configured base directory. The primary checkout is always
+ * kept, regardless of its current branch or location.
  */
 export function useFilteredWorktrees(): Worktree[] {
   const worktrees = useDataStore((s) => s.worktrees);
@@ -580,9 +580,6 @@ export function useFilteredWorktrees(): Worktree[] {
     // ~/.impala/automation-runs — never inside the worktree base dir.
     if (isVirtual) return worktrees;
     if (!enabled || !baseDir) return worktrees;
-    const prefix = baseDir.endsWith("/") ? baseDir : `${baseDir}/`;
-    return worktrees.filter(
-      (w) => w.title === null || w.path === baseDir || w.path.startsWith(prefix),
-    );
+    return filterWorktreesByBaseDir(worktrees, enabled, baseDir);
   }, [worktrees, enabled, baseDir, isVirtual]);
 }

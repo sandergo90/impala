@@ -46,8 +46,20 @@ if (POPULATE) {
   Object.assign(FIXED, {
     load_projects: [PROJECT],
     list_worktrees: [
-      { path: WT, branch: "feature/perf", head_commit: "deadbeef", title: "Perf work" },
-      { path: PROJECT, branch: "main", head_commit: "cafef00d", title: null },
+      {
+        path: WT,
+        branch: "feature/perf",
+        head_commit: "deadbeef",
+        title: "Perf work",
+        is_primary: false,
+      },
+      {
+        path: PROJECT,
+        branch: "main",
+        head_commit: "cafef00d",
+        title: null,
+        is_primary: true,
+      },
     ],
     discover_project_icon: null,
     get_project_issue_tracker: { kind: "none" },

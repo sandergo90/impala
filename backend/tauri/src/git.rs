@@ -8,6 +8,7 @@ pub struct Worktree {
     pub branch: String,
     pub head_commit: String,
     pub title: Option<String>,
+    pub is_primary: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,6 +79,9 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
                  head: &mut String,
                  worktrees: &mut Vec<Worktree>| {
         if !path.is_empty() {
+            // `git worktree list --porcelain` guarantees the primary worktree
+            // is the first record. Capture that role before sorting the result.
+            let is_primary = worktrees.is_empty();
             worktrees.push(Worktree {
                 path: std::mem::take(path),
                 branch: if branch.is_empty() {
@@ -87,6 +91,7 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
                 },
                 head_commit: std::mem::take(head),
                 title: None,
+                is_primary,
             });
         }
     };
@@ -104,8 +109,9 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<Worktree>, String> {
     }
     flush(&mut path, &mut branch, &mut head, &mut worktrees);
 
-    // Filter out temporary Claude Code agent worktrees
-    worktrees.retain(|wt| !wt.branch.starts_with("worktree-agent-"));
+    // Filter out temporary Claude Code agent worktrees, but never hide the
+    // repository's primary checkout if it happens to be on such a branch.
+    worktrees.retain(|wt| wt.is_primary || !wt.branch.starts_with("worktree-agent-"));
 
     // Sort newest-created first; worktrees without a readable creation time sink to the bottom.
     worktrees.sort_by(|a, b| worktree_created_at(&b.path).cmp(&worktree_created_at(&a.path)));
@@ -521,6 +527,7 @@ pub fn create_worktree(
         branch: local_branch,
         head_commit: head,
         title: None,
+        is_primary: false,
     })
 }
 
@@ -1036,6 +1043,52 @@ mod tests {
         assert_eq!(
             copy_worktree_includes(repo.to_str().unwrap(), repo.to_str().unwrap()).unwrap(),
             0,
+        );
+    }
+
+    #[test]
+    fn list_worktrees_identifies_primary_checkout_independently_of_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        let linked_main = tmp.path().join("linked-main");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        git(&repo, &["config", "user.name", "Tester"]);
+        std::fs::write(repo.join("README.md"), "tracked").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "init"]);
+        git(&repo, &["checkout", "-q", "-b", "feature/local-checkout"]);
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                linked_main.to_str().unwrap(),
+                "main",
+            ],
+        );
+
+        let worktrees = list_worktrees(repo.to_str().unwrap()).unwrap();
+        let canonical_repo = std::fs::canonicalize(&repo).unwrap();
+        let canonical_linked_main = std::fs::canonicalize(&linked_main).unwrap();
+        let primary = worktrees
+            .iter()
+            .find(|worktree| worktree.path == canonical_repo.to_string_lossy())
+            .unwrap();
+        let linked = worktrees
+            .iter()
+            .find(|worktree| worktree.path == canonical_linked_main.to_string_lossy())
+            .unwrap();
+
+        assert!(
+            primary.is_primary,
+            "the primary checkout stays primary on a feature branch",
+        );
+        assert!(
+            !linked.is_primary,
+            "a linked main-branch worktree is not the primary checkout",
         );
     }
 

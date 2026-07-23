@@ -658,12 +658,12 @@ export function Sidebar() {
           ).catch(() => [] as Worktree[]);
           useDataStore.getState().setWorktrees(wts);
           const persistedWorktree = useUIStore.getState().selectedWorktree;
-          if (
-            persistedWorktree &&
-            wts.some((wt) => wt.path === persistedWorktree.path)
-          ) {
+          const restoredWorktree = persistedWorktree
+            ? wts.find((wt) => wt.path === persistedWorktree.path)
+            : undefined;
+          if (restoredWorktree) {
             useUIStore.getState().setGeneralTerminalActive(false);
-            await sharedSelectWorktree(persistedWorktree, {
+            await sharedSelectWorktree(restoredWorktree, {
               stayOnRoute: true,
             });
           } else {
@@ -680,12 +680,12 @@ export function Sidebar() {
             useDataStore.getState().setWorktrees(wts);
 
             const persistedWorktree = useUIStore.getState().selectedWorktree;
-            if (
-              persistedWorktree &&
-              wts.some((wt) => wt.path === persistedWorktree.path)
-            ) {
+            const restoredWorktree = persistedWorktree
+              ? wts.find((wt) => wt.path === persistedWorktree.path)
+              : undefined;
+            if (restoredWorktree) {
               useUIStore.getState().setGeneralTerminalActive(false);
-              await sharedSelectWorktree(persistedWorktree, {
+              await sharedSelectWorktree(restoredWorktree, {
                 stayOnRoute: true,
               });
             } else {
@@ -972,16 +972,13 @@ export function Sidebar() {
             {worktrees.map((wt) => {
               const isSelected = selectedWorktree?.path === wt.path;
               const stats = diffStats[wt.path];
-              const isMain =
-                wt.branch === "main" ||
-                wt.branch === "master" ||
-                wt.branch === "develop";
+              const isPrimary = wt.is_primary;
               const isActive = agentStatuses[wt.path] === "working";
               const hasUnseen = unseenResults[wt.path];
               const prStatus = prStatuses[wt.path];
               const isPermission = agentStatuses[wt.path] === "permission";
 
-              const cardBorder = isMain
+              const cardBorder = isPrimary
                 ? ""
                 : isSelected
                   ? "border border-primary/30"
@@ -1011,13 +1008,18 @@ export function Sidebar() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        {isMain ? (
-                          <span
-                            className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
-                            title={wt.branch}
-                          >
-                            {wt.branch}
-                          </span>
+                        {isPrimary ? (
+                          <>
+                            <span
+                              className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                              title={wt.branch}
+                            >
+                              {wt.branch}
+                            </span>
+                            <span className="font-mono text-xs bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
+                              local
+                            </span>
+                          </>
                         ) : editingPath === wt.path ? (
                           <input
                             autoFocus
@@ -1064,7 +1066,7 @@ export function Sidebar() {
                             </span>
                           </span>
                           {/* Close button — overlaid on hover */}
-                          {!isMain && (
+                          {!isPrimary && (
                             <span
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1077,7 +1079,7 @@ export function Sidebar() {
                           )}
                         </span>
                       </div>
-                      {!isMain && editingPath !== wt.path && (
+                      {!isPrimary && editingPath !== wt.path && (
                         <div className="mt-1 flex items-center gap-1 flex-wrap">
                           {isActive && (
                             <span className="inline-flex items-center gap-1 font-mono text-xs bg-accent/60 text-warning rounded px-1.5 py-0.5">
@@ -1111,7 +1113,7 @@ export function Sidebar() {
                 </div>
               );
 
-              return isMain ? (
+              return isPrimary ? (
                 <Fragment key={wt.path}>{row}</Fragment>
               ) : (
                 <ContextMenu

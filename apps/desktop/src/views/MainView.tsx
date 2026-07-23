@@ -248,19 +248,20 @@ export function MainView() {
           </button>
           {selectedWorktree && (() => {
             const branch = selectedWorktree.branch;
-            const isMain = branch === "main" || branch === "master" || branch === "develop";
+            const isPrimary = selectedWorktree.is_primary;
+            const isMainline = branch === "main" || branch === "master" || branch === "develop";
             const aheadCount = dataState?.commits?.length ?? 0;
-            const primary = isMain ? branch : (selectedWorktree.title ?? branch);
+            const primary = isPrimary ? branch : (selectedWorktree.title ?? branch);
             const metaParts: string[] = [];
             if (selectedProject?.name) metaParts.push(selectedProject.name);
-            if (!isMain) metaParts.push(branch);
-            if (!isMain && dataState?.baseBranch && aheadCount > 0) {
+            if (!isPrimary) metaParts.push(branch);
+            if (!isMainline && dataState?.baseBranch && aheadCount > 0) {
               metaParts.push(`${aheadCount} ahead of ${dataState.baseBranch}`);
             }
             return (
               <div className="flex flex-col justify-center min-w-0">
                 <span
-                  className={`truncate max-w-[420px] text-base font-semibold text-foreground ${isMain ? "font-mono" : ""}`}
+                  className={`truncate max-w-[420px] text-base font-semibold text-foreground ${isPrimary ? "font-mono" : ""}`}
                   title={primary}
                 >
                   {primary}

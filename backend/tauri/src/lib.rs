@@ -116,7 +116,7 @@ async fn list_worktrees(
         worktrees::get_all_titles(&conn)?
     };
     for wt in worktrees.iter_mut() {
-        if worktrees::is_main_branch(&wt.branch) {
+        if wt.is_primary {
             wt.title = None;
             continue;
         }
@@ -455,7 +455,7 @@ async fn create_worktree(
         settings::set_setting(&conn, "selectedAgent", &worktree.path, &agent)?;
         settings::set_setting(&conn, "lastAgentForProject", &repo_path, &agent)?;
 
-        if !worktrees::is_main_branch(&worktree.branch) {
+        if !worktree.is_primary {
             let title = match initial_title {
                 Some(t) if !t.trim().is_empty() => t.trim().to_string(),
                 _ => worktrees::default_title_from_branch(&branch_name),

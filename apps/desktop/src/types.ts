@@ -8,6 +8,7 @@ export interface Worktree {
   branch: string;
   head_commit: string;
   title: string | null;
+  is_primary: boolean;
 }
 
 export interface CommitInfo {

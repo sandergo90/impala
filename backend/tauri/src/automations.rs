@@ -1322,6 +1322,7 @@ pub fn list_automation_run_worktrees(
                 branch: "automation".to_string(),
                 head_commit: String::new(),
                 title: Some(name),
+                is_primary: false,
             })
             .collect(),
     )
@@ -1343,6 +1344,7 @@ pub fn list_recent_automation_worktrees(
                 branch: "automation".to_string(),
                 head_commit: String::new(),
                 title: Some(name),
+                is_primary: false,
             })
             .collect(),
     )
