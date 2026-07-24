@@ -104,6 +104,13 @@ impl AgentPaneStatuses {
         aggregate
     }
 
+    pub fn contains(&self, worktree_path: &str, pane_id: &str) -> bool {
+        let Ok(panes) = self.panes.lock() else {
+            return false;
+        };
+        panes.contains_key(&(worktree_path.to_owned(), pane_id.to_owned()))
+    }
+
     pub fn interrupt(&self, worktree_path: &str, pane_id: &str) -> Option<String> {
         self.clear(worktree_path, pane_id)
     }
@@ -230,6 +237,47 @@ impl Default for InterruptedAgentTurns {
             panes: Mutex::new(HashSet::new()),
             persist: false,
         }
+    }
+}
+
+/// Status a hook event implies for its pane. `pane_is_active` is whether the
+/// pane currently has a non-idle status: a backgrounded tool's PostToolUse
+/// can arrive after the turn's Stop, and must drain silently rather than
+/// resurrect a pane whose agent already went idle — no later event would
+/// ever clear it. New turns always open with UserPromptSubmit, PreToolUse,
+/// or PermissionRequest, so only those may raise status from scratch.
+fn pane_status_for_hook_event(
+    event_type: &str,
+    automation_should_complete: bool,
+    stop_with_active_tools: bool,
+    pane_is_active: bool,
+) -> &'static str {
+    match event_type {
+        "UserPromptSubmit" | "PreToolUse" => {
+            if automation_should_complete {
+                "idle"
+            } else {
+                "working"
+            }
+        }
+        "PostToolUse" | "PostToolUseFailure" => {
+            if automation_should_complete {
+                "idle"
+            } else if pane_is_active {
+                "working"
+            } else {
+                ""
+            }
+        }
+        "Stop" => {
+            if stop_with_active_tools {
+                "working"
+            } else {
+                "idle"
+            }
+        }
+        "PermissionRequest" => "permission",
+        _ => "",
     }
 }
 
@@ -1100,11 +1148,16 @@ pub fn start(
 
             let event_type = params.get("event_type").map(|s| s.as_str()).unwrap_or("");
             let worktree_path = params.get("worktree_path").cloned().unwrap_or_default();
+            // An empty pane_id means the agent wasn't launched into a known
+            // pane (a PTY session predating IMPALA_PANE_ID, or a child
+            // process with a stripped env). Attributing such events to a
+            // real tab lights up a pane whose agent is idle, so they carry
+            // no pane status at all.
             let pane_id = params
                 .get("pane_id")
                 .filter(|value| !value.is_empty())
                 .cloned()
-                .unwrap_or_else(|| "tab-agent".to_owned());
+                .unwrap_or_default();
             let provider = params
                 .get("agent_provider")
                 .map(String::as_str)
@@ -1112,14 +1165,16 @@ pub fn start(
             let mut hook_payload = String::new();
             let _ = request.as_reader().read_to_string(&mut hook_payload);
 
-            subagents.ingest_hook(
-                &app_handle,
-                &worktree_path,
-                &pane_id,
-                provider,
-                event_type,
-                &hook_payload,
-            );
+            if !pane_id.is_empty() {
+                subagents.ingest_hook(
+                    &app_handle,
+                    &worktree_path,
+                    &pane_id,
+                    provider,
+                    event_type,
+                    &hook_payload,
+                );
+            }
 
             let suppress_interrupted_event =
                 interrupted_turns.suppresses(&worktree_path, &pane_id, event_type);
@@ -1131,27 +1186,15 @@ pub fn start(
             } else {
                 automation_completion.observe(&worktree_path, &pane_id, event_type, &hook_payload)
             };
-            let status = if suppress_interrupted_event {
+            let status = if suppress_interrupted_event || pane_id.is_empty() {
                 ""
             } else {
-                match event_type {
-                    "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => {
-                        if automation_should_complete {
-                            "idle"
-                        } else {
-                            "working"
-                        }
-                    }
-                    "Stop" => {
-                        if automation_completion.has_active_tools(&worktree_path, &pane_id) {
-                            "working"
-                        } else {
-                            "idle"
-                        }
-                    }
-                    "PermissionRequest" => "permission",
-                    _ => "",
-                }
+                pane_status_for_hook_event(
+                    event_type,
+                    automation_should_complete,
+                    automation_completion.has_active_tools(&worktree_path, &pane_id),
+                    pane_statuses.contains(&worktree_path, &pane_id),
+                )
             };
 
             // A stopped lead turn completes its launched automation only
@@ -1228,8 +1271,8 @@ pub fn start(
 #[cfg(test)]
 mod tests {
     use super::{
-        hook_command, AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns,
-        IMPALA_BROWSER_SKILL,
+        hook_command, pane_status_for_hook_event, AgentPaneStatuses, AutomationCompletionTracker,
+        InterruptedAgentTurns, IMPALA_BROWSER_SKILL,
     };
     use std::fs;
     use std::io::Write;
@@ -1538,5 +1581,48 @@ cat >/dev/null
             "permission"
         );
         assert_eq!(panes.observe(worktree, "pane-2", "idle"), "working");
+    }
+
+    #[test]
+    fn a_trailing_post_tool_use_does_not_resurrect_an_idle_pane() {
+        // A backgrounded tool's PostToolUse lands after the turn's Stop
+        // already cleared the pane — nothing may come back to "working".
+        assert_eq!(pane_status_for_hook_event("PostToolUse", false, false, false), "");
+        assert_eq!(
+            pane_status_for_hook_event("PostToolUseFailure", false, false, false),
+            ""
+        );
+    }
+
+    #[test]
+    fn post_tool_use_during_an_active_turn_keeps_the_pane_working() {
+        assert_eq!(
+            pane_status_for_hook_event("PostToolUse", false, false, true),
+            "working"
+        );
+    }
+
+    #[test]
+    fn a_new_turn_raises_status_from_a_prompt_or_tool_call() {
+        assert_eq!(
+            pane_status_for_hook_event("UserPromptSubmit", false, false, false),
+            "working"
+        );
+        assert_eq!(
+            pane_status_for_hook_event("PreToolUse", false, false, false),
+            "working"
+        );
+        assert_eq!(
+            pane_status_for_hook_event("PermissionRequest", false, false, false),
+            "permission"
+        );
+    }
+
+    #[test]
+    fn automation_completion_still_drains_to_idle_through_trailing_tools() {
+        // An automation's lead turn stops while background tools run: Stop
+        // keeps it working, and the final draining PostToolUse completes it.
+        assert_eq!(pane_status_for_hook_event("Stop", false, true, true), "working");
+        assert_eq!(pane_status_for_hook_event("PostToolUse", true, false, true), "idle");
     }
 }
