@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=PermissionRequest\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=PermissionRequest\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ]
@@ -14,7 +14,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=PostToolUse\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=PostToolUse\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ],
@@ -25,7 +25,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=PostToolUseFailure\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=PostToolUseFailure\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ],
@@ -36,7 +36,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=PreToolUse\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=PreToolUse\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ],
@@ -47,7 +47,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=SessionStart\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=SessionStart\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ]
@@ -57,7 +57,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=Stop\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=Stop\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ]
@@ -67,7 +67,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=SubagentStart\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=SubagentStart\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ],
@@ -78,7 +78,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=SubagentStop\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=SubagentStop\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ],
@@ -89,7 +89,7 @@
       {
         "hooks": [
           {
-            "command": "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=UserPromptSubmit\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+            "command": "IMPALA_INHERITED_HOOK_PORT=\"${IMPALA_HOOK_PORT:-}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${IMPALA_INHERITED_HOOK_PORT}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${IMPALA_HOOK_PORT}/hook\" --url-query \"event_type=UserPromptSubmit\" --url-query \"worktree_path=${IMPALA_WORKTREE_PATH}\" --url-query \"pane_id=${IMPALA_PANE_ID}\" --url-query \"agent_provider=${IMPALA_AGENT_PROVIDER}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
             "type": "command"
           }
         ]
