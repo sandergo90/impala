@@ -196,10 +196,22 @@ fn ingest_claude_event(session: &mut PaneSession, event_type: &str, value: &Valu
     let Some(agent_id) = value.get("agent_id").and_then(Value::as_str) else {
         return false;
     };
-    let agent_type = value
+    // Claude Code encodes "type unknown" as agent_type: "" (the payload
+    // schema requires a string), and SubagentStop for background agents can
+    // be the only event that ever names a record — keep any name we already
+    // learned instead of clobbering it.
+    let name = value
         .get("agent_type")
         .and_then(Value::as_str)
-        .unwrap_or("Subagent");
+        .filter(|agent_type| !agent_type.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            session
+                .agents
+                .get(agent_id)
+                .map(|record| record.summary.name.clone())
+        })
+        .unwrap_or_else(|| "Subagent".to_string());
     let now = chrono::Utc::now().timestamp_millis();
     let status = if event_type == "SubagentStop" {
         "done"
@@ -209,7 +221,7 @@ fn ingest_claude_event(session: &mut PaneSession, event_type: &str, value: &Valu
     let next = SubagentRecord {
         summary: SubagentSummary {
             id: agent_id.to_string(),
-            name: agent_type.to_string(),
+            name,
             status: status.to_string(),
             depth: 1,
             updated_at: now,
@@ -404,6 +416,44 @@ mod tests {
         ));
         let done = session.agents.get("agent-1").unwrap();
         assert_eq!(done.summary.status, "done");
+    }
+
+    #[test]
+    fn empty_agent_type_on_stop_keeps_the_name_from_start() {
+        let mut session = PaneSession::default();
+        ingest_claude_event(
+            &mut session,
+            "SubagentStart",
+            &serde_json::json!({
+                "agent_id": "agent-1",
+                "agent_type": "Explore"
+            }),
+        );
+        ingest_claude_event(
+            &mut session,
+            "SubagentStop",
+            &serde_json::json!({
+                "agent_id": "agent-1",
+                "agent_type": ""
+            }),
+        );
+        let done = session.agents.get("agent-1").unwrap();
+        assert_eq!(done.summary.name, "Explore");
+        assert_eq!(done.summary.status, "done");
+    }
+
+    #[test]
+    fn stop_only_record_with_empty_agent_type_gets_placeholder_name() {
+        let mut session = PaneSession::default();
+        ingest_claude_event(
+            &mut session,
+            "SubagentStop",
+            &serde_json::json!({
+                "agent_id": "agent-1",
+                "agent_type": ""
+            }),
+        );
+        assert_eq!(session.agents.get("agent-1").unwrap().summary.name, "Subagent");
     }
 
     #[test]
