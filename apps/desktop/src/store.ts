@@ -19,6 +19,7 @@ import {
 } from "./lib/split-tree-migration";
 import { isAutomationsProject } from "./lib/automations-project";
 import { filterWorktreesByBaseDir } from "./lib/worktree-visibility";
+import { addRecentBrowserUrl as appendRecentBrowserUrl } from "./lib/browser-history";
 
 function createDefaultNavState(): WorktreeNavState {
   return {
@@ -144,6 +145,12 @@ interface UIState {
   // calls). In-memory; drives the activity indicators with a decay window.
   browserAgentActivity: Record<string, { until: number; kind: string }>;
   markBrowserAgentActivity: (worktreePath: string, kind: string) => void;
+  // URLs explicitly submitted through a browser pane's address bar. Persisted
+  // globally so the same local dev URL is available across worktrees.
+  recentBrowserUrls: string[];
+  addRecentBrowserUrl: (url: string) => void;
+  removeRecentBrowserUrl: (url: string) => void;
+  clearRecentBrowserUrls: () => void;
   // Whether the sidebar (and other worktree consumers) hides worktrees that
   // live outside the configured worktree base directory. Persisted.
   worktreeFilterEnabled: boolean;
@@ -300,6 +307,21 @@ export const useUIStore = create<UIState>()(
             [worktreePath]: { until: Date.now() + 2500, kind },
           },
         })),
+      recentBrowserUrls: [],
+      addRecentBrowserUrl: (url) =>
+        set((state) => ({
+          recentBrowserUrls: appendRecentBrowserUrl(
+            state.recentBrowserUrls,
+            url,
+          ),
+        })),
+      removeRecentBrowserUrl: (url) =>
+        set((state) => ({
+          recentBrowserUrls: state.recentBrowserUrls.filter(
+            (entry) => entry !== url,
+          ),
+        })),
+      clearRecentBrowserUrls: () => set({ recentBrowserUrls: [] }),
       worktreeFilterEnabled: true,
       setWorktreeFilterEnabled: (enabled) => set({ worktreeFilterEnabled: enabled }),
       worktreeBaseDirOverride: null,
@@ -309,7 +331,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "impala-ui-state",
-      version: 13,
+      version: 14,
       migrate: (persistedState: any, fromVersion: number) => {
         if (fromVersion < 1 && persistedState?.worktreeNavStates) {
           const cleaned: Record<string, any> = {};

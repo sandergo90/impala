@@ -22,6 +22,7 @@ import {
   AGENT_ACTIVITY_LABELS,
   useBrowserAgentActivity,
 } from "../hooks/useBrowserAgentActivity";
+import { filterRecentBrowserUrls } from "../lib/browser-history";
 
 const DEFAULT_URL = "about:blank";
 
@@ -68,6 +69,9 @@ export const BrowserPane = memo(function BrowserPane({
   const createdRef = useRef(false);
   const inputFocusedRef = useRef(false);
   const [inputValue, setInputValue] = useState(url ?? "");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(-1);
   const [loading, setLoading] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   // Last failed browser_* invoke, shown as a strip under the toolbar. Cleared
@@ -93,12 +97,17 @@ export const BrowserPane = memo(function BrowserPane({
   const finderOpen = useUIStore((s) => s.fileFinderOpen);
   const terminalMenuOpen = useUIStore((s) => s.terminalMenuOpen);
   const occlusionActive = useUIStore((s) => s.panelDragActive);
+  const recentBrowserUrls = useUIStore((s) => s.recentBrowserUrls);
+  const addRecentBrowserUrl = useUIStore((s) => s.addRecentBrowserUrl);
+  const removeRecentBrowserUrl = useUIStore((s) => s.removeRecentBrowserUrl);
+  const clearRecentBrowserUrls = useUIStore((s) => s.clearRecentBrowserUrls);
   const visible =
     isActive &&
     !paletteOpen &&
     !finderOpen &&
     !terminalMenuOpen &&
-    !occlusionActive;
+    !occlusionActive &&
+    !historyOpen;
   const { active: agentActive, kind: agentKind } =
     useBrowserAgentActivity(worktreePath);
   // Read by the async browser_open callback, which may resolve after
@@ -237,6 +246,10 @@ export const BrowserPane = memo(function BrowserPane({
       const url = sanitizeUrl(raw);
       if (url === DEFAULT_URL) return;
       setInputValue(url);
+      setHistoryOpen(false);
+      setHistoryQuery("");
+      setSelectedHistoryIndex(-1);
+      addRecentBrowserUrl(url);
       persistUrl(url);
       // First navigation from the empty state: the webview doesn't exist yet;
       // persisting the URL flips `hasUrl` and the layout effect creates it.
@@ -246,7 +259,7 @@ export const BrowserPane = memo(function BrowserPane({
         );
       }
     },
-    [paneId, persistUrl],
+    [paneId, persistUrl, addRecentBrowserUrl],
   );
 
   const toggleAnnotate = useCallback(() => {
@@ -317,6 +330,10 @@ export const BrowserPane = memo(function BrowserPane({
   }, [pendingPick, comment, saving, paneId, worktreePath]);
 
   const currentUrl = url ?? DEFAULT_URL;
+  const filteredHistory = filterRecentBrowserUrls(
+    recentBrowserUrls,
+    historyQuery,
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -395,37 +412,152 @@ export const BrowserPane = memo(function BrowserPane({
             />
           </svg>
         </button>
-        <input
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onFocus={(e) => {
-            inputFocusedRef.current = true;
-            e.currentTarget.select();
-          }}
-          onBlur={() => {
-            inputFocusedRef.current = false;
-            // Read the latest persisted URL from this pane's leaf — the render
-            // closure's `url` prop is stale right after an Enter-triggered
-            // navigate, which would visibly revert the bar to the old URL.
-            const latest = getBrowserLeafUrl(worktreePath, tabId, paneId);
-            setInputValue(latest ?? "");
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              navigate(inputValue);
-              e.currentTarget.blur();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              e.currentTarget.blur();
+        <div className="relative flex-1 min-w-0">
+          <input
+            value={inputValue}
+            onChange={(e) => {
+              const next = e.target.value;
+              setInputValue(next);
+              setHistoryQuery(next);
+              setSelectedHistoryIndex(-1);
+              setHistoryOpen(recentBrowserUrls.length > 0);
+            }}
+            onFocus={(e) => {
+              inputFocusedRef.current = true;
+              setHistoryQuery("");
+              setSelectedHistoryIndex(-1);
+              setHistoryOpen(recentBrowserUrls.length > 0);
+              e.currentTarget.select();
+            }}
+            onBlur={() => {
+              inputFocusedRef.current = false;
+              setHistoryOpen(false);
+              setHistoryQuery("");
+              setSelectedHistoryIndex(-1);
+              // Read the latest persisted URL from this pane's leaf — the
+              // render closure's `url` prop is stale right after an
+              // Enter-triggered navigate, which would visibly revert the bar.
+              const latest = getBrowserLeafUrl(worktreePath, tabId, paneId);
+              setInputValue(latest ?? "");
+            }}
+            onKeyDown={(e) => {
+              if (
+                e.key === "ArrowDown" &&
+                historyOpen &&
+                filteredHistory.length > 0
+              ) {
+                e.preventDefault();
+                setSelectedHistoryIndex((current) =>
+                  Math.min(current + 1, filteredHistory.length - 1),
+                );
+              } else if (
+                e.key === "ArrowUp" &&
+                historyOpen &&
+                filteredHistory.length > 0
+              ) {
+                e.preventDefault();
+                setSelectedHistoryIndex((current) =>
+                  current <= 0 ? filteredHistory.length - 1 : current - 1,
+                );
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                const selectedUrl =
+                  selectedHistoryIndex >= 0
+                    ? filteredHistory[selectedHistoryIndex]
+                    : undefined;
+                navigate(selectedUrl ?? inputValue);
+                e.currentTarget.blur();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                if (historyOpen) {
+                  setHistoryOpen(false);
+                  setSelectedHistoryIndex(-1);
+                } else {
+                  e.currentTarget.blur();
+                }
+              }
+            }}
+            placeholder="localhost:3000"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={historyOpen}
+            aria-controls={`browser-history-${paneId}`}
+            aria-activedescendant={
+              selectedHistoryIndex >= 0
+                ? `browser-history-${paneId}-${selectedHistoryIndex}`
+                : undefined
             }
-          }}
-          placeholder="localhost:3000"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          className="flex-1 min-w-0 bg-background border border-border rounded px-2 py-1 text-sm font-mono outline-none"
-        />
+            className="w-full bg-background border border-border rounded-sm px-2 py-1 text-sm font-mono outline-none placeholder:text-muted-foreground"
+          />
+          {historyOpen && (
+            <div
+              id={`browser-history-${paneId}`}
+              role="listbox"
+              aria-label="Recent URLs"
+              className="absolute z-20 top-full inset-x-0 mt-1 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md"
+            >
+              {filteredHistory.length > 0 ? (
+                <div className="max-h-64 overflow-y-auto p-1">
+                  {filteredHistory.map((historyUrl, index) => (
+                    <div
+                      key={historyUrl}
+                      className={`group flex items-center rounded-md ${
+                        index === selectedHistoryIndex ? "bg-accent" : ""
+                      }`}
+                    >
+                      <button
+                        id={`browser-history-${paneId}-${index}`}
+                        role="option"
+                        aria-selected={index === selectedHistoryIndex}
+                        title={historyUrl}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => setSelectedHistoryIndex(index)}
+                        onClick={() => navigate(historyUrl)}
+                        className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm font-mono text-foreground hover:bg-accent"
+                      >
+                        {historyUrl}
+                      </button>
+                      <button
+                        aria-label={`Remove ${historyUrl} from recent URLs`}
+                        title="Remove from recent URLs"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          removeRecentBrowserUrl(historyUrl);
+                          setSelectedHistoryIndex(-1);
+                        }}
+                        className="mr-1 size-6 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                      >
+                        <span aria-hidden="true">×</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-3 py-2 text-sm text-muted-foreground">
+                  No matching recent URLs
+                </div>
+              )}
+              <div className="flex items-center justify-between border-t border-border/70 px-2 py-1">
+                <span className="text-xs text-muted-foreground">
+                  Recent URLs
+                </span>
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    clearRecentBrowserUrls();
+                    setHistoryOpen(false);
+                  }}
+                  className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         <button
           onClick={() => {
             if (currentUrl !== DEFAULT_URL) {
