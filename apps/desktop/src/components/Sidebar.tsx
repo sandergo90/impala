@@ -585,6 +585,9 @@ export function Sidebar() {
             force: true,
           });
         }
+        useDataStore.getState().updateWorktreeDataState(wt.path, {
+          hasUnseenResult: false,
+        });
       } catch (e) {
         // Rollback: re-fetch the real worktree list
         toast.error(`Failed to remove worktree: ${e}`);

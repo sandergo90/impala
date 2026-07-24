@@ -10,6 +10,7 @@ import { Toaster } from "./components/ui/sonner";
 import { UpdateChecker } from "./components/UpdateChecker";
 import { useAgentNotifications } from "./hooks/useAgentNotifications";
 import { useAgentStatusSync } from "./hooks/useAgentStatusSync";
+import { useDockBadge } from "./hooks/useDockBadge";
 import { useUIStore, useDataStore, useFilteredWorktrees } from "./store";
 import {
   splitNode,
@@ -47,6 +48,7 @@ export function RootLayout() {
 
   useAgentStatusSync();
   useAgentNotifications();
+  useDockBadge();
 
   // Agent browser interactions (hook-server /browser/*): create the tab on a
   // navigate for a worktree without one, and mark activity for the indicators.
