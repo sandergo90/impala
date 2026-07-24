@@ -487,6 +487,28 @@ fn tool_create_automation(args: &Value) -> Result<Value, String> {
     .map(strip_ok)
 }
 
+fn tool_update_automation(args: &Value) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("missing id")?;
+    let mut params = vec![("id", id)];
+    for key in ["name", "prompt", "schedule", "agent"] {
+        if let Some(value) = args
+            .get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            params.push((key, value));
+        }
+    }
+    if params.len() == 1 {
+        return Err("nothing to update — pass at least one of name, prompt, schedule, agent".to_string());
+    }
+    browser_get("/automations/update", &params).map(strip_ok)
+}
+
 fn tool_run_automation_now(args: &Value) -> Result<Value, String> {
     let id = args
         .get("id")
@@ -783,6 +805,37 @@ fn tool_definitions() -> Value {
                 }
             },
             {
+                "name": "update_automation",
+                "description": "Edit an existing automation (get the id from list_automations). Pass only the fields to change — name, prompt, schedule, and/or agent; omitted fields keep their current value. Changing the schedule recomputes the next run from now.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "The automation id"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "New name"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "New prompt each run starts the agent with. Self-contained; output written into worktree files."
+                        },
+                        "schedule": {
+                            "type": "string",
+                            "description": "New 5-field cron expression, local time (e.g. \"0 9 * * MON-FRI\")"
+                        },
+                        "agent": {
+                            "type": "string",
+                            "enum": ["claude", "codex"],
+                            "description": "New agent to run"
+                        }
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
                 "name": "run_automation_now",
                 "description": "Trigger one immediate run of an automation (get the id from list_automations). Creates a real worktree and launches the agent — tell the user before doing this. Does not change the automation's schedule.",
                 "inputSchema": {
@@ -956,6 +1009,7 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "open_agent_tab" => tool_open_agent_tab(&tool_args),
                 "list_automations" => tool_list_automations(&tool_args),
                 "create_automation" => tool_create_automation(&tool_args),
+                "update_automation" => tool_update_automation(&tool_args),
                 "run_automation_now" => tool_run_automation_now(&tool_args),
                 "set_automation_enabled" => tool_set_automation_enabled(&tool_args),
                 "list_files_with_annotations" => {

@@ -603,16 +603,17 @@ After making a fix, navigate again and screenshot — verify visually before dec
 
 const IMPALA_AUTOMATIONS_SKILL: &str = r#"---
 name: impala-automations
-description: Schedule recurring agent runs in Impala. Use when the user asks for work on a schedule — "every morning", "daily", "check this weekly", "keep an eye on this" — or wants to list, pause, resume, or trigger scheduled automations.
-allowed-tools: mcp__impala__list_automations, mcp__impala__create_automation, mcp__impala__run_automation_now, mcp__impala__set_automation_enabled
+description: Schedule recurring agent runs in Impala. Use when the user asks for work on a schedule — "every morning", "daily", "check this weekly", "keep an eye on this" — or wants to list, edit, pause, resume, or trigger scheduled automations.
+allowed-tools: mcp__impala__list_automations, mcp__impala__create_automation, mcp__impala__update_automation, mcp__impala__run_automation_now, mcp__impala__set_automation_enabled
 ---
 
 Impala (the desktop app this worktree is open in) runs scheduled automations: name + prompt + schedule + agent, per project. At each fire Impala creates a fresh worktree, launches the agent with the prompt, and the finished run lands as a reviewable diff with a badge in the app. Runs fire only while Impala is open; a slot missed while it was closed fires once on next launch.
 
 ## Tools
 
-- `mcp__impala__list_automations` — automations + recent runs for this project. Call this FIRST before creating; update duplicates instead of stacking similar ones (there is no update tool — if one exists already, tell the user to edit it in Impala's Automations view).
+- `mcp__impala__list_automations` — automations + recent runs for this project. Call this FIRST before creating; if a similar one exists, edit it with update_automation instead of stacking a duplicate.
 - `mcp__impala__create_automation` — name, prompt, schedule; agent defaults to this worktree's agent.
+- `mcp__impala__update_automation` — edit an existing automation by id; pass only the fields to change (name, prompt, schedule, agent). Changing the schedule recomputes the next run from now.
 - `mcp__impala__run_automation_now` — trigger one run immediately (creates a real worktree; say so before doing it).
 - `mcp__impala__set_automation_enabled` — pause (false) / resume (true). Resuming skips occurrences missed while paused.
 
@@ -901,6 +902,24 @@ fn handle_automation_request(
                 )?;
                 let _ = app.emit("automations-changed", ());
                 Ok(serde_json::json!({ "automation": created }))
+            }
+            "/automations/update" => {
+                let id = require("id")?;
+                let optional = |key: &str| params.get(key).filter(|v| !v.is_empty()).cloned();
+                let updated = crate::automations::update_automation_row(
+                    &conn,
+                    id,
+                    crate::automations::UpdateAutomation {
+                        name: optional("name"),
+                        prompt: optional("prompt"),
+                        agent: optional("agent"),
+                        schedule: optional("schedule"),
+                        repo_path: None,
+                    },
+                    chrono::Utc::now().timestamp(),
+                )?;
+                let _ = app.emit("automations-changed", ());
+                Ok(serde_json::json!({ "automation": updated }))
             }
             "/automations/run_now" => {
                 let id = require("id")?;

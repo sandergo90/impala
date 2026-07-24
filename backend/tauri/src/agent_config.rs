@@ -718,15 +718,16 @@ After making a fix, navigate again and screenshot — verify visually before dec
 "#;
 
 const IMPALA_AUTOMATIONS_COMMAND: &str = r#"---
-description: Schedule recurring agent runs in Impala. Use when the user asks for work on a schedule ("every morning", "daily", "check this weekly") or wants to list, pause, resume, or trigger scheduled automations.
+description: Schedule recurring agent runs in Impala. Use when the user asks for work on a schedule ("every morning", "daily", "check this weekly") or wants to list, edit, pause, resume, or trigger scheduled automations.
 ---
 
 Impala (the desktop app this worktree is open in) runs scheduled automations: name + prompt + schedule + agent, per project. At each fire Impala creates a fresh worktree, launches the agent with the prompt, and the finished run lands as a reviewable diff with a badge in the app. Runs fire only while Impala is open; a slot missed while it was closed fires once on next launch.
 
 ## Tools
 
-- `mcp__impala__list_automations` — automations + recent runs for this project. Call this FIRST before creating; if a similar one exists, tell the user to edit it in Impala's Automations view instead of stacking a duplicate.
+- `mcp__impala__list_automations` — automations + recent runs for this project. Call this FIRST before creating; if a similar one exists, edit it with update_automation instead of stacking a duplicate.
 - `mcp__impala__create_automation` — name, prompt, schedule; agent defaults to this worktree's agent.
+- `mcp__impala__update_automation` — edit an existing automation by id; pass only the fields to change (name, prompt, schedule, agent). Changing the schedule recomputes the next run from now.
 - `mcp__impala__run_automation_now` — trigger one run immediately (creates a real worktree; say so before doing it).
 - `mcp__impala__set_automation_enabled` — pause (false) / resume (true). Resuming skips occurrences missed while paused.
 
