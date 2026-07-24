@@ -23,8 +23,20 @@ import {
   useBrowserAgentActivity,
 } from "../hooks/useBrowserAgentActivity";
 import { filterRecentBrowserUrls } from "../lib/browser-history";
+import {
+  browserNativeVisible,
+  browserPaneShowsUnderlay,
+} from "../lib/browser-underlay";
 
 const DEFAULT_URL = "about:blank";
+
+function disposeListener(unlisten: UnlistenFn | undefined) {
+  if (!unlisten) return;
+  // Tauri's runtime unlisten function is async even though its public type
+  // says `() => void`. Catch its promise so a rapid pane teardown cannot
+  // surface an unhandled rejection from a listener already removed by WebKit.
+  void Promise.resolve(unlisten()).catch(() => {});
+}
 
 // Superset-style omnibox semantics, minus the search-engine fallback — this
 // is a dev-preview pane, not a general browser. `0.0.0.0` binds are rewritten
@@ -57,6 +69,7 @@ export const BrowserPane = memo(function BrowserPane({
   url,
   isActive,
   isFocused,
+  onNativeSettled,
 }: {
   paneId: string;
   tabId: string;
@@ -64,9 +77,11 @@ export const BrowserPane = memo(function BrowserPane({
   url?: string;
   isActive: boolean;
   isFocused: boolean;
+  onNativeSettled?: (paneId: string) => void;
 }) {
   const placeholderRef = useRef<HTMLDivElement | null>(null);
   const createdRef = useRef(false);
+  const lifecycleGenerationRef = useRef(0);
   const inputFocusedRef = useRef(false);
   const [inputValue, setInputValue] = useState(url ?? "");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -82,6 +97,9 @@ export const BrowserPane = memo(function BrowserPane({
   const [pendingPick, setPendingPick] = useState<BrowserPick | null>(null);
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
+  // The DOM hole becomes transparent only after AppKit confirms the native
+  // view is ordered, onscreen, and at the active pane bounds.
+  const [nativeVisible, setNativeVisible] = useState(false);
 
   // The native webview is created lazily on the first real URL. A webview at
   // about:blank is invisible anyway (tauri-runtime-wry skips with_url for
@@ -97,17 +115,31 @@ export const BrowserPane = memo(function BrowserPane({
   const finderOpen = useUIStore((s) => s.fileFinderOpen);
   const terminalMenuOpen = useUIStore((s) => s.terminalMenuOpen);
   const occlusionActive = useUIStore((s) => s.panelDragActive);
+  const underlayEnabled = useUIStore((s) => s.browserUnderlayEnabled);
+  const shellOverlayActive = useUIStore(
+    (s) => s.browserShellOverlayActive,
+  );
   const recentBrowserUrls = useUIStore((s) => s.recentBrowserUrls);
   const addRecentBrowserUrl = useUIStore((s) => s.addRecentBrowserUrl);
   const removeRecentBrowserUrl = useUIStore((s) => s.removeRecentBrowserUrl);
   const clearRecentBrowserUrls = useUIStore((s) => s.clearRecentBrowserUrls);
-  const visible =
-    isActive &&
-    !paletteOpen &&
-    !finderOpen &&
-    !terminalMenuOpen &&
-    !occlusionActive &&
-    !historyOpen;
+  const visible = browserNativeVisible({
+    isActive,
+    underlayEnabled,
+    shellOverlayActive:
+      paletteOpen ||
+      finderOpen ||
+      terminalMenuOpen ||
+      occlusionActive ||
+      shellOverlayActive ||
+      historyOpen,
+  });
+  const showsUnderlay = browserPaneShowsUnderlay({
+    underlayEnabled,
+    hasUrl,
+    nativeVisible,
+    visible,
+  });
   const { active: agentActive, kind: agentKind } =
     useBrowserAgentActivity(worktreePath);
   // Read by the async browser_open callback, which may resolve after
@@ -129,78 +161,127 @@ export const BrowserPane = memo(function BrowserPane({
     if (r.width < 1 || r.height < 1) return;
     // Viewport coords ARE window-logical coords: the main webview fills the
     // window (titleBarStyle Overlay) and the app never scrolls the body.
-    invoke("browser_set_bounds", {
+    return invoke("browser_set_bounds", {
       id: paneId,
       x: r.x,
       y: r.y,
       width: r.width,
       height: r.height,
-    }).catch(() => {});
+    });
   }, [paneId]);
+  const syncBoundsQuietly = useCallback(() => {
+    void syncBounds()?.catch(() => {});
+  }, [syncBounds]);
 
   useLayoutEffect(() => {
-    if (!hasUrl) return;
+    if (!hasUrl) {
+      onNativeSettled?.(paneId);
+      return;
+    }
     const el = placeholderRef.current;
     if (!el) return;
     let disposed = false;
+    const lifecycleGeneration = ++lifecycleGenerationRef.current;
     const r = el.getBoundingClientRect();
-    invoke("browser_open", {
-      id: paneId,
-      worktreePath,
-      // hasUrl guards this effect; on the flip from empty state this closure
-      // re-runs with the freshly navigated url.
-      url,
-      x: r.x,
-      y: r.y,
-      width: Math.max(r.width, 1),
-      height: Math.max(r.height, 1),
-    })
-      .then(() => {
-        createdRef.current = true;
-        setOpenError(null);
-        if (disposed || !visibleRef.current) {
-          // Creation resolved after unmount/occlusion — the webview was
-          // created visible; hide it before it covers the wrong content.
-          invoke("browser_set_visible", { id: paneId, visible: false }).catch(
-            () => {},
-          );
-          return;
-        }
-        // Nudge bounds after create — works around a race where the child
-        // webview first paints before the placeholder has its final rect.
-        requestAnimationFrame(syncBounds);
+    // React Strict Mode replays layout effects setup → cleanup → setup. Wait
+    // one frame so the throwaway setup is cancelled before it can race a
+    // second native browser_open for the same pane id.
+    const openFrame = requestAnimationFrame(() => {
+      invoke("browser_open", {
+        id: paneId,
+        worktreePath,
+        // hasUrl guards this effect; on the flip from empty state this closure
+        // re-runs with the freshly navigated url.
+        url,
+        x: r.x,
+        y: r.y,
+        width: Math.max(r.width, 1),
+        height: Math.max(r.height, 1),
       })
-      .catch((e) => setOpenError(String(e)));
+        .then(() => {
+          if (lifecycleGeneration !== lifecycleGenerationRef.current) return;
+          createdRef.current = true;
+          setOpenError(null);
+          if (disposed || !visibleRef.current) {
+            // A real unmount/occlusion still owns this generation. A replayed
+            // cleanup does not: the newer setup incremented the generation.
+            invoke("browser_set_visible", { id: paneId, visible: false }).catch(
+              () => {},
+            );
+            return;
+          }
+          setNativeVisible(true);
+          onNativeSettled?.(paneId);
+          // Nudge bounds after create — works around a race where the child
+          // webview first paints before the placeholder has its final rect.
+          requestAnimationFrame(syncBoundsQuietly);
+        })
+        .catch((e) => {
+          if (lifecycleGeneration !== lifecycleGenerationRef.current) return;
+          setOpenError(String(e));
+          // Reveal the component's error state instead of leaving the
+          // transition cover mounted indefinitely.
+          onNativeSettled?.(paneId);
+        });
+      });
 
     let raf = 0;
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(syncBounds);
+      raf = requestAnimationFrame(syncBoundsQuietly);
     });
     ro.observe(el);
-    window.addEventListener("resize", syncBounds);
+    window.addEventListener("resize", syncBoundsQuietly);
     return () => {
       disposed = true;
       ro.disconnect();
-      window.removeEventListener("resize", syncBounds);
+      window.removeEventListener("resize", syncBoundsQuietly);
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(openFrame);
       // Hide, never close — the webview survives tab switches; closeUserTab
-      // owns destruction.
-      invoke("browser_set_visible", { id: paneId, visible: false }).catch(
-        () => {},
-      );
+      // owns destruction. Defer so Strict Mode's replacement setup can claim
+      // a newer generation before this cleanup mutates the native view.
+      queueMicrotask(() => {
+        if (lifecycleGeneration !== lifecycleGenerationRef.current) return;
+        invoke("browser_set_visible", { id: paneId, visible: false }).catch(
+          () => {},
+        );
+      });
     };
     // url intentionally omitted: it changes on every navigation, but the
     // webview is created once (hasUrl only ever flips false -> true) and
     // navigates itself from then on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paneId, hasUrl, syncBounds]);
+  }, [
+    paneId,
+    hasUrl,
+    syncBoundsQuietly,
+    onNativeSettled,
+  ]);
 
   useEffect(() => {
     if (!createdRef.current) return;
-    invoke("browser_set_visible", { id: paneId, visible }).catch(() => {});
-    if (visible) syncBounds();
-  }, [visible, paneId, syncBounds]);
+    if (!visible) {
+      setNativeVisible(false);
+      invoke("browser_set_visible", { id: paneId, visible: false }).catch(
+        () => {},
+      );
+      return;
+    }
+    Promise.resolve(syncBounds())
+      .then(() =>
+        invoke("browser_set_visible", { id: paneId, visible: true }),
+      )
+      .then(() => {
+        setNativeVisible(true);
+        onNativeSettled?.(paneId);
+      })
+      .catch((error) => {
+        setNativeVisible(false);
+        setLastError(`Browser activation failed: ${String(error)}`);
+        onNativeSettled?.(paneId);
+      });
+  }, [visible, paneId, syncBounds, onNativeSettled]);
 
   // Self-heal: attaching the docked Web Inspector (right-click → Inspect
   // Element) makes WebKit resize the child webview to fill the window, and
@@ -209,9 +290,9 @@ export const BrowserPane = memo(function BrowserPane({
   // Never runs while hidden — that would un-park an offscreen webview.
   useEffect(() => {
     if (!visible || !hasUrl) return;
-    const t = setInterval(syncBounds, 1000);
+    const t = setInterval(syncBoundsQuietly, 1000);
     return () => clearInterval(t);
-  }, [visible, hasUrl, syncBounds]);
+  }, [visible, hasUrl, syncBoundsQuietly]);
 
   useEffect(() => {
     let unlistenNav: UnlistenFn | undefined;
@@ -225,19 +306,19 @@ export const BrowserPane = memo(function BrowserPane({
       setPendingPick(null);
       if (!inputFocusedRef.current) setInputValue(event.payload);
     }).then((fn) => {
-      if (cancelled) fn();
+      if (cancelled) disposeListener(fn);
       else unlistenNav = fn;
     });
     listen<boolean>(`browser-loading-${paneId}`, (event) => {
       setLoading(event.payload);
     }).then((fn) => {
-      if (cancelled) fn();
+      if (cancelled) disposeListener(fn);
       else unlistenLoading = fn;
     });
     return () => {
       cancelled = true;
-      unlistenNav?.();
-      unlistenLoading?.();
+      disposeListener(unlistenNav);
+      disposeListener(unlistenLoading);
     };
   }, [paneId, persistUrl]);
 
@@ -661,7 +742,12 @@ export const BrowserPane = memo(function BrowserPane({
           agentActive ? "border-primary/60" : "border-transparent"
         }`}
       >
-      <div ref={placeholderRef} className="relative h-full w-full bg-background">
+      <div
+        ref={placeholderRef}
+        className={`relative h-full w-full ${
+          showsUnderlay ? "bg-transparent" : "bg-card"
+        }`}
+      >
         {/* The native webview floats over this div. Content here is only
             visible before creation, on error, or while the webview is hidden. */}
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground">

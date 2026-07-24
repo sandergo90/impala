@@ -141,6 +141,14 @@ interface UIState {
   // Native child webviews composite above the DOM regardless of CSS z-index.
   panelDragActive: boolean;
   setPanelDragActive: (active: boolean) => void;
+  // Native browser-underlay capability reported by the backend. In-memory:
+  // unsupported platforms and the emergency fallback retain overlay mode.
+  browserUnderlayEnabled: boolean;
+  setBrowserUnderlayEnabled: (enabled: boolean) => void;
+  // Global DOM overlay ownership. Used by legacy overlay mode to park native
+  // browsers and by underlay mode as the frontend mirror of native routing.
+  browserShellOverlayActive: boolean;
+  setBrowserShellOverlayActive: (active: boolean) => void;
   // worktreePath -> recent agent browser activity (hook-server /browser/*
   // calls). In-memory; drives the activity indicators with a decay window.
   browserAgentActivity: Record<string, { until: number; kind: string }>;
@@ -299,6 +307,12 @@ export const useUIStore = create<UIState>()(
       setTerminalMenuOpen: (open) => set({ terminalMenuOpen: open }),
       panelDragActive: false,
       setPanelDragActive: (active) => set({ panelDragActive: active }),
+      browserUnderlayEnabled: false,
+      setBrowserUnderlayEnabled: (enabled) =>
+        set({ browserUnderlayEnabled: enabled }),
+      browserShellOverlayActive: false,
+      setBrowserShellOverlayActive: (active) =>
+        set({ browserShellOverlayActive: active }),
       browserAgentActivity: {},
       markBrowserAgentActivity: (worktreePath, kind) =>
         set((s) => ({
@@ -477,6 +491,7 @@ export const useUIStore = create<UIState>()(
           commandPaletteOpen,
           terminalMenuOpen,
           panelDragActive,
+          browserUnderlayEnabled,
           browserAgentActivity,
           worktreeNavStates,
           worktreeBaseDirOverride,

@@ -126,6 +126,12 @@
   html[data-vibrancy="strong"] body {
     background-color: transparent;
   }
+  /* The main WKWebView leaves active browser pane rectangles visually clear
+     so the native browser sibling underneath can paint them. App surfaces
+     continue to own their backgrounds and overlays. */
+  html[data-browser-underlay="true"] body {
+    background-color: transparent;
+  }
 }
 
 /* Markdown preview rendering */

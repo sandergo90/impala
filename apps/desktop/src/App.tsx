@@ -11,6 +11,7 @@ import { UpdateChecker } from "./components/UpdateChecker";
 import { useAgentNotifications } from "./hooks/useAgentNotifications";
 import { useAgentStatusSync } from "./hooks/useAgentStatusSync";
 import { useDockBadge } from "./hooks/useDockBadge";
+import { useBrowserUnderlayBridge } from "./hooks/useBrowserUnderlayBridge";
 import { useUIStore, useDataStore, useFilteredWorktrees } from "./store";
 import {
   splitNode,
@@ -42,6 +43,9 @@ export function RootLayout() {
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const fileFinderOpen = useUIStore((s) => s.fileFinderOpen);
   const setFileFinderOpen = useUIStore((s) => s.setFileFinderOpen);
+  const browserUnderlayEnabled = useUIStore(
+    (s) => s.browserUnderlayEnabled,
+  );
 
   const router = useRouter();
   const matchRoute = useMatchRoute();
@@ -49,6 +53,7 @@ export function RootLayout() {
   useAgentStatusSync();
   useAgentNotifications();
   useDockBadge();
+  useBrowserUnderlayBridge();
 
   // Agent browser interactions (hook-server /browser/*): create the tab on a
   // navigate for a worktree without one, and mark activity for the indicators.
@@ -370,7 +375,11 @@ export function RootLayout() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-background text-foreground flex flex-col">
+    <div
+      className={`h-screen w-screen overflow-hidden text-foreground flex flex-col ${
+        browserUnderlayEnabled ? "bg-transparent" : "bg-background"
+      }`}
+    >
       <Outlet />
 
       <CommandPalette

@@ -90,6 +90,7 @@ import {
   getPaneBodyKey,
   getWorkspaceRendererKey,
 } from "../lib/workspace-renderer-key";
+import { browserPaneNeedsHandoffCover } from "../lib/browser-underlay";
 import { SubagentMenu } from "./SubagentMenu";
 import { useMountEffect } from "../hooks/useMountEffect";
 
@@ -1304,6 +1305,7 @@ function PaneMenuDismiss({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div
       aria-hidden="true"
+      data-browser-native-occlusion
       className="fixed inset-0 z-30"
       onMouseDown={onDismiss}
     />
@@ -1351,6 +1353,13 @@ function PaneTabGroup({
   );
   const [editingPaneTabId, setEditingPaneTabId] = useState<string | null>(null);
   const [editingPaneLabel, setEditingPaneLabel] = useState("");
+  const [settledBrowserPaneId, setSettledBrowserPaneId] = useState<
+    string | null
+  >(null);
+  const underlayEnabled = useUIStore((s) => s.browserUnderlayEnabled);
+  const markBrowserNativeSettled = useCallback((paneId: string) => {
+    setSettledBrowserPaneId(paneId);
+  }, []);
   const commitPaneRename = useCallback(() => {
     if (editingPaneTabId) {
       renamePaneGroupTab(
@@ -1365,6 +1374,12 @@ function PaneTabGroup({
   }, [editingPaneLabel, editingPaneTabId, topTabId, worktreePath]);
   const activeTab = getActiveGroupTab(group);
   const content = activeTab.content;
+  const browserHandoffPending = browserPaneNeedsHandoffCover({
+    underlayEnabled,
+    isBrowser: content.kind === "browser",
+    activePaneId: activeTab.id,
+    settledPaneId: settledBrowserPaneId,
+  });
   // Only one tab in a group is mounted at a time, so the group shares a single
   // panel (the APG single-panel form). Ids are derived from the group, not the
   // active tab, so an inactive tab's `aria-controls` never dangles.
@@ -1397,6 +1412,7 @@ function PaneTabGroup({
         url={content.url}
         isActive={isActive}
         isFocused={isFocused}
+        onNativeSettled={markBrowserNativeSettled}
       />
     );
   } else {
@@ -1511,7 +1527,17 @@ function PaneTabGroup({
                     id={paneTabId(tab.id)}
                     aria-selected={selected}
                     aria-controls={panePanelId}
-                    onClick={() => onActivate(tab.id)}
+                    onClick={() => {
+                      if (selected) {
+                        onActivate(tab.id);
+                        return;
+                      }
+                      // A native browser view is parked whenever its pane
+                      // unmounts, so every activation needs a fresh paint
+                      // handshake.
+                      setSettledBrowserPaneId(null);
+                      onActivate(tab.id);
+                    }}
                     onDoubleClick={() => {
                       if (tab.content.kind === "file") return;
                       setEditingPaneTabId(tab.id);
@@ -1591,7 +1617,6 @@ function PaneTabGroup({
           secondary group owns a panel of its own. */}
       <div
         className="relative min-h-0 flex-1"
-        key={getPaneBodyKey(activeTab.id, primaryTerminalOverride?.paneId)}
         {...(isPrimaryGroup
           ? {}
           : {
@@ -1606,7 +1631,23 @@ function PaneTabGroup({
           groupId={group.id}
           isPrimaryGroup={isPrimaryGroup}
         />
-        {body}
+        <div
+          className="absolute inset-0"
+          key={getPaneBodyKey(
+            activeTab.id,
+            primaryTerminalOverride?.paneId,
+          )}
+        >
+          {body}
+        </div>
+        {browserHandoffPending ? (
+          <div
+            aria-hidden="true"
+            data-browser-underlay-handoff
+            data-browser-native-occlusion
+            className="pointer-events-none absolute inset-0 z-30 bg-card"
+          />
+        ) : null}
       </div>
     </div>
   );

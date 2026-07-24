@@ -853,6 +853,7 @@ export function Sidebar() {
       {showDropdown && (
         <>
           <div
+            data-browser-native-occlusion
             className="fixed inset-0 z-20"
             onClick={() => setShowDropdown(false)}
           />

@@ -264,6 +264,9 @@ export function NewWorktreeDialog({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-worktree-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={onCancel}
       onKeyDown={(e) => {
@@ -281,7 +284,9 @@ export function NewWorktreeDialog({
           handleCreate();
         }}
       >
-        <h2 className="text-lg font-semibold">New Worktree</h2>
+        <h2 id="new-worktree-title" className="text-lg font-semibold">
+          New Worktree
+        </h2>
 
         <div className="flex gap-2">
           {(["claude", "codex"] as const).map((a) => (

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -18,6 +19,8 @@ pub struct TabState {
 
 #[derive(Default)]
 pub struct BrowserRegistry(pub Mutex<HashMap<String, TabState>>);
+
+static BROWSER_UNDERLAY_READY: AtomicBool = AtomicBool::new(false);
 
 /// Console capture: shims console.*, window.onerror, and unhandledrejection
 /// into a capped window.__IMPALA_LOGS__ ring buffer. Runs per navigation
@@ -144,6 +147,79 @@ fn get_webview(app: &AppHandle, id: &str) -> Result<Webview, String> {
         .ok_or_else(|| format!("no browser webview for id {id}"))
 }
 
+fn underlay_enabled_from_override(override_value: Option<&str>) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+
+    !override_value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off"
+        )
+    })
+}
+
+fn underlay_enabled() -> bool {
+    // The underlay is the supported macOS compositor path. Keep an environment
+    // escape hatch so a packaged build can fall back to the legacy overlay
+    // path without requiring a new binary.
+    underlay_enabled_from_override(std::env::var("IMPALA_BROWSER_UNDERLAY").ok().as_deref())
+}
+
+fn underlay_ready() -> bool {
+    BROWSER_UNDERLAY_READY.load(Ordering::Acquire)
+}
+
+#[tauri::command]
+pub async fn browser_underlay_enabled(
+    app: AppHandle,
+    red: u8,
+    green: u8,
+    blue: u8,
+) -> Result<bool, String> {
+    if !underlay_enabled() {
+        BROWSER_UNDERLAY_READY.store(false, Ordering::Release);
+        return Ok(false);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(error) = native::configure_main_underlay(&app, red, green, blue) {
+            BROWSER_UNDERLAY_READY.store(false, Ordering::Release);
+            return Err(error);
+        }
+        BROWSER_UNDERLAY_READY.store(true, Ordering::Release);
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    Ok(false)
+}
+
+#[tauri::command]
+pub fn browser_set_overlay_active(active: bool) {
+    if !underlay_ready() {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    native::set_overlay_active(active);
+}
+
+#[tauri::command]
+pub fn browser_set_underlay_backdrop(
+    app: AppHandle,
+    red: u8,
+    green: u8,
+    blue: u8,
+) -> Result<(), String> {
+    if !underlay_ready() {
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    return native::set_underlay_backdrop(&app, red, green, blue);
+    #[cfg(not(target_os = "macos"))]
+    Ok(())
+}
+
 /// Create the child webview for a browser tab, or re-show an existing one at
 /// the given bounds. Bounds are logical (CSS px), relative to the main window.
 #[tauri::command]
@@ -170,11 +246,47 @@ pub async fn browser_open(
 
     if let Ok(wv) = get_webview(&app, &id) {
         info!(id = %id, x, y, width, height, "browser_open: reshow existing webview");
-        wv.set_position(LogicalPosition::new(x, y))
-            .map_err(|e| e.to_string())?;
-        wv.set_size(LogicalSize::new(width, height))
-            .map_err(|e| e.to_string())?;
-        wv.show().map_err(|e| e.to_string())?;
+        #[cfg(target_os = "macos")]
+        let visibility_generation = if underlay_ready() {
+            Some(native::begin_browser_visibility(&id, true))
+        } else {
+            None
+        };
+        let activation = (|| -> Result<(), String> {
+            wv.set_position(LogicalPosition::new(x, y))
+                .map_err(|e| e.to_string())?;
+            wv.set_size(LogicalSize::new(width, height))
+                .map_err(|e| e.to_string())?;
+            wv.show().map_err(|e| e.to_string())?;
+            if underlay_ready() {
+                #[cfg(target_os = "macos")]
+                {
+                    native::set_browser_bounds(&id, x, y, width, height);
+                    // Inactive underlay views remain composited behind the shell.
+                    // Prepare this one at its final geometry, then promote it
+                    // directly below the shell only after WebKit has a frame.
+                    // The outgoing browser therefore remains the visible backing
+                    // layer throughout the handoff.
+                    native::wait_for_paint(&wv)?;
+                    native::order_browser_below_main(
+                        &app,
+                        &id,
+                        &wv,
+                        visibility_generation.unwrap(),
+                        true,
+                    )?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = activation {
+            #[cfg(target_os = "macos")]
+            if let Some(generation) = visibility_generation {
+                native::fail_browser_visibility(&id, generation);
+            }
+            let _ = wv.set_position(LogicalPosition::new(PARK_OFFSET, PARK_OFFSET));
+            return Err(error);
+        }
         return Ok(());
     }
 
@@ -205,7 +317,7 @@ pub async fn browser_open(
             debug!(id = %load_id, url = %payload.url(), loading, "browser on_page_load");
             let _ = load_app.emit_to("main", &format!("browser-loading-{load_id}"), loading);
         });
-    window
+    let webview = window
         .add_child(
             builder,
             LogicalPosition::new(x, y),
@@ -215,6 +327,36 @@ pub async fn browser_open(
             warn!(id = %id, error = %e, "browser_open: add_child failed");
             e.to_string()
         })?;
+    if underlay_ready() {
+        #[cfg(target_os = "macos")]
+        {
+            let visibility_generation = native::begin_browser_visibility(&id, true);
+            native::set_browser_bounds(&id, x, y, width, height);
+            // A newly added child may initially sit above the main webview.
+            // Put it under the shell immediately so the DOM handoff cover
+            // owns the pane while WebKit produces its first frame.
+            let activation = (|| -> Result<(), String> {
+                native::order_browser_below_main(
+                    &app,
+                    &id,
+                    &webview,
+                    visibility_generation,
+                    false,
+                )?;
+                native::wait_for_paint(&webview)?;
+                // Re-promote after readiness in case another browser occupied
+                // the slot directly beneath the shell during the wait.
+                native::order_browser_below_main(&app, &id, &webview, visibility_generation, true)
+            })();
+            if let Err(error) = activation {
+                native::fail_browser_visibility(&id, visibility_generation);
+                native::remove_browser(&id);
+                app.state::<BrowserRegistry>().0.lock().unwrap().remove(&id);
+                let _ = webview.close();
+                return Err(error);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -231,20 +373,58 @@ pub fn browser_set_bounds(
     wv.set_position(LogicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
     wv.set_size(LogicalSize::new(width, height))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if underlay_ready() {
+        #[cfg(target_os = "macos")]
+        native::set_browser_bounds(&id, x, y, width, height);
+    }
+    Ok(())
 }
 
-// "Hiding" is implemented by parking the view far offscreen: WKWebView comes
+// Legacy overlay-mode "hiding" parks the view far offscreen: WKWebView comes
 // back BLACK from a setHidden(true)/setHidden(false) cycle (the layer's
 // contents are dropped and not repainted), so hide()/show() are unusable for
-// tab switching. The real position is restored by the frontend's next
-// browser_set_bounds / browser_open call, which always follows a show.
+// tab switching. Underlay mode instead keeps inactive compositor surfaces
+// warm behind the opaque shell and switches them by sibling ordering.
 const PARK_OFFSET: f64 = -20000.0;
 
 #[tauri::command]
-pub fn browser_set_visible(app: AppHandle, id: String, visible: bool) -> Result<(), String> {
+pub async fn browser_set_visible(app: AppHandle, id: String, visible: bool) -> Result<(), String> {
     debug!(id = %id, visible, "browser_set_visible");
     let wv = get_webview(&app, &id)?;
+    if underlay_ready() {
+        #[cfg(target_os = "macos")]
+        let visibility_generation = native::begin_browser_visibility(&id, visible);
+        if !visible {
+            // Keep inactive views at their last onscreen geometry and below
+            // the native backdrop. Their compositor surfaces stay warm for
+            // an atomic sibling-order swap on reactivation; hit testing is
+            // disabled by the native routing state above.
+            #[cfg(target_os = "macos")]
+            native::order_browser_below_backdrop(&wv, &id, visibility_generation)?;
+            return Ok(());
+        }
+        let activation = (|| -> Result<(), String> {
+            wv.show().map_err(|e| e.to_string())?;
+            #[cfg(target_os = "macos")]
+            {
+                // Worktrees remain mounted while inactive, so returning to one
+                // reaches this command rather than browser_open. Promote the warm
+                // view back above the backdrop through the same readiness
+                // boundary used by a browser-tab activation.
+                native::wait_for_paint(&wv)?;
+                native::order_browser_below_main(&app, &id, &wv, visibility_generation, true)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = activation {
+            #[cfg(target_os = "macos")]
+            native::fail_browser_visibility(&id, visibility_generation);
+            let _ = wv.set_position(LogicalPosition::new(PARK_OFFSET, PARK_OFFSET));
+            return Err(error);
+        }
+        return Ok(());
+    }
     if visible {
         // Defensive: un-hide webviews that a previous build's hide() left
         // hidden. Position is restored by the caller's bounds sync.
@@ -291,6 +471,10 @@ pub fn browser_reload(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn browser_close(app: AppHandle, id: String) -> Result<(), String> {
     app.state::<BrowserRegistry>().0.lock().unwrap().remove(&id);
+    if underlay_ready() {
+        #[cfg(target_os = "macos")]
+        native::remove_browser(&id);
+    }
     if let Ok(wv) = get_webview(&app, &id) {
         wv.close().map_err(|e| e.to_string())?;
     }
@@ -687,21 +871,493 @@ pub async fn browser_page_info(app: AppHandle, id: String) -> Result<serde_json:
 
 #[cfg(target_os = "macos")]
 mod native {
-    use std::sync::{mpsc, Mutex};
+    use std::collections::HashMap;
+    use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
 
     use block2::RcBlock;
     use objc2::rc::Retained;
-    use objc2::runtime::AnyObject;
-    use objc2::MainThreadMarker;
+    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
+    use objc2::{msg_send, sel};
+    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2_app_kit::{NSAutoresizingMaskOptions, NSBox, NSBoxType};
     use objc2_app_kit::{
-        NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSEvent,
-        NSEventModifierFlags, NSEventType, NSImage, NSScreen, NSWindow,
+        NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSColor, NSEvent,
+        NSEventModifierFlags, NSEventType, NSImage, NSScreen, NSView, NSWindow,
+        NSWindowOrderingMode,
     };
     use objc2_core_graphics::{CGEvent, CGScrollEventUnit};
-    use objc2_foundation::{NSDictionary, NSError, NSPoint, NSProcessInfo, NSString};
+    use objc2_foundation::{NSArray, NSDictionary, NSError, NSPoint, NSProcessInfo, NSString};
     use objc2_web_kit::WKWebView;
-    use tauri::Webview;
+    use tauri::{AppHandle, Manager, Webview};
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct BrowserRegion {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        requested_visible: bool,
+        visible: bool,
+        view_address: usize,
+        visibility_generation: u64,
+        activation_serial: u64,
+    }
+
+    impl BrowserRegion {
+        fn contains(self, x: f64, y: f64) -> bool {
+            self.visible
+                && x >= self.x
+                && y >= self.y
+                && x < self.x + self.width
+                && y < self.y + self.height
+        }
+    }
+
+    #[derive(Default)]
+    struct UnderlayRouting {
+        overlay_active: bool,
+        next_activation_serial: u64,
+        regions: HashMap<String, BrowserRegion>,
+    }
+
+    impl UnderlayRouting {
+        fn browser_view_at(&self, x: f64, y: f64) -> Option<usize> {
+            if self.overlay_active {
+                return None;
+            }
+            self.regions
+                .values()
+                .filter(|region| region.view_address != 0 && region.contains(x, y))
+                .max_by_key(|region| region.activation_serial)
+                .map(|region| region.view_address)
+        }
+
+        fn sibling_priority(
+            &self,
+            address: usize,
+            main: usize,
+            backdrop: usize,
+            moved: usize,
+            moved_priority: u8,
+        ) -> u8 {
+            if address == main {
+                3
+            } else if address == moved {
+                moved_priority
+            } else if address == backdrop {
+                1
+            } else if self
+                .regions
+                .values()
+                .any(|region| region.visible && region.view_address == address)
+            {
+                2
+            } else {
+                0
+            }
+        }
+    }
+
+    static UNDERLAY_ROUTING: std::sync::OnceLock<Mutex<UnderlayRouting>> =
+        std::sync::OnceLock::new();
+    static UNDERLAY_BACKDROP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    static UNDERLAY_MAIN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
+    fn sort_underlay_siblings(
+        parent: &NSView,
+        moved: &NSView,
+        moved_priority: u8,
+    ) -> Result<(), String> {
+        let main = *UNDERLAY_MAIN
+            .get()
+            .ok_or("browser underlay shell view is not configured")?;
+        let backdrop = *UNDERLAY_BACKDROP
+            .get()
+            .ok_or("browser underlay backdrop is not configured")?;
+        let moved = moved as *const NSView as usize;
+        let routing = routing()
+            .lock()
+            .map_err(|_| "browser underlay routing lock is poisoned")?;
+        let mut subviews = parent.subviews().to_vec();
+        subviews.sort_by_key(|view| {
+            let address = &**view as *const NSView as usize;
+            routing.sibling_priority(address, main, backdrop, moved, moved_priority)
+        });
+        let reordered = NSArray::from_retained_slice(&subviews);
+        // Apple's `subviews` setter reorders existing views without removing
+        // them and marks affected window areas for display.
+        parent.setSubviews(&reordered);
+        Ok(())
+    }
+
+    fn routing() -> &'static Mutex<UnderlayRouting> {
+        UNDERLAY_ROUTING.get_or_init(|| Mutex::new(UnderlayRouting::default()))
+    }
+
+    pub fn set_browser_bounds(id: &str, x: f64, y: f64, width: f64, height: f64) {
+        let Ok(mut state) = routing().lock() else {
+            return;
+        };
+        let region = state.regions.entry(id.to_string()).or_default();
+        region.x = x;
+        region.y = y;
+        region.width = width;
+        region.height = height;
+    }
+
+    pub fn begin_browser_visibility(id: &str, visible: bool) -> u64 {
+        let Ok(mut state) = routing().lock() else {
+            return 0;
+        };
+        let region = state.regions.entry(id.to_string()).or_default();
+        region.visibility_generation = region.visibility_generation.wrapping_add(1);
+        region.requested_visible = visible;
+        region.visible = false;
+        region.visibility_generation
+    }
+
+    fn visibility_request_is_current(id: &str, generation: u64, visible: bool) -> bool {
+        routing()
+            .lock()
+            .ok()
+            .and_then(|state| state.regions.get(id).copied())
+            .map(|region| {
+                region.visibility_generation == generation && region.requested_visible == visible
+            })
+            .unwrap_or(false)
+    }
+
+    fn commit_browser_visibility(
+        id: &str,
+        generation: u64,
+        visible: bool,
+        view_address: Option<usize>,
+    ) {
+        let Ok(mut state) = routing().lock() else {
+            return;
+        };
+        let Some(region) = state.regions.get_mut(id) else {
+            return;
+        };
+        if region.visibility_generation != generation || region.requested_visible != visible {
+            return;
+        }
+        if visible {
+            state.next_activation_serial = state.next_activation_serial.wrapping_add(1);
+        }
+        let activation_serial = state.next_activation_serial;
+        let region = state.regions.get_mut(id).unwrap();
+        region.visible = visible;
+        if let Some(view_address) = view_address {
+            region.view_address = view_address;
+        }
+        if visible {
+            region.activation_serial = activation_serial;
+        }
+    }
+
+    pub fn fail_browser_visibility(id: &str, generation: u64) {
+        let Ok(mut state) = routing().lock() else {
+            return;
+        };
+        let Some(region) = state.regions.get_mut(id) else {
+            return;
+        };
+        if region.visibility_generation != generation {
+            return;
+        }
+        region.requested_visible = false;
+        region.visible = false;
+    }
+
+    pub fn remove_browser(id: &str) {
+        if let Ok(mut state) = routing().lock() {
+            state.regions.remove(id);
+        }
+    }
+
+    pub fn set_overlay_active(active: bool) {
+        if let Ok(mut state) = routing().lock() {
+            state.overlay_active = active;
+        }
+    }
+
+    unsafe extern "C-unwind" fn underlay_container_hit_test(
+        this: &AnyObject,
+        _cmd: Sel,
+        point: NSPoint,
+    ) -> *mut NSView {
+        let view = unsafe { &*(this as *const AnyObject as *const NSView) };
+        let route_point = if view.isFlipped() {
+            point
+        } else {
+            NSPoint::new(point.x, view.bounds().size.height - point.y)
+        };
+        if let Some(view_address) = routing()
+            .lock()
+            .ok()
+            .and_then(|state| state.browser_view_at(route_point.x, route_point.y))
+        {
+            return view_address as *mut NSView;
+        }
+
+        let superclass = this
+            .class()
+            .superclass()
+            .expect("underlay shell webview must have a superclass");
+        unsafe { msg_send![super(this, superclass), hitTest: point] }
+    }
+
+    fn install_container_hit_test_router(container: &NSView) -> Result<(), String> {
+        let class_name = c"ImpalaUnderlayContainerView";
+        let current_class = container.class();
+        if current_class.name() == class_name {
+            return Ok(());
+        }
+        let underlay_class = if let Some(class) = AnyClass::get(class_name) {
+            class
+        } else {
+            let mut builder = ClassBuilder::new(class_name, current_class)
+                .ok_or("could not create underlay shell webview class")?;
+            unsafe {
+                builder.add_method(
+                    sel!(hitTest:),
+                    underlay_container_hit_test as unsafe extern "C-unwind" fn(_, _, _) -> _,
+                );
+            }
+            builder.register()
+        };
+        let object = unsafe { &*(container as *const NSView as *const AnyObject) };
+        let previous = unsafe { AnyObject::set_class(object, underlay_class) };
+        if previous != current_class {
+            return Err(
+                "native container class changed while installing hit-test router".to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    pub fn configure_main_underlay(
+        app: &AppHandle,
+        red: u8,
+        green: u8,
+        blue: u8,
+    ) -> Result<(), String> {
+        let main = app
+            .get_webview("main")
+            .ok_or("main webview not found for browser underlay")?;
+        let (tx, rx) = mpsc::channel();
+        main.with_webview(move |platform_webview| {
+            let wk = unsafe { &*(platform_webview.inner() as *const WKWebView) };
+            let result = unsafe { wk.superview() }
+                .ok_or_else(|| "main webview has no native container".to_string())
+                .and_then(|container| {
+                    install_container_hit_test_router(&container)?;
+                    let _ = UNDERLAY_MAIN.set(wk as *const WKWebView as usize);
+                    let color = NSColor::colorWithSRGBRed_green_blue_alpha(
+                        f64::from(red) / 255.0,
+                        f64::from(green) / 255.0,
+                        f64::from(blue) / 255.0,
+                        1.0,
+                    );
+                    if UNDERLAY_BACKDROP.get().is_none() {
+                        let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
+                        let backdrop = NSBox::initWithFrame(NSBox::alloc(mtm), container.bounds());
+                        backdrop.setBoxType(NSBoxType::Custom);
+                        backdrop.setTransparent(false);
+                        backdrop.setFillColor(&color);
+                        backdrop.setBorderColor(&color);
+                        backdrop.setAutoresizingMask(
+                            NSAutoresizingMaskOptions::ViewWidthSizable
+                                | NSAutoresizingMaskOptions::ViewHeightSizable,
+                        );
+                        container.addSubview_positioned_relativeTo(
+                            &backdrop,
+                            NSWindowOrderingMode::Below,
+                            Some(wk),
+                        );
+                        let _ = UNDERLAY_BACKDROP.set(&*backdrop as *const NSBox as usize);
+                    } else if let Some(backdrop_address) = UNDERLAY_BACKDROP.get() {
+                        let backdrop = unsafe { &*(*backdrop_address as *const NSBox) };
+                        backdrop.setFillColor(&color);
+                        backdrop.setBorderColor(&color);
+                    }
+                    Ok(())
+                });
+            if result.is_ok() {
+                unsafe {
+                    wk.setUnderPageBackgroundColor(Some(&NSColor::clearColor()));
+                }
+            }
+            let _ = tx.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+        rx.recv_timeout(Duration::from_secs(3))
+            .map_err(|_| "timed out configuring browser underlay".to_string())?
+    }
+
+    pub fn set_underlay_backdrop(
+        app: &AppHandle,
+        red: u8,
+        green: u8,
+        blue: u8,
+    ) -> Result<(), String> {
+        let backdrop_address = *UNDERLAY_BACKDROP
+            .get()
+            .ok_or("browser underlay backdrop is not configured")?;
+        let main = app
+            .get_webview("main")
+            .ok_or("main webview not found for browser underlay")?;
+        let (tx, rx) = mpsc::channel();
+        main.with_webview(move |_| {
+            let backdrop = unsafe { &*(backdrop_address as *const NSBox) };
+            let color = NSColor::colorWithSRGBRed_green_blue_alpha(
+                f64::from(red) / 255.0,
+                f64::from(green) / 255.0,
+                f64::from(blue) / 255.0,
+                1.0,
+            );
+            backdrop.setFillColor(&color);
+            backdrop.setBorderColor(&color);
+            backdrop.setNeedsDisplay(true);
+            let _ = tx.send(());
+        })
+        .map_err(|error| error.to_string())?;
+        rx.recv_timeout(Duration::from_secs(3))
+            .map_err(|_| "timed out updating browser underlay backdrop".to_string())
+    }
+
+    pub fn order_browser_below_main(
+        app: &AppHandle,
+        id: &str,
+        browser: &Webview,
+        visibility_generation: u64,
+        commit_visibility: bool,
+    ) -> Result<(), String> {
+        let main = app
+            .get_webview("main")
+            .ok_or("main webview not found for browser underlay")?;
+        let browser = browser.clone();
+        let id = id.to_string();
+        let (tx, rx) = mpsc::channel();
+        let tx = Arc::new(Mutex::new(Some(tx)));
+        main.with_webview(move |main_platform_webview| {
+            let main_address = main_platform_webview.inner() as usize;
+            let inner_tx = tx.clone();
+            if let Err(error) = browser.with_webview(move |browser_platform_webview| {
+                let result = (|| {
+                    if !visibility_request_is_current(&id, visibility_generation, true) {
+                        return Ok(());
+                    }
+                    let main_view = unsafe { &*(main_address as *const NSView) };
+                    let browser_view =
+                        unsafe { &*(browser_platform_webview.inner() as *const NSView) };
+                    let parent = unsafe { browser_view.superview() }
+                        .ok_or("browser underlay webview has no superview")?;
+                    let same_parent = unsafe { main_view.superview() }
+                        .map(|main_parent| std::ptr::eq(&*parent, &*main_parent))
+                        .unwrap_or(false);
+                    if !same_parent {
+                        return Err("browser and shell webviews are not sibling views".to_string());
+                    }
+                    sort_underlay_siblings(&parent, browser_view, 2)?;
+                    if commit_visibility {
+                        commit_browser_visibility(
+                            &id,
+                            visibility_generation,
+                            true,
+                            Some(browser_view as *const NSView as usize),
+                        );
+                    }
+                    Ok(())
+                })();
+                if let Some(tx) = inner_tx.lock().unwrap().take() {
+                    let _ = tx.send(result);
+                }
+            }) {
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(Err(error.to_string()));
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
+        rx.recv_timeout(Duration::from_secs(3))
+            .map_err(|_| "timed out ordering browser underlay".to_string())?
+    }
+
+    pub fn order_browser_below_backdrop(
+        browser: &Webview,
+        id: &str,
+        visibility_generation: u64,
+    ) -> Result<(), String> {
+        let backdrop_address = *UNDERLAY_BACKDROP
+            .get()
+            .ok_or("browser underlay backdrop is not configured")?;
+        let id = id.to_string();
+        let (tx, rx) = mpsc::channel();
+        browser
+            .with_webview(move |browser_platform_webview| {
+                let result = (|| {
+                    if !visibility_request_is_current(&id, visibility_generation, false) {
+                        return Ok(());
+                    }
+                    let browser_view =
+                        unsafe { &*(browser_platform_webview.inner() as *const NSView) };
+                    let backdrop = unsafe { &*(backdrop_address as *const NSView) };
+                    let parent = unsafe { browser_view.superview() }
+                        .ok_or("browser underlay webview has no superview")?;
+                    let same_parent = unsafe { backdrop.superview() }
+                        .map(|backdrop_parent| std::ptr::eq(&*parent, &*backdrop_parent))
+                        .unwrap_or(false);
+                    if !same_parent {
+                        return Err(
+                            "browser and underlay backdrop are not sibling views".to_string()
+                        );
+                    }
+                    sort_underlay_siblings(&parent, browser_view, 0)?;
+                    commit_browser_visibility(&id, visibility_generation, false, None);
+                    Ok(())
+                })();
+                let _ = tx.send(result);
+            })
+            .map_err(|error| error.to_string())?;
+        rx.recv_timeout(Duration::from_secs(3))
+            .map_err(|_| "timed out parking browser below underlay backdrop".to_string())?
+    }
+
+    /// Do not tell the transparent shell to expose this view until WebKit can
+    /// asynchronously produce an image for its current onscreen geometry.
+    /// AppKit ordering and `show()` complete before WKWebView's compositor has
+    /// necessarily submitted its first frame; snapshot completion is the
+    /// native readiness boundary for the underlay handoff.
+    pub fn wait_for_paint(webview: &Webview) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel::<Result<(), String>>();
+        let tx = Mutex::new(Some(tx));
+        webview
+            .with_webview(move |pw| {
+                let wk = unsafe { &*(pw.inner() as *const WKWebView) };
+                let block = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
+                    let Some(tx) = tx.lock().unwrap().take() else {
+                        return;
+                    };
+                    if !error.is_null() {
+                        let desc = unsafe { (*error).localizedDescription() };
+                        let _ = tx.send(Err(desc.to_string()));
+                    } else if image.is_null() {
+                        let _ = tx.send(Err("paint snapshot returned no image".to_string()));
+                    } else {
+                        let _ = tx.send(Ok(()));
+                    }
+                });
+                unsafe {
+                    wk.takeSnapshotWithConfiguration_completionHandler(None, &block);
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        rx.recv_timeout(Duration::from_secs(3))
+            .map_err(|_| "timed out waiting for browser paint".to_string())?
+    }
 
     /// Run JS in the page's main frame and return its result. Always send
     /// JSON.stringify(...)-shaped JS so the result is a string.
@@ -992,6 +1648,115 @@ mod native {
             unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props) }
                 .ok_or("PNG encoding failed")?;
         Ok(png.to_vec())
+    }
+
+    #[cfg(test)]
+    mod underlay_tests {
+        use super::{BrowserRegion, UnderlayRouting};
+
+        fn routing_with_visible_region() -> UnderlayRouting {
+            let mut routing = UnderlayRouting::default();
+            routing.regions.insert(
+                "browser-one".to_string(),
+                BrowserRegion {
+                    x: 100.0,
+                    y: 80.0,
+                    width: 400.0,
+                    height: 300.0,
+                    requested_visible: true,
+                    visible: true,
+                    view_address: 42,
+                    visibility_generation: 1,
+                    activation_serial: 1,
+                },
+            );
+            routing.next_activation_serial = 1;
+            routing
+        }
+
+        #[test]
+        fn routes_points_inside_visible_browser_to_the_underlay() {
+            let routing = routing_with_visible_region();
+
+            assert_eq!(routing.browser_view_at(100.0, 80.0), Some(42));
+            assert_eq!(routing.browser_view_at(499.0, 379.0), Some(42));
+            assert_eq!(routing.browser_view_at(500.0, 380.0), None);
+        }
+
+        #[test]
+        fn shell_overlay_owns_the_complete_window() {
+            let mut routing = routing_with_visible_region();
+            routing.overlay_active = true;
+
+            assert_eq!(routing.browser_view_at(200.0, 200.0), None);
+        }
+
+        #[test]
+        fn hidden_browser_does_not_receive_hit_tests() {
+            let mut routing = routing_with_visible_region();
+            routing.regions.get_mut("browser-one").unwrap().visible = false;
+
+            assert_eq!(routing.browser_view_at(200.0, 200.0), None);
+        }
+
+        #[test]
+        fn overlapping_regions_route_only_to_the_committed_active_browser() {
+            let mut routing = routing_with_visible_region();
+            routing.regions.insert(
+                "browser-two".to_string(),
+                BrowserRegion {
+                    x: 100.0,
+                    y: 80.0,
+                    width: 400.0,
+                    height: 300.0,
+                    requested_visible: true,
+                    visible: true,
+                    view_address: 84,
+                    visibility_generation: 1,
+                    activation_serial: 2,
+                },
+            );
+            routing.next_activation_serial = 2;
+
+            assert_eq!(routing.browser_view_at(200.0, 200.0), Some(84));
+        }
+
+        #[test]
+        fn promoting_a_split_browser_keeps_other_visible_splits_above_backdrop() {
+            let mut routing = routing_with_visible_region();
+            routing.regions.insert(
+                "browser-two".to_string(),
+                BrowserRegion {
+                    x: 500.0,
+                    y: 80.0,
+                    width: 400.0,
+                    height: 300.0,
+                    requested_visible: true,
+                    visible: true,
+                    view_address: 84,
+                    visibility_generation: 1,
+                    activation_serial: 2,
+                },
+            );
+
+            assert_eq!(routing.sibling_priority(42, 1000, 2000, 84, 2), 2,);
+        }
+    }
+}
+
+#[cfg(test)]
+mod underlay_feature_tests {
+    use super::underlay_enabled_from_override;
+
+    #[test]
+    fn macos_underlay_defaults_on_and_has_an_explicit_fallback() {
+        assert_eq!(
+            underlay_enabled_from_override(None),
+            cfg!(target_os = "macos")
+        );
+        assert!(!underlay_enabled_from_override(Some("0")));
+        assert!(!underlay_enabled_from_override(Some("false")));
+        assert!(!underlay_enabled_from_override(Some("OFF")));
     }
 }
 

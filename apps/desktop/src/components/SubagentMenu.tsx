@@ -221,6 +221,7 @@ function MenuDismiss({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div
       aria-hidden="true"
+      data-browser-native-occlusion
       className="fixed inset-0 z-30"
       onMouseDown={onDismiss}
     />

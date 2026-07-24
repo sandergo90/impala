@@ -98,7 +98,13 @@ export function CommandPalette({
   return (
     <div className="fixed inset-0 z-50" onClick={onClose}>
       <div className="fixed inset-0 bg-black/40" />
-      <div className="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-[640px]" onClick={(e) => e.stopPropagation()}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        className="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-[640px]"
+        onClick={(e) => e.stopPropagation()}
+      >
         <Command
           className="rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden"
           loop
