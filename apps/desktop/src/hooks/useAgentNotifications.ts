@@ -1,14 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  isPermissionGranted,
-  requestPermission,
-  onAction,
-} from "@tauri-apps/plugin-notification";
 import { invoke } from "@/lib/invoke";
-import { useUIStore, useDataStore } from "../store";
-import { selectWorktree } from "./useWorktreeActions";
+import {
+  canSendNotifications,
+  getNotificationPermissionStatus,
+} from "@/lib/notification-permissions";
+import { useUIStore } from "../store";
+import { useMountEffect } from "./useMountEffect";
 
 export const NOTIFICATION_SOUNDS = [
   { id: "chime", name: "Chime" },
@@ -30,7 +29,7 @@ export function useAgentNotifications() {
   // notification say which automation finished instead of the generic copy.
   const automationCompletionsRef = useRef(new Map<string, string>());
 
-  useEffect(() => {
+  useMountEffect(() => {
     let cancelled = false;
     const window = getCurrentWindow();
 
@@ -46,45 +45,9 @@ export function useAgentNotifications() {
       cancelled = true;
       unlisten.then((fn) => fn());
     };
-  }, []);
+  });
 
-  useEffect(() => {
-    isPermissionGranted().then((granted) => {
-      if (!granted) requestPermission();
-    }).catch(() => {
-      // Plugin may not be available in dev mode
-    });
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unregister: (() => void) | null = null;
-
-    onAction((notification) => {
-      const worktreePath = notification.extra?.worktree_path as string | undefined;
-      if (!worktreePath) return;
-
-      getCurrentWindow().setFocus();
-
-      const worktree = useDataStore.getState().worktrees.find((wt) => wt.path === worktreePath);
-      if (worktree) selectWorktree(worktree);
-    }).then((listener) => {
-      if (cancelled) {
-        listener.unregister();
-      } else {
-        unregister = () => listener.unregister();
-      }
-    }).catch(() => {
-      // Plugin may not be available in dev mode
-    });
-
-    return () => {
-      cancelled = true;
-      unregister?.();
-    };
-  }, []);
-
-  useEffect(() => {
+  useMountEffect(() => {
     const unlisten = listen<{
       worktree_path: string;
       automation_name: string;
@@ -97,9 +60,9 @@ export function useAgentNotifications() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  });
 
-  useEffect(() => {
+  useMountEffect(() => {
     const unlisten = listen<{ worktree_path: string; status: string }>(
       "agent-status",
       async (event) => {
@@ -132,9 +95,13 @@ export function useAgentNotifications() {
             ? `"${automationName}" finished — diff ready to review`
             : `"${worktreeName}" has finished its task`;
 
-        const granted = await isPermissionGranted();
-        if (granted) {
-          invoke("send_notification", { title, body });
+        try {
+          const permission = await getNotificationPermissionStatus();
+          if (canSendNotifications(permission)) {
+            await invoke("send_notification", { title, body });
+          }
+        } catch (error) {
+          console.warn("Failed to send notification:", error);
         }
 
         const { notificationSoundMuted, selectedSoundId } = useUIStore.getState();
@@ -147,5 +114,5 @@ export function useAgentNotifications() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  });
 }

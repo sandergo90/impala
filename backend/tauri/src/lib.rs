@@ -1722,7 +1722,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
@@ -1968,11 +1967,6 @@ pub fn run() {
                 }
             }
 
-            // Register a minimal .app bundle with Launch Services so macOS can
-            // resolve our bundle identifier to the Impala icon for notifications
-            #[cfg(target_os = "macos")]
-            notifications::register_notification_icon(app);
-
             // Set macOS application icon for dock/window in dev mode
             #[cfg(target_os = "macos")]
             {
@@ -2111,6 +2105,9 @@ pub fn run() {
             config::read_project_config,
             config::write_project_config,
             notifications::send_notification,
+            notifications::get_notification_permission_status,
+            notifications::request_notification_permission,
+            notifications::open_notification_settings,
             notifications::play_notification_sound,
             discover_project_icon,
             hotkeys::read_hotkey_overrides,

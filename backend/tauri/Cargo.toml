@@ -42,7 +42,6 @@ reqwest = { version = "0.13", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "fs", "macros", "time", "sync"] }
 tiny_http = "0.12"
 urlencoding = "2"
-tauri-plugin-notification = "2"
 impala-daemon-shared = { path = "shared" }
 anyhow = "1"
 libc = "0.2"
@@ -64,7 +63,8 @@ objc2-foundation = { version = "0.3", features = ["NSData", "NSString", "NSDicti
 objc2-core-graphics = { version = "0.3", features = ["std", "CGEvent", "CGEventTypes"], default-features = false }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
 block2 = "0.6"
-notify-rust = "4"
+mac-usernotifications = "0.3.1"
+notify-rust = { version = "4", features = ["preview-macos-un"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 window-vibrancy = "0.7"

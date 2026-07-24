@@ -54,7 +54,6 @@
         { "path": "$HOME/**/.*/**" }
       ]
     },
-    "notification:default",
     "sentry:default",
     "updater:default",
     "process:allow-restart"
