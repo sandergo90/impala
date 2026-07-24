@@ -2086,6 +2086,7 @@ pub fn run() {
             pty::prepare_shell_launch,
             running_services::list_running_services,
             running_services::terminate_running_service,
+            running_services::terminate_all_running_services,
             check_generated_files,
             open_in_editor,
             resolve_file_path,

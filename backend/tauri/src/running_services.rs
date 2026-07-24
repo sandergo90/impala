@@ -97,6 +97,68 @@ pub async fn terminate_running_service(
     .map_err(|error| format!("service stop task failed: {error}"))?
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StopAllOutcome {
+    pub stopped: u32,
+    pub failures: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn terminate_all_running_services(
+    state: tauri::State<'_, DaemonState>,
+    db: tauri::State<'_, DbState>,
+    project_path: String,
+) -> Result<StopAllOutcome, String> {
+    authorize_project(&db, &project_path)?;
+    // Stopping must fail closed: without the daemon inventory we cannot prove
+    // that a listener is not an Impala terminal's root shell.
+    let sessions = daemon_sessions(&state).await?;
+    tokio::task::spawn_blocking(move || {
+        let worktree_paths = project_worktree_paths(&project_path)?;
+        let services = scan_running_services(&worktree_paths, &sessions)?;
+        #[cfg(unix)]
+        {
+            let mut seen_pids = HashSet::new();
+            let mut outcome = StopAllOutcome {
+                stopped: 0,
+                failures: Vec::new(),
+            };
+            for service in services {
+                if sessions
+                    .iter()
+                    .any(|session| session.pid == Some(service.pid))
+                {
+                    continue;
+                }
+                if !seen_pids.insert(service.pid) {
+                    continue;
+                }
+                let result = unsafe { libc::kill(service.pid as i32, libc::SIGTERM) };
+                // ESRCH means the process already exited (e.g. its parent was
+                // stopped earlier in this loop); not a failure.
+                if result == 0
+                    || std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+                {
+                    outcome.stopped += 1;
+                } else {
+                    outcome
+                        .failures
+                        .push(format!("{} (PID {})", service.process_name, service.pid));
+                }
+            }
+            Ok(outcome)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = services;
+            Err("Stopping services is currently supported on Unix only.".into())
+        }
+    })
+    .await
+    .map_err(|error| format!("service stop task failed: {error}"))?
+}
+
 fn authorize_project(db: &DbState, project_path: &str) -> Result<(), String> {
     let conn =
         db.0.lock()

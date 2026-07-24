@@ -3,10 +3,10 @@ import { createPortal } from "react-dom";
 import {
   ChevronDown,
   Copy,
-  ExternalLink,
-  Focus,
+  Globe2,
   Radio,
   Square,
+  Terminal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { invoke } from "@/lib/invoke";
@@ -51,7 +51,9 @@ export function RunningServicesMenu({
 }) {
   const [services, setServices] = useState<RunningService[]>([]);
   const [open, setOpen] = useState(false);
-  const [stopTarget, setStopTarget] = useState<RunningService | null>(null);
+  const [stopTarget, setStopTarget] = useState<RunningService | "all" | null>(
+    null,
+  );
   const [stopping, setStopping] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -156,12 +158,27 @@ export function RunningServicesMenu({
     if (!stopTarget) return;
     setStopping(true);
     try {
-      await invoke("terminate_running_service", {
-        pid: stopTarget.pid,
-        port: stopTarget.port,
-        projectPath,
-      });
-      toast.success(`Stopped ${stopTarget.processName} on port ${stopTarget.port}`);
+      if (stopTarget === "all") {
+        const outcome = await invoke<{ stopped: number; failures: string[] }>(
+          "terminate_all_running_services",
+          { projectPath },
+        );
+        if (outcome.failures.length > 0) {
+          toast.error(`Could not stop ${outcome.failures.join(", ")}`);
+        }
+        if (outcome.stopped > 0) {
+          toast.success(
+            `Stopped ${outcome.stopped} ${outcome.stopped === 1 ? "process" : "processes"}`,
+          );
+        }
+      } else {
+        await invoke("terminate_running_service", {
+          pid: stopTarget.pid,
+          port: stopTarget.port,
+          projectPath,
+        });
+        toast.success(`Stopped ${stopTarget.processName} on port ${stopTarget.port}`);
+      }
       setStopTarget(null);
       if (refreshInFlightRef.current) {
         refreshQueuedRef.current = true;
@@ -206,7 +223,7 @@ export function RunningServicesMenu({
             ref={popoverRef}
             role="dialog"
             aria-label="Running services"
-            className="fixed z-40 w-[390px] max-h-[min(560px,calc(100vh-24px))] overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+            className="fixed z-40 w-[390px] max-h-[min(560px,calc(100vh-24px))] origin-bottom-left animate-in fade-in-0 zoom-in-95 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
             style={{
               left: (rootRef.current?.getBoundingClientRect().right ?? 0) + 8,
               bottom: Math.max(
@@ -224,9 +241,21 @@ export function RunningServicesMenu({
                   Listening ports in this project
                 </div>
               </div>
-              <span className="rounded-md bg-success/15 px-2 py-1 text-xs font-medium text-success">
-                {services.length} live
-              </span>
+              <div className="flex items-center gap-1">
+                <span className="rounded-md bg-success/15 px-2 py-1 text-xs font-medium text-success">
+                  {services.length} live
+                </span>
+                {services.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="text-muted-foreground hover:text-danger"
+                    onClick={() => setStopTarget("all")}
+                  >
+                    Stop all
+                  </Button>
+                )}
+              </div>
             </div>
 
             {groups.map(({ worktree, services: worktreeServices }) => (
@@ -235,7 +264,7 @@ export function RunningServicesMenu({
                   <span className="truncate text-xs font-medium text-muted-foreground">
                     {worktreeLabel(worktree)}
                   </span>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     {worktreeServices.length}
                   </span>
                 </div>
@@ -258,11 +287,11 @@ export function RunningServicesMenu({
                           :{service.port}
                         </span>
                       </span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
+                      <span className="block truncate text-xs text-muted-foreground">
                         PID {service.pid} · {service.managed ? "Impala terminal" : "External process"}
                       </span>
                     </button>
-                    <div className="flex items-center">
+                    <div className="flex items-center gap-0.5">
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -270,7 +299,7 @@ export function RunningServicesMenu({
                         aria-label={`Open port ${service.port} in Impala`}
                         onClick={() => void openService(service)}
                       >
-                        <ExternalLink />
+                        <Globe2 aria-hidden="true" className="size-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -280,7 +309,7 @@ export function RunningServicesMenu({
                         disabled={!service.sessionId}
                         onClick={() => void focusTerminal(service)}
                       >
-                        <Focus />
+                        <Terminal aria-hidden="true" className="size-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -289,7 +318,7 @@ export function RunningServicesMenu({
                         aria-label={`Copy URL for port ${service.port}`}
                         onClick={() => void copyUrl(service)}
                       >
-                        <Copy />
+                        <Copy aria-hidden="true" className="size-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -299,7 +328,7 @@ export function RunningServicesMenu({
                         aria-label={`Stop process on port ${service.port}`}
                         onClick={() => setStopTarget(service)}
                       >
-                        <Square />
+                        <Square aria-hidden="true" className="size-3.5" />
                       </Button>
                     </div>
                   </div>
@@ -319,10 +348,21 @@ export function RunningServicesMenu({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Stop this service?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {stopTarget === "all" ? "Stop all services?" : "Stop this service?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This sends SIGTERM to {stopTarget?.processName || "the process"} (PID{" "}
-              {stopTarget?.pid}) listening on port {stopTarget?.port}.
+              {stopTarget === "all" ? (
+                <>
+                  This sends SIGTERM to every process with a listening port in
+                  this project, including ones Impala didn't start.
+                </>
+              ) : (
+                <>
+                  This sends SIGTERM to {stopTarget?.processName || "the process"}{" "}
+                  (PID {stopTarget?.pid}) listening on port {stopTarget?.port}.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -335,7 +375,11 @@ export function RunningServicesMenu({
                 void stopService();
               }}
             >
-              {stopping ? "Stopping…" : "Stop service"}
+              {stopping
+                ? "Stopping…"
+                : stopTarget === "all"
+                  ? "Stop all services"
+                  : "Stop service"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
