@@ -1660,8 +1660,9 @@ export interface PaneFileOrigin {
  *
  * Existing files in the same split layout are focused in place. New files
  * prefer the nearest pane to the right, then the left, and use pane-local
- * preview semantics. If the source has no horizontal neighbor (or the target
- * would be a user tab's projected primary group), fall back to the regular
+ * preview semantics. A lone agent tab in its only pane creates a new right
+ * split for the file. Other sources without a horizontal neighbor (or whose
+ * target would be a user tab's projected primary group) fall back to regular
  * top-level file tab behavior.
  */
 export function openFileTabFromPane(
@@ -1730,6 +1731,38 @@ export function openFileTabFromPane(
     parkPendingTarget();
     uiState.revealFileInTree(worktreePath, path);
     return;
+  }
+
+  const sourceGroup = findLeaf(tree, origin.groupId);
+  const sourceContent = sourceGroup
+    ? getActiveGroupTab(sourceGroup)?.content
+    : null;
+  const sourceIsAgent =
+    sourceContent?.kind === "terminal" && sourceContent.launch === "agent";
+  if (
+    sourceIsAgent &&
+    sourceGroup?.tabs.length === 1 &&
+    getLeaves(tree).length === 1
+  ) {
+    const result = splitNode(tree, origin.groupId, "vertical", {
+      kind: "file",
+      path,
+    });
+    if (result) {
+      const createdGroup = findLeaf(result.tree, result.newLeafId);
+      const createdTab = createdGroup?.tabs[0];
+      const nextTree =
+        pin && createdTab
+          ? updateGroupTab(result.tree, createdTab.id, (tab) => ({
+              ...tab,
+              pinned: true,
+            }))
+          : result.tree;
+      applyTree(nextTree, result.newLeafId);
+      parkPendingTarget();
+      uiState.revealFileInTree(worktreePath, path);
+      return;
+    }
   }
 
   const targetGroupId =

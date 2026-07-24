@@ -195,7 +195,7 @@ describe("openFileTabFromPane", () => {
     expect(nav.agentTabFocusedPaneId).toBe("right-pane");
   });
 
-  test("falls back to a top-level file tab without a horizontal neighbor", () => {
+  test("opens a right file split when the source agent is the only pane", () => {
     const tree = group("tab-agent", [
       groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
     ]);
@@ -210,9 +210,45 @@ describe("openFileTabFromPane", () => {
     });
 
     const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    expect(nav.userTabs).toHaveLength(0);
+    expect(nav.agentTabSplitTree.type).toBe("split");
+    expect(nav.agentTabSplitTree.orientation).toBe("vertical");
+    expect(nav.agentTabSplitTree.first.id).toBe("tab-agent");
+    const right = findGroup(
+      nav.agentTabSplitTree,
+      nav.agentTabFocusedPaneId,
+    );
+    expect(right.tabs).toHaveLength(1);
+    expect(right.tabs[0].content).toEqual({
+      kind: "file",
+      path: "README.md",
+    });
+    expect(nav.activeTerminalsTab).toBe("tab-agent");
+  });
+
+  test("keeps the existing fallback when the unsplit pane has multiple tabs", () => {
+    const tree = group(
+      "tab-agent",
+      [
+        groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+        groupTab("other-agent", { kind: "terminal", launch: "agent" }),
+      ],
+      "tab-agent",
+    );
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: tree,
+      agentTabFocusedPaneId: "tab-agent",
+      activeTerminalsTab: "tab-agent",
+    });
+
+    openFileTabFromPane(worktreePath, "README.md", {
+      topTabId: "tab-agent",
+      groupId: "tab-agent",
+    });
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    expect(nav.agentTabSplitTree).toEqual(tree);
     expect(nav.userTabs).toHaveLength(1);
-    expect(nav.userTabs[0].kind).toBe("file");
     expect(nav.userTabs[0].path).toBe("README.md");
-    expect(nav.activeTerminalsTab).toBe(nav.userTabs[0].id);
   });
 });
