@@ -2,11 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { getSubagentTriggerState } from "./subagent-menu-state";
 
 describe("getSubagentTriggerState", () => {
-  test("keeps completed Claude subagent history reachable", () => {
-    expect(getSubagentTriggerState(0, 4)).toEqual({
+  test("hides the trigger once a new message archives completed subagents", () => {
+    expect(getSubagentTriggerState(0)).toEqual({
+      visible: false,
+      count: 0,
+    });
+  });
+
+  test("counts only the current turn's subagents", () => {
+    expect(getSubagentTriggerState(2)).toEqual({
       visible: true,
-      count: 4,
-      historyOnly: true,
+      count: 2,
     });
   });
 });

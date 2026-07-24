@@ -82,10 +82,7 @@ export function SubagentMenu({
     };
   });
 
-  const triggerState = getSubagentTriggerState(
-    snapshot.agents.length,
-    snapshot.previousAgents.length,
-  );
+  const triggerState = getSubagentTriggerState(snapshot.agents.length);
 
   if (!triggerState.visible) return null;
 
@@ -100,8 +97,7 @@ export function SubagentMenu({
         agent.name.toLowerCase().includes(normalizedQuery),
       )
     : snapshot.previousAgents;
-  const previousExpanded =
-    triggerState.historyOnly || showPrevious || normalizedQuery.length > 0;
+  const previousExpanded = showPrevious || normalizedQuery.length > 0;
 
   return (
     <>
@@ -118,17 +114,9 @@ export function SubagentMenu({
           setOpen((value) => !value);
         }}
         className="mx-1.5 flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground outline-none hover:bg-background/70 hover:text-foreground"
-        aria-label={
-          triggerState.historyOnly
-            ? `${triggerState.count} completed subagents. Open subagent history`
-            : `${triggerState.count} subagents, ${snapshot.activeCount} active. Open subagent menu`
-        }
+        aria-label={`${triggerState.count} subagents, ${snapshot.activeCount} active. Open subagent menu`}
         aria-expanded={open}
-        title={
-          triggerState.historyOnly
-            ? `${triggerState.count} completed subagents`
-            : `${triggerState.count} subagents · ${snapshot.activeCount} active`
-        }
+        title={`${triggerState.count} subagents · ${snapshot.activeCount} active`}
       >
         <Circle
           aria-hidden="true"
@@ -210,9 +198,7 @@ export function SubagentMenu({
                   ) : null}
                 </div>
                 <div className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
-                  {triggerState.historyOnly
-                    ? `${snapshot.previousAgents.length} previous`
-                    : `${snapshot.activeCount} running · ${snapshot.agents.length} this turn`}
+                  {`${snapshot.activeCount} running · ${snapshot.agents.length} this turn`}
                 </div>
               </div>
             </>,
