@@ -592,6 +592,20 @@ export const TabbedTerminals = memo(function TabbedTerminals({
               ●
             </span>
           )}
+          {agentPaneStatuses[t.paneId] !== undefined && (
+            <span
+              className={`shrink-0 text-warning ${
+                agentPaneStatuses[t.paneId] === "working" ? "animate-pulse" : ""
+              }`}
+              aria-label={
+                agentPaneStatuses[t.paneId] === "working"
+                  ? "Agent working"
+                  : "Agent awaiting permission"
+              }
+            >
+              ●
+            </span>
+          )}
           <span className="truncate">{t.label}</span>
         </button>
       )}
@@ -1510,6 +1524,22 @@ function PaneTabGroup({
                       aria-hidden="true"
                       className={`size-4 shrink-0 ${selected ? "opacity-90" : "opacity-75"}`}
                     />
+                    {agentPaneStatuses[tab.id] !== undefined && (
+                      <span
+                        className={`shrink-0 text-warning ${
+                          agentPaneStatuses[tab.id] === "working"
+                            ? "animate-pulse"
+                            : ""
+                        }`}
+                        aria-label={
+                          agentPaneStatuses[tab.id] === "working"
+                            ? "Agent working"
+                            : "Agent awaiting permission"
+                        }
+                      >
+                        ●
+                      </span>
+                    )}
                     <span className="truncate">
                       {displayLabel}
                     </span>
