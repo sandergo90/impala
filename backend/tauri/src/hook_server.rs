@@ -430,9 +430,10 @@ pub fn hook_command_public(event_type: &str) -> String {
 }
 
 /// The hook command for a specific event type.
-/// Reads the hook port from ~/.impala/hook-port (written on each app start)
-/// so that persistent PTY sessions always reach the current hook server,
-/// even after an app restart changes the port. Stdin must be drained first:
+/// Prefers the port inherited by the PTY while that server is reachable. A
+/// second short-lived Impala instance can overwrite ~/.impala/hook-port, so
+/// blindly trusting the discovery file would strand healthy live sessions.
+/// Falls back to that file after an app restart changes the port. Stdin must be drained first:
 /// the agent writes the full event payload to hook stdin, and a PostToolUse
 /// payload carrying a browser screenshot exceeds the 64KB pipe buffer — a
 /// command that exits without reading gives the agent a broken-pipe error.
@@ -441,7 +442,7 @@ pub fn hook_command_public(event_type: &str) -> String {
 /// sure neither sees the HTTP response body.
 fn hook_command(event_type: &str) -> String {
     format!(
-        "IMPALA_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${{IMPALA_HOOK_PORT}}/hook\" --url-query \"event_type={}\" --url-query \"worktree_path=${{IMPALA_WORKTREE_PATH}}\" --url-query \"pane_id=${{IMPALA_PANE_ID}}\" --url-query \"agent_provider=${{IMPALA_AGENT_PROVIDER}}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
+        "IMPALA_INHERITED_HOOK_PORT=\"${{IMPALA_HOOK_PORT:-}}\"; IMPALA_DISCOVERED_HOOK_PORT=$(cat ~/.impala/hook-port 2>/dev/null); if [ -n \"$IMPALA_INHERITED_HOOK_PORT\" ] && curl -sS \"http://127.0.0.1:${{IMPALA_INHERITED_HOOK_PORT}}/\" --connect-timeout 1 --max-time 1 >/dev/null 2>&1; then IMPALA_HOOK_PORT=\"$IMPALA_INHERITED_HOOK_PORT\"; else IMPALA_HOOK_PORT=\"$IMPALA_DISCOVERED_HOOK_PORT\"; fi; if [ -n \"$IMPALA_WORKTREE_PATH\" ] && [ -n \"$IMPALA_HOOK_PORT\" ]; then curl -sS -X POST \"http://127.0.0.1:${{IMPALA_HOOK_PORT}}/hook\" --url-query \"event_type={}\" --url-query \"worktree_path=${{IMPALA_WORKTREE_PATH}}\" --url-query \"pane_id=${{IMPALA_PANE_ID}}\" --url-query \"agent_provider=${{IMPALA_AGENT_PROVIDER}}\" --data-binary @- --connect-timeout 1 --max-time 2 >/dev/null 2>&1; else cat >/dev/null 2>&1; fi; true",
         event_type
     )
 }
@@ -1227,14 +1228,69 @@ pub fn start(
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns, IMPALA_BROWSER_SKILL,
+        hook_command, AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns,
+        IMPALA_BROWSER_SKILL,
     };
+    use std::fs;
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::{Command, Stdio};
 
     #[test]
     fn browser_skill_requires_impala_runtime_context() {
         assert!(IMPALA_BROWSER_SKILL
             .contains(r#"test -n "${IMPALA_WORKTREE_PATH:-}" && test -n "${IMPALA_PANE_ID:-}""#));
         assert!(IMPALA_BROWSER_SKILL.contains("If the command fails, stop using this skill"));
+    }
+
+    #[test]
+    fn hook_command_prefers_the_live_inherited_port_over_a_stale_discovery_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin_dir = temp.path().join("bin");
+        let impala_dir = temp.path().join(".impala");
+        fs::create_dir_all(&bin_dir).unwrap();
+        fs::create_dir_all(&impala_dir).unwrap();
+        fs::write(impala_dir.join("hook-port"), "60920").unwrap();
+
+        let curl_path = bin_dir.join("curl");
+        fs::write(
+            &curl_path,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$CURL_LOG"
+case "$*" in
+  *"http://127.0.0.1:60158/") exit 0 ;;
+esac
+cat >/dev/null
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&curl_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let log_path = temp.path().join("curl.log");
+        let mut child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(hook_command("Stop"))
+            .env("HOME", temp.path())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin_dir.display()))
+            .env("CURL_LOG", &log_path)
+            .env("IMPALA_HOOK_PORT", "60158")
+            .env("IMPALA_WORKTREE_PATH", "/worktree")
+            .env("IMPALA_PANE_ID", "tab-agent")
+            .env("IMPALA_AGENT_PROVIDER", "codex")
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(br#"{"turn_id":"turn-1"}"#)
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+
+        let invocations = fs::read_to_string(log_path).unwrap();
+        assert_eq!(invocations.matches("http://127.0.0.1:60158").count(), 2);
+        assert!(!invocations.contains("http://127.0.0.1:60920"));
     }
 
     #[test]
