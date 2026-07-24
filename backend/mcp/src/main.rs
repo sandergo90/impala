@@ -261,33 +261,58 @@ fn tool_list_files_with_annotations(conn: &Connection, params: &Value) -> Result
 
 // ---------------------------------------------------------------------------
 // Browser tools — talk to the running Impala app via its hook server. The
-// port is written to ~/.impala/hook-port on every app start (hook_server.rs).
+// port is inherited from the Impala instance that launched the agent. The
+// shared ~/.impala/hook-port file remains a fallback for sessions that survive
+// an app restart and therefore retain a dead inherited port.
 // ---------------------------------------------------------------------------
 
-fn hook_port() -> Result<u16, String> {
-    let home = dirs::home_dir().ok_or("could not determine home directory")?;
-    let raw = std::fs::read_to_string(home.join(".impala").join("hook-port"))
-        .map_err(|_| "Impala isn't running (no hook port file)".to_string())?;
-    raw.trim()
-        .parse::<u16>()
-        .map_err(|_| "invalid hook port file".to_string())
+fn hook_ports() -> Result<Vec<u16>, String> {
+    let mut ports = Vec::new();
+    if let Ok(raw) = std::env::var("IMPALA_HOOK_PORT") {
+        if let Ok(port) = raw.trim().parse::<u16>() {
+            ports.push(port);
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        match std::fs::read_to_string(home.join(".impala").join("hook-port")) {
+            Ok(raw) => match raw.trim().parse::<u16>() {
+                Ok(discovered) if !ports.contains(&discovered) => ports.push(discovered),
+                Ok(_) => {}
+                Err(_) if ports.is_empty() => return Err("invalid hook port file".to_string()),
+                Err(_) => {}
+            },
+            Err(_) if ports.is_empty() => {
+                return Err("Impala isn't running (no hook port file)".to_string());
+            }
+            Err(_) => {}
+        }
+    } else if ports.is_empty() {
+        return Err("could not determine home directory".to_string());
+    }
+
+    Ok(ports)
 }
 
 fn browser_get(path: &str, params: &[(&str, &str)]) -> Result<Value, String> {
-    let port = hook_port()?;
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| e.to_string())?;
-    let url = reqwest::Url::parse_with_params(
-        &format!("http://127.0.0.1:{port}{path}"),
-        params.iter().copied(),
-    )
-    .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(url)
-        .send()
-        .map_err(|_| "Impala isn't reachable (is the app running?)".to_string())?;
+    let mut response = None;
+    for port in hook_ports()? {
+        let url = reqwest::Url::parse_with_params(
+            &format!("http://127.0.0.1:{port}{path}"),
+            params.iter().copied(),
+        )
+        .map_err(|e| e.to_string())?;
+        if let Ok(resp) = client.get(url).send() {
+            response = Some(resp);
+            break;
+        }
+    }
+    let resp =
+        response.ok_or_else(|| "Impala isn't reachable (is the app running?)".to_string())?;
     let body: Value = resp.json().map_err(|e| format!("bad response: {e}"))?;
     if body.get("ok").and_then(|v| v.as_bool()) == Some(true) {
         Ok(body)
