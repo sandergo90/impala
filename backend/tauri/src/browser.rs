@@ -877,7 +877,7 @@ mod native {
 
     use block2::RcBlock;
     use objc2::rc::Retained;
-    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
+    use objc2::runtime::{AnyClass, AnyObject, Sel};
     use objc2::{msg_send, sel};
     use objc2::{MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{NSAutoresizingMaskOptions, NSBox, NSBoxType};
@@ -963,6 +963,8 @@ mod native {
         std::sync::OnceLock::new();
     static UNDERLAY_BACKDROP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     static UNDERLAY_MAIN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    static UNDERLAY_CONTAINER: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    static UNDERLAY_CONTAINER_SUPERCLASS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
 
     fn sort_underlay_siblings(
         parent: &NSView,
@@ -1089,52 +1091,79 @@ mod native {
         point: NSPoint,
     ) -> *mut NSView {
         let view = unsafe { &*(this as *const AnyObject as *const NSView) };
-        let route_point = if view.isFlipped() {
-            point
-        } else {
-            NSPoint::new(point.x, view.bounds().size.height - point.y)
-        };
-        if let Some(view_address) = routing()
-            .lock()
-            .ok()
-            .and_then(|state| state.browser_view_at(route_point.x, route_point.y))
-        {
-            return view_address as *mut NSView;
+        // The method lives on the shared container class, so other instances of
+        // it (other windows) must fall straight through to AppKit.
+        let is_container = UNDERLAY_CONTAINER
+            .get()
+            .is_some_and(|address| *address == view as *const NSView as usize);
+        if is_container {
+            let route_point = if view.isFlipped() {
+                point
+            } else {
+                NSPoint::new(point.x, view.bounds().size.height - point.y)
+            };
+            if let Some(view_address) = routing()
+                .lock()
+                .ok()
+                .and_then(|state| state.browser_view_at(route_point.x, route_point.y))
+            {
+                return view_address as *mut NSView;
+            }
         }
 
-        let superclass = this
-            .class()
-            .superclass()
-            .expect("underlay shell webview must have a superclass");
+        // Dispatch above the class we installed into, recorded at install time.
+        // Reading the superclass back off `this` would resolve through its live
+        // isa, which lands on the installing class itself — and recurses
+        // forever — as soon as anything subclasses the instance at runtime.
+        let superclass = UNDERLAY_CONTAINER_SUPERCLASS
+            .get()
+            .map(|address| unsafe { &*(*address as *const AnyClass) })
+            .expect("underlay hit-test router only runs once installed");
         unsafe { msg_send![super(this, superclass), hitTest: point] }
     }
 
+    /// Routes clicks over the shell container to whichever browser webview owns
+    /// the point.
+    ///
+    /// The method is added to the container's own class instead of swizzling
+    /// the instance into a subclass. tao's `drawRect:` resolves its super call
+    /// through the view's live isa, so slipping a subclass under the container
+    /// makes tao's own view class its superclass: `drawRect:` then dispatches
+    /// straight back into itself until the stack overflows. That fires whenever
+    /// AppKit genuinely redraws the container — moving the window to a display
+    /// with a different backing scale factor, for one.
     fn install_container_hit_test_router(container: &NSView) -> Result<(), String> {
-        let class_name = c"ImpalaUnderlayContainerView";
-        let current_class = container.class();
-        if current_class.name() == class_name {
-            return Ok(());
+        let container_address = container as *const NSView as usize;
+        if let Some(installed) = UNDERLAY_CONTAINER.get() {
+            return if *installed == container_address {
+                Ok(())
+            } else {
+                Err("browser underlay hit-test router is bound to another container".to_string())
+            };
         }
-        let underlay_class = if let Some(class) = AnyClass::get(class_name) {
-            class
-        } else {
-            let mut builder = ClassBuilder::new(class_name, current_class)
-                .ok_or("could not create underlay shell webview class")?;
-            unsafe {
-                builder.add_method(
-                    sel!(hitTest:),
-                    underlay_container_hit_test as unsafe extern "C-unwind" fn(_, _, _) -> _,
-                );
-            }
-            builder.register()
+
+        let class = container.class();
+        let superclass = class
+            .superclass()
+            .ok_or("native container class has no superclass")?;
+        // `@` id return, `@` self, `:` selector, CGPoint argument.
+        let types = c"@@:{CGPoint=dd}";
+        let added = unsafe {
+            objc2::ffi::class_addMethod(
+                class as *const AnyClass as *mut AnyClass,
+                sel!(hitTest:),
+                std::mem::transmute::<
+                    unsafe extern "C-unwind" fn(&AnyObject, Sel, NSPoint) -> *mut NSView,
+                    unsafe extern "C-unwind" fn(),
+                >(underlay_container_hit_test),
+                types.as_ptr(),
+            )
         };
-        let object = unsafe { &*(container as *const NSView as *const AnyObject) };
-        let previous = unsafe { AnyObject::set_class(object, underlay_class) };
-        if previous != current_class {
-            return Err(
-                "native container class changed while installing hit-test router".to_string(),
-            );
+        if !added.as_bool() {
+            return Err("native container class already implements hitTest:".to_string());
         }
+        let _ = UNDERLAY_CONTAINER_SUPERCLASS.set(superclass as *const AnyClass as usize);
+        let _ = UNDERLAY_CONTAINER.set(container_address);
         Ok(())
     }
 
