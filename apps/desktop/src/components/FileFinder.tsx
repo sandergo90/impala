@@ -3,7 +3,7 @@ import { Command } from "cmdk";
 import { Fzf, type FzfResultItem } from "fzf";
 import { useUIStore } from "../store";
 import { useAllFiles } from "../hooks/useAllFiles";
-import { openFileTab } from "../lib/tab-actions";
+import { openFileFromFinder } from "../lib/file-finder-actions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { basename, dirname } from "../lib/path-utils";
 
@@ -63,7 +63,7 @@ export function FileFinder({
 
   const openPath = (path: string, pin: boolean) => {
     if (!worktreePath) return;
-    openFileTab(worktreePath, path, { pin });
+    openFileFromFinder(worktreePath, path, pin);
     onClose();
   };
 

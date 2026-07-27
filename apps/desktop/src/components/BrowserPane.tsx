@@ -27,6 +27,10 @@ import {
   browserNativeVisible,
   browserPaneShowsUnderlay,
 } from "../lib/browser-underlay";
+import {
+  openBrowserExternally,
+  type BrowserPageInfo,
+} from "../lib/browser-external";
 
 const DEFAULT_URL = "about:blank";
 
@@ -641,9 +645,13 @@ export const BrowserPane = memo(function BrowserPane({
         </div>
         <button
           onClick={() => {
-            if (currentUrl !== DEFAULT_URL) {
-              openInSystemBrowser(currentUrl).catch(() => {});
-            }
+            openBrowserExternally(paneId, currentUrl, {
+              getPageInfo: (id) =>
+                invoke<BrowserPageInfo>("browser_page_info", { id }),
+              open: openInSystemBrowser,
+            }).catch((error) =>
+              setLastError(`Failed to open system browser: ${String(error)}`),
+            );
           }}
           className="size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           aria-label="Open in system browser"

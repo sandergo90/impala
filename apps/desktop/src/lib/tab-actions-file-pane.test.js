@@ -16,6 +16,7 @@ globalThis.window = globalThis;
 
 const { useUIStore } = await import("../store.ts");
 const { openFileTabFromPane, openFileTabFromTree } = await import("./tab-actions.ts");
+const { openFileFromFinder } = await import("./file-finder-actions.ts");
 
 const worktreePath = "/tmp/file-link-pane-routing";
 const groupTab = (id, content, extra = {}) => ({
@@ -385,5 +386,36 @@ describe("openFileTabFromTree", () => {
     const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
     expect(nav.userTabs).toHaveLength(1);
     expect(nav.userTabs[0].path).toBe("README.md");
+  });
+});
+
+describe("openFileFromFinder", () => {
+  test("opens the selected file in the existing split instead of a top-level tab", () => {
+    const tree = split(
+      group("tab-agent", [
+        groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+      ]),
+      group("right-pane", [
+        groupTab("right-shell", { kind: "terminal", launch: "shell" }),
+      ]),
+    );
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: tree,
+      agentTabFocusedPaneId: "right-pane",
+      activeTerminalsTab: "tab-agent",
+    });
+
+    openFileFromFinder(worktreePath, "apps/desktop/src/store.ts", false);
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const right = findGroup(nav.agentTabSplitTree, "right-pane");
+    expect(nav.userTabs).toHaveLength(0);
+    expect(nav.activeTerminalsTab).toBe("tab-agent");
+    expect(right.tabs).toHaveLength(2);
+    expect(right.tabs[1].content).toEqual({
+      kind: "file",
+      path: "apps/desktop/src/store.ts",
+    });
+    expect(right.activeTabId).toBe(right.tabs[1].id);
   });
 });
