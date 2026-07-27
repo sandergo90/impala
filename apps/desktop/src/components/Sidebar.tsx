@@ -1,12 +1,26 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useShallow } from "zustand/shallow";
 import { invoke } from "@/lib/invoke";
 import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { Clock3, Settings, SquareTerminal } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Settings,
+  SquareTerminal,
+} from "lucide-react";
 import { useAutomationBadge } from "../hooks/useAutomationBadge";
+import { useWorktreeRunInfo } from "../hooks/useWorktreeRunInfo";
 import { useUIStore, useDataStore, useFilteredWorktrees } from "../store";
 import { useEditorDocsStore } from "../stores/editor-docs";
 import { releaseCachedTerminal } from "./XtermTerminal";
@@ -21,6 +35,7 @@ import type {
   Project,
   WorktreeIssue,
   PrStatus,
+  AutomationRun,
 } from "../types";
 import { usePrStatusSync } from "../hooks/usePrStatusSync";
 import { PrBadge } from "./PrBadge";
@@ -123,6 +138,29 @@ function BranchIcon({ active }: { active: boolean }) {
     </svg>
   );
 }
+
+const RUN_STATUS_DOT: Record<AutomationRun["status"], string> = {
+  pending: "bg-warning animate-pulse",
+  launched: "bg-warning animate-pulse",
+  completed: "bg-success",
+  failed: "bg-danger",
+  aborted: "bg-muted-foreground/40",
+  skipped: "bg-muted-foreground/40",
+};
+
+/** One rendered line of the worktree section: a worktree card or a
+ *  collapsible per-automation group row. */
+type SidebarRow =
+  | {
+      kind: "group";
+      id: string;
+      name: string;
+      status: AutomationRun["status"];
+      count: number;
+      unseenCount: number;
+      open: boolean;
+    }
+  | { kind: "worktree"; wt: Worktree; indent?: boolean };
 
 function SidebarNavButton({
   label,
@@ -383,6 +421,7 @@ export function Sidebar() {
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
+  const runInfo = useWorktreeRunInfo();
 
   usePrStatusSync(worktrees);
 
@@ -446,6 +485,9 @@ export function Sidebar() {
   );
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  // Explicit expand/collapse choices per automation group; groups without an
+  // entry open themselves only while they need attention.
+  const [groupToggles, setGroupToggles] = useState<Record<string, boolean>>({});
   const projectTriggerRef = useRef<HTMLButtonElement>(null);
 
   // The `fixed inset-0` catcher below only dismisses on pointer. Escape closes
@@ -763,6 +805,63 @@ export function Sidebar() {
 
   const selectProject = sharedSelectProject;
 
+  // Validated by the sidebar prototype (branch prototype/sidebar-automations-abc):
+  // hand-made worktrees stay flat; automation-spawned ones roll up into
+  // collapsible per-automation groups, pinned above the services menu.
+  const { manualRows, automationRows } = useMemo(() => {
+    const manual: SidebarRow[] = [];
+    const groups = new Map<
+      string,
+      {
+        name: string;
+        entries: { wt: Worktree; scheduledFor: number; status: AutomationRun["status"] }[];
+      }
+    >();
+    for (const wt of worktrees) {
+      const run = runInfo[wt.path];
+      if (!run) {
+        manual.push({ kind: "worktree", wt });
+        continue;
+      }
+      const group = groups.get(run.automationId) ?? { name: run.automationName, entries: [] };
+      group.entries.push({ wt, scheduledFor: run.scheduledFor, status: run.status });
+      groups.set(run.automationId, group);
+    }
+    const auto: SidebarRow[] = [];
+    const sorted = [...groups.entries()]
+      .map(([id, g]) => ({
+        id,
+        name: g.name,
+        entries: [...g.entries].sort((a, b) => b.scheduledFor - a.scheduledFor),
+      }))
+      .sort((a, b) => b.entries[0].scheduledFor - a.entries[0].scheduledFor);
+    for (const g of sorted) {
+      const open =
+        groupToggles[g.id] ??
+        g.entries.some(
+          (e) =>
+            unseenResults[e.wt.path] ||
+            agentStatuses[e.wt.path] === "working" ||
+            selectedWorktree?.path === e.wt.path,
+        );
+      auto.push({
+        kind: "group",
+        id: g.id,
+        name: g.name,
+        status: g.entries[0].status,
+        count: g.entries.length,
+        unseenCount: g.entries.filter((e) => unseenResults[e.wt.path]).length,
+        open,
+      });
+      if (open) {
+        for (const e of g.entries) {
+          auto.push({ kind: "worktree", wt: e.wt, indent: true });
+        }
+      }
+    }
+    return { manualRows: manual, automationRows: auto };
+  }, [worktrees, runInfo, groupToggles, unseenResults, agentStatuses, selectedWorktree]);
+
   const handleRemoveProject = async (e: React.MouseEvent, path: string) => {
     e.stopPropagation();
     // Clean up viewed files for all worktrees in this project
@@ -784,6 +883,241 @@ export function Sidebar() {
     }
     const updated = useDataStore.getState().projects;
     await persistProjects(updated);
+  };
+
+  const renderSidebarRow = (entry: SidebarRow) => {
+    if (entry.kind === "group") {
+      return (
+        <button
+          key={`group:${entry.id}`}
+          onClick={() =>
+            setGroupToggles((prev) => ({
+              ...prev,
+              [entry.id]: !entry.open,
+            }))
+          }
+          aria-expanded={entry.open}
+          className="mx-2 mt-0.5 flex w-[calc(100%-1rem)] items-center gap-1.5 rounded-[5px] px-2 py-1.5 text-left transition-colors hover:bg-accent"
+        >
+          {entry.open ? (
+            <ChevronDown
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+          ) : (
+            <ChevronRight
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+          )}
+          <span
+            className={cn(
+              "h-1.5 w-1.5 shrink-0 rounded-full",
+              RUN_STATUS_DOT[entry.status],
+            )}
+          />
+          <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+            {entry.name}
+          </span>
+          {entry.unseenCount > 0 && (
+            <span
+              className="min-w-4 shrink-0 rounded-full bg-primary/15 px-1 text-center text-[11px] leading-4 text-primary"
+              title={`${entry.unseenCount} run${entry.unseenCount === 1 ? "" : "s"} to review`}
+            >
+              {entry.unseenCount}
+            </span>
+          )}
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            {entry.count}
+          </span>
+        </button>
+      );
+    }
+    const wt = entry.wt;
+    const isSelected = selectedWorktree?.path === wt.path;
+    const stats = diffStats[wt.path];
+    const isPrimary = wt.is_primary;
+    const isActive = agentStatuses[wt.path] === "working";
+    const hasUnseen = unseenResults[wt.path];
+    const prStatus = prStatuses[wt.path];
+    const isPermission = agentStatuses[wt.path] === "permission";
+
+    const cardBorder = isPrimary
+      ? ""
+      : isSelected
+        ? "border border-primary/30"
+        : "border border-border/50";
+
+    const row = (
+      <div
+        className={cn(
+          "group relative mx-2 my-1.5",
+          entry.indent && "ml-6",
+        )}
+      >
+        <button
+          onClick={() => selectWorktree(wt)}
+          aria-pressed={isSelected}
+          className={`flex items-start gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${cardBorder} ${
+            isSelected ? "bg-primary/15" : "hover:bg-accent"
+          }`}
+        >
+          <div className="relative shrink-0 mt-0.5">
+            {isActive ? (
+              <span className="w-4 h-4 flex items-center justify-center">
+                <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
+              </span>
+            ) : hasUnseen ? (
+              <span className="w-4 h-4 flex items-center justify-center">
+                <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-warning" : "bg-success"}`} />
+              </span>
+            ) : (
+              <BranchIcon active={isSelected} />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isPrimary ? (
+                <>
+                  <span
+                    className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                    title={wt.branch}
+                  >
+                    {wt.branch}
+                  </span>
+                  <span className="font-mono text-xs bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
+                    local
+                  </span>
+                </>
+              ) : editingPath === wt.path ? (
+                <input
+                  autoFocus
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitRename(wt);
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelRename();
+                    }
+                  }}
+                  onBlur={() => commitRename(wt)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-sm bg-background border border-border rounded px-1 py-0.5 min-w-0 flex-1 outline-none"
+                />
+              ) : (
+                <>
+                  <span
+                    className={`text-sm truncate grow min-w-0 ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                    title={wt.title ?? wt.branch}
+                  >
+                    {wt.title ?? wt.branch}
+                  </span>
+                </>
+              )}
+              <span className="relative ml-auto shrink-0">
+                {/* Stats badge — visible by default, invisible on hover (keeps layout space) */}
+                <span
+                  className={`flex items-center gap-0.5 text-xs font-mono rounded px-1.5 py-0.5 ${
+                    stats &&
+                    (stats.additions > 0 || stats.deletions > 0)
+                      ? "bg-accent/60 group-hover:invisible"
+                      : "invisible"
+                  }`}
+                >
+                  <span className="text-success">
+                    +{stats?.additions ?? 0}
+                  </span>
+                  <span className="text-danger">
+                    -{stats?.deletions ?? 0}
+                  </span>
+                </span>
+                {/* Close button — overlaid on hover */}
+                {!isPrimary && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setWorktreeToDelete(wt);
+                    }}
+                    className="absolute right-0 top-1/2 -translate-y-1/2 size-6 hidden group-hover:flex items-center justify-center text-muted-foreground hover:!text-destructive text-sm transition-colors"
+                  >
+                    ×
+                  </span>
+                )}
+              </span>
+            </div>
+            {!isPrimary && editingPath !== wt.path && (
+              <div className="mt-1 flex items-center gap-1 flex-wrap">
+                {isActive && (
+                  <span className="inline-flex items-center gap-1 font-mono text-xs bg-accent/60 text-warning rounded px-1.5 py-0.5">
+                    ▶ running
+                  </span>
+                )}
+                <span
+                  className="font-mono text-xs bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground truncate max-w-[140px]"
+                  title={wt.branch}
+                >
+                  {wt.branch.split("/").pop() || wt.branch}
+                </span>
+                {worktreeIssues[wt.path] && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openUrl(worktreeIssues[wt.path].url);
+                    }}
+                    className="font-mono text-xs bg-accent/60 text-info hover:text-foreground rounded px-1.5 py-0.5 cursor-pointer"
+                  >
+                    {worktreeIssues[wt.path].identifier}
+                  </span>
+                )}
+                {prStatus?.kind === "has_pr" && (
+                  <PrBadge status={prStatus} />
+                )}
+              </div>
+            )}
+          </div>
+        </button>
+      </div>
+    );
+
+    return isPrimary ? (
+      <Fragment key={wt.path}>{row}</Fragment>
+    ) : (
+      <ContextMenu
+        key={wt.path}
+        items={[
+          { label: "Rename", onSelect: () => startRename(wt) },
+          ...(worktreeIssues[wt.path]
+            ? [
+                {
+                  label: "Open issue",
+                  onSelect: () =>
+                    openUrl(worktreeIssues[wt.path].url),
+                },
+              ]
+            : []),
+          ...(prStatus?.kind === "has_pr"
+            ? [
+                {
+                  label: "Open pull request",
+                  onSelect: () => {
+                    if (prStatus?.kind === "has_pr")
+                      openUrl(prStatus.url);
+                  },
+                },
+              ]
+            : []),
+          {
+            label: "Delete worktree",
+            onSelect: () => setWorktreeToDelete(wt),
+          },
+        ]}
+      >
+        {row}
+      </ContextMenu>
+    );
   };
 
   return (
@@ -973,188 +1307,21 @@ export function Sidebar() {
           )}
 
           <div className="flex-1 overflow-y-auto">
-            {worktrees.map((wt) => {
-              const isSelected = selectedWorktree?.path === wt.path;
-              const stats = diffStats[wt.path];
-              const isPrimary = wt.is_primary;
-              const isActive = agentStatuses[wt.path] === "working";
-              const hasUnseen = unseenResults[wt.path];
-              const prStatus = prStatuses[wt.path];
-              const isPermission = agentStatuses[wt.path] === "permission";
-
-              const cardBorder = isPrimary
-                ? ""
-                : isSelected
-                  ? "border border-primary/30"
-                  : "border border-border/50";
-
-              const row = (
-                <div className="group relative mx-2 my-1.5">
-                  <button
-                    onClick={() => selectWorktree(wt)}
-                    aria-pressed={isSelected}
-                    className={`flex items-start gap-2 w-full px-3 py-2.5 rounded-[5px] text-left transition-colors ${cardBorder} ${
-                      isSelected ? "bg-primary/15" : "hover:bg-accent"
-                    }`}
-                  >
-                    <div className="relative shrink-0 mt-0.5">
-                      {isActive ? (
-                        <span className="w-4 h-4 flex items-center justify-center">
-                          <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
-                        </span>
-                      ) : hasUnseen ? (
-                        <span className="w-4 h-4 flex items-center justify-center">
-                          <span className={`w-2 h-2 rounded-full ${isPermission ? "bg-warning" : "bg-success"}`} />
-                        </span>
-                      ) : (
-                        <BranchIcon active={isSelected} />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {isPrimary ? (
-                          <>
-                            <span
-                              className={`text-sm truncate ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
-                              title={wt.branch}
-                            >
-                              {wt.branch}
-                            </span>
-                            <span className="font-mono text-xs bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
-                              local
-                            </span>
-                          </>
-                        ) : editingPath === wt.path ? (
-                          <input
-                            autoFocus
-                            value={editingTitle}
-                            onChange={(e) => setEditingTitle(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                commitRename(wt);
-                              } else if (e.key === "Escape") {
-                                e.preventDefault();
-                                cancelRename();
-                              }
-                            }}
-                            onBlur={() => commitRename(wt)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-sm bg-background border border-border rounded px-1 py-0.5 min-w-0 flex-1 outline-none"
-                          />
-                        ) : (
-                          <>
-                            <span
-                              className={`text-sm truncate grow min-w-0 ${isSelected ? "text-foreground font-medium" : "text-muted-foreground"}`}
-                              title={wt.title ?? wt.branch}
-                            >
-                              {wt.title ?? wt.branch}
-                            </span>
-                          </>
-                        )}
-                        <span className="relative ml-auto shrink-0">
-                          {/* Stats badge — visible by default, invisible on hover (keeps layout space) */}
-                          <span
-                            className={`flex items-center gap-0.5 text-xs font-mono rounded px-1.5 py-0.5 ${
-                              stats &&
-                              (stats.additions > 0 || stats.deletions > 0)
-                                ? "bg-accent/60 group-hover:invisible"
-                                : "invisible"
-                            }`}
-                          >
-                            <span className="text-success">
-                              +{stats?.additions ?? 0}
-                            </span>
-                            <span className="text-danger">
-                              -{stats?.deletions ?? 0}
-                            </span>
-                          </span>
-                          {/* Close button — overlaid on hover */}
-                          {!isPrimary && (
-                            <span
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setWorktreeToDelete(wt);
-                              }}
-                              className="absolute right-0 top-1/2 -translate-y-1/2 size-6 hidden group-hover:flex items-center justify-center text-muted-foreground hover:!text-destructive text-sm transition-colors"
-                            >
-                              ×
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                      {!isPrimary && editingPath !== wt.path && (
-                        <div className="mt-1 flex items-center gap-1 flex-wrap">
-                          {isActive && (
-                            <span className="inline-flex items-center gap-1 font-mono text-xs bg-accent/60 text-warning rounded px-1.5 py-0.5">
-                              ▶ running
-                            </span>
-                          )}
-                          <span
-                            className="font-mono text-xs bg-accent/60 rounded px-1.5 py-0.5 text-muted-foreground truncate max-w-[140px]"
-                            title={wt.branch}
-                          >
-                            {wt.branch.split("/").pop() || wt.branch}
-                          </span>
-                          {worktreeIssues[wt.path] && (
-                            <span
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openUrl(worktreeIssues[wt.path].url);
-                              }}
-                              className="font-mono text-xs bg-accent/60 text-info hover:text-foreground rounded px-1.5 py-0.5 cursor-pointer"
-                            >
-                              {worktreeIssues[wt.path].identifier}
-                            </span>
-                          )}
-                          {prStatus?.kind === "has_pr" && (
-                            <PrBadge status={prStatus} />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                </div>
-              );
-
-              return isPrimary ? (
-                <Fragment key={wt.path}>{row}</Fragment>
-              ) : (
-                <ContextMenu
-                  key={wt.path}
-                  items={[
-                    { label: "Rename", onSelect: () => startRename(wt) },
-                    ...(worktreeIssues[wt.path]
-                      ? [
-                          {
-                            label: "Open issue",
-                            onSelect: () =>
-                              openUrl(worktreeIssues[wt.path].url),
-                          },
-                        ]
-                      : []),
-                    ...(prStatus?.kind === "has_pr"
-                      ? [
-                          {
-                            label: "Open pull request",
-                            onSelect: () => {
-                              if (prStatus?.kind === "has_pr")
-                                openUrl(prStatus.url);
-                            },
-                          },
-                        ]
-                      : []),
-                    {
-                      label: "Delete worktree",
-                      onSelect: () => setWorktreeToDelete(wt),
-                    },
-                  ]}
-                >
-                  {row}
-                </ContextMenu>
-              );
-            })}
+            {manualRows.map(renderSidebarRow)}
           </div>
+          {automationRows.length > 0 && (
+            <div className="flex max-h-[45%] shrink-0 flex-col">
+              <div className="mx-3 mb-1 border-t border-border/30" />
+              <div className="px-3.5 pb-1 pt-1">
+                <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground font-semibold">
+                  Automations
+                </span>
+              </div>
+              <div className="min-h-0 overflow-y-auto pb-1">
+                {automationRows.map(renderSidebarRow)}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
