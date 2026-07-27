@@ -104,6 +104,9 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             worktree_path TEXT,
             instructions_path TEXT,
             automation_snapshot TEXT,
+            agent_provider TEXT,
+            agent_session_id TEXT,
+            agent_turn_id TEXT,
             status TEXT NOT NULL,
             error TEXT,
             created_at TEXT NOT NULL,
@@ -124,6 +127,18 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
     );
     let _ = conn.execute(
         "ALTER TABLE automation_runs ADD COLUMN automation_snapshot TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE automation_runs ADD COLUMN agent_provider TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE automation_runs ADD COLUMN agent_session_id TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE automation_runs ADD COLUMN agent_turn_id TEXT",
         [],
     );
     retry_orphaned_instruction_cleanup(conn)?;
@@ -834,6 +849,212 @@ pub fn complete_run_for_worktree(
     Ok(name)
 }
 
+pub(crate) fn record_run_agent_lifecycle(
+    conn: &Connection,
+    worktree_path: &str,
+    provider: &str,
+    session_id: Option<&str>,
+    turn_id: Option<&str>,
+) -> Result<(), String> {
+    if worktree_path.is_empty() {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE automation_runs
+         SET agent_provider = CASE
+                 WHEN ?2 = '' THEN agent_provider
+                 ELSE ?2
+             END,
+             agent_turn_id = CASE
+                 WHEN ?3 IS NOT NULL
+                      AND agent_session_id IS NOT NULL
+                      AND agent_session_id != ?3
+                 THEN ?4
+                 ELSE COALESCE(agent_turn_id, ?4)
+             END,
+             agent_session_id = COALESCE(?3, agent_session_id)
+         WHERE worktree_path = ?1 AND status IN ('pending', 'launched')",
+        params![worktree_path, provider, session_id, turn_id],
+    )
+    .map_err(|e| format!("Failed to record automation agent lifecycle: {}", e))?;
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ReconciledAutomationRun {
+    pub run_id: String,
+    pub automation_name: String,
+    pub worktree_path: String,
+}
+
+#[derive(Debug)]
+struct CodexTranscriptState {
+    session_id: String,
+    first_turn_id: Option<String>,
+    completed_turn_ids: std::collections::HashSet<String>,
+    modified_at: std::time::SystemTime,
+}
+
+fn collect_codex_transcripts(root: &Path, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_codex_transcripts(&path, paths);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            paths.push(path);
+        }
+    }
+}
+
+fn read_codex_transcript_state(path: &Path, worktree_path: &str) -> Option<CodexTranscriptState> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let mut session_id = None;
+    let mut first_turn_id = None;
+    let mut completed_turn_ids = std::collections::HashSet::new();
+    for line in contents.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value["type"] == "session_meta" {
+            let payload = &value["payload"];
+            if payload["cwd"].as_str() != Some(worktree_path)
+                || payload
+                    .get("agent_path")
+                    .is_some_and(|agent_path| !agent_path.is_null())
+            {
+                return None;
+            }
+            session_id = payload["id"].as_str().map(str::to_owned);
+            continue;
+        }
+        if value["type"] != "event_msg" {
+            continue;
+        }
+        let payload = &value["payload"];
+        let turn_id = payload["turn_id"].as_str();
+        match payload["type"].as_str() {
+            Some("task_started") if first_turn_id.is_none() => {
+                first_turn_id = turn_id.map(str::to_owned);
+            }
+            Some("task_complete") => {
+                if let Some(turn_id) = turn_id {
+                    completed_turn_ids.insert(turn_id.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(CodexTranscriptState {
+        session_id: session_id?,
+        first_turn_id,
+        completed_turn_ids,
+        modified_at: std::fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+    })
+}
+
+fn codex_transcript_for_run(
+    worktree_path: &str,
+    expected_session_id: Option<&str>,
+) -> Option<CodexTranscriptState> {
+    let mut paths = Vec::new();
+    collect_codex_transcripts(
+        &Path::new(worktree_path)
+            .join(".impala")
+            .join("codex")
+            .join("sessions"),
+        &mut paths,
+    );
+    let mut transcripts = paths
+        .iter()
+        .filter_map(|path| read_codex_transcript_state(path, worktree_path))
+        .filter(|state| {
+            expected_session_id
+                .map(|expected| state.session_id == expected)
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+    transcripts.sort_by_key(|state| state.modified_at);
+    transcripts.pop()
+}
+
+/// Recover Codex automation completion from its durable JSONL transcript.
+/// The exact automation turn is persisted from hooks; legacy launched rows
+/// are backfilled from the first turn in their fresh run worktree.
+pub(crate) fn reconcile_completed_codex_runs(
+    conn: &Connection,
+) -> Result<Vec<ReconciledAutomationRun>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT r.id, a.name, r.worktree_path, r.agent_session_id, r.agent_turn_id
+             FROM automation_runs r
+             JOIN automations a ON a.id = r.automation_id
+             WHERE r.status = 'launched'
+               AND a.agent = 'codex'
+               AND r.worktree_path IS NOT NULL",
+        )
+        .map_err(|e| format!("Failed to prepare Codex automation recovery: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })
+        .map_err(|e| format!("Failed to query Codex automation recovery: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read Codex automation recovery: {}", e))?;
+    drop(stmt);
+
+    let mut completed = Vec::new();
+    for (run_id, automation_name, worktree_path, stored_session_id, stored_turn_id) in rows {
+        let Some(transcript) =
+            codex_transcript_for_run(&worktree_path, stored_session_id.as_deref())
+        else {
+            continue;
+        };
+        let turn_id = stored_turn_id.or(transcript.first_turn_id);
+        conn.execute(
+            "UPDATE automation_runs
+             SET agent_provider = 'codex',
+                 agent_session_id = ?2,
+                 agent_turn_id = COALESCE(agent_turn_id, ?3)
+             WHERE id = ?1 AND status = 'launched'",
+            params![run_id, transcript.session_id, turn_id],
+        )
+        .map_err(|e| format!("Failed to backfill Codex automation identity: {}", e))?;
+        let Some(turn_id) = turn_id else {
+            continue;
+        };
+        if !transcript.completed_turn_ids.contains(&turn_id) {
+            continue;
+        }
+        let changed = conn
+            .execute(
+                "UPDATE automation_runs
+                 SET status = 'completed', error = NULL
+                 WHERE id = ?1 AND status = 'launched'",
+                params![run_id],
+            )
+            .map_err(|e| format!("Failed to reconcile Codex automation completion: {}", e))?;
+        if changed > 0 {
+            completed.push(ReconciledAutomationRun {
+                run_id,
+                automation_name,
+                worktree_path,
+            });
+        }
+    }
+    Ok(completed)
+}
+
 /// A user interrupt is a failed automation outcome, not a successful Stop.
 /// Returns the automation name when an active run was transitioned.
 pub fn fail_run_for_worktree(
@@ -1086,6 +1307,63 @@ pub fn start_scheduler(app: AppHandle) {
             if let Err(e) = tick(&app) {
                 warn!(error = %e, "automation scheduler tick failed");
             }
+        }
+    });
+}
+
+pub fn start_completion_reconciler(
+    app: AppHandle,
+    db_path: PathBuf,
+    pane_statuses: std::sync::Arc<crate::hook_server::AgentPaneStatuses>,
+    statuses: std::sync::Arc<crate::hook_server::AgentStatuses>,
+    caffeinators: std::sync::Arc<crate::hook_server::Caffeinators>,
+) {
+    tauri::async_runtime::spawn(async move {
+        // Run immediately on startup, then keep repairing a missed Stop while
+        // the app remains open. Codex writes task_complete before this poll.
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        loop {
+            interval.tick().await;
+            // A dedicated SQLite connection keeps transcript I/O off the
+            // shared application DB mutex used by latency-sensitive commands.
+            let completed = Connection::open(&db_path)
+                .map_err(|error| format!("Failed to open automation database: {}", error))
+                .and_then(|conn| reconcile_completed_codex_runs(&conn));
+            let completed = match completed {
+                Ok(completed) => completed,
+                Err(error) => {
+                    warn!(error = %error, "Codex automation completion reconciliation failed");
+                    continue;
+                }
+            };
+            if completed.is_empty() {
+                continue;
+            }
+            for run in completed {
+                let aggregate_status =
+                    pane_statuses.observe(&run.worktree_path, "tab-agent", "idle");
+                crate::hook_server::publish_agent_pane_event(
+                    &app,
+                    &run.worktree_path,
+                    "tab-agent",
+                    "idle",
+                );
+                crate::hook_server::publish_agent_status(
+                    &app,
+                    &statuses,
+                    &caffeinators,
+                    &run.worktree_path,
+                    &aggregate_status,
+                );
+                let _ = app.emit(
+                    "automation-run-completed",
+                    serde_json::json!({
+                        "worktree_path": run.worktree_path,
+                        "automation_name": run.automation_name,
+                    }),
+                );
+            }
+            let _ = app.emit("automation-runs-changed", ());
         }
     });
 }
@@ -1691,6 +1969,140 @@ mod tests {
         let interrupted = get_run(&conn, &run.id).unwrap();
         assert_eq!(interrupted.status, "failed");
         assert_eq!(interrupted.error.as_deref(), Some("Interrupted by user"));
+    }
+
+    #[test]
+    fn codex_completion_reconciliation_requires_the_automation_turn() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(
+            &conn,
+            NewAutomation {
+                agent: "codex".into(),
+                ..new_automation("0 9 * * *")
+            },
+            now,
+        )
+        .unwrap();
+        let run = insert_run(&conn, &automation.id, now).unwrap().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let worktree = workspace.path().to_string_lossy().to_string();
+        report_run(&conn, &run.id, Some(&worktree), "launched", None).unwrap();
+        record_run_agent_lifecycle(
+            &conn,
+            &worktree,
+            "codex",
+            Some("session-1"),
+            Some("automation-turn"),
+        )
+        .unwrap();
+
+        let sessions = workspace.path().join(".impala/codex/sessions/2026/07/27");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let transcript = sessions.join("rollout-session-1.jsonl");
+        std::fs::write(
+            &transcript,
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": { "id": "session-1", "cwd": worktree }
+                })
+                .to_string(),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "task_complete", "turn_id": "manual-turn" }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        assert!(reconcile_completed_codex_runs(&conn).unwrap().is_empty());
+        assert_eq!(get_run(&conn, &run.id).unwrap().status, "launched");
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .unwrap();
+        writeln!(
+            file,
+            "\n{}",
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "task_complete", "turn_id": "automation-turn" }
+            })
+        )
+        .unwrap();
+
+        let reconciled = reconcile_completed_codex_runs(&conn).unwrap();
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].run_id, run.id);
+        assert_eq!(reconciled[0].worktree_path, worktree);
+        assert_eq!(get_run(&conn, &run.id).unwrap().status, "completed");
+    }
+
+    #[test]
+    fn codex_completion_reconciliation_backfills_preexisting_run_identity() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(
+            &conn,
+            NewAutomation {
+                agent: "codex".into(),
+                ..new_automation("0 9 * * *")
+            },
+            now,
+        )
+        .unwrap();
+        let run = insert_run(&conn, &automation.id, now).unwrap().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let worktree = workspace.path().to_string_lossy().to_string();
+        report_run(&conn, &run.id, Some(&worktree), "launched", None).unwrap();
+
+        let sessions = workspace.path().join(".impala/codex/sessions/2026/07/27");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(
+            sessions.join("rollout-session-backfill.jsonl"),
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": { "id": "session-backfill", "cwd": worktree }
+                })
+                .to_string(),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "task_started", "turn_id": "turn-backfill" }
+                })
+                .to_string(),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "task_complete", "turn_id": "turn-backfill" }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let reconciled = reconcile_completed_codex_runs(&conn).unwrap();
+        assert_eq!(reconciled.len(), 1);
+        let identity: (Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT agent_provider, agent_session_id, agent_turn_id
+                 FROM automation_runs WHERE id = ?1",
+                params![run.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            identity,
+            (
+                Some("codex".into()),
+                Some("session-backfill".into()),
+                Some("turn-backfill".into())
+            )
+        );
     }
 
     #[test]

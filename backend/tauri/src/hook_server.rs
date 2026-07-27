@@ -1164,6 +1164,31 @@ pub fn start(
                 .unwrap_or_default();
             let mut hook_payload = String::new();
             let _ = request.as_reader().read_to_string(&mut hook_payload);
+            let hook_identity = serde_json::from_str::<serde_json::Value>(&hook_payload).ok();
+
+            // Persist the provider session and the first turn identity on the
+            // automation run. The completion reconciler can then recover an
+            // exact Codex task_complete even when this hook delivery is lost.
+            if !worktree_path.is_empty() && pane_id == "tab-agent" {
+                use tauri::Manager;
+                let session_id = hook_identity
+                    .as_ref()
+                    .and_then(|value| value["session_id"].as_str());
+                let turn_id = hook_identity
+                    .as_ref()
+                    .and_then(|value| value["turn_id"].as_str());
+                let state = app_handle.state::<crate::DbState>();
+                let connection = state.0.lock();
+                if let Ok(conn) = connection {
+                    let _ = crate::automations::record_run_agent_lifecycle(
+                        &conn,
+                        &worktree_path,
+                        provider,
+                        session_id,
+                        turn_id,
+                    );
+                }
+            }
 
             if !pane_id.is_empty() {
                 subagents.ingest_hook(

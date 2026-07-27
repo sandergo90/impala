@@ -1877,14 +1877,21 @@ pub fn run() {
                 );
             }
             app.manage(HookPort(hook_port));
-            app.manage(agent_statuses);
-            app.manage(agent_pane_statuses);
+            app.manage(agent_statuses.clone());
+            app.manage(agent_pane_statuses.clone());
             app.manage(last_turn_snapshots);
-            app.manage(caffeinators);
+            app.manage(caffeinators.clone());
             app.manage(interrupted_turns);
             app.manage(subagent_registry);
 
             automations::start_scheduler(app.handle().clone());
+            automations::start_completion_reconciler(
+                app.handle().clone(),
+                db_path.clone(),
+                agent_pane_statuses.clone(),
+                agent_statuses.clone(),
+                caffeinators.clone(),
+            );
 
             // Bring up the detached PTY daemon in the background. Commands
             // arriving during initialization wait on DaemonState; a startup
