@@ -11,6 +11,14 @@ export interface Worktree {
   is_primary: boolean;
 }
 
+/** Everything a worktree produced since forking from its base — committed,
+ *  uncommitted, and untracked together. */
+export interface DiffStat {
+  files: number;
+  additions: number;
+  deletions: number;
+}
+
 export interface CommitInfo {
   hash: string;
   message: string;

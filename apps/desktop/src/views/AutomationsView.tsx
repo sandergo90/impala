@@ -19,11 +19,19 @@ import { Sidebar } from "../components/Sidebar";
 import { ResizablePanel } from "../components/ResizablePanel";
 import { XtermTerminal } from "../components/XtermTerminal";
 import { AGENT_PANE_ID, agentPtySessionId } from "../lib/pane-ids";
+import { AUTOMATIONS_PROJECT } from "../lib/automations-project";
+import { selectWorktree } from "../hooks/useWorktreeActions";
 import {
   AUTOMATION_TEMPLATES,
   type AutomationTemplate,
 } from "../lib/automation-templates";
-import type { Automation, AutomationRun, Worktree } from "../types";
+import type {
+  Automation,
+  AutomationRun,
+  DiffStat,
+  Project,
+  Worktree,
+} from "../types";
 
 const DEFAULT_SIDEBAR_WIDTH = 280;
 
@@ -107,6 +115,23 @@ function formatWhen(unixSeconds: number): string {
   });
 }
 
+/** `+N −M · k files` for a run, or "no changes" when it wrote nothing —
+ *  the difference between "worth opening" and "skip it" at a glance. */
+function DiffStatBadge({ stat }: { stat: DiffStat }) {
+  if (stat.files === 0) {
+    return <span className="shrink-0 text-sm text-muted-foreground">no changes</span>;
+  }
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 text-sm tabular-nums">
+      <span className="text-success">+{stat.additions}</span>
+      <span className="text-danger">-{stat.deletions}</span>
+      <span className="text-muted-foreground">
+        {stat.files} {stat.files === 1 ? "file" : "files"}
+      </span>
+    </span>
+  );
+}
+
 const RUN_STATUS_META: Record<AutomationRun["status"], { dot: string; label: string }> = {
   pending: { dot: "bg-warning", label: "starting" },
   launched: { dot: "bg-info", label: "running" },
@@ -123,6 +148,7 @@ export function AutomationsView() {
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [runs, setRuns] = useState<AutomationRun[]>([]);
   const [automationWorktrees, setAutomationWorktrees] = useState<Worktree[]>([]);
+  const [runStats, setRunStats] = useState<Record<string, DiffStat>>({});
   const [inspectedWorktree, setInspectedWorktree] =
     useState<Worktree | null>(null);
   const [worktreePaneWidth, setWorktreePaneWidth] = useState(720);
@@ -142,7 +168,18 @@ export function AutomationsView() {
       .then(setRuns)
       .catch(() => setRuns([]));
     invoke<Worktree[]>("list_recent_automation_worktrees")
-      .then(setAutomationWorktrees)
+      .then((worktrees) => {
+        setAutomationWorktrees(worktrees);
+        // Per-worktree so a run whose dir was deleted mid-flight doesn't
+        // blank out the others' stats.
+        for (const worktree of worktrees) {
+          invoke<DiffStat>("get_run_diff_stat", { worktreePath: worktree.path })
+            .then((stat) =>
+              setRunStats((prev) => ({ ...prev, [worktree.path]: stat })),
+            )
+            .catch(() => {});
+        }
+      })
       .catch(() => setAutomationWorktrees([]));
     // The user is looking at the runs — clear the sidebar badge. Emits (and
     // re-triggers this refresh) only when rows actually flip.
@@ -202,6 +239,40 @@ export function AutomationsView() {
       }
     },
     [automationWorktrees, project],
+  );
+
+  // The full diff experience — annotations, viewed tracking, commit panel —
+  // lives on the main view. Scope it to the run's project (global runs use the
+  // virtual Automations project) and hand off rather than rebuild it here.
+  const openFullReview = useCallback(
+    async (worktree: Worktree, automation: Automation | undefined) => {
+      const repo = automation?.repo_path ?? "";
+      const target: Project =
+        repo === ""
+          ? AUTOMATIONS_PROJECT
+          : projects.find((p) => p.path === repo) ?? {
+              path: repo,
+              name: repo.split("/").pop() || repo,
+            };
+      try {
+        const worktrees =
+          repo === ""
+            ? await invoke<Worktree[]>("list_automation_run_worktrees")
+            : await invoke<Worktree[]>("list_worktrees", { repoPath: repo });
+        const found = worktrees.find((w) => w.path === worktree.path);
+        if (!found) {
+          toast.error("The run's worktree no longer exists");
+          return;
+        }
+        useUIStore.getState().setSelectedProject(target);
+        useDataStore.getState().setWorktrees(worktrees);
+        useUIStore.getState().setGeneralTerminalActive(false);
+        await selectWorktree(found);
+      } catch (e) {
+        toast.error(`Failed to open review: ${e}`);
+      }
+    },
+    [projects],
   );
 
   const openCreate = (template: AutomationTemplate | null) => {
@@ -367,54 +438,65 @@ export function AutomationsView() {
                         (candidate) => candidate.id === run?.automation_id,
                       );
                       const meta = run ? RUN_STATUS_META[run.status] : null;
+                      const stat = runStats[worktree.path];
                       const isOpen =
                         inspectedWorktree?.path === worktree.path;
 
                       return (
-                        <button
+                        <div
                           key={worktree.path}
-                          type="button"
-                          disabled={!run || !automation}
-                          onClick={() =>
-                            run &&
-                            automation &&
-                            openRunWorktree(run, automation)
-                          }
-                          className={`flex items-center gap-3.5 rounded-lg px-3 py-3 text-left transition-colors disabled:cursor-default ${
-                            isOpen
-                              ? "bg-accent/60"
-                              : "enabled:hover:bg-accent/30"
+                          className={`group flex items-center gap-3.5 rounded-lg pr-3 transition-colors ${
+                            isOpen ? "bg-accent/60" : "hover:bg-accent/30"
                           }`}
                         >
-                          <span
-                            className={`h-2 w-2 shrink-0 rounded-full ${
-                              meta?.dot ?? "bg-muted-foreground/40"
-                            }`}
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-base font-medium">
-                              {worktree.title ??
-                                automation?.name ??
-                                "Automation worktree"}
+                          <button
+                            type="button"
+                            disabled={!run || !automation}
+                            onClick={() =>
+                              run &&
+                              automation &&
+                              openRunWorktree(run, automation)
+                            }
+                            className="flex min-w-0 flex-1 items-center gap-3.5 rounded-lg py-3 pl-3 text-left disabled:cursor-default"
+                          >
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${
+                                meta?.dot ?? "bg-muted-foreground/40"
+                              }`}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-base font-medium">
+                                {worktree.title ??
+                                  automation?.name ??
+                                  "Automation worktree"}
+                              </span>
+                              <span className="mt-0.5 block truncate text-sm text-muted-foreground">
+                                {automation?.repo_path === ""
+                                  ? "Global"
+                                  : projects.find(
+                                        (candidate) =>
+                                          candidate.path ===
+                                          automation?.repo_path,
+                                      )?.name ??
+                                    automation?.repo_path.split("/").pop() ??
+                                    "Unknown project"}
+                                {meta && <> · {meta.label}</>}
+                                {run && <> · {formatWhen(run.scheduled_for)}</>}
+                              </span>
                             </span>
-                            <span className="mt-0.5 block truncate text-sm text-muted-foreground">
-                              {automation?.repo_path === ""
-                                ? "Global"
-                                : projects.find(
-                                      (candidate) =>
-                                        candidate.path ===
-                                        automation?.repo_path,
-                                    )?.name ??
-                                  automation?.repo_path.split("/").pop() ??
-                                  "Unknown project"}
-                              {meta && <> · {meta.label}</>}
-                              {run && <> · {formatWhen(run.scheduled_for)}</>}
-                            </span>
-                          </span>
-                          <span className="shrink-0 text-sm text-muted-foreground">
-                            Open
-                          </span>
-                        </button>
+                          </button>
+                          {stat && <DiffStatBadge stat={stat} />}
+                          {stat && stat.files > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => openFullReview(worktree, automation)}
+                              title="Open the run's diff on the main view"
+                              className="shrink-0 rounded-md border border-border px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                            >
+                              Review
+                            </button>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
@@ -494,6 +576,19 @@ export function AutomationsView() {
           >
             <AutomationWorktreePane
               worktree={inspectedWorktree}
+              stat={runStats[inspectedWorktree.path]}
+              onReview={() =>
+                openFullReview(
+                  inspectedWorktree,
+                  automations.find(
+                    (a) =>
+                      a.id ===
+                      runs.find(
+                        (r) => r.worktree_path === inspectedWorktree.path,
+                      )?.automation_id,
+                  ),
+                )
+              }
               onClose={() => setInspectedWorktree(null)}
             />
           </ResizablePanel>
@@ -506,6 +601,7 @@ export function AutomationsView() {
             automation={selected}
             template={creating?.template ?? null}
             runs={selected ? runs.filter((r) => r.automation_id === selected.id) : []}
+            runStats={runStats}
             onCreated={(a) => {
               setCreating(null);
               setSelectedId(a.id);
@@ -560,9 +656,13 @@ export function AutomationsView() {
 
 function AutomationWorktreePane({
   worktree,
+  stat,
+  onReview,
   onClose,
 }: {
   worktree: Worktree;
+  stat: DiffStat | undefined;
+  onReview: () => void;
   onClose: () => void;
 }) {
   return (
@@ -577,6 +677,20 @@ function AutomationWorktreePane({
             {worktree.title ?? worktree.branch}
           </div>
         </div>
+        {stat && <DiffStatBadge stat={stat} />}
+        {/* The transcript says what the run intended; the diff says what it
+            did. Nothing here renders the diff — hand off to the main view.
+            A run that changed nothing has nothing to hand off. */}
+        {stat && stat.files > 0 && (
+          <button
+            type="button"
+            onClick={onReview}
+            title="Open the run's diff on the main view"
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            Review changes
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -644,6 +758,7 @@ function AutomationEditor({
   automation,
   template,
   runs,
+  runStats,
   onCreated,
   onClose,
   onDelete,
@@ -653,6 +768,7 @@ function AutomationEditor({
   automation: Automation | null;
   template: AutomationTemplate | null;
   runs: AutomationRun[];
+  runStats: Record<string, DiffStat>;
   onCreated: (a: Automation) => void;
   onClose: () => void;
   onDelete: () => void;
@@ -1019,6 +1135,9 @@ function AutomationEditor({
               <div className="flex flex-col">
                 {runs.slice(0, 15).map((run) => {
                   const meta = RUN_STATUS_META[run.status];
+                  const stat = run.worktree_path
+                    ? runStats[run.worktree_path]
+                    : undefined;
                   return (
                     <button
                       key={run.id}
@@ -1036,6 +1155,12 @@ function AutomationEditor({
                         </span>
                       )}
                       <div className="flex-1" />
+                      {stat && stat.files > 0 && (
+                        <span className="shrink-0 text-xs tabular-nums">
+                          <span className="text-success">+{stat.additions}</span>{" "}
+                          <span className="text-danger">-{stat.deletions}</span>
+                        </span>
+                      )}
                       <span className="shrink-0 text-xs text-muted-foreground">
                         {formatWhen(run.scheduled_for)}
                       </span>

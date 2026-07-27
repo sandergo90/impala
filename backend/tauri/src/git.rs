@@ -27,6 +27,13 @@ pub struct ChangedFile {
     pub path: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DiffStat {
+    pub files: u32,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
 pub(crate) fn augmented_path() -> String {
     let current = std::env::var("PATH").unwrap_or_default();
     let extras = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
@@ -946,6 +953,49 @@ pub fn get_all_changed_files(worktree_path: &str) -> Result<Vec<ChangedFile>, St
     Ok(files)
 }
 
+/// Everything a worktree has produced since it forked from its base —
+/// committed and uncommitted alike. Neither existing lens describes an
+/// automation run on its own: `base...HEAD` misses a run that never committed,
+/// and the uncommitted diff misses one that did.
+pub fn get_run_diff_stat(worktree_path: &str) -> Result<DiffStat, String> {
+    let base = detect_base_branch(worktree_path)?;
+    // Two-dot against the fork point, so the working tree is included. A
+    // scratch repo's base *is* HEAD, which reduces this to "everything
+    // uncommitted" — exactly what a global run leaves behind.
+    let fork = run_git(worktree_path, &["merge-base", &base, "HEAD"])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "HEAD".to_string());
+    let numstat = run_git(worktree_path, &["diff", "--numstat", &fork])?;
+
+    let mut stat = DiffStat {
+        files: 0,
+        additions: 0,
+        deletions: 0,
+    };
+    for line in numstat.lines().filter(|l| !l.is_empty()) {
+        let mut parts = line.split('\t');
+        // Binary files report "-" for both counts: a changed file, no lines.
+        let additions = parts.next().unwrap_or("-").parse::<u32>().unwrap_or(0);
+        let deletions = parts.next().unwrap_or("-").parse::<u32>().unwrap_or(0);
+        stat.files += 1;
+        stat.additions += additions;
+        stat.deletions += deletions;
+    }
+
+    // git diff never reports untracked files, and a run whose whole output is
+    // new files (a report, a doc) would otherwise read as "no changes".
+    let status = run_git(worktree_path, &["status", "--porcelain", "-uall"]).unwrap_or_default();
+    for line in status.lines().filter(|l| l.starts_with("??")) {
+        let rel = &line[3..];
+        stat.files += 1;
+        if let Ok(content) = std::fs::read_to_string(std::path::Path::new(worktree_path).join(rel)) {
+            stat.additions += content.lines().count() as u32;
+        }
+    }
+
+    Ok(stat)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -959,6 +1009,65 @@ mod tests {
             .expect("spawn git")
             .success();
         assert!(ok, "git {:?} failed", args);
+    }
+
+    #[test]
+    fn run_diff_stat_counts_committed_uncommitted_and_untracked() {
+        // An automation run may commit its work, leave it uncommitted, or only
+        // write new files. All three have to land in one number.
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        git(&repo, &["config", "user.name", "Tester"]);
+        std::fs::write(repo.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "init"]);
+
+        let wt = tmp.path().join("wt");
+        create_worktree(
+            repo.to_str().unwrap(),
+            "run",
+            None,
+            false,
+            wt.to_str().unwrap(),
+        )
+        .unwrap();
+
+        // Committed on the branch.
+        std::fs::write(wt.join("a.txt"), "one\ntwo\nthree\n").unwrap();
+        git(&wt, &["add", "."]);
+        git(&wt, &["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-q", "-m", "add"]);
+        // Uncommitted on top.
+        std::fs::write(wt.join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
+        // Untracked — never reported by `git diff`.
+        std::fs::write(wt.join("report.md"), "line1\nline2\n").unwrap();
+
+        let stat = get_run_diff_stat(wt.to_str().unwrap()).unwrap();
+        assert_eq!(stat.files, 2, "one modified file plus one untracked");
+        assert_eq!(stat.additions, 4, "2 committed+uncommitted lines, 2 new file lines");
+        assert_eq!(stat.deletions, 0);
+    }
+
+    #[test]
+    fn run_diff_stat_counts_scratch_repo_output() {
+        // A global run's scratch repo: init + empty commit, everything the
+        // agent writes stays uncommitted and untracked.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("scratch");
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        git(&dir, &["config", "user.email", "t@example.com"]);
+        git(&dir, &["config", "user.name", "Tester"]);
+        git(&dir, &["commit", "-q", "--allow-empty", "-m", "Automation run start"]);
+
+        std::fs::write(dir.join("digest.md"), "a\nb\nc\n").unwrap();
+
+        let stat = get_run_diff_stat(dir.to_str().unwrap()).unwrap();
+        assert_eq!(stat.files, 1);
+        assert_eq!(stat.additions, 3);
+        assert_eq!(stat.deletions, 0);
     }
 
     #[test]
@@ -1188,3 +1297,4 @@ mod tests {
         assert_eq!(messages, vec!["f1"]);
     }
 }
+

@@ -321,6 +321,13 @@ async fn get_all_changed_files(worktree_path: String) -> Result<Vec<git::Changed
 }
 
 #[tauri::command]
+async fn get_run_diff_stat(worktree_path: String) -> Result<git::DiffStat, String> {
+    tokio::task::spawn_blocking(move || git::get_run_diff_stat(&worktree_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
 async fn get_last_turn_files(
     snapshots: tauri::State<'_, Arc<hook_server::LastTurnSnapshots>>,
     worktree_path: String,
@@ -2007,6 +2014,7 @@ pub fn run() {
             get_full_branch_diff,
             get_head_commit,
             get_all_changed_files,
+            get_run_diff_stat,
             get_last_turn_files,
             get_last_turn_diff,
             has_last_turn_snapshot,
