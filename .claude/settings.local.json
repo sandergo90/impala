@@ -96,6 +96,7 @@
       }
     ]
   },
+  "outputStyle": "Clear & Efficient",
   "permissions": {
     "allow": [
       "Bash(echo 'export TAURI_SIGNING_PRIVATE_KEY=\"$\\(cat ~/.tauri/canopy.key\\)\"')",

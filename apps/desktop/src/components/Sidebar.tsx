@@ -422,6 +422,12 @@ export function Sidebar() {
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
   const runInfo = useWorktreeRunInfo();
+  // Which population the worktree section shows. Automation-spawned
+  // worktrees live behind the Automations tab so they never crowd the
+  // branch list; the tab badge carries unreviewed-run attention.
+  const [sideTab, setSideTab] = useState<"branches" | "automations">(
+    "branches",
+  );
 
   usePrStatusSync(worktrees);
 
@@ -806,8 +812,8 @@ export function Sidebar() {
   const selectProject = sharedSelectProject;
 
   // Validated by the sidebar prototype (branch prototype/sidebar-automations-abc):
-  // hand-made worktrees stay flat; automation-spawned ones roll up into
-  // collapsible per-automation groups, pinned above the services menu.
+  // hand-made worktrees stay flat on the Branches tab; automation-spawned
+  // ones roll up into collapsible per-automation groups on the Automations tab.
   const { manualRows, automationRows } = useMemo(() => {
     const manual: SidebarRow[] = [];
     const groups = new Map<
@@ -885,6 +891,11 @@ export function Sidebar() {
     await persistProjects(updated);
   };
 
+  const automationUnseen = automationRows.reduce(
+    (n, r) => (r.kind === "group" ? n + r.unseenCount : n),
+    0,
+  );
+
   const renderSidebarRow = (entry: SidebarRow) => {
     if (entry.kind === "group") {
       return (
@@ -942,6 +953,32 @@ export function Sidebar() {
     const prStatus = prStatuses[wt.path];
     const isPermission = agentStatuses[wt.path] === "permission";
 
+    const contextMenuItems = [
+      { label: "Rename", onSelect: () => startRename(wt) },
+      ...(worktreeIssues[wt.path]
+        ? [
+            {
+              label: "Open issue",
+              onSelect: () => openUrl(worktreeIssues[wt.path].url),
+            },
+          ]
+        : []),
+      ...(prStatus?.kind === "has_pr"
+        ? [
+            {
+              label: "Open pull request",
+              onSelect: () => {
+                if (prStatus?.kind === "has_pr") openUrl(prStatus.url);
+              },
+            },
+          ]
+        : []),
+      {
+        label: "Delete worktree",
+        onSelect: () => setWorktreeToDelete(wt),
+      },
+    ];
+
     const cardBorder = isPrimary
       ? ""
       : isSelected
@@ -950,10 +987,7 @@ export function Sidebar() {
 
     const row = (
       <div
-        className={cn(
-          "group relative mx-2 my-1.5",
-          entry.indent && "ml-6",
-        )}
+        className={cn("group relative mx-2 my-1.5", entry.indent && "ml-6")}
       >
         <button
           onClick={() => selectWorktree(wt)}
@@ -1085,36 +1119,7 @@ export function Sidebar() {
     return isPrimary ? (
       <Fragment key={wt.path}>{row}</Fragment>
     ) : (
-      <ContextMenu
-        key={wt.path}
-        items={[
-          { label: "Rename", onSelect: () => startRename(wt) },
-          ...(worktreeIssues[wt.path]
-            ? [
-                {
-                  label: "Open issue",
-                  onSelect: () =>
-                    openUrl(worktreeIssues[wt.path].url),
-                },
-              ]
-            : []),
-          ...(prStatus?.kind === "has_pr"
-            ? [
-                {
-                  label: "Open pull request",
-                  onSelect: () => {
-                    if (prStatus?.kind === "has_pr")
-                      openUrl(prStatus.url);
-                  },
-                },
-              ]
-            : []),
-          {
-            label: "Delete worktree",
-            onSelect: () => setWorktreeToDelete(wt),
-          },
-        ]}
-      >
+      <ContextMenu key={wt.path} items={contextMenuItems}>
         {row}
       </ContextMenu>
     );
@@ -1287,12 +1292,47 @@ export function Sidebar() {
       {selectedProject && (
         <div className="flex flex-col min-h-0 flex-1">
           <div className="mx-3 mb-1.5 border-b border-border/30" />
-          <div className="flex items-center justify-between px-3.5 pt-1 pb-1 shrink-0">
-            <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground font-semibold">
-              Worktrees
-            </span>
-          </div>
-          {!isAutomationsProject(selectedProject) && (
+          {automationRows.length > 0 ? (
+            <div className="mx-2.5 mb-1.5 flex shrink-0 gap-0.5 rounded-lg bg-accent/35 p-1">
+              {(
+                [
+                  { key: "branches", label: "Worktrees" },
+                  { key: "automations", label: "Automations" },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setSideTab(tab.key)}
+                  aria-pressed={sideTab === tab.key}
+                  className={cn(
+                    "flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors duration-150",
+                    // Same active vocabulary as SidebarNavButton above: tonal
+                    // fill + ring, never a shadow — the ring keeps the active
+                    // tab visible in themes where accent ≈ sidebar.
+                    sideTab === tab.key
+                      ? "bg-accent text-foreground ring-1 ring-border"
+                      : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                  )}
+                >
+                  {tab.label}
+                  {tab.key === "automations" && automationUnseen > 0 && (
+                    <span className="min-w-4 rounded-full bg-primary/15 px-1 text-center text-[11px] leading-4 text-primary">
+                      {automationUnseen}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-between px-3.5 pt-1 pb-1 shrink-0">
+              <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground font-semibold">
+                Worktrees
+              </span>
+            </div>
+          )}
+          {!(automationRows.length > 0 && sideTab === "automations") &&
+            !isAutomationsProject(selectedProject) && (
             <div className="px-2 pt-0.5 pb-2.5 shrink-0">
               <button
                 onClick={() => setShowNewWorktree(true)}
@@ -1307,21 +1347,10 @@ export function Sidebar() {
           )}
 
           <div className="flex-1 overflow-y-auto">
-            {manualRows.map(renderSidebarRow)}
+            {automationRows.length > 0 && sideTab === "automations"
+              ? automationRows.map(renderSidebarRow)
+              : manualRows.map(renderSidebarRow)}
           </div>
-          {automationRows.length > 0 && (
-            <div className="flex max-h-[45%] shrink-0 flex-col">
-              <div className="mx-3 mb-1 border-t border-border/30" />
-              <div className="px-3.5 pb-1 pt-1">
-                <span className="text-sm uppercase tracking-[1.2px] text-muted-foreground font-semibold">
-                  Automations
-                </span>
-              </div>
-              <div className="min-h-0 overflow-y-auto pb-1">
-                {automationRows.map(renderSidebarRow)}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
