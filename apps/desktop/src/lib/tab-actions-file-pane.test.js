@@ -15,7 +15,7 @@ globalThis.localStorage = {
 globalThis.window = globalThis;
 
 const { useUIStore } = await import("../store.ts");
-const { openFileTabFromPane } = await import("./tab-actions.ts");
+const { openFileTabFromPane, openFileTabFromTree } = await import("./tab-actions.ts");
 
 const worktreePath = "/tmp/file-link-pane-routing";
 const groupTab = (id, content, extra = {}) => ({
@@ -248,6 +248,141 @@ describe("openFileTabFromPane", () => {
 
     const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
     expect(nav.agentTabSplitTree).toEqual(tree);
+    expect(nav.userTabs).toHaveLength(1);
+    expect(nav.userTabs[0].path).toBe("README.md");
+  });
+});
+
+describe("openFileTabFromTree", () => {
+  test("opens the selected file in the focused split pane", () => {
+    const tree = split(
+      group("tab-agent", [
+        groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+      ]),
+      group("right-pane", [
+        groupTab("right-shell", { kind: "terminal", launch: "shell" }),
+      ]),
+    );
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: tree,
+      agentTabFocusedPaneId: "right-pane",
+      activeTerminalsTab: "tab-agent",
+    });
+
+    openFileTabFromTree(worktreePath, "apps/desktop/src/store.ts");
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const right = findGroup(nav.agentTabSplitTree, "right-pane");
+    expect(nav.userTabs).toHaveLength(0);
+    expect(nav.activeTerminalsTab).toBe("tab-agent");
+    expect(right.tabs).toHaveLength(2);
+    expect(right.tabs[1].content).toEqual({
+      kind: "file",
+      path: "apps/desktop/src/store.ts",
+    });
+    expect(right.activeTabId).toBe(right.tabs[1].id);
+  });
+
+  test("uses the auxiliary split when the primary pane still has focus", () => {
+    const tree = split(
+      group("tab-agent", [
+        groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+      ]),
+      group("right-pane", [
+        groupTab("right-shell", { kind: "terminal", launch: "shell" }),
+      ]),
+    );
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: tree,
+      agentTabFocusedPaneId: "tab-agent",
+      activeTerminalsTab: "tab-agent",
+    });
+
+    openFileTabFromTree(worktreePath, "README.md");
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const primary = findGroup(nav.agentTabSplitTree, "tab-agent");
+    const right = findGroup(nav.agentTabSplitTree, "right-pane");
+    expect(primary.activeTabId).toBe("tab-agent");
+    expect(right.tabs[1].content).toEqual({
+      kind: "file",
+      path: "README.md",
+    });
+    expect(nav.agentTabFocusedPaneId).toBe("right-pane");
+  });
+
+  test("retargets and pins the auxiliary pane's file preview", () => {
+    const preview = groupTab(
+      "file-preview",
+      { kind: "file", path: "old.ts" },
+      { label: "old.ts" },
+    );
+    const tree = split(
+      group("tab-agent", [
+        groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+      ]),
+      group("right-pane", [preview]),
+    );
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      agentTabSplitTree: tree,
+      agentTabFocusedPaneId: "right-pane",
+      activeTerminalsTab: "tab-agent",
+    });
+
+    openFileTabFromTree(worktreePath, "new/location.ts", { pin: true });
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const right = findGroup(nav.agentTabSplitTree, "right-pane");
+    expect(right.tabs).toHaveLength(1);
+    expect(right.tabs[0]).toMatchObject({
+      id: "file-preview",
+      label: "location.ts",
+      pinned: true,
+      content: { kind: "file", path: "new/location.ts" },
+    });
+  });
+
+  test("opens in a user tab's auxiliary split pane", () => {
+    const tree = split(
+      group("primary-pane", [
+        groupTab("primary-pane", { kind: "terminal", launch: "shell" }),
+      ]),
+      group("secondary-pane", [
+        groupTab("secondary-browser", { kind: "browser" }),
+      ]),
+    );
+    const owner = {
+      id: "terminal-1",
+      kind: "terminal",
+      terminalLaunch: "shell",
+      label: "Terminal 1",
+      createdAt: 1,
+      splitTree: tree,
+      focusedPaneId: "secondary-pane",
+    };
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      userTabs: [owner],
+      activeTerminalsTab: owner.id,
+    });
+
+    openFileTabFromTree(worktreePath, "README.md");
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const updatedOwner = nav.userTabs[0];
+    const secondary = findGroup(updatedOwner.splitTree, "secondary-pane");
+    expect(nav.userTabs).toHaveLength(1);
+    expect(nav.activeTerminalsTab).toBe(owner.id);
+    expect(updatedOwner.focusedPaneId).toBe("secondary-pane");
+    expect(secondary.tabs[1].content).toEqual({
+      kind: "file",
+      path: "README.md",
+    });
+  });
+
+  test("keeps top-level preview behavior when there is no split pane", () => {
+    openFileTabFromTree(worktreePath, "README.md");
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
     expect(nav.userTabs).toHaveLength(1);
     expect(nav.userTabs[0].path).toBe("README.md");
   });

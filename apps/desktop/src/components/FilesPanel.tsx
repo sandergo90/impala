@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
-import { openFileTab } from "../lib/tab-actions";
+import { openFileTabFromTree } from "../lib/tab-actions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { dirname } from "../lib/path-utils";
 import { FileTreeSelectionIntent } from "../lib/file-tree-selection-intent";
@@ -119,7 +119,7 @@ export function FilesPanel() {
       void expand(path.slice(0, -1));
       return;
     }
-    openFileTab(wtPath, path); // preview
+    openFileTabFromTree(wtPath, path); // preview
   };
 
   // Stable ref so we can call the latest `refresh` from inside callbacks
@@ -365,14 +365,14 @@ export function FilesPanel() {
           label: "Open",
           onSelect: () => {
             close();
-            openFileTab(wtPath, rel);
+            openFileTabFromTree(wtPath, rel);
           },
         });
         items.push({
           label: "Open Pinned",
           onSelect: () => {
             close();
-            openFileTab(wtPath, rel, { pin: true });
+            openFileTabFromTree(wtPath, rel, { pin: true });
           },
         });
         items.push({
@@ -484,7 +484,7 @@ export function FilesPanel() {
     if (row.getAttribute("data-item-type") !== "file") return;
     const path = row.getAttribute("data-item-path");
     if (!path) return;
-    openFileTab(wtPath, path, { pin: true }); // pin
+    openFileTabFromTree(wtPath, path, { pin: true }); // pin
   };
 
   const handleClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {

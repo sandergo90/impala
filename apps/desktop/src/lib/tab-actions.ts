@@ -1656,6 +1656,97 @@ export interface PaneFileOrigin {
 }
 
 /**
+ * Open a file selected in the Files tree.
+ *
+ * When the active top-level tab has an auxiliary split pane, keep its primary
+ * content visible and route the file into that split. Otherwise preserve the
+ * regular top-level preview behavior.
+ */
+export function openFileTabFromTree(
+  worktreePath: string,
+  path: string,
+  opts: OpenFileTabOptions = {},
+): void {
+  const context = getActivePaneContext(worktreePath);
+  const leaves = context ? getLeaves(context.tree) : [];
+  const primaryGroupId = leaves[0]?.id;
+  if (!context || leaves.length <= 1 || !primaryGroupId) {
+    openFileTab(worktreePath, path, opts);
+    return;
+  }
+
+  const targetGroupId =
+    context.groupId !== primaryGroupId
+      ? context.groupId
+      : leaves.find((group) => group.id !== primaryGroupId)?.id;
+  const targetGroup = targetGroupId
+    ? findLeaf(context.tree, targetGroupId)
+    : null;
+  if (!targetGroupId || !targetGroup) {
+    openFileTab(worktreePath, path, opts);
+    return;
+  }
+
+  const { pin = false, forceNewTab = false, line, col } = opts;
+  const existing = targetGroup.tabs.find(
+    (tab) => tab.content.kind === "file" && tab.content.path === path,
+  );
+  const preview = !forceNewTab
+    ? targetGroup.tabs.find(
+        (tab) => tab.content.kind === "file" && !tab.pinned,
+      )
+    : undefined;
+  const label = basename(path);
+  let nextTree: SplitNode;
+
+  if (existing) {
+    nextTree = setActiveGroupTab(context.tree, targetGroupId, existing.id);
+  } else if (preview) {
+    nextTree = updateGroupTab(context.tree, preview.id, (tab) => ({
+      ...tab,
+      label,
+      pinned: pin || tab.pinned,
+      content: { kind: "file", path },
+    }));
+    nextTree = setActiveGroupTab(nextTree, targetGroupId, preview.id);
+  } else {
+    const created = createGroup({ kind: "file", path }).tabs[0];
+    nextTree = addTabToGroup(context.tree, targetGroupId, {
+      ...created,
+      label,
+      ...(pin ? { pinned: true } : {}),
+    });
+  }
+
+  const uiState = useUIStore.getState();
+  if (context.isAgent) {
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTab: "terminal",
+      activeTerminalsTab: AGENT_PANE_ID,
+      agentTabSplitTree: nextTree,
+      agentTabFocusedPaneId: targetGroupId,
+    });
+  } else {
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTab: "terminal",
+      activeTerminalsTab: context.topTab!.id,
+      userTabs: context.nav.userTabs.map((tab) =>
+        tab.id === context.topTab!.id
+          ? { ...tab, splitTree: nextTree, focusedPaneId: targetGroupId }
+          : tab,
+      ),
+    });
+  }
+
+  if (line !== undefined) {
+    useEditorDocsStore
+      .getState()
+      .setPendingTarget(buildDocumentKey(worktreePath, path), { line, col });
+  }
+  uiState.revealFileInTree(worktreePath, path);
+}
+
+/**
  * Open a terminal file link beside the pane that produced it.
  *
  * Existing files in the same split layout are focused in place. New files
