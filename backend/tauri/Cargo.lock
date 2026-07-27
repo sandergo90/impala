@@ -300,6 +300,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -511,9 +517,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.3.0"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c89588d05638b5b4594a3348a2d6c20277e43a7f5c5202b05cc56888475a47b8"
+checksum = "5add81bb678e6cb321aff7fa0dc7689ad82b112dbc032cea19f91d6b8e3582b9"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -2158,7 +2164,7 @@ name = "impala"
 version = "0.23.9"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.0",
  "block2",
  "chrono",
  "cron",
@@ -2200,7 +2206,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
- "window-vibrancy 0.7.1",
+ "window-vibrancy 0.8.0",
 ]
 
 [[package]]
@@ -2997,6 +3003,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
+ "objc2-quartz-core",
 ]
 
 [[package]]
@@ -6411,14 +6418,15 @@ dependencies = [
 
 [[package]]
 name = "window-vibrancy"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "010797bd7c40396fbc59d3105089fed0885fe267a0ef4a0a4646df54e28647f6"
+checksum = "fe6461139557c2245c3b9b34de2092e7af39460bf97ef4723bc5feb0cf66f831"
 dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-foundation",
+ "objc2-quartz-core",
  "raw-window-handle",
  "windows-sys 0.60.2",
  "windows-version",
