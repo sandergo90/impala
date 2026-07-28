@@ -64,6 +64,12 @@ const CONSOLE_SHIM: &str = r#"
 /// tab; modified clicks and downloads keep their native behavior.
 const TARGET_BLANK_SHIM: &str = include_str!("browser_target_blank.js");
 
+/// Keystrokes inside the child webview never reach the shell's hotkey
+/// listeners, so browser-reserved chords (Cmd+R/L/W) are intercepted in the
+/// page and forwarded over the same impala.invalid sentinel-navigation
+/// channel as the target=_blank shim.
+const HOTKEY_SHIM: &str = include_str!("browser_hotkeys.js");
+
 /// Virtual cursor overlay: makes agent-driven input visible in the pane. A
 /// pointer-events:none arrow that glides to each interaction point (350ms,
 /// matching the Rust-side wait in animate_cursor) and fades out after 2s
@@ -179,6 +185,21 @@ fn new_tab_target(url: &Url) -> Option<Url> {
         .find_map(|(key, value)| (key == "url").then(|| value.into_owned()))?;
     let target = Url::parse(&target).ok()?;
     matches!(target.scheme(), "http" | "https").then_some(target)
+}
+
+fn hotkey_action(url: &Url) -> Option<&'static str> {
+    if url.scheme() != "https"
+        || url.host_str() != Some("impala.invalid")
+        || url.path() != "/hotkey"
+    {
+        return None;
+    }
+    let action = url
+        .query_pairs()
+        .find_map(|(key, value)| (key == "action").then(|| value.into_owned()))?;
+    ["reload", "focus-address", "close-pane"]
+        .into_iter()
+        .find(|candidate| *candidate == action)
 }
 
 fn toolbar_url_for_event(url: &Url, committed_main_page: bool) -> Option<&str> {
@@ -355,8 +376,22 @@ pub async fn browser_open(
         )
         .initialization_script(CONSOLE_SHIM)
         .initialization_script(TARGET_BLANK_SHIM)
+        .initialization_script(HOTKEY_SHIM)
         .initialization_script(CURSOR_JS)
         .on_navigation(move |url| {
+            if let Some(action) = hotkey_action(url) {
+                info!(id = %nav_id, action, "browser hotkey");
+                if action == "focus-address" {
+                    // DOM focus alone cannot take first responder from the
+                    // native child webview; return key focus to the shell
+                    // before the frontend focuses the address input.
+                    if let Some(main) = nav_app.get_webview("main") {
+                        let _ = main.set_focus();
+                    }
+                }
+                let _ = nav_app.emit_to("main", &format!("browser-hotkey-{nav_id}"), action);
+                return false;
+            }
             if let Some(target) = new_tab_target(url) {
                 info!(
                     id = %nav_id,
@@ -997,6 +1032,27 @@ mod tests {
             new_tab_target(&Url::parse("https://example.com/").unwrap()),
             None
         );
+    }
+
+    #[test]
+    fn hotkey_navigation_extracts_allowlisted_actions_only() {
+        let action = |raw: &str| hotkey_action(&Url::parse(raw).unwrap());
+
+        assert_eq!(
+            action("https://impala.invalid/hotkey?action=reload"),
+            Some("reload")
+        );
+        assert_eq!(
+            action("https://impala.invalid/hotkey?action=focus-address"),
+            Some("focus-address")
+        );
+        assert_eq!(
+            action("https://impala.invalid/hotkey?action=close-pane"),
+            Some("close-pane")
+        );
+        assert_eq!(action("https://impala.invalid/hotkey?action=evil"), None);
+        assert_eq!(action("https://impala.invalid/hotkey"), None);
+        assert_eq!(action("https://example.com/hotkey?action=reload"), None);
     }
 
     #[test]

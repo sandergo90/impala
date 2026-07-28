@@ -1497,6 +1497,33 @@ export function closeUserTabFocusedPane(
   uiState.updateWorktreeNavState(worktreePath, { userTabs: nextTabs });
 }
 
+/**
+ * Close one specific group tab of a user tab, resolving the leaf that holds
+ * it. For contexts that only know the group-tab id (e.g. Cmd+W forwarded from
+ * inside a browser pane's native webview): group-tab ids only equal leaf ids
+ * for panes never re-homed by a drag or split, so the leaf must be looked up
+ * rather than assumed.
+ */
+export function closeUserTabGroupTab(
+  worktreePath: string,
+  tabId: string,
+  groupTabId: string,
+): void {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const tab = nav.userTabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  const tree = getEffectiveUserTabSplitTree(tab);
+  const leaf = getLeaves(tree).find((l) =>
+    l.tabs.some((t) => t.id === groupTabId),
+  );
+  if (!leaf) return;
+  // Activating also focuses the leaf, so the generic close hits exactly
+  // this group tab.
+  setUserGroupActiveTab(worktreePath, tabId, leaf.id, groupTabId);
+  closeUserTabFocusedPane(worktreePath, tabId);
+}
+
 export function focusAdjacentUserTabPane(
   worktreePath: string,
   tabId: string,

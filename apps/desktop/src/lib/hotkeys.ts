@@ -2,7 +2,12 @@
 // Hotkey types
 // ---------------------------------------------------------------------------
 
-export type HotkeyCategory = "Navigation" | "Layout" | "Terminal" | "Worktree";
+export type HotkeyCategory =
+  | "Navigation"
+  | "Layout"
+  | "Terminal"
+  | "Browser"
+  | "Worktree";
 
 export interface HotkeyDefinition {
   label: string;
@@ -155,6 +160,23 @@ export const HOTKEYS = {
     category: "Terminal",
   },
 
+  // -- Browser --
+  // These two also work while focus is inside the page itself, via a fixed
+  // Cmd+R / Cmd+L interception in the child webview (browser_hotkeys.js) —
+  // rebinding here only affects the app-shell context.
+  BROWSER_RELOAD: {
+    label: "Reload Page",
+    description: "Reload the focused browser pane",
+    default: "meta+r",
+    category: "Browser",
+  },
+  BROWSER_FOCUS_ADDRESS: {
+    label: "Focus Address Bar",
+    description: "Focus the URL input of the focused browser pane",
+    default: "meta+l",
+    category: "Browser",
+  },
+
   // -- Worktree --
   NEW_WORKTREE: {
     label: "New Worktree",
@@ -188,6 +210,7 @@ export const HOTKEY_CATEGORIES: HotkeyCategory[] = [
   "Navigation",
   "Layout",
   "Terminal",
+  "Browser",
   "Worktree",
 ];
 

@@ -10,7 +10,12 @@ import { invoke } from "@/lib/invoke";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInSystemBrowser } from "@tauri-apps/plugin-shell";
 import { useUIStore } from "../store";
-import { setBrowserLeafUrl, getBrowserLeafUrl } from "../lib/tab-actions";
+import {
+  setBrowserLeafUrl,
+  getBrowserLeafUrl,
+  closeUserTabGroupTab,
+} from "../lib/tab-actions";
+import { useAppHotkey } from "../hooks/useAppHotkey";
 import {
   PICKER_ARM,
   PICKER_DISARM,
@@ -84,6 +89,7 @@ export const BrowserPane = memo(function BrowserPane({
   onNativeSettled?: (paneId: string) => void;
 }) {
   const placeholderRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const createdRef = useRef(false);
   const lifecycleGenerationRef = useRef(0);
   const inputFocusedRef = useRef(false);
@@ -347,6 +353,47 @@ export const BrowserPane = memo(function BrowserPane({
     [paneId, persistUrl, addRecentBrowserUrl],
   );
 
+  const reload = useCallback(() => {
+    if (!createdRef.current) return;
+    invoke("browser_reload", { id: paneId }).catch((e) =>
+      setLastError(String(e)),
+    );
+  }, [paneId]);
+
+  const focusAddress = useCallback(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // App-shell context: focus is somewhere in the main webview and this pane
+  // is the focused one. Keystrokes inside the page never get here — those
+  // arrive via the browser-hotkey event below.
+  useAppHotkey("BROWSER_RELOAD", reload, { enabled: isFocused && hasUrl });
+  useAppHotkey("BROWSER_FOCUS_ADDRESS", focusAddress, { enabled: isFocused });
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    listen<string>(`browser-hotkey-${paneId}`, (event) => {
+      if (event.payload === "reload") {
+        reload();
+      } else if (event.payload === "focus-address") {
+        // Rust already moved first responder back to the main webview.
+        focusAddress();
+      } else if (event.payload === "close-pane") {
+        // paneId is this browser's group-tab id, not a leaf id — the action
+        // resolves the leaf itself.
+        closeUserTabGroupTab(worktreePath, tabId, paneId);
+      }
+    }).then((fn) => {
+      if (cancelled) disposeListener(fn);
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      disposeListener(unlisten);
+    };
+  }, [paneId, tabId, worktreePath, reload, focusAddress]);
+
   const toggleAnnotate = useCallback(() => {
     if (annotating) {
       setAnnotating(false); // the polling effect's cleanup sends the disarm
@@ -474,11 +521,7 @@ export const BrowserPane = memo(function BrowserPane({
           </svg>
         </button>
         <button
-          onClick={() =>
-            invoke("browser_reload", { id: paneId }).catch((e) =>
-              setLastError(String(e)),
-            )
-          }
+          onClick={reload}
           className={`size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors ${
             loading
               ? "animate-pulse motion-reduce:animate-none motion-reduce:opacity-60"
@@ -499,6 +542,7 @@ export const BrowserPane = memo(function BrowserPane({
         </button>
         <div className="relative flex-1 min-w-0">
           <input
+            ref={inputRef}
             value={inputValue}
             onChange={(e) => {
               const next = e.target.value;

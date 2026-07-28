@@ -15,7 +15,7 @@ globalThis.localStorage = {
 globalThis.window = globalThis;
 
 const { useUIStore } = await import("../store.ts");
-const { createBrowserTabFromRequest, openBrowserTabAt } =
+const { createBrowserTabFromRequest, openBrowserTabAt, closeUserTabGroupTab } =
   await import("./tab-actions.ts");
 
 const worktreePath = "/tmp/browser-service-focus";
@@ -162,5 +162,107 @@ describe("openBrowserTabAt", () => {
     expect(findGroup(nav.agentTabSplitTree, "agent-secondary").activeTabId).toBe(
       browser.id,
     );
+  });
+});
+
+describe("closeUserTabGroupTab", () => {
+  test("closes only the browser's group tab when its id differs from the leaf id", () => {
+    // Regression: Cmd+W forwarded from a browser webview passes the group-tab
+    // id. Treating it as a leaf id made the close fall back to the first leaf
+    // and destroy the wrong pane.
+    const browser = groupTab("browser-pane", {
+      kind: "browser",
+      url: "http://localhost:5173",
+    });
+    const secondary = group(
+      "secondary",
+      [groupTab("shell-pane", { kind: "terminal", launch: "shell" }), browser],
+      browser.id,
+    );
+    const owner = {
+      id: "owner",
+      kind: "terminal",
+      label: "Terminal",
+      createdAt: 1,
+      splitTree: split(
+        group("primary", [
+          groupTab("primary-shell", { kind: "terminal", launch: "shell" }),
+        ]),
+        secondary,
+      ),
+      // Focus parked elsewhere — the close must not act on this leaf.
+      focusedPaneId: "primary",
+    };
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      userTabs: [owner],
+      activeTerminalsTab: owner.id,
+    });
+
+    closeUserTabGroupTab(worktreePath, owner.id, browser.id);
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    expect(nav.userTabs).toHaveLength(1);
+    const tree = nav.userTabs[0].splitTree;
+    expect(findGroup(tree, "primary").tabs.map((t) => t.id)).toEqual([
+      "primary-shell",
+    ]);
+    expect(findGroup(tree, "secondary").tabs.map((t) => t.id)).toEqual([
+      "shell-pane",
+    ]);
+  });
+
+  test("closing the last pane of a browser-only leaf removes just that leaf", () => {
+    const browser = groupTab("browser-pane", {
+      kind: "browser",
+      url: "http://localhost:5173",
+    });
+    const owner = {
+      id: "owner",
+      kind: "terminal",
+      label: "Terminal",
+      createdAt: 1,
+      splitTree: split(
+        group("primary", [
+          groupTab("primary-shell", { kind: "terminal", launch: "shell" }),
+        ]),
+        group("secondary", [browser]),
+      ),
+      focusedPaneId: "primary",
+    };
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      userTabs: [owner],
+      activeTerminalsTab: owner.id,
+    });
+
+    closeUserTabGroupTab(worktreePath, owner.id, browser.id);
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    expect(nav.userTabs).toHaveLength(1);
+    const tree = nav.userTabs[0].splitTree;
+    expect(tree.type).toBe("group");
+    expect(tree.tabs.map((t) => t.id)).toEqual(["primary-shell"]);
+  });
+
+  test("ignores a group tab id that no longer exists", () => {
+    const owner = {
+      id: "owner",
+      kind: "terminal",
+      label: "Terminal",
+      createdAt: 1,
+      splitTree: group("primary", [
+        groupTab("primary-shell", { kind: "terminal", launch: "shell" }),
+      ]),
+      focusedPaneId: "primary",
+    };
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      userTabs: [owner],
+      activeTerminalsTab: owner.id,
+    });
+
+    closeUserTabGroupTab(worktreePath, owner.id, "gone");
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    expect(nav.userTabs).toHaveLength(1);
+    expect(findGroup(nav.userTabs[0].splitTree, "primary").tabs).toHaveLength(1);
   });
 });
