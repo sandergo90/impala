@@ -187,11 +187,14 @@ fn new_tab_target(url: &Url) -> Option<Url> {
     matches!(target.scheme(), "http" | "https").then_some(target)
 }
 
+fn is_hotkey_sentinel(url: &Url) -> bool {
+    url.scheme() == "https"
+        && url.host_str() == Some("impala.invalid")
+        && url.path() == "/hotkey"
+}
+
 fn hotkey_action(url: &Url) -> Option<&'static str> {
-    if url.scheme() != "https"
-        || url.host_str() != Some("impala.invalid")
-        || url.path() != "/hotkey"
-    {
+    if !is_hotkey_sentinel(url) {
         return None;
     }
     let action = url
@@ -200,6 +203,47 @@ fn hotkey_action(url: &Url) -> Option<&'static str> {
     ["reload", "focus-address", "close-pane"]
         .into_iter()
         .find(|candidate| *candidate == action)
+}
+
+/// A chord the shim did not reserve, forwarded so the shell can replay it
+/// through its own hotkey listeners. Returns the KeyboardEvent-shaped payload
+/// the frontend re-dispatches.
+fn forwarded_key(url: &Url) -> Option<serde_json::Value> {
+    if !is_hotkey_sentinel(url) {
+        return None;
+    }
+    let mut forward = false;
+    let mut key = None;
+    let mut code = String::new();
+    let (mut meta, mut ctrl, mut alt, mut shift) = (false, false, false, false);
+    for (name, value) in url.query_pairs() {
+        match name.as_ref() {
+            "action" => forward = value == "forward",
+            "key" => key = Some(value.into_owned()),
+            "code" => code = value.into_owned(),
+            "meta" => meta = value == "1",
+            "ctrl" => ctrl = value == "1",
+            "alt" => alt = value == "1",
+            "shift" => shift = value == "1",
+            _ => {}
+        }
+    }
+    if !forward {
+        return None;
+    }
+    let key = key?;
+    // KeyboardEvent key/code values are short; anything longer is not a chord.
+    if key.is_empty() || key.len() > 32 || code.len() > 32 {
+        return None;
+    }
+    Some(serde_json::json!({
+        "key": key,
+        "code": code,
+        "metaKey": meta,
+        "ctrlKey": ctrl,
+        "altKey": alt,
+        "shiftKey": shift,
+    }))
 }
 
 fn toolbar_url_for_event(url: &Url, committed_main_page: bool) -> Option<&str> {
@@ -390,6 +434,11 @@ pub async fn browser_open(
                     }
                 }
                 let _ = nav_app.emit_to("main", &format!("browser-hotkey-{nav_id}"), action);
+                return false;
+            }
+            if let Some(payload) = forwarded_key(url) {
+                debug!(id = %nav_id, "browser forwarded key chord");
+                let _ = nav_app.emit_to("main", "browser-forward-key", payload);
                 return false;
             }
             if let Some(target) = new_tab_target(url) {
@@ -1053,6 +1102,39 @@ mod tests {
         assert_eq!(action("https://impala.invalid/hotkey?action=evil"), None);
         assert_eq!(action("https://impala.invalid/hotkey"), None);
         assert_eq!(action("https://example.com/hotkey?action=reload"), None);
+    }
+
+    #[test]
+    fn forwarded_key_navigation_builds_a_keyboard_event_payload() {
+        let parse = |raw: &str| forwarded_key(&Url::parse(raw).unwrap());
+
+        assert_eq!(
+            parse(
+                "https://impala.invalid/hotkey?action=forward&key=P&code=KeyP&meta=1&ctrl=0&alt=0&shift=1",
+            ),
+            Some(serde_json::json!({
+                "key": "P",
+                "code": "KeyP",
+                "metaKey": true,
+                "ctrlKey": false,
+                "altKey": false,
+                "shiftKey": true,
+            }))
+        );
+        // Reserved actions and malformed signals never produce a payload.
+        assert_eq!(parse("https://impala.invalid/hotkey?action=reload"), None);
+        assert_eq!(parse("https://impala.invalid/hotkey?action=forward"), None);
+        assert_eq!(
+            parse(&format!(
+                "https://impala.invalid/hotkey?action=forward&key={}",
+                "x".repeat(40)
+            )),
+            None
+        );
+        assert_eq!(
+            parse("https://example.com/hotkey?action=forward&key=p"),
+            None
+        );
     }
 
     #[test]

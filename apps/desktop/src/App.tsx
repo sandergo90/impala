@@ -94,6 +94,23 @@ export function RootLayout() {
     );
     track(
       listen<{
+        key: string;
+        code: string;
+        metaKey: boolean;
+        ctrlKey: boolean;
+        altKey: boolean;
+        shiftKey: boolean;
+      }>("browser-forward-key", (event) => {
+        // A chord pressed inside a browser pane's native webview, forwarded
+        // because keystrokes there never reach the shell. Replay it so every
+        // useAppHotkey listener matches it like a locally typed chord.
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { ...event.payload, cancelable: true }),
+        );
+      }),
+    );
+    track(
+      listen<{
         worktreePath: string;
         prompt: string;
         agent?: "claude" | "codex";
