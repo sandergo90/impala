@@ -36,6 +36,8 @@ import type { Worktree } from "@/types";
 
 const POLL_INTERVAL_MS = 5_000;
 
+type StopTarget = RunningService | "all" | { worktree: Worktree };
+
 function worktreeLabel(worktree: Worktree): string {
   return worktree.title ?? worktree.branch;
 }
@@ -51,9 +53,7 @@ export function RunningServicesMenu({
 }) {
   const [services, setServices] = useState<RunningService[]>([]);
   const [open, setOpen] = useState(false);
-  const [stopTarget, setStopTarget] = useState<RunningService | "all" | null>(
-    null,
-  );
+  const [stopTarget, setStopTarget] = useState<StopTarget | null>(null);
   const [stopping, setStopping] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -158,10 +158,14 @@ export function RunningServicesMenu({
     if (!stopTarget) return;
     setStopping(true);
     try {
-      if (stopTarget === "all") {
+      if (stopTarget === "all" || "worktree" in stopTarget) {
         const outcome = await invoke<{ stopped: number; failures: string[] }>(
           "terminate_all_running_services",
-          { projectPath },
+          {
+            projectPath,
+            worktreePath:
+              stopTarget === "all" ? undefined : stopTarget.worktree.path,
+          },
         );
         if (outcome.failures.length > 0) {
           toast.error(`Could not stop ${outcome.failures.join(", ")}`);
@@ -264,8 +268,20 @@ export function RunningServicesMenu({
                   <span className="truncate text-xs font-medium text-muted-foreground">
                     {worktreeLabel(worktree)}
                   </span>
-                  <span className="text-xs text-muted-foreground">
-                    {worktreeServices.length}
+                  <span className="flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground">
+                      {worktreeServices.length}
+                    </span>
+                    {worktreeServices.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="text-muted-foreground hover:text-danger"
+                        onClick={() => setStopTarget({ worktree })}
+                      >
+                        Stop all
+                      </Button>
+                    )}
                   </span>
                 </div>
                 {worktreeServices.map((service) => (
@@ -349,13 +365,23 @@ export function RunningServicesMenu({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {stopTarget === "all" ? "Stop all services?" : "Stop this service?"}
+              {stopTarget === "all"
+                ? "Stop all services?"
+                : stopTarget && "worktree" in stopTarget
+                  ? "Stop all services in this worktree?"
+                  : "Stop this service?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {stopTarget === "all" ? (
                 <>
                   This sends SIGTERM to every process with a listening port in
                   this project, including ones Impala didn't start.
+                </>
+              ) : stopTarget && "worktree" in stopTarget ? (
+                <>
+                  This sends SIGTERM to every process with a listening port in{" "}
+                  {worktreeLabel(stopTarget.worktree)}, including ones Impala
+                  didn't start.
                 </>
               ) : (
                 <>
@@ -377,7 +403,8 @@ export function RunningServicesMenu({
             >
               {stopping
                 ? "Stopping…"
-                : stopTarget === "all"
+                : stopTarget === "all" ||
+                    (stopTarget && "worktree" in stopTarget)
                   ? "Stop all services"
                   : "Stop service"}
             </AlertDialogAction>

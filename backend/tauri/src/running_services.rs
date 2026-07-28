@@ -109,6 +109,7 @@ pub async fn terminate_all_running_services(
     state: tauri::State<'_, DaemonState>,
     db: tauri::State<'_, DbState>,
     project_path: String,
+    worktree_path: Option<String>,
 ) -> Result<StopAllOutcome, String> {
     authorize_project(&db, &project_path)?;
     // Stopping must fail closed: without the daemon inventory we cannot prove
@@ -116,7 +117,10 @@ pub async fn terminate_all_running_services(
     let sessions = daemon_sessions(&state).await?;
     tokio::task::spawn_blocking(move || {
         let worktree_paths = project_worktree_paths(&project_path)?;
-        let services = scan_running_services(&worktree_paths, &sessions)?;
+        let mut services = scan_running_services(&worktree_paths, &sessions)?;
+        if let Some(worktree_path) = worktree_path {
+            services.retain(|service| service.worktree_path == worktree_path);
+        }
         #[cfg(unix)]
         {
             let mut seen_pids = HashSet::new();
