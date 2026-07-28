@@ -1190,15 +1190,16 @@ pub fn count_unseen_runs(conn: &Connection) -> Result<UnseenRunCounts, String> {
     .map_err(|e| format!("Failed to count unseen runs: {}", e))
 }
 
-/// Mark finished runs seen. Only completed/failed rows — a launched run
-/// marked seen mid-flight would never badge on completion.
-pub fn mark_runs_seen(conn: &Connection) -> Result<usize, String> {
+/// Mark one finished run seen when its worktree is opened. Only
+/// completed/failed rows — a launched run marked seen mid-flight would never
+/// badge on completion.
+pub fn mark_run_seen(conn: &Connection, run_id: &str) -> Result<usize, String> {
     conn.execute(
         "UPDATE automation_runs SET seen = 1
-         WHERE seen = 0 AND status IN ('completed', 'failed')",
-        [],
+         WHERE id = ?1 AND seen = 0 AND status IN ('completed', 'failed')",
+        params![run_id],
     )
-    .map_err(|e| format!("Failed to mark runs seen: {}", e))
+    .map_err(|e| format!("Failed to mark run seen: {}", e))
 }
 
 /// Create the scratch git repo a global automation run executes in. A real
@@ -1675,7 +1676,8 @@ pub fn count_unseen_automation_runs(
 }
 
 #[tauri::command]
-pub fn mark_automation_runs_seen(
+pub fn mark_automation_run_seen(
+    run_id: String,
     app: AppHandle,
     state: tauri::State<'_, crate::DbState>,
 ) -> Result<(), String> {
@@ -1683,10 +1685,7 @@ pub fn mark_automation_runs_seen(
         .0
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
-    // Emit only when something changed — the Automations view marks seen on
-    // every refresh, and an unconditional emit would loop refresh → mark →
-    // emit → refresh forever.
-    if mark_runs_seen(&conn)? > 0 {
+    if mark_run_seen(&conn, &run_id)? > 0 {
         let _ = app.emit("automation-runs-changed", ());
     }
     Ok(())
@@ -1757,6 +1756,28 @@ mod tests {
             .to_string();
         let n: u32 = weekday.parse().unwrap();
         assert!((1..=5).contains(&n), "MON-FRI fired on ISO weekday {n}");
+    }
+
+    #[test]
+    fn opening_one_finished_run_only_marks_that_run_seen() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(&conn, new_automation("0 9 * * *"), now).unwrap();
+        let mut run_ids = Vec::new();
+
+        for scheduled_for in [1000, 2000, 3000] {
+            let run = insert_run(&conn, &automation.id, scheduled_for)
+                .unwrap()
+                .unwrap();
+            report_run(&conn, &run.id, None, "completed", None).unwrap();
+            run_ids.push(run.id);
+        }
+
+        assert_eq!(count_unseen_runs(&conn).unwrap().total, 3);
+        assert_eq!(mark_run_seen(&conn, &run_ids[0]).unwrap(), 1);
+        assert_eq!(count_unseen_runs(&conn).unwrap().total, 2);
+        assert_eq!(mark_run_seen(&conn, &run_ids[0]).unwrap(), 0);
+        assert_eq!(count_unseen_runs(&conn).unwrap().total, 2);
     }
 
     #[test]
@@ -1835,7 +1856,7 @@ mod tests {
         // launched → completed via the worktree Stop path. A run marked seen
         // while still launched must re-badge on completion.
         report_run(&conn, &run.id, Some("/wt/auto-1"), "launched", None).unwrap();
-        assert_eq!(mark_runs_seen(&conn).unwrap(), 0);
+        assert_eq!(mark_run_seen(&conn, &run.id).unwrap(), 0);
         assert_eq!(
             complete_run_for_worktree(&conn, "/wt/auto-1")
                 .unwrap()
@@ -1850,7 +1871,7 @@ mod tests {
         assert_eq!(runs[0].status, "completed");
         assert_eq!(runs[0].worktree_path.as_deref(), Some("/wt/auto-1"));
 
-        // Unseen badge: one completed run, cleared by mark_runs_seen
+        // Unseen badge: one completed run, cleared when that run is opened.
         assert_eq!(
             count_unseen_runs(&conn).unwrap(),
             UnseenRunCounts {
@@ -1858,8 +1879,8 @@ mod tests {
                 failed: 0
             }
         );
-        assert_eq!(mark_runs_seen(&conn).unwrap(), 1);
-        assert_eq!(mark_runs_seen(&conn).unwrap(), 0);
+        assert_eq!(mark_run_seen(&conn, &run.id).unwrap(), 1);
+        assert_eq!(mark_run_seen(&conn, &run.id).unwrap(), 0);
         assert_eq!(
             count_unseen_runs(&conn).unwrap(),
             UnseenRunCounts {
@@ -1896,7 +1917,8 @@ mod tests {
         report_run(&conn, &grun.id, Some("/scratch/g1"), "launched", None).unwrap();
         complete_run_for_worktree(&conn, "/scratch/g1").unwrap();
         assert_eq!(count_unseen_runs(&conn).unwrap().total, 2);
-        assert_eq!(mark_runs_seen(&conn).unwrap(), 2);
+        assert_eq!(mark_run_seen(&conn, &run2.id).unwrap(), 1);
+        assert_eq!(mark_run_seen(&conn, &grun.id).unwrap(), 1);
 
         // Deleting a worktree aborts its in-flight run (already seen), but a
         // finished run's worktree deletion leaves the record alone.

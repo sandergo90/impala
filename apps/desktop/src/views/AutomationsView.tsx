@@ -181,9 +181,6 @@ export function AutomationsView() {
         }
       })
       .catch(() => setAutomationWorktrees([]));
-    // The user is looking at the runs — clear the sidebar badge. Emits (and
-    // re-triggers this refresh) only when rows actually flip.
-    invoke("mark_automation_runs_seen").catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -208,6 +205,10 @@ export function AutomationsView() {
 
   const projects = useDataStore((s) => s.projects);
 
+  const markRunSeen = useCallback((runId: string) => {
+    invoke("mark_automation_run_seen", { runId }).catch(() => {});
+  }, []);
+
   const openRunWorktree = useCallback(
     async (run: AutomationRun, automation?: Automation) => {
       if (!run.worktree_path) return;
@@ -217,6 +218,7 @@ export function AutomationsView() {
         );
         if (existingWorktree) {
           setInspectedWorktree(existingWorktree);
+          markRunSeen(run.id);
           return;
         }
         if (automation?.repo_path === "") {
@@ -234,11 +236,12 @@ export function AutomationsView() {
           return;
         }
         setInspectedWorktree(wt);
+        markRunSeen(run.id);
       } catch (e) {
         toast.error(`Failed to open worktree: ${e}`);
       }
     },
-    [automationWorktrees, project],
+    [automationWorktrees, markRunSeen, project],
   );
 
   // The full diff experience — annotations, viewed tracking, commit panel —
@@ -264,6 +267,10 @@ export function AutomationsView() {
           toast.error("The run's worktree no longer exists");
           return;
         }
+        const run = runs.find(
+          (candidate) => candidate.worktree_path === worktree.path,
+        );
+        if (run) markRunSeen(run.id);
         useUIStore.getState().setSelectedProject(target);
         useDataStore.getState().setWorktrees(worktrees);
         useUIStore.getState().setGeneralTerminalActive(false);
@@ -272,7 +279,7 @@ export function AutomationsView() {
         toast.error(`Failed to open review: ${e}`);
       }
     },
-    [projects],
+    [markRunSeen, projects, runs],
   );
 
   const openCreate = (template: AutomationTemplate | null) => {

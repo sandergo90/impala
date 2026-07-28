@@ -12,7 +12,7 @@ const NONE: UnseenRunCounts = { total: 0, failed: 0 };
 /**
  * Finished automation runs (completed/failed) the user hasn't seen — across
  * all projects and global automations, matching the unscoped Automations
- * view. Cleared when the view marks them seen.
+ * view. Each run clears when its worktree is opened.
  */
 export function useAutomationBadge(): UnseenRunCounts {
   const [counts, setCounts] = useState<UnseenRunCounts>(NONE);
