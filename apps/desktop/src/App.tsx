@@ -28,7 +28,7 @@ import {
   focusAdjacentUserTabPane,
   closeAgentTabFocusedPane,
   focusAdjacentAgentTabPane,
-  createBrowserTab,
+  createBrowserTabFromRequest,
   createAgentTabFromRequest,
   canSplitTerminalsTab,
   splitActiveTabPane,
@@ -55,8 +55,9 @@ export function RootLayout() {
   useDockBadge();
   useBrowserUnderlayBridge();
 
-  // Agent browser interactions (hook-server /browser/*): create the tab on a
-  // navigate for a worktree without one, and mark activity for the indicators.
+  // Browser requests create a managed tab: agent navigation uses this when a
+  // worktree has no browser yet, and target=_blank links use it instead of an
+  // unmanaged native popup. Agent-only events also mark toolbar activity.
   useEffect(() => {
     const unlistens: UnlistenFn[] = [];
     let cancelled = false;
@@ -67,10 +68,14 @@ export function RootLayout() {
       }).catch(() => {});
     };
     track(
-      listen<{ worktreePath: string; url: string }>(
+      listen<{ worktreePath: string; url: string; sourcePaneId?: string }>(
         "browser-request-open",
         (event) => {
-          createBrowserTab(event.payload.worktreePath, event.payload.url);
+          createBrowserTabFromRequest(
+            event.payload.worktreePath,
+            event.payload.url,
+            event.payload.sourcePaneId,
+          );
         },
       ),
     );

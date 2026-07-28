@@ -15,7 +15,8 @@ globalThis.localStorage = {
 globalThis.window = globalThis;
 
 const { useUIStore } = await import("../store.ts");
-const { openBrowserTabAt } = await import("./tab-actions.ts");
+const { createBrowserTabFromRequest, openBrowserTabAt } =
+  await import("./tab-actions.ts");
 
 const worktreePath = "/tmp/browser-service-focus";
 const groupTab = (id, content) => ({
@@ -40,6 +41,53 @@ const split = (first, second) => ({
 
 beforeEach(() => {
   useUIStore.setState({ worktreeNavStates: {} });
+});
+
+describe("createBrowserTabFromRequest", () => {
+  test("opens next to the source browser inside the same split pane", () => {
+    const source = groupTab("source-browser", {
+      kind: "browser",
+      url: "http://localhost:4293/report",
+    });
+    const owner = {
+      id: "owner",
+      kind: "terminal",
+      label: "Terminal",
+      createdAt: 1,
+      splitTree: split(
+        group("primary", [
+          groupTab("primary-shell", { kind: "terminal", launch: "shell" }),
+        ]),
+        group("secondary", [source]),
+      ),
+      focusedPaneId: "primary",
+    };
+    useUIStore.getState().updateWorktreeNavState(worktreePath, {
+      userTabs: [owner],
+      activeTerminalsTab: owner.id,
+    });
+
+    const createdId = createBrowserTabFromRequest(
+      worktreePath,
+      "https://example.com/source",
+      source.id,
+    );
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const updatedOwner = nav.userTabs[0];
+    const sourceGroup = findGroup(updatedOwner.splitTree, "secondary");
+    expect(nav.userTabs).toHaveLength(1);
+    expect(updatedOwner.focusedPaneId).toBe("secondary");
+    expect(sourceGroup.tabs.map((tab) => tab.id)).toEqual([
+      source.id,
+      createdId,
+    ]);
+    expect(sourceGroup.activeTabId).toBe(createdId);
+    expect(sourceGroup.tabs[1].content).toEqual({
+      kind: "browser",
+      url: "https://example.com/source",
+    });
+  });
 });
 
 describe("openBrowserTabAt", () => {

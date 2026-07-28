@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::webview::{PageLoadEvent, WebviewBuilder};
+use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl};
 use tracing::{debug, info, warn};
 
@@ -57,6 +57,12 @@ const CONSOLE_SHIM: &str = r#"
   });
 })();
 "#;
+
+/// WKWebView child views can silently discard target=_blank anchor clicks
+/// before Wry's new-window callback sees them. Convert plain left-clicks to a
+/// reserved navigation signal that Rust routes to a managed Impala browser
+/// tab; modified clicks and downloads keep their native behavior.
+const TARGET_BLANK_SHIM: &str = include_str!("browser_target_blank.js");
 
 /// Virtual cursor overlay: makes agent-driven input visible in the pane. A
 /// pointer-events:none arrow that glides to each interaction point (350ms,
@@ -145,6 +151,46 @@ fn get_webview(app: &AppHandle, id: &str) -> Result<Webview, String> {
         .get(&label_for(id))
         .cloned()
         .ok_or_else(|| format!("no browser webview for id {id}"))
+}
+
+fn new_window_request(
+    registry: &BrowserRegistry,
+    source_id: &str,
+    url: &Url,
+) -> Option<serde_json::Value> {
+    let map = registry.0.lock().unwrap();
+    let source = map.get(source_id)?;
+    Some(serde_json::json!({
+        "worktreePath": source.worktree_path,
+        "url": url.as_str(),
+        "sourcePaneId": source_id,
+    }))
+}
+
+fn new_tab_target(url: &Url) -> Option<Url> {
+    if url.scheme() != "https"
+        || url.host_str() != Some("impala.invalid")
+        || url.path() != "/open-new-tab"
+    {
+        return None;
+    }
+    let target = url
+        .query_pairs()
+        .find_map(|(key, value)| (key == "url").then(|| value.into_owned()))?;
+    let target = Url::parse(&target).ok()?;
+    matches!(target.scheme(), "http" | "https").then_some(target)
+}
+
+fn toolbar_url_for_event(url: &Url, committed_main_page: bool) -> Option<&str> {
+    committed_main_page.then(|| url.as_str())
+}
+
+fn emit_new_browser_tab_request(app: &AppHandle, source_id: &str, url: &Url) -> Result<(), String> {
+    let registry = app.state::<BrowserRegistry>();
+    let payload = new_window_request(&registry, source_id, url)
+        .ok_or_else(|| "source pane missing from browser registry".to_string())?;
+    app.emit_to("main", "browser-request-open", payload)
+        .map_err(|error| error.to_string())
 }
 
 fn underlay_enabled_from_override(override_value: Option<&str>) -> bool {
@@ -297,6 +343,8 @@ pub async fn browser_open(
     let nav_id = id.clone();
     let load_app = app.clone();
     let load_id = id.clone();
+    let new_window_app = app.clone();
+    let new_window_id = id.clone();
     let builder = WebviewBuilder::new(label_for(&id), WebviewUrl::External(parsed))
         // WKWebView's default UA lacks the "Version/… Safari/…" suffix, so
         // UA-sniffing sites (Google among them) serve their legacy fallback
@@ -306,15 +354,54 @@ pub async fn browser_open(
              (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
         )
         .initialization_script(CONSOLE_SHIM)
+        .initialization_script(TARGET_BLANK_SHIM)
         .initialization_script(CURSOR_JS)
         .on_navigation(move |url| {
+            if let Some(target) = new_tab_target(url) {
+                info!(
+                    id = %nav_id,
+                    url = %target,
+                    "browser target=_blank request"
+                );
+                if let Err(error) = emit_new_browser_tab_request(&nav_app, &nav_id, &target) {
+                    warn!(
+                        id = %nav_id,
+                        url = %target,
+                        error = %error,
+                        "browser target=_blank request failed"
+                    );
+                }
+                return false;
+            }
             debug!(id = %nav_id, url = %url, "browser on_navigation");
-            let _ = nav_app.emit_to("main", &format!("browser-nav-{nav_id}"), url.to_string());
+            if let Some(url) = toolbar_url_for_event(url, false) {
+                let _ = nav_app.emit_to("main", &format!("browser-nav-{nav_id}"), url);
+            }
             true
+        })
+        .on_new_window(move |url, _features| {
+            info!(id = %new_window_id, url = %url, "browser new window request");
+            if let Err(error) = emit_new_browser_tab_request(&new_window_app, &new_window_id, &url)
+            {
+                warn!(
+                    id = %new_window_id,
+                    url = %url,
+                    error = %error,
+                    "browser new window request failed"
+                );
+            }
+            // The frontend event creates a managed Impala browser tab. Never
+            // let WebKit create an unmanaged popup outside the pane tree.
+            NewWindowResponse::Deny
         })
         .on_page_load(move |_wv, payload| {
             let loading = matches!(payload.event(), PageLoadEvent::Started);
             debug!(id = %load_id, url = %payload.url(), loading, "browser on_page_load");
+            // A committed main-page URL corrects any speculative/subframe
+            // candidate previously seen by on_navigation (notably redirects).
+            if let Some(url) = toolbar_url_for_event(payload.url(), true) {
+                let _ = load_app.emit_to("main", &format!("browser-nav-{load_id}"), url);
+            }
             let _ = load_app.emit_to("main", &format!("browser-loading-{load_id}"), loading);
         });
     let webview = window
@@ -867,6 +954,72 @@ pub async fn browser_console_logs(
 pub async fn browser_page_info(app: AppHandle, id: String) -> Result<serde_json::Value, String> {
     let wv = get_webview(&app, &id)?;
     page_info(&wv)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_blank_request_opens_a_managed_browser_tab() {
+        let registry = BrowserRegistry::default();
+        registry.0.lock().unwrap().insert(
+            "source-pane".to_string(),
+            TabState {
+                worktree_path: "/tmp/worktree".to_string(),
+                cursor: None,
+            },
+        );
+        let url = Url::parse("https://example.com/source").unwrap();
+
+        assert_eq!(
+            new_window_request(&registry, "source-pane", &url),
+            Some(serde_json::json!({
+                "worktreePath": "/tmp/worktree",
+                "url": "https://example.com/source",
+                "sourcePaneId": "source-pane",
+            }))
+        );
+    }
+
+    #[test]
+    fn target_blank_navigation_extracts_the_requested_url() {
+        let signal = Url::parse(
+            "https://impala.invalid/open-new-tab?url=https%3A%2F%2Fexample.com%2Fsource%3Fa%3D1",
+        )
+        .unwrap();
+
+        assert_eq!(
+            new_tab_target(&signal),
+            Some(Url::parse("https://example.com/source?a=1").unwrap())
+        );
+        assert_eq!(
+            new_tab_target(&Url::parse("https://example.com/").unwrap()),
+            None
+        );
+    }
+
+    #[test]
+    fn subframe_navigation_does_not_replace_the_committed_toolbar_url() {
+        assert_eq!(
+            toolbar_url_for_event(
+                &Url::parse(
+                    "https://s0.2mdn.net/sadbundle/72818855012990976/Nespresso-Zenius.html",
+                )
+                .unwrap(),
+                false,
+            ),
+            None
+        );
+        assert_eq!(
+            toolbar_url_for_event(&Url::parse("about:blank").unwrap(), false),
+            None
+        );
+        assert_eq!(
+            toolbar_url_for_event(&Url::parse("https://www.out.be/").unwrap(), true),
+            Some("https://www.out.be/")
+        );
+    }
 }
 
 #[cfg(target_os = "macos")]

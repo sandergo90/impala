@@ -222,6 +222,47 @@ export function createBrowserTab(worktreePath: string, url?: string): UserTab {
   return newTab;
 }
 
+/**
+ * Open a browser request beside its source. Browser tabs inside a split are
+ * pane-local, so target=_blank stays in that same group. Requests without a
+ * split source (including agent navigation) retain the top-level fallback.
+ */
+export function createBrowserTabFromRequest(
+  worktreePath: string,
+  url: string,
+  sourcePaneId?: string,
+): string {
+  if (sourcePaneId) {
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const agentTree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+    const agentSource = findGroupTab(agentTree, sourcePaneId);
+    if (agentSource && getLeaves(agentTree).length > 1) {
+      const created = addTabToPane(
+        worktreePath,
+        AGENT_PANE_ID,
+        agentSource.group.id,
+        { kind: "browser", url },
+      );
+      if (created) return created;
+    }
+
+    for (const topTab of nav.userTabs) {
+      const tree = getEffectiveUserTabSplitTree(topTab);
+      const source = findGroupTab(tree, sourcePaneId);
+      if (!source || getLeaves(tree).length <= 1) continue;
+      const created = addTabToPane(
+        worktreePath,
+        topTab.id,
+        source.group.id,
+        { kind: "browser", url },
+      );
+      if (created) return created;
+    }
+  }
+
+  return createBrowserTab(worktreePath, url).id;
+}
+
 function browserUrlMatches(
   candidate: string,
   target: string,
