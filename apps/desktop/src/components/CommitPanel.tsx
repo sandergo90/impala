@@ -1,13 +1,13 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@/lib/invoke";
 import { listen } from "@tauri-apps/api/event";
+import { ChevronDown, ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { useCmdHeld } from "../hooks/useCmdClickCursor";
 import { ChangedFileContextMenu } from "./ChangedFileContextMenu";
-import { basename } from "../lib/path-utils";
 import type { ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
 
 // Same mapping the file tree uses (see `getTreesStyle` in themes/apply.ts): the
@@ -25,6 +25,66 @@ const WORKING_AGENT_AUTO_REFRESH_DELAY_MS = 2500;
 const EMPTY_COMMITS: CommitInfo[] = [];
 const EMPTY_CHANGED_FILES: ChangedFile[] = [];
 const ZERO_STATS = { additions: 0, deletions: 0 };
+
+interface ChangedFileTreeDirectory {
+  directories: Map<string, ChangedFileTreeDirectory>;
+  files: ChangedFile[];
+}
+
+type ChangedFileTreeRow =
+  | { kind: "directory"; depth: number; name: string; path: string }
+  | { kind: "file"; depth: number; name: string; file: ChangedFile };
+
+function buildChangedFileTreeRows(
+  files: ChangedFile[],
+  collapsedDirectories: Set<string>,
+): ChangedFileTreeRow[] {
+  const root: ChangedFileTreeDirectory = {
+    directories: new Map(),
+    files: [],
+  };
+
+  for (const file of files) {
+    const segments = file.path.split("/").filter(Boolean);
+    let directory = root;
+    for (const segment of segments.slice(0, -1)) {
+      let child = directory.directories.get(segment);
+      if (!child) {
+        child = { directories: new Map(), files: [] };
+        directory.directories.set(segment, child);
+      }
+      directory = child;
+    }
+    directory.files.push(file);
+  }
+
+  const rows: ChangedFileTreeRow[] = [];
+  const visit = (directory: ChangedFileTreeDirectory, path: string, depth: number) => {
+    const childDirectories = [...directory.directories.entries()]
+      .sort(([a], [b]) => a.localeCompare(b));
+    for (const [name, child] of childDirectories) {
+      const childPath = path ? `${path}/${name}` : name;
+      rows.push({ kind: "directory", depth, name, path: childPath });
+      if (!collapsedDirectories.has(childPath)) {
+        visit(child, childPath, depth + 1);
+      }
+    }
+
+    const childFiles = [...directory.files]
+      .sort((a, b) => a.path.localeCompare(b.path));
+    for (const file of childFiles) {
+      rows.push({
+        kind: "file",
+        depth,
+        name: file.path.split("/").pop() ?? file.path,
+        file,
+      });
+    }
+  };
+
+  visit(root, "", 0);
+  return rows;
+}
 
 function countDiffStats(diff: string): { additions: number; deletions: number } {
   let additions = 0;
@@ -110,13 +170,20 @@ export function CommitPanel() {
   const autoRefreshInFlightRef = useRef(false);
   const autoRefreshQueuedRef = useRef(false);
   const selectionRequestRef = useRef(0);
+  const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const changedFileRows = useMemo(
+    () => buildChangedFileTreeRows(changedFiles, collapsedDirectories),
+    [changedFiles, collapsedDirectories],
+  );
 
   // Virtualize the changed-files list: a large diff can have hundreds of files,
-  // and rendering them all (each wrapped in a context menu) is the slowest part
-  // of this panel. Only the rows in view plus a small buffer hit the DOM.
+  // and rendering every tree row (with a context menu for each file) is the
+  // slowest part of this panel. Only visible rows plus a small buffer hit the DOM.
   const filesScrollRef = useRef<HTMLDivElement>(null);
   const filesVirtualizer = useVirtualizer({
-    count: changedFiles.length,
+    count: changedFileRows.length,
     getScrollElement: () => filesScrollRef.current,
     estimateSize: () => 30,
     overscan: 12,
@@ -604,32 +671,63 @@ export function CommitPanel() {
         <div ref={filesScrollRef} className="overflow-y-auto flex-1 min-h-0">
           <div style={{ height: filesVirtualizer.getTotalSize(), position: "relative" }}>
           {filesVirtualizer.getVirtualItems().map((virtualRow) => {
-            const file = changedFiles[virtualRow.index];
-            const isSelected = selectedFile?.path === file.path;
+            const row = changedFileRows[virtualRow.index];
+            const isDirectory = row.kind === "directory";
+            const isCollapsed = isDirectory && collapsedDirectories.has(row.path);
+            const file = row.kind === "file" ? row.file : null;
+            const isSelected = file !== null && selectedFile?.path === file.path;
             const button = (
               <button
+                type="button"
                 onClick={(e) => {
-                  if (e.metaKey && worktreePath) {
+                  if (row.kind === "directory") {
+                    setCollapsedDirectories((current) => {
+                      const next = new Set(current);
+                      if (next.has(row.path)) next.delete(row.path);
+                      else next.add(row.path);
+                      return next;
+                    });
+                  } else if (e.metaKey && worktreePath) {
                     e.stopPropagation();
-                    openFileInEditor(`${worktreePath}/${file.path}`);
+                    openFileInEditor(`${worktreePath}/${row.file.path}`);
                   } else {
-                    selectFile(file);
+                    selectFile(row.file);
                   }
                 }}
-                className={`w-full px-3.5 py-1.5 text-left font-mono text-sm flex items-center gap-1.5 transition-colors truncate ${
+                aria-expanded={isDirectory ? !isCollapsed : undefined}
+                title={row.kind === "directory" ? row.path : row.file.path}
+                className={`w-full pr-3.5 py-1.5 text-left font-mono text-sm flex items-center gap-1.5 transition-colors ${
                   isSelected ? "text-primary bg-primary/[0.06]" : "text-muted-foreground hover:bg-accent"
                 }`}
-                style={cmdHeld ? { cursor: "pointer" } : undefined}
+                style={{
+                  paddingLeft: `${0.875 + row.depth}rem`,
+                  cursor: cmdHeld && file ? "pointer" : undefined,
+                }}
               >
-                <span className={`text-sm font-semibold w-3 text-center shrink-0 ${statusColor[file.status] || ""}`}>
-                  {file.status}
-                </span>
-                {basename(file.path)}
+                {row.kind === "directory" ? (
+                  <>
+                    {isCollapsed ? (
+                      <ChevronRight aria-hidden="true" className="size-3.5 shrink-0" />
+                    ) : (
+                      <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+                    )}
+                    {isCollapsed ? (
+                      <Folder aria-hidden="true" className="size-3.5 shrink-0" />
+                    ) : (
+                      <FolderOpen aria-hidden="true" className="size-3.5 shrink-0" />
+                    )}
+                  </>
+                ) : (
+                  <span className={`text-sm font-semibold w-3 text-center shrink-0 ${statusColor[row.file.status] || ""}`}>
+                    {row.file.status}
+                  </span>
+                )}
+                <span className="truncate">{row.name}</span>
               </button>
             );
             return (
               <div
-                key={file.path}
+                key={row.kind === "directory" ? `directory:${row.path}` : `file:${row.file.path}`}
                 data-index={virtualRow.index}
                 ref={filesVirtualizer.measureElement}
                 style={{
@@ -640,7 +738,7 @@ export function CommitPanel() {
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                {worktreePath ? (
+                {worktreePath && file ? (
                   <ChangedFileContextMenu worktreePath={worktreePath} filePath={file.path}>
                     {button}
                   </ChangedFileContextMenu>
