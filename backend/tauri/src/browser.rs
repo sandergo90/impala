@@ -20,6 +20,24 @@ pub struct TabState {
 #[derive(Default)]
 pub struct BrowserRegistry(pub Mutex<HashMap<String, TabState>>);
 
+/// A shell-owned rectangle (logical px, window coords) that keeps its clicks
+/// even where a browser underlay region overlaps it — e.g. toasts drawn over
+/// a pane. Published by the frontend, consulted by the native hit-test router.
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+pub struct ShellHitRegion {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl ShellHitRegion {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn contains(self, x: f64, y: f64) -> bool {
+        x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
+    }
+}
+
 static BROWSER_UNDERLAY_READY: AtomicBool = AtomicBool::new(false);
 
 /// Console capture: shims console.*, window.onerror, and unhandledrejection
@@ -313,6 +331,17 @@ pub fn browser_set_overlay_active(active: bool) {
     }
     #[cfg(target_os = "macos")]
     native::set_overlay_active(active);
+}
+
+#[tauri::command]
+pub fn browser_set_shell_regions(regions: Vec<ShellHitRegion>) {
+    if !underlay_ready() {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    native::set_shell_regions(regions);
+    #[cfg(not(target_os = "macos"))]
+    drop(regions);
 }
 
 #[tauri::command]
@@ -1182,6 +1211,8 @@ mod native {
     use objc2_web_kit::WKWebView;
     use tauri::{AppHandle, Manager, Webview};
 
+    use super::ShellHitRegion;
+
     #[derive(Clone, Copy, Debug, Default)]
     struct BrowserRegion {
         x: f64,
@@ -1210,11 +1241,19 @@ mod native {
         overlay_active: bool,
         next_activation_serial: u64,
         regions: HashMap<String, BrowserRegion>,
+        shell_regions: Vec<ShellHitRegion>,
     }
 
     impl UnderlayRouting {
         fn browser_view_at(&self, x: f64, y: f64) -> Option<usize> {
             if self.overlay_active {
+                return None;
+            }
+            if self
+                .shell_regions
+                .iter()
+                .any(|region| region.contains(x, y))
+            {
                 return None;
             }
             self.regions
@@ -1373,6 +1412,12 @@ mod native {
     pub fn set_overlay_active(active: bool) {
         if let Ok(mut state) = routing().lock() {
             state.overlay_active = active;
+        }
+    }
+
+    pub fn set_shell_regions(regions: Vec<ShellHitRegion>) {
+        if let Ok(mut state) = routing().lock() {
+            state.shell_regions = regions;
         }
     }
 
@@ -2009,6 +2054,22 @@ mod native {
             routing.overlay_active = true;
 
             assert_eq!(routing.browser_view_at(200.0, 200.0), None);
+        }
+
+        #[test]
+        fn shell_regions_keep_their_rectangles_clickable_in_the_shell() {
+            let mut routing = routing_with_visible_region();
+            routing.shell_regions = vec![super::ShellHitRegion {
+                x: 300.0,
+                y: 200.0,
+                width: 150.0,
+                height: 60.0,
+            }];
+
+            // A toast drawn over the browser keeps its clicks in the shell…
+            assert_eq!(routing.browser_view_at(320.0, 220.0), None);
+            // …while the rest of the pane still routes to the page.
+            assert_eq!(routing.browser_view_at(150.0, 100.0), Some(42));
         }
 
         #[test]

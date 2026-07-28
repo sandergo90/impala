@@ -1,5 +1,8 @@
 import { invoke } from "@/lib/invoke";
-import { hasShellOwnedOverlay } from "@/lib/browser-underlay";
+import {
+  collectShellHitRegions,
+  hasShellOwnedOverlay,
+} from "@/lib/browser-underlay";
 import { useUIStore } from "@/store";
 import { resolveThemeById } from "@/themes/apply";
 import { useMountEffect } from "./useMountEffect";
@@ -77,7 +80,27 @@ export function useBrowserUnderlayBridge() {
           }
         };
 
-        const observer = new MutationObserver(syncOverlayOwnership);
+        // Toasts float over browser panes without occluding them, so instead
+        // of hiding the native view their rectangles are published to the
+        // hit-test router. Sent only on change; the interval catches
+        // animation/stack-expansion moves that mutate no observed attribute.
+        let lastShellRegions = "";
+        const syncShellRegions = () => {
+          if (!enabled) return;
+          const regions = collectShellHitRegions(document);
+          const serialized = JSON.stringify(regions);
+          if (serialized === lastShellRegions) return;
+          lastShellRegions = serialized;
+          invoke("browser_set_shell_regions", { regions }).catch(() => {});
+        };
+        const shellRegionInterval = enabled
+          ? setInterval(syncShellRegions, 500)
+          : undefined;
+
+        const observer = new MutationObserver(() => {
+          syncOverlayOwnership();
+          syncShellRegions();
+        });
         observer.observe(document.body, {
           childList: true,
           subtree: true,
@@ -102,12 +125,19 @@ export function useBrowserUnderlayBridge() {
         });
         syncBackdrop();
         syncOverlayOwnership();
+        syncShellRegions();
 
         cleanup = () => {
           observer.disconnect();
           unsubscribe();
+          if (shellRegionInterval !== undefined) {
+            clearInterval(shellRegionInterval);
+          }
           if (enabled) {
             invoke("browser_set_overlay_active", { active: false }).catch(
+              () => {},
+            );
+            invoke("browser_set_shell_regions", { regions: [] }).catch(
               () => {},
             );
           }

@@ -2131,6 +2131,7 @@ pub fn run() {
             browser::browser_open,
             browser::browser_underlay_enabled,
             browser::browser_set_overlay_active,
+            browser::browser_set_shell_regions,
             browser::browser_set_underlay_backdrop,
             browser::browser_set_bounds,
             browser::browser_set_visible,

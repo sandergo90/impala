@@ -4,6 +4,7 @@ import {
   browserPaneShowsUnderlay,
   browserNativeVisible,
   hasShellOwnedOverlay,
+  collectShellHitRegions,
 } from "./browser-underlay";
 
 describe("browser underlay visibility", () => {
@@ -125,5 +126,29 @@ describe("shell overlay ownership", () => {
     const root = { querySelector: () => null };
 
     expect(hasShellOwnedOverlay(root)).toBe(false);
+  });
+});
+
+describe("collectShellHitRegions", () => {
+  const element = (rect) => ({ getBoundingClientRect: () => rect });
+
+  test("measures visible toasts and skips collapsed ones", () => {
+    const root = {
+      querySelectorAll: (selector) => {
+        expect(selector).toBe("[data-sonner-toast]");
+        return [
+          element({ x: 900, y: 700, width: 356, height: 60 }),
+          element({ x: 900, y: 700, width: 0, height: 0 }),
+        ];
+      },
+    };
+
+    expect(collectShellHitRegions(root)).toEqual([
+      { x: 900, y: 700, width: 356, height: 60 },
+    ]);
+  });
+
+  test("returns an empty list when no toasts are mounted", () => {
+    expect(collectShellHitRegions({ querySelectorAll: () => [] })).toEqual([]);
   });
 });
