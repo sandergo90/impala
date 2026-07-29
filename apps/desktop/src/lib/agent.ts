@@ -54,7 +54,7 @@ function buildAgentCommand(
   return parts.join(" ");
 }
 
-/** Resume a completed global automation in a view-scoped interactive PTY. */
+/** Build the direct command for a completed global automation's interactive PTY. */
 export function buildAutomationResumeCommand(
   agent: Agent,
   flags: string,
@@ -63,7 +63,7 @@ export function buildAutomationResumeCommand(
 ): string {
   const args =
     agent === "codex" ? ["resume", sessionId] : ["--resume", sessionId];
-  return `${buildAgentCommand(agent, flags, args, env)}; exit\n`;
+  return buildAgentCommand(agent, flags, args, env);
 }
 
 function shellQuote(s: string): string {

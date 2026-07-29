@@ -16,6 +16,23 @@ import {
 import { useUIStore } from "../store";
 import { useDataStore } from "../store";
 
+const AUTOMATION_RESUME_STARTUP_TIMEOUT_MS = 5_000;
+const AUTOMATION_RESUME_STARTUP_POLL_MS = 50;
+
+async function awaitAutomationResumeStartup(sessionId: string): Promise<void> {
+  const deadline = Date.now() + AUTOMATION_RESUME_STARTUP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const [buffer, isAlive] = await Promise.all([
+      invoke<string>("pty_get_buffer", { sessionId }).catch(() => ""),
+      invoke<boolean>("pty_is_alive", { sessionId }).catch(() => true),
+    ]);
+    if (buffer || !isAlive) return;
+    await new Promise((resolve) =>
+      setTimeout(resolve, AUTOMATION_RESUME_STARTUP_POLL_MS),
+    );
+  }
+}
+
 /**
  * Launch the primary agent in a worktree whose pane is not mounted (the
  * automation executor's path). Mirrors TabbedTerminals' spawn recipe — same
@@ -115,10 +132,13 @@ export async function launchAutomationResume(opts: {
     shell_args: string[];
     env: Record<string, string>;
   }>("prepare_shell_launch");
+  const flags = await resolveFlags(agent, worktreePath);
   const isNew = await invoke<boolean>("pty_spawn", {
     sessionId: ptyId,
     cwd: worktreePath,
-    command: null,
+    command: [
+      buildAutomationResumeCommand(agent, flags, sessionId, extraEnv),
+    ],
     shellPath: launch.shell_path,
     shellArgs: launch.shell_args,
     envVars: {
@@ -131,18 +151,7 @@ export async function launchAutomationResume(opts: {
     },
   });
   if (isNew) {
-    const flags = await resolveFlags(agent, worktreePath);
-    const cmd = buildAutomationResumeCommand(
-      agent,
-      flags,
-      sessionId,
-      extraEnv,
-    );
-    await awaitShellReady(ptyId);
-    await invoke("pty_write", {
-      sessionId: ptyId,
-      data: encodePtyInput(cmd),
-    });
+    await awaitAutomationResumeStartup(ptyId);
   }
   return ptyId;
 }

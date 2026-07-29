@@ -1032,7 +1032,7 @@ function GlobalAutomationTerminal({
     <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
       {resumeState.status === "error"
         ? resumeState.message
-        : "Resuming agent session..."}
+        : "Opening agent session..."}
     </div>
   );
 }

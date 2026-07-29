@@ -18,12 +18,12 @@ describe("global automation commands", () => {
     );
   });
 
-  test("resumes each provider interactively and closes the shell afterward", () => {
+  test("builds direct resume commands without an echoed shell exit", () => {
     expect(buildAutomationResumeCommand("codex", "--yolo", "session-1")).toBe(
-      "codex --yolo 'resume' 'session-1'; exit\n",
+      "codex --yolo 'resume' 'session-1'",
     );
     expect(buildAutomationResumeCommand("claude", "", "session-2")).toBe(
-      "claude '--resume' 'session-2'; exit\n",
+      "claude '--resume' 'session-2'",
     );
   });
 });
