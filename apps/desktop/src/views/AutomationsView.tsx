@@ -28,6 +28,7 @@ import {
 } from "../lib/pane-ids";
 import { launchAutomationResume } from "../lib/agent-launch";
 import { cleanupWorktreeForDeletion } from "../lib/worktree-cleanup";
+import { createDeferredCleanupScheduler } from "../lib/deferred-cleanup";
 import { AUTOMATIONS_PROJECT } from "../lib/automations-project";
 import { acknowledgeAutomationRun } from "../lib/automation-run-acknowledgement";
 import { selectWorktree } from "../hooks/useWorktreeActions";
@@ -905,6 +906,7 @@ function GlobalAutomationTerminal({
   claimed: boolean;
   onClaimReleased: (runId: string) => void;
 }) {
+  const claimedCleanupRef = useRef(createDeferredCleanupScheduler());
   const [resumeState, setResumeState] = useState<
     | { status: "starting" }
     | { status: "finishing" }
@@ -918,13 +920,16 @@ function GlobalAutomationTerminal({
 
   useMountEffect(() => {
     if (claimed) {
+      claimedCleanupRef.current.cancelPendingCleanup();
       return () => {
-        releaseCachedTerminal(executionPtyId);
-        onClaimReleased(run.id);
-        invoke("release_global_automation_run", {
-          worktreePath: worktree.path,
-        }).catch((error) => {
-          console.error("Failed to release global automation run:", error);
+        claimedCleanupRef.current.scheduleCleanup(() => {
+          releaseCachedTerminal(executionPtyId);
+          onClaimReleased(run.id);
+          invoke("release_global_automation_run", {
+            worktreePath: worktree.path,
+          }).catch((error) => {
+            console.error("Failed to release global automation run:", error);
+          });
         });
       };
     }
