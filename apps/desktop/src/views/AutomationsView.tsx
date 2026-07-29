@@ -20,6 +20,7 @@ import { ResizablePanel } from "../components/ResizablePanel";
 import { XtermTerminal } from "../components/XtermTerminal";
 import { AGENT_PANE_ID, agentPtySessionId } from "../lib/pane-ids";
 import { AUTOMATIONS_PROJECT } from "../lib/automations-project";
+import { acknowledgeAutomationRun } from "../lib/automation-run-acknowledgement";
 import { selectWorktree } from "../hooks/useWorktreeActions";
 import {
   AUTOMATION_TEMPLATES,
@@ -205,8 +206,21 @@ export function AutomationsView() {
 
   const projects = useDataStore((s) => s.projects);
 
-  const markRunSeen = useCallback((runId: string) => {
-    invoke("mark_automation_run_seen", { runId }).catch(() => {});
+  const acknowledgeRun = useCallback((run: AutomationRun) => {
+    acknowledgeAutomationRun(
+      run,
+      (runId) => {
+        invoke("mark_automation_run_seen", { runId }).catch(() => {});
+      },
+      (worktreePath) => {
+        const state =
+          useDataStore.getState().worktreeDataStates[worktreePath];
+        if (!state?.hasUnseenResult) return;
+        useDataStore.getState().updateWorktreeDataState(worktreePath, {
+          hasUnseenResult: false,
+        });
+      },
+    );
   }, []);
 
   const openRunWorktree = useCallback(
@@ -218,7 +232,7 @@ export function AutomationsView() {
         );
         if (existingWorktree) {
           setInspectedWorktree(existingWorktree);
-          markRunSeen(run.id);
+          acknowledgeRun(run);
           return;
         }
         if (automation?.repo_path === "") {
@@ -236,12 +250,12 @@ export function AutomationsView() {
           return;
         }
         setInspectedWorktree(wt);
-        markRunSeen(run.id);
+        acknowledgeRun(run);
       } catch (e) {
         toast.error(`Failed to open worktree: ${e}`);
       }
     },
-    [automationWorktrees, markRunSeen, project],
+    [acknowledgeRun, automationWorktrees, project],
   );
 
   // The full diff experience — annotations, viewed tracking, commit panel —
@@ -270,7 +284,7 @@ export function AutomationsView() {
         const run = runs.find(
           (candidate) => candidate.worktree_path === worktree.path,
         );
-        if (run) markRunSeen(run.id);
+        if (run) acknowledgeRun(run);
         useUIStore.getState().setSelectedProject(target);
         useDataStore.getState().setWorktrees(worktrees);
         useUIStore.getState().setGeneralTerminalActive(false);
@@ -279,7 +293,7 @@ export function AutomationsView() {
         toast.error(`Failed to open review: ${e}`);
       }
     },
-    [markRunSeen, projects, runs],
+    [acknowledgeRun, projects, runs],
   );
 
   const openCreate = (template: AutomationTemplate | null) => {
