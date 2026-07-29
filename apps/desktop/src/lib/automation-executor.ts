@@ -82,7 +82,14 @@ async function executeRun({
   worktree_path,
 }: AutomationDueEvent) {
   try {
+    if (
+      !(await invoke<boolean>("automation_run_is_active", { runId: run_id }))
+    ) {
+      return;
+    }
+
     let runPath: string;
+    let projectWorktree: Worktree | undefined;
     if (worktree_path) {
       // Recovery after the run directory/worktree was allocated but before
       // launch was reported. Reuse it so the immutable instructions keep the
@@ -116,6 +123,7 @@ async function executeRun({
         automationRunId: run_id,
       });
       runPath = worktree.path;
+      projectWorktree = worktree;
 
       // Sidebar list refresh — only meaningful when this project is selected.
       if (useUIStore.getState().selectedProject?.path === automation.repo_path) {
@@ -124,14 +132,50 @@ async function executeRun({
         });
         useDataStore.getState().setWorktrees(wts);
       }
+    }
 
-      runSetupScript(automation.repo_path, worktree).catch(() => {});
+    // Deletion pauses the automation before taking its cleanup snapshot. A
+    // dispatch already queued in the frontend may still have allocated this
+    // path, so recheck after allocation and remove it instead of launching.
+    if (
+      !(await invoke<boolean>("automation_run_is_active", { runId: run_id }))
+    ) {
+      if (automation.repo_path === "") {
+        await invoke("delete_automation_run_dir", { worktreePath: runPath });
+      } else {
+        await invoke("run_teardown_script", {
+          repoPath: automation.repo_path,
+          worktreePath: runPath,
+        }).catch(() => {});
+        await invoke("delete_worktree", {
+          repoPath: automation.repo_path,
+          worktreePath: runPath,
+          force: true,
+        });
+      }
+      return;
+    }
+
+    if (projectWorktree) {
+      runSetupScript(automation.repo_path, projectWorktree).catch(() => {});
     }
 
     await invoke("finalize_automation_run_instructions", {
       runId: run_id,
       worktreePath: runPath,
     });
+
+    // One-shot global commands can finish quickly. Mark the row launched
+    // before writing the command so a provider Stop hook cannot arrive while
+    // the row is still pending and miss the completion transition.
+    if (automation.repo_path === "") {
+      await invoke("report_automation_run", {
+        runId: run_id,
+        worktreePath: runPath,
+        status: "launched",
+        error: null,
+      });
+    }
 
     await launchAgentHeadless({
       worktreePath: runPath,
@@ -140,14 +184,17 @@ async function executeRun({
       projectPath: automation.repo_path || runPath,
       agent: automation.agent,
       prompt: `Read and execute the automation instructions in \`${instructions_path}\`.`,
+      oneShot: automation.repo_path === "",
     });
 
-    await invoke("report_automation_run", {
-      runId: run_id,
-      worktreePath: runPath,
-      status: "launched",
-      error: null,
-    });
+    if (automation.repo_path !== "") {
+      await invoke("report_automation_run", {
+        runId: run_id,
+        worktreePath: runPath,
+        status: "launched",
+        error: null,
+      });
+    }
 
     // Refresh the virtual Automations project's run list if it's on screen —
     // after the report, since the listing reads worktree_path off the run row.

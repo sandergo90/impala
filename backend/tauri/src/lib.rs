@@ -454,6 +454,24 @@ async fn create_worktree(
     .await
     .map_err(|e| format!("Task join error: {}", e))??;
 
+    if let Some(run_id) = automation_run_id.as_deref() {
+        let assignment = {
+            let conn = state
+                .0
+                .lock()
+                .map_err(|e| format!("DB lock error: {}", e))?;
+            automations::assign_run_worktree(&conn, run_id, &worktree.path)
+        };
+        if let Err(error) = assignment {
+            let repo = repo_path.clone();
+            let path = worktree.path.clone();
+            let _ =
+                tokio::task::spawn_blocking(move || git::delete_worktree(&repo, &path, true, true))
+                    .await;
+            return Err(error);
+        }
+    }
+
     {
         let conn = state
             .0
@@ -469,9 +487,6 @@ async fn create_worktree(
             };
             worktrees::upsert_title(&conn, &worktree.path, &title)?;
             worktree.title = Some(title);
-        }
-        if let Some(run_id) = automation_run_id.as_deref() {
-            automations::assign_run_worktree(&conn, run_id, &worktree.path)?;
         }
     }
 
@@ -2042,6 +2057,8 @@ pub fn run() {
             automations::create_automation,
             automations::update_automation,
             automations::delete_automation,
+            automations::prepare_automation_deletion,
+            automations::automation_run_is_active,
             automations::set_automation_enabled,
             automations::run_automation_now,
             automations::list_automation_runs,

@@ -61,6 +61,9 @@ pub struct AutomationRun {
     pub status: String,
     pub error: Option<String>,
     pub created_at: String,
+    pub agent_provider: Option<String>,
+    pub agent_session_id: Option<String>,
+    pub agent_turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,6 +72,12 @@ pub struct AutomationDueEvent {
     pub automation: Automation,
     pub instructions_path: String,
     pub worktree_path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AutomationDeletionPlan {
+    pub automation: Automation,
+    pub runs: Vec<AutomationRun>,
 }
 
 const RUN_STATUSES: &[&str] = &[
@@ -91,6 +100,7 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             agent TEXT NOT NULL,
             schedule TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
+            deleting INTEGER NOT NULL DEFAULT 0,
             next_run_at INTEGER NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -139,6 +149,10 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
     );
     let _ = conn.execute(
         "ALTER TABLE automation_runs ADD COLUMN agent_turn_id TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE automations ADD COLUMN deleting INTEGER NOT NULL DEFAULT 0",
         [],
     );
     retry_orphaned_instruction_cleanup(conn)?;
@@ -212,11 +226,14 @@ fn row_to_run(row: &rusqlite::Row) -> rusqlite::Result<AutomationRun> {
         status: row.get(5)?,
         error: row.get(6)?,
         created_at: row.get(7)?,
+        agent_provider: row.get(8)?,
+        agent_session_id: row.get(9)?,
+        agent_turn_id: row.get(10)?,
     })
 }
 
 const RUN_COLS: &str =
-    "id, automation_id, scheduled_for, worktree_path, instructions_path, status, error, created_at";
+    "id, automation_id, scheduled_for, worktree_path, instructions_path, status, error, created_at, agent_provider, agent_session_id, agent_turn_id";
 
 fn get_run(conn: &Connection, id: &str) -> Result<AutomationRun, String> {
     conn.query_row(
@@ -293,6 +310,23 @@ pub fn update_automation_row(
 }
 
 pub fn delete_automation_row(conn: &Connection, id: &str) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT agent_session_id
+             FROM automation_runs
+             WHERE automation_id = ?1
+               AND agent_provider = 'claude'
+               AND agent_session_id IS NOT NULL",
+        )
+        .map_err(|e| format!("Failed to prepare automation session cleanup: {}", e))?;
+    let claude_session_ids = stmt
+        .query_map(params![id], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Failed to query automation sessions: {}", e))?
+        .collect::<Result<std::collections::HashSet<_>, _>>()
+        .map_err(|e| format!("Failed to read automation sessions: {}", e))?;
+    drop(stmt);
+    remove_claude_session_artifacts(&claude_session_ids)?;
+
     let instruction_artifacts = instruction_artifacts_for_automation(conn, id)?;
     for artifact in &instruction_artifacts {
         remove_run_instructions(&artifact.run_id, &artifact.path)?;
@@ -311,6 +345,61 @@ pub fn delete_automation_row(conn: &Connection, id: &str) -> Result<(), String> 
     Ok(())
 }
 
+fn remove_claude_session_artifacts(
+    session_ids: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    if session_ids.is_empty() {
+        return Ok(());
+    }
+    if session_ids
+        .iter()
+        .any(|id| uuid::Uuid::parse_str(id).is_err())
+    {
+        return Err("refusing to delete malformed Claude session id".to_string());
+    }
+    let root = dirs::home_dir()
+        .ok_or("no home dir")?
+        .join(".claude")
+        .join("projects");
+    if !root.exists() {
+        return Ok(());
+    }
+    remove_claude_session_artifacts_below(&root, session_ids)
+}
+
+fn remove_claude_session_artifacts_below(
+    dir: &Path,
+    session_ids: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir)
+        .map_err(|e| format!("Failed to read Claude session directory: {}", e))?
+    {
+        let entry = entry.map_err(|e| format!("Failed to read Claude session entry: {}", e))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to inspect Claude session artifact: {}", e))?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if file_type.is_dir() {
+            if session_ids.contains(name.as_ref()) {
+                std::fs::remove_dir_all(&path)
+                    .map_err(|e| format!("Failed to delete Claude session artifacts: {}", e))?;
+            } else {
+                remove_claude_session_artifacts_below(&path, session_ids)?;
+            }
+        } else if file_type.is_file()
+            && name
+                .strip_suffix(".jsonl")
+                .is_some_and(|id| session_ids.contains(id))
+        {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("Failed to delete Claude session transcript: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
 pub fn set_enabled_row(conn: &Connection, id: &str, enabled: bool, now: i64) -> Result<(), String> {
     let existing = get_automation(conn, id)?;
     // Resuming recomputes from now — occurrences missed while paused are
@@ -322,7 +411,12 @@ pub fn set_enabled_row(conn: &Connection, id: &str, enabled: bool, now: i64) -> 
     };
     let ts = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE automations SET enabled = ?1, next_run_at = ?2, updated_at = ?3 WHERE id = ?4",
+        "UPDATE automations
+         SET enabled = ?1,
+             deleting = CASE WHEN ?1 = 1 THEN 0 ELSE deleting END,
+             next_run_at = ?2,
+             updated_at = ?3
+         WHERE id = ?4",
         params![enabled as i64, next_run_at, ts, id],
     )
     .map_err(|e| format!("Failed to set enabled: {}", e))?;
@@ -379,6 +473,9 @@ pub fn insert_run(
         status: "pending".to_string(),
         error: None,
         created_at: ts,
+        agent_provider: None,
+        agent_session_id: None,
+        agent_turn_id: None,
     }))
 }
 
@@ -1463,6 +1560,35 @@ pub fn delete_automation(
         .0
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
+    let deleting: bool = conn
+        .query_row(
+            "SELECT deleting FROM automations WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|_| format!("Automation not found: {}", id))?;
+    if !deleting {
+        return Err("automation deletion was not prepared".to_string());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT worktree_path
+             FROM automation_runs
+             WHERE automation_id = ?1 AND worktree_path IS NOT NULL",
+        )
+        .map_err(|e| format!("Failed to prepare automation resource check: {}", e))?;
+    let paths = stmt
+        .query_map(params![id], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Failed to query automation resources: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read automation resources: {}", e))?;
+    drop(stmt);
+    if let Some(path) = paths.iter().find(|path| Path::new(path).exists()) {
+        return Err(format!(
+            "automation resource still exists and must be removed first: {}",
+            path
+        ));
+    }
     delete_automation_row(&conn, &id)?;
     let _ = app.emit("automations-changed", ());
     let _ = app.emit("automation-runs-changed", ());
@@ -1496,6 +1622,16 @@ pub fn run_automation_now(
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
     let automation = get_automation(&conn, &id)?;
+    let deleting: bool = conn
+        .query_row(
+            "SELECT deleting FROM automations WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Failed to check automation state: {}", e))?;
+    if deleting {
+        return Err("automation is being deleted".to_string());
+    }
     // Deliberately does not touch next_run_at — an ad-hoc run leaves the
     // cadence alone.
     dispatch(&app, &conn, &automation, chrono::Utc::now().timestamp())
@@ -1520,6 +1656,74 @@ pub fn list_automation_runs(
         .map_err(|e| format!("Failed to query runs: {}", e))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("Failed to read run: {}", e))
+}
+
+fn prepare_automation_deletion_row(
+    conn: &Connection,
+    id: &str,
+    now: i64,
+) -> Result<AutomationDeletionPlan, String> {
+    let automation = get_automation(conn, id)?;
+    set_enabled_row(conn, id, false, now)?;
+    conn.execute(
+        "UPDATE automations SET deleting = 1 WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("Failed to mark automation for deletion: {}", e))?;
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {RUN_COLS} FROM automation_runs
+             WHERE automation_id = ?1
+             ORDER BY created_at DESC, scheduled_for DESC"
+        ))
+        .map_err(|e| format!("Failed to prepare automation deletion: {}", e))?;
+    let runs = stmt
+        .query_map(params![id], row_to_run)
+        .map_err(|e| format!("Failed to query automation deletion runs: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read automation deletion runs: {}", e))?;
+    Ok(AutomationDeletionPlan { automation, runs })
+}
+
+#[tauri::command]
+pub fn prepare_automation_deletion(
+    app: AppHandle,
+    state: tauri::State<'_, crate::DbState>,
+    id: String,
+) -> Result<AutomationDeletionPlan, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let plan = prepare_automation_deletion_row(&conn, &id, chrono::Utc::now().timestamp())?;
+    let _ = app.emit("automations-changed", ());
+    Ok(plan)
+}
+
+fn automation_run_is_active_row(conn: &Connection, run_id: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM automation_runs r
+            JOIN automations a ON a.id = r.automation_id
+            WHERE r.id = ?1 AND a.deleting = 0
+        )",
+        params![run_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("Failed to check automation run state: {}", e))
+}
+
+#[tauri::command]
+pub fn automation_run_is_active(
+    state: tauri::State<'_, crate::DbState>,
+    run_id: String,
+) -> Result<bool, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    automation_run_is_active_row(&conn, &run_id)
 }
 
 #[tauri::command]
@@ -1581,7 +1785,11 @@ pub fn prepare_automation_run_dir(
         .0
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
-    assign_run_worktree(&conn, &run_id, &path)?;
+    if let Err(error) = assign_run_worktree(&conn, &run_id, &path) {
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&path);
+        return Err(error);
+    }
     Ok(path)
 }
 
@@ -2290,5 +2498,56 @@ mod tests {
             .contains("immutable automation instructions are missing"));
         assert!(!instructions_path.exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn claude_session_cleanup_removes_only_matching_artifacts() {
+        let root = std::env::temp_dir().join(format!(
+            "impala-claude-session-cleanup-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let project = root.join("project");
+        let session_id = "11111111-2222-3333-4444-555555555555";
+        let other_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        std::fs::create_dir_all(project.join(session_id).join("subagents")).unwrap();
+        std::fs::write(project.join(format!("{session_id}.jsonl")), "session").unwrap();
+        std::fs::write(project.join(format!("{other_id}.jsonl")), "other").unwrap();
+
+        remove_claude_session_artifacts_below(
+            &root,
+            &[session_id.to_string()].into_iter().collect(),
+        )
+        .unwrap();
+
+        assert!(!project.join(format!("{session_id}.jsonl")).exists());
+        assert!(!project.join(session_id).exists());
+        assert!(project.join(format!("{other_id}.jsonl")).exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deletion_plan_pauses_dispatch_and_includes_more_than_ui_history_limit() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(&conn, new_automation("0 9 * * *"), now).unwrap();
+        let mut first_run_id = String::new();
+        for offset in 0..201 {
+            let run = insert_run(&conn, &automation.id, now + offset)
+                .unwrap()
+                .unwrap();
+            if offset == 0 {
+                first_run_id = run.id;
+            }
+        }
+        assert!(automation_run_is_active_row(&conn, &first_run_id).unwrap());
+        set_enabled_row(&conn, &automation.id, false, now + 250).unwrap();
+        assert!(automation_run_is_active_row(&conn, &first_run_id).unwrap());
+        set_enabled_row(&conn, &automation.id, true, now + 260).unwrap();
+
+        let plan = prepare_automation_deletion_row(&conn, &automation.id, now + 300).unwrap();
+
+        assert_eq!(plan.runs.len(), 201);
+        assert!(!automation_run_is_active_row(&conn, &first_run_id).unwrap());
+        assert!(!get_automation(&conn, &automation.id).unwrap().enabled);
     }
 }

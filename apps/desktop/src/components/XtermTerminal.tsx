@@ -104,6 +104,7 @@ interface CachedTerminal {
   writeQueue: Uint8Array[];
   writeScheduled: boolean;
   isFocusedRef: { current: boolean };
+  readOnlyRef: { current: boolean };
 }
 
 const terminalCache = new Map<string, CachedTerminal>();
@@ -258,10 +259,11 @@ async function createCachedTerminal(
     writeQueue: [],
     writeScheduled: false,
     isFocusedRef: { current: true },
+    readOnlyRef: { current: false },
   };
 
   function writeToPty(text: string) {
-    if (entry.exitedRef.current) return;
+    if (entry.exitedRef.current || entry.readOnlyRef.current) return;
     const encoded = encodePtyInput(text);
     invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
     if (isTerminalInterruptInput(text)) {
@@ -440,6 +442,7 @@ interface XtermTerminalProps {
   fileLinkTopTabId?: string;
   fileLinkGroupId?: string;
   scrollback?: number;
+  readOnly?: boolean;
 }
 
 function XtermTerminalInner({
@@ -454,6 +457,7 @@ function XtermTerminalInner({
   fileLinkTopTabId,
   fileLinkGroupId,
   scrollback = 10000,
+  readOnly = false,
 }: XtermTerminalProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const entryRef = useRef<CachedTerminal | null>(null);
@@ -518,6 +522,8 @@ function XtermTerminalInner({
         fileLinkTopTabId && fileLinkGroupId
           ? { topTabId: fileLinkTopTabId, groupId: fileLinkGroupId }
           : null;
+      entry.readOnlyRef.current = readOnly;
+      entry.terminal.options.disableStdin = readOnly;
       entry.onInterruptHandler = () => onInterruptRef.current?.();
       entry.onOpenUrlHandler = (url) => {
         const handler = onOpenUrlRef.current;
@@ -639,7 +645,9 @@ function XtermTerminalInner({
       fileLinkTopTabId && fileLinkGroupId
         ? { topTabId: fileLinkTopTabId, groupId: fileLinkGroupId }
         : null;
-  }, [baseDir, fileLinkGroupId, fileLinkTopTabId, sessionId]);
+    entry.readOnlyRef.current = readOnly;
+    entry.terminal.options.disableStdin = readOnly;
+  }, [baseDir, fileLinkGroupId, fileLinkTopTabId, readOnly, sessionId]);
 
   // onFocus handler lives on the host container (not the cached wrapper) so
   // each mount gets its own callback.

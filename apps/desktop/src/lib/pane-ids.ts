@@ -9,6 +9,10 @@ export function runPtySessionId(worktreePath: string): string {
   return `pty-${RUN_PANE_ID}-${worktreePath}`;
 }
 
+export function automationRunResumePtySessionId(runId: string): string {
+  return `pty-automation-resume-${runId}`;
+}
+
 export function userTabPaneId(tabId: string): string {
   return `tab-user-${tabId}`;
 }

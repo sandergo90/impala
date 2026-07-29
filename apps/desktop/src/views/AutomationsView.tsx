@@ -17,11 +17,21 @@ import {
 import { useDataStore, useUIStore } from "../store";
 import { Sidebar } from "../components/Sidebar";
 import { ResizablePanel } from "../components/ResizablePanel";
-import { XtermTerminal } from "../components/XtermTerminal";
-import { AGENT_PANE_ID, agentPtySessionId } from "../lib/pane-ids";
+import {
+  releaseCachedTerminal,
+  XtermTerminal,
+} from "../components/XtermTerminal";
+import {
+  AGENT_PANE_ID,
+  agentPtySessionId,
+  automationRunResumePtySessionId,
+} from "../lib/pane-ids";
+import { launchAutomationResume } from "../lib/agent-launch";
+import { cleanupWorktreeForDeletion } from "../lib/worktree-cleanup";
 import { AUTOMATIONS_PROJECT } from "../lib/automations-project";
 import { acknowledgeAutomationRun } from "../lib/automation-run-acknowledgement";
 import { selectWorktree } from "../hooks/useWorktreeActions";
+import { useMountEffect } from "../hooks/useMountEffect";
 import {
   AUTOMATION_TEMPLATES,
   type AutomationTemplate,
@@ -203,6 +213,12 @@ export function AutomationsView() {
     return map;
   }, [runs]);
   const selected = automations.find((a) => a.id === selectedId) ?? null;
+  const inspectedRun = inspectedWorktree
+    ? runs.find((run) => run.worktree_path === inspectedWorktree.path)
+    : undefined;
+  const inspectedAutomation = automations.find(
+    (automation) => automation.id === inspectedRun?.automation_id,
+  );
 
   const projects = useDataStore((s) => s.projects);
 
@@ -301,6 +317,63 @@ export function AutomationsView() {
     setSelectedId(null);
     setCreating({ template });
   };
+
+  const deleteAutomation = useCallback(async (automation: Automation) => {
+    // Pause first so the scheduler cannot allocate another run while its
+    // existing resources are being removed. Rows remain intact until every
+    // process and directory has been handled, making a failed delete retryable.
+    const plan = await invoke<{
+      automation: Automation;
+      runs: AutomationRun[];
+    }>("prepare_automation_deletion", { id: automation.id });
+    const target = plan.automation;
+    const automationRuns = plan.runs;
+    const paths = [
+      ...new Set(
+        automationRuns
+          .map((run) => run.worktree_path)
+          .filter((path): path is string => !!path),
+      ),
+    ];
+    const existingWorktrees =
+      target.repo_path === ""
+        ? await invoke<Worktree[]>("list_automation_run_worktrees")
+        : await invoke<Worktree[]>("list_worktrees", {
+            repoPath: target.repo_path,
+          });
+    const existingPaths = new Set(
+      existingWorktrees.map((worktree) => worktree.path),
+    );
+
+    for (const worktreePath of paths) {
+      const resumeSessionIds = automationRuns
+        .filter((candidate) => candidate.worktree_path === worktreePath)
+        .map((run) => automationRunResumePtySessionId(run.id));
+      await cleanupWorktreeForDeletion(
+        worktreePath,
+        resumeSessionIds,
+        true,
+      );
+      if (!existingPaths.has(worktreePath)) continue;
+
+      if (target.repo_path === "") {
+        await invoke("delete_automation_run_dir", { worktreePath });
+      } else {
+        await invoke("run_teardown_script", {
+          repoPath: target.repo_path,
+          worktreePath,
+        }).catch((error) => {
+          toast.error(`Teardown script failed: ${error}`);
+        });
+        await invoke("delete_worktree", {
+          repoPath: target.repo_path,
+          worktreePath,
+          force: true,
+        });
+      }
+    }
+    await invoke("delete_automation", { id: target.id });
+  }, []);
 
   const goBack = useCallback(() => {
     if (router.history.canGoBack()) {
@@ -597,18 +670,11 @@ export function AutomationsView() {
           >
             <AutomationWorktreePane
               worktree={inspectedWorktree}
+              run={inspectedRun}
+              automation={inspectedAutomation}
               stat={runStats[inspectedWorktree.path]}
               onReview={() =>
-                openFullReview(
-                  inspectedWorktree,
-                  automations.find(
-                    (a) =>
-                      a.id ===
-                      runs.find(
-                        (r) => r.worktree_path === inspectedWorktree.path,
-                      )?.automation_id,
-                  ),
-                )
+                openFullReview(inspectedWorktree, inspectedAutomation)
               }
               onClose={() => setInspectedWorktree(null)}
             />
@@ -650,8 +716,8 @@ export function AutomationsView() {
               <span className="font-medium text-foreground">
                 {deleting?.name}
               </span>{" "}
-              will stop firing and its run history will be removed. Worktrees
-              from past runs are untouched.
+              will stop firing. All run processes, worktrees, scratch repos,
+              instructions, and run history will be deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -659,11 +725,21 @@ export function AutomationsView() {
             <AlertDialogAction
               onClick={() => {
                 if (!deleting) return;
-                invoke("delete_automation", { id: deleting.id }).catch((e) =>
-                  toast.error(String(e)),
-                );
-                setSelectedId(null);
-                setDeleting(null);
+                const automation = deleting;
+                deleteAutomation(automation)
+                  .then(() => {
+                    if (
+                      inspectedRun?.automation_id === automation.id
+                    ) {
+                      setInspectedWorktree(null);
+                    }
+                    setSelectedId(null);
+                    setDeleting(null);
+                  })
+                  .catch((error) => {
+                    toast.error(`Failed to delete automation: ${error}`);
+                    refresh();
+                  });
               }}
             >
               Delete
@@ -677,11 +753,15 @@ export function AutomationsView() {
 
 function AutomationWorktreePane({
   worktree,
+  run,
+  automation,
   stat,
   onReview,
   onClose,
 }: {
   worktree: Worktree;
+  run: AutomationRun | undefined;
+  automation: Automation | undefined;
   stat: DiffStat | undefined;
   onReview: () => void;
   onClose: () => void;
@@ -724,24 +804,143 @@ function AutomationWorktreePane({
       </div>
 
       <div className="min-h-0 flex-1">
-        <XtermTerminal
-          sessionId={agentPtySessionId(worktree.path)}
-          baseDir={worktree.path}
-          isFocused
-          onExit={() => {
-            invoke("clear_agent_pane_status", {
-              worktreePath: worktree.path,
-              paneId: AGENT_PANE_ID,
-            }).catch(() => {});
-          }}
-          onInterrupt={() => {
-            invoke("interrupt_agent_turn", {
-              worktreePath: worktree.path,
-              paneId: AGENT_PANE_ID,
-            }).catch(() => {});
-          }}
-        />
+        {automation?.repo_path === "" && run ? (
+          <GlobalAutomationTerminal
+            key={`${run.id}:${run.status}:${run.agent_session_id ?? ""}`}
+            run={run}
+            worktree={worktree}
+            fallbackAgent={automation.agent}
+          />
+        ) : (
+          <XtermTerminal
+            sessionId={agentPtySessionId(worktree.path)}
+            baseDir={worktree.path}
+            isFocused
+            onExit={() => {
+              invoke("clear_agent_pane_status", {
+                worktreePath: worktree.path,
+                paneId: AGENT_PANE_ID,
+              }).catch(() => {});
+            }}
+            onInterrupt={() => {
+              invoke("interrupt_agent_turn", {
+                worktreePath: worktree.path,
+                paneId: AGENT_PANE_ID,
+              }).catch(() => {});
+            }}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+function GlobalAutomationTerminal({
+  run,
+  worktree,
+  fallbackAgent,
+}: {
+  run: AutomationRun;
+  worktree: Worktree;
+  fallbackAgent: Automation["agent"];
+}) {
+  const [resumeState, setResumeState] = useState<
+    | { status: "starting" }
+    | { status: "finishing" }
+    | { status: "ready"; ptyId: string }
+    | { status: "error"; message: string }
+  >({ status: "starting" });
+
+  const isRunning = run.status === "pending" || run.status === "launched";
+  const resumePtyId = automationRunResumePtySessionId(run.id);
+
+  useMountEffect(() => {
+    if (isRunning) return;
+    let disposed = false;
+
+    const start = async () => {
+      if (!run.agent_session_id) {
+        setResumeState({
+          status: "error",
+          message: "This run has no provider session to resume.",
+        });
+        return;
+      }
+      const executionPtyId = agentPtySessionId(worktree.path);
+      while (
+        !disposed &&
+        (await invoke<boolean>("pty_is_alive", {
+          sessionId: executionPtyId,
+        }))
+      ) {
+        setResumeState({ status: "finishing" });
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (disposed) return;
+      releaseCachedTerminal(executionPtyId);
+      setResumeState({ status: "starting" });
+      releaseCachedTerminal(resumePtyId);
+      await invoke("pty_kill", { sessionId: resumePtyId }).catch(() => {});
+      const ptyId = await launchAutomationResume({
+        runId: run.id,
+        worktreePath: worktree.path,
+        agent: run.agent_provider ?? fallbackAgent,
+        sessionId: run.agent_session_id,
+      });
+      if (disposed) {
+        releaseCachedTerminal(ptyId);
+        await invoke("pty_kill", { sessionId: ptyId }).catch(() => {});
+        return;
+      }
+      setResumeState({ status: "ready", ptyId });
+    };
+
+    start().catch((error) => {
+      if (!disposed) {
+        setResumeState({ status: "error", message: String(error) });
+      }
+    });
+    return () => {
+      disposed = true;
+      releaseCachedTerminal(resumePtyId);
+      invoke("pty_kill", { sessionId: resumePtyId }).catch(() => {});
+    };
+  });
+
+  if (isRunning) {
+    return (
+      <XtermTerminal
+        sessionId={agentPtySessionId(worktree.path)}
+        baseDir={worktree.path}
+        isFocused
+        readOnly
+      />
+    );
+  }
+  if (resumeState.status === "finishing") {
+    return (
+      <XtermTerminal
+        sessionId={agentPtySessionId(worktree.path)}
+        baseDir={worktree.path}
+        isFocused
+        readOnly
+      />
+    );
+  }
+  if (resumeState.status === "ready") {
+    return (
+      <XtermTerminal
+        sessionId={resumeState.ptyId}
+        baseDir={worktree.path}
+        isFocused
+      />
+    );
+  }
+  return (
+    <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
+      {resumeState.status === "error"
+        ? resumeState.message
+        : "Resuming agent session..."}
     </div>
   );
 }

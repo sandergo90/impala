@@ -2,8 +2,18 @@ import { invoke } from "@/lib/invoke";
 import { getHookPort } from "./get-hook-port";
 import { encodePtyInput } from "./encode-pty";
 import { awaitShellReady } from "./pty-ready";
-import { agentPtySessionId, AGENT_PANE_ID } from "./pane-ids";
-import { buildLaunchCommand, resolveFlags, type Agent } from "./agent";
+import {
+  agentPtySessionId,
+  AGENT_PANE_ID,
+  automationRunResumePtySessionId,
+} from "./pane-ids";
+import {
+  buildAutomationResumeCommand,
+  buildAutomationRunCommand,
+  buildLaunchCommand,
+  resolveFlags,
+  type Agent,
+} from "./agent";
 import { useUIStore } from "../store";
 import { useDataStore } from "../store";
 
@@ -18,8 +28,9 @@ export async function launchAgentHeadless(opts: {
   projectPath: string;
   agent: Agent;
   prompt: string;
+  oneShot?: boolean;
 }): Promise<void> {
-  const { worktreePath, projectPath, agent, prompt } = opts;
+  const { worktreePath, projectPath, agent, prompt, oneShot = false } = opts;
   const ptyId = agentPtySessionId(worktreePath);
   const hookPort = await getHookPort();
 
@@ -60,9 +71,11 @@ export async function launchAgentHeadless(opts: {
   });
 
   const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
-  if (isNew && !nav.agentLaunched) {
+  if (isNew && (oneShot || !nav.agentLaunched)) {
     const flags = await resolveFlags(agent, projectPath);
-    const cmd = buildLaunchCommand(agent, flags, prompt, extraEnv);
+    const cmd = oneShot
+      ? buildAutomationRunCommand(agent, flags, prompt, extraEnv)
+      : buildLaunchCommand(agent, flags, prompt, extraEnv);
     await awaitShellReady(ptyId);
     await invoke("pty_write", { sessionId: ptyId, data: encodePtyInput(cmd) });
     useUIStore
@@ -76,4 +89,64 @@ export async function launchAgentHeadless(opts: {
       data: encodePtyInput(prompt + "\r"),
     });
   }
+}
+
+/**
+ * Start a completed global run's interactive provider session. The PTY belongs
+ * to the view, not the run, and callers must kill it when the view closes.
+ */
+export async function launchAutomationResume(opts: {
+  runId: string;
+  worktreePath: string;
+  agent: Agent;
+  sessionId: string;
+}): Promise<string> {
+  const { runId, worktreePath, agent, sessionId } = opts;
+  const ptyId = automationRunResumePtySessionId(runId);
+  const hookPort = await getHookPort();
+
+  let extraEnv: Record<string, string> = {};
+  try {
+    extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
+      worktreePath,
+      agent,
+    });
+  } catch (err) {
+    console.warn("Failed to prepare agent config:", err);
+  }
+  const launch = await invoke<{
+    shell_path: string;
+    shell_args: string[];
+    env: Record<string, string>;
+  }>("prepare_shell_launch");
+  const isNew = await invoke<boolean>("pty_spawn", {
+    sessionId: ptyId,
+    cwd: worktreePath,
+    command: null,
+    shellPath: launch.shell_path,
+    shellArgs: launch.shell_args,
+    envVars: {
+      ...launch.env,
+      ...extraEnv,
+      IMPALA_HOOK_PORT: String(hookPort),
+      IMPALA_WORKTREE_PATH: worktreePath,
+      IMPALA_PANE_ID: AGENT_PANE_ID,
+      IMPALA_AGENT_PROVIDER: agent,
+    },
+  });
+  if (isNew) {
+    const flags = await resolveFlags(agent, worktreePath);
+    const cmd = buildAutomationResumeCommand(
+      agent,
+      flags,
+      sessionId,
+      extraEnv,
+    );
+    await awaitShellReady(ptyId);
+    await invoke("pty_write", {
+      sessionId: ptyId,
+      data: encodePtyInput(cmd),
+    });
+  }
+  return ptyId;
 }

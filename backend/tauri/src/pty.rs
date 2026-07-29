@@ -109,8 +109,11 @@ pub async fn pty_kill(
             session_id: session_id.clone(),
         })
         .await;
-    client.forget_session(&session_id);
-    unwrap_or_err(resp, |r| matches!(r, Response::Killed).then_some(()))
+    let result = unwrap_or_err(resp, |r| matches!(r, Response::Killed).then_some(()));
+    if result.is_ok() {
+        client.forget_session(&session_id);
+    }
+    result
 }
 
 #[tauri::command]

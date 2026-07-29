@@ -101,6 +101,9 @@ export interface AutomationRun {
   status: "pending" | "launched" | "completed" | "failed" | "aborted" | "skipped";
   error?: string | null;
   created_at: string;
+  agent_provider?: "claude" | "codex" | null;
+  agent_session_id?: string | null;
+  agent_turn_id?: string | null;
 }
 
 export type TerminalLaunchProfile = "shell" | "agent";

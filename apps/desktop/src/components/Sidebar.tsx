@@ -22,8 +22,6 @@ import {
 import { useAutomationBadge } from "../hooks/useAutomationBadge";
 import { useWorktreeRunInfo } from "../hooks/useWorktreeRunInfo";
 import { useUIStore, useDataStore, useFilteredWorktrees } from "../store";
-import { useEditorDocsStore } from "../stores/editor-docs";
-import { releaseCachedTerminal } from "./XtermTerminal";
 import { viewedFilesProvider } from "../providers/viewed-files-provider";
 import {
   selectWorktree as sharedSelectWorktree,
@@ -60,12 +58,9 @@ import { isAutomationsProject } from "../lib/automations-project";
 import { encodePtyInput } from "../lib/encode-pty";
 import {
   RUN_PANE_ID,
-  agentPtySessionId,
-  panePtySessionId,
   runPtySessionId,
 } from "../lib/pane-ids";
-import { getEffectiveUserTabSplitTree } from "../lib/tab-actions";
-import { getLeaves } from "../lib/split-tree";
+import { cleanupWorktreeForDeletion } from "../lib/worktree-cleanup";
 
 function ProjectBadge({ name, iconUrl }: { name: string; iconUrl?: string }) {
   const [iconError, setIconError] = useState(false);
@@ -558,57 +553,10 @@ export function Sidebar() {
       useUIStore.getState().setSelectedWorktree(null);
     }
 
-    // Drop any open editor docs/buffers for this worktree's file tabs.
-    const editorDocs = useEditorDocsStore.getState();
-    for (const key of Object.keys(editorDocs.docs)) {
-      if (editorDocs.docs[key]?.worktreePath === wt.path) {
-        editorDocs.removeDoc(key);
-      }
-    }
-
     // Run actual deletion in background
     (async () => {
       try {
-        const dataState = useDataStore.getState().worktreeDataStates[wt.path];
-        // paneSessions is in-memory only, but the PTY daemon (and any
-        // processes running in the tabs) survives app restarts — so sessions
-        // may exist without being tracked. Session ids are deterministic per
-        // pane, so reconstruct and kill them all: Run, Agent, and every pane
-        // of every persisted user tab.
-        const sessionIds = new Set(
-          Object.values(dataState?.paneSessions ?? {}),
-        );
-        sessionIds.add(runPtySessionId(wt.path));
-        sessionIds.add(agentPtySessionId(wt.path));
-        const nav = useUIStore.getState().getWorktreeNavState(wt.path);
-        for (const tab of nav.userTabs) {
-          for (const group of getLeaves(getEffectiveUserTabSplitTree(tab))) {
-            for (const groupTab of group.tabs) {
-              if (groupTab.content.kind === "terminal") {
-                sessionIds.add(panePtySessionId(wt.path, groupTab.id));
-              }
-            }
-          }
-        }
-        const ptyKills = [...sessionIds].map((sessionId) => {
-          releaseCachedTerminal(sessionId);
-          return invoke("pty_kill", { sessionId }).catch(() => {});
-        });
-        await Promise.all([
-          ...ptyKills,
-          invoke("clear_agent_worktree_status", {
-            worktreePath: wt.path,
-          }).catch(() => {}),
-          invoke("unwatch_worktree", { worktreePath: wt.path }).catch(() => {}),
-          viewedFilesProvider.clearForWorktree(wt.path).catch(() => {}),
-          invoke("unlink_worktree_issue", { worktreePath: wt.path }).catch(
-            () => {},
-          ),
-          invoke("unlink_worktree_title", { worktreePath: wt.path }).catch(
-            () => {},
-          ),
-          invoke("delete_pr_status", { worktreePath: wt.path }).catch(() => {}),
-        ]);
+        await cleanupWorktreeForDeletion(wt.path);
 
         if (isAutomationsProject(selectedProject)) {
           // Scratch repo of a global automation run — standalone, no
@@ -633,9 +581,6 @@ export function Sidebar() {
             force: true,
           });
         }
-        useDataStore.getState().updateWorktreeDataState(wt.path, {
-          hasUnseenResult: false,
-        });
       } catch (e) {
         // Rollback: re-fetch the real worktree list
         toast.error(`Failed to remove worktree: ${e}`);

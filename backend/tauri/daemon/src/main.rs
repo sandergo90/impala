@@ -139,6 +139,7 @@ struct Session {
     /// clear it; current threads access it via cloned Arc handles.
     #[allow(dead_code)]
     shell_ready_scan: Arc<Mutex<Option<ShellReadyScanState>>>,
+    reader_done: Arc<(Mutex<bool>, std::sync::Condvar)>,
 }
 
 struct Registry {
@@ -445,6 +446,7 @@ fn spawn_session(
     } else {
         None
     }));
+    let reader_done = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
 
     let session = Session {
         cwd: cwd.clone(),
@@ -454,6 +456,7 @@ fn spawn_session(
         child: Arc::clone(&child),
         state: Arc::clone(&state),
         shell_ready_scan: Arc::clone(&shell_ready_scan),
+        reader_done: Arc::clone(&reader_done),
     };
     registry
         .sessions
@@ -475,6 +478,7 @@ fn spawn_session(
         child,
         Arc::clone(registry),
         Arc::clone(&shell_ready_scan),
+        reader_done,
     );
 
     if supports_marker {
@@ -524,6 +528,7 @@ fn start_pty_io_threads(
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     registry: Arc<Registry>,
     shell_ready_scan: Arc<Mutex<Option<ShellReadyScanState>>>,
+    reader_done: Arc<(Mutex<bool>, std::sync::Condvar)>,
 ) {
     let pending: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let backpressured = Arc::new(AtomicBool::new(false));
@@ -670,6 +675,9 @@ fn start_pty_io_threads(
                 .lock()
                 .unwrap()
                 .remove(&session_id_for_thread);
+            let (done, completed) = &*reader_done;
+            *done.lock().unwrap() = true;
+            completed.notify_all();
         });
     }
 }
@@ -707,16 +715,63 @@ fn collect_descendants(root_pid: i32) -> Vec<i32> {
 /// init and a fresh `pgrep -P root` no longer sees them; meanwhile any
 /// subprocess spawned by a survivor during the 2s window would be missed
 /// by the initial walk.
-fn kill_session_tree(root_pid: i32) {
+fn process_exists(pid: i32) -> bool {
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+fn wait_for_processes_to_exit(pids: &std::collections::HashSet<i32>, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if !pids.iter().any(|pid| process_exists(*pid)) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn wait_for_reader(
+    reader_done: &Arc<(Mutex<bool>, std::sync::Condvar)>,
+    timeout: Duration,
+) -> bool {
+    let (done, completed) = &**reader_done;
+    let guard = done.lock().unwrap();
+    let (guard, _) = completed
+        .wait_timeout_while(guard, timeout, |is_done| !*is_done)
+        .unwrap();
+    *guard
+}
+
+fn kill_session_tree(root_pid: i32) -> Result<(), String> {
     let initial = collect_descendants(root_pid);
     for &pid in &initial {
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
-    std::thread::sleep(Duration::from_millis(2000));
-    let mut to_kill: std::collections::HashSet<i32> = initial.into_iter().collect();
-    to_kill.extend(collect_descendants(root_pid));
-    for pid in to_kill {
+    let initial: std::collections::HashSet<i32> = initial.into_iter().collect();
+    if wait_for_processes_to_exit(&initial, Duration::from_millis(2000)) {
+        return Ok(());
+    }
+
+    let mut to_kill = initial.clone();
+    for &pid in &initial {
+        if process_exists(pid) {
+            to_kill.extend(collect_descendants(pid));
+        }
+    }
+    for &pid in &to_kill {
         unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+    if wait_for_processes_to_exit(&to_kill, Duration::from_millis(1000)) {
+        Ok(())
+    } else {
+        Err(format!(
+            "process tree rooted at {root_pid} did not exit after SIGKILL"
+        ))
     }
 }
 
@@ -851,23 +906,46 @@ fn handle_request(registry: &Arc<Registry>, req: Request) -> Response {
             let session = registry.sessions.lock().unwrap().remove(&session_id);
             registry.remove_completed_buffer(&session_id);
             if let Some(s) = session {
+                let reader_done = Arc::clone(&s.reader_done);
                 let shell_pid = s
                     .child
                     .lock()
                     .ok()
                     .and_then(|c| c.process_id())
                     .map(|p| p as i32);
-                std::thread::spawn(move || {
-                    match shell_pid {
-                        Some(pid) => kill_session_tree(pid),
-                        None => {
-                            if let Ok(mut c) = s.child.lock() {
-                                let _ = c.kill();
-                            }
+                let result = match shell_pid {
+                    Some(pid) => kill_session_tree(pid),
+                    None => {
+                        if let Ok(mut child) = s.child.lock() {
+                            child.kill().map_err(|e| format!("kill: {e}"))
+                        } else {
+                            Err("child process lock poisoned".to_string())
                         }
                     }
-                    drop(s);
-                });
+                };
+                if let Err(message) = result {
+                    registry
+                        .sessions
+                        .lock()
+                        .unwrap()
+                        .insert(session_id.clone(), s);
+                    return Response::Error {
+                        message: format!("failed to kill {session_id}: {message}"),
+                    };
+                }
+                if !wait_for_reader(&reader_done, Duration::from_secs(2)) {
+                    registry
+                        .sessions
+                        .lock()
+                        .unwrap()
+                        .insert(session_id.clone(), s);
+                    return Response::Error {
+                        message: format!("failed to kill {session_id}: PTY reader did not finish"),
+                    };
+                }
+                // The reader archives its final buffer before signalling
+                // completion. A deliberate Kill discards that history.
+                registry.remove_completed_buffer(&session_id);
             }
             Response::Killed
         }
@@ -1163,7 +1241,7 @@ async fn main() -> Result<()> {
         .into_iter()
         .map(|(pid, s)| {
             std::thread::spawn(move || {
-                kill_session_tree(pid);
+                let _ = kill_session_tree(pid);
                 drop(s);
             })
         })
@@ -1185,8 +1263,8 @@ mod tests {
     use impala_daemon_shared::wire::{Request, Response};
 
     use super::{
-        handle_request, persist_completed_buffers, restore_completed_buffers, safe_pty_size,
-        CompletedBuffer, Registry,
+        handle_request, kill_session_tree, persist_completed_buffers, process_exists,
+        restore_completed_buffers, safe_pty_size, CompletedBuffer, Registry,
     };
 
     #[test]
@@ -1280,5 +1358,64 @@ mod tests {
         );
 
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn kill_session_tree_waits_until_the_process_is_gone() {
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "sleep 30"])
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        let waiter = std::thread::spawn(move || child.wait().unwrap());
+
+        kill_session_tree(pid).unwrap();
+
+        assert!(!process_exists(pid));
+        assert!(!waiter.join().unwrap().success());
+    }
+
+    #[test]
+    fn killed_session_can_be_replaced_under_the_same_id() {
+        let registry = Registry::new();
+        let session_id = "replace-after-kill".to_string();
+        let spawn = || Request::Spawn {
+            session_id: session_id.clone(),
+            cwd: "/tmp".into(),
+            command: Some(vec!["sleep 30".into()]),
+            shell_path: Some("/bin/sh".into()),
+            shell_args: Some(Vec::new()),
+            env: Vec::new(),
+            cols: 80,
+            rows: 24,
+        };
+        assert!(matches!(
+            handle_request(&registry, spawn()),
+            Response::Spawned { .. }
+        ));
+        assert!(matches!(
+            handle_request(
+                &registry,
+                Request::Kill {
+                    session_id: session_id.clone()
+                }
+            ),
+            Response::Killed
+        ));
+
+        assert!(matches!(
+            handle_request(&registry, spawn()),
+            Response::Spawned {
+                already_existed: false,
+                ..
+            }
+        ));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(registry.sessions.lock().unwrap().contains_key(&session_id));
+
+        assert!(matches!(
+            handle_request(&registry, Request::Kill { session_id }),
+            Response::Killed
+        ));
     }
 }
