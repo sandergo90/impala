@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "impala-mcp"
-version = "0.23.18"
+version = "0.23.19"
 dependencies = [
  "base64 0.23.0",
  "chrono",
