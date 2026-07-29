@@ -103,15 +103,19 @@ pub async fn pty_kill(
     state: tauri::State<'_, DaemonState>,
     session_id: String,
 ) -> Result<(), String> {
+    kill_session(&state, &session_id).await
+}
+
+pub(crate) async fn kill_session(state: &DaemonState, session_id: &str) -> Result<(), String> {
     let client = state.client().await?;
     let resp = client
         .request(Request::Kill {
-            session_id: session_id.clone(),
+            session_id: session_id.to_owned(),
         })
         .await;
     let result = unwrap_or_err(resp, |r| matches!(r, Response::Killed).then_some(()));
     if result.is_ok() {
-        client.forget_session(&session_id);
+        client.forget_session(session_id);
     }
     result
 }

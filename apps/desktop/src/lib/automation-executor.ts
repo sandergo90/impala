@@ -165,9 +165,9 @@ async function executeRun({
       worktreePath: runPath,
     });
 
-    // One-shot global commands can finish quickly. Mark the row launched
-    // before writing the command so a provider Stop hook cannot arrive while
-    // the row is still pending and miss the completion transition.
+    // Mark global rows launched before writing the first prompt so a provider
+    // Stop hook cannot arrive while the row is still pending and miss the
+    // completion transition.
     if (automation.repo_path === "") {
       await invoke("report_automation_run", {
         runId: run_id,
@@ -184,7 +184,6 @@ async function executeRun({
       projectPath: automation.repo_path || runPath,
       agent: automation.agent,
       prompt: `Read and execute the automation instructions in \`${instructions_path}\`.`,
-      oneShot: automation.repo_path === "",
     });
 
     if (automation.repo_path !== "") {

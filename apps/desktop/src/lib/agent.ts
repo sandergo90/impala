@@ -54,24 +54,6 @@ function buildAgentCommand(
   return parts.join(" ");
 }
 
-/**
- * Global automations run as one-shot commands inside a PTY so their live
- * output remains attachable. Exiting the shell after the command prevents the
- * daemon from retaining an idle shell for every completed run.
- */
-export function buildAutomationRunCommand(
-  agent: Agent,
-  flags: string,
-  prompt: string,
-  env?: Record<string, string>,
-): string {
-  const args =
-    agent === "codex"
-      ? ["exec", prompt]
-      : ["--print", "--output-format", "text", prompt];
-  return `${buildAgentCommand(agent, flags, args, env)}; exit\n`;
-}
-
 /** Resume a completed global automation in a view-scoped interactive PTY. */
 export function buildAutomationResumeCommand(
   agent: Agent,

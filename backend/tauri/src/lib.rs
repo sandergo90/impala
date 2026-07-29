@@ -1863,6 +1863,7 @@ pub fn run() {
 
             app.manage(DbState(Mutex::new(conn)));
             app.manage(daemon_client::DaemonState::new());
+            app.manage(automations::AutomationRunClaims::default());
             app.manage(browser::BrowserRegistry::default());
             app.manage(watcher::WatcherState::new());
             app.manage(file_tree::GitignoreCache::new());
@@ -2061,6 +2062,8 @@ pub fn run() {
             automations::automation_run_is_active,
             automations::set_automation_enabled,
             automations::run_automation_now,
+            automations::claim_global_automation_run,
+            automations::release_global_automation_run,
             automations::list_automation_runs,
             automations::list_pending_automation_runs,
             automations::report_automation_run,

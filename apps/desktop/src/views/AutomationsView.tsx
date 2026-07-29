@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { listen } from "@tauri-apps/api/event";
 import { ArrowLeft, Bot, PanelRightOpen, X } from "lucide-react";
@@ -153,11 +153,21 @@ const RUN_STATUS_META: Record<AutomationRun["status"], { dot: string; label: str
 };
 
 export function AutomationsView() {
+  const mountedRef = useRef(false);
+  useMountEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  });
   const navigate = useNavigate();
   const router = useRouter();
   const project = useUIStore((s) => s.selectedProject);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [runs, setRuns] = useState<AutomationRun[]>([]);
+  const [claimedRunIds, setClaimedRunIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [automationWorktrees, setAutomationWorktrees] = useState<Worktree[]>([]);
   const [runStats, setRunStats] = useState<Record<string, DiffStat>>({});
   const [inspectedWorktree, setInspectedWorktree] =
@@ -246,13 +256,45 @@ export function AutomationsView() {
         const existingWorktree = automationWorktrees.find(
           (worktree) => worktree.path === run.worktree_path,
         );
+        if (automation?.repo_path === "" && !existingWorktree) {
+          toast.error("The run's worktree no longer exists");
+          return;
+        }
+        if (
+          automation?.repo_path === "" &&
+          (run.status === "pending" || run.status === "launched")
+        ) {
+          try {
+            await invoke("claim_global_automation_run", { runId: run.id });
+            if (!mountedRef.current) {
+              await invoke("release_global_automation_run", {
+                worktreePath: run.worktree_path,
+              });
+              return;
+            }
+            setClaimedRunIds((current) => {
+              const next = new Set(current);
+              next.add(run.id);
+              return next;
+            });
+          } catch {
+            const latestRuns =
+              await invoke<AutomationRun[]>("list_automation_runs");
+            setRuns(latestRuns);
+            const latest = latestRuns.find(
+              (candidate) => candidate.id === run.id,
+            );
+            if (
+              latest?.status === "pending" ||
+              latest?.status === "launched"
+            ) {
+              throw new Error("Failed to claim the active automation run");
+            }
+          }
+        }
         if (existingWorktree) {
           setInspectedWorktree(existingWorktree);
           acknowledgeRun(run);
-          return;
-        }
-        if (automation?.repo_path === "") {
-          toast.error("The run's worktree no longer exists");
           return;
         }
         const repo = automation?.repo_path ?? project?.path;
@@ -677,6 +719,15 @@ export function AutomationsView() {
                 openFullReview(inspectedWorktree, inspectedAutomation)
               }
               onClose={() => setInspectedWorktree(null)}
+              claimed={!!inspectedRun && claimedRunIds.has(inspectedRun.id)}
+              onClaimReleased={(runId) => {
+                setClaimedRunIds((current) => {
+                  if (!current.has(runId)) return current;
+                  const next = new Set(current);
+                  next.delete(runId);
+                  return next;
+                });
+              }}
             />
           </ResizablePanel>
         )}
@@ -758,6 +809,8 @@ function AutomationWorktreePane({
   stat,
   onReview,
   onClose,
+  claimed,
+  onClaimReleased,
 }: {
   worktree: Worktree;
   run: AutomationRun | undefined;
@@ -765,6 +818,8 @@ function AutomationWorktreePane({
   stat: DiffStat | undefined;
   onReview: () => void;
   onClose: () => void;
+  claimed: boolean;
+  onClaimReleased: (runId: string) => void;
 }) {
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
@@ -806,10 +861,12 @@ function AutomationWorktreePane({
       <div className="min-h-0 flex-1">
         {automation?.repo_path === "" && run ? (
           <GlobalAutomationTerminal
-            key={`${run.id}:${run.status}:${run.agent_session_id ?? ""}`}
+            key={`${run.id}:${claimed ? "claimed" : (run.agent_session_id ?? "")}`}
             run={run}
             worktree={worktree}
             fallbackAgent={automation.agent}
+            claimed={claimed}
+            onClaimReleased={onClaimReleased}
           />
         ) : (
           <XtermTerminal
@@ -839,10 +896,14 @@ function GlobalAutomationTerminal({
   run,
   worktree,
   fallbackAgent,
+  claimed,
+  onClaimReleased,
 }: {
   run: AutomationRun;
   worktree: Worktree;
   fallbackAgent: Automation["agent"];
+  claimed: boolean;
+  onClaimReleased: (runId: string) => void;
 }) {
   const [resumeState, setResumeState] = useState<
     | { status: "starting" }
@@ -852,9 +913,21 @@ function GlobalAutomationTerminal({
   >({ status: "starting" });
 
   const isRunning = run.status === "pending" || run.status === "launched";
+  const executionPtyId = agentPtySessionId(worktree.path);
   const resumePtyId = automationRunResumePtySessionId(run.id);
 
   useMountEffect(() => {
+    if (claimed) {
+      return () => {
+        releaseCachedTerminal(executionPtyId);
+        onClaimReleased(run.id);
+        invoke("release_global_automation_run", {
+          worktreePath: worktree.path,
+        }).catch((error) => {
+          console.error("Failed to release global automation run:", error);
+        });
+      };
+    }
     if (isRunning) return;
     let disposed = false;
 
@@ -866,7 +939,6 @@ function GlobalAutomationTerminal({
         });
         return;
       }
-      const executionPtyId = agentPtySessionId(worktree.path);
       while (
         !disposed &&
         (await invoke<boolean>("pty_is_alive", {
@@ -907,10 +979,25 @@ function GlobalAutomationTerminal({
     };
   });
 
+  if (claimed) {
+    return (
+      <XtermTerminal
+        sessionId={executionPtyId}
+        baseDir={worktree.path}
+        isFocused
+        onInterrupt={() => {
+          invoke("interrupt_agent_turn", {
+            worktreePath: worktree.path,
+            paneId: AGENT_PANE_ID,
+          }).catch(() => {});
+        }}
+      />
+    );
+  }
   if (isRunning) {
     return (
       <XtermTerminal
-        sessionId={agentPtySessionId(worktree.path)}
+        sessionId={executionPtyId}
         baseDir={worktree.path}
         isFocused
         readOnly
@@ -920,7 +1007,7 @@ function GlobalAutomationTerminal({
   if (resumeState.status === "finishing") {
     return (
       <XtermTerminal
-        sessionId={agentPtySessionId(worktree.path)}
+        sessionId={executionPtyId}
         baseDir={worktree.path}
         isFocused
         readOnly

@@ -1238,6 +1238,10 @@ pub fn start(
                     })
                     .flatten();
                 if let Some(automation_name) = completed_name {
+                    crate::automations::stop_completed_global_run_if_unclaimed(
+                        &app_handle,
+                        &worktree_path,
+                    );
                     let _ = app_handle.emit(
                         "automation-run-completed",
                         serde_json::json!({

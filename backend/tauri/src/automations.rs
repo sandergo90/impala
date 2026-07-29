@@ -1,12 +1,63 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Mutex;
 
 use chrono::TimeZone;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::warn;
+
+#[derive(Default)]
+struct AutomationRunOwnership {
+    claimed: HashSet<String>,
+    cleanup_started: HashSet<String>,
+}
+
+#[derive(Default)]
+pub struct AutomationRunClaims(Mutex<AutomationRunOwnership>);
+
+impl AutomationRunClaims {
+    fn claim(&self, worktree_path: String) -> Result<(), String> {
+        let mut ownership = self
+            .0
+            .lock()
+            .map_err(|error| format!("Automation claim lock error: {error}"))?;
+        if ownership.cleanup_started.contains(&worktree_path) {
+            return Err("The global automation run is already stopping".to_string());
+        }
+        ownership.claimed.insert(worktree_path);
+        Ok(())
+    }
+
+    fn begin_release(&self, worktree_path: &str) -> Result<bool, String> {
+        let mut ownership = self
+            .0
+            .lock()
+            .map_err(|error| format!("Automation claim lock error: {error}"))?;
+        if !ownership.claimed.remove(worktree_path) {
+            return Ok(false);
+        }
+        ownership.cleanup_started.insert(worktree_path.to_string());
+        Ok(true)
+    }
+
+    fn begin_unclaimed_cleanup(&self, worktree_path: &str) -> Result<bool, String> {
+        let mut ownership = self
+            .0
+            .lock()
+            .map_err(|error| format!("Automation claim lock error: {error}"))?;
+        if ownership.claimed.contains(worktree_path)
+            || ownership.cleanup_started.contains(worktree_path)
+        {
+            return Ok(false);
+        }
+        ownership.cleanup_started.insert(worktree_path.to_string());
+        Ok(true)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Automation {
@@ -1152,6 +1203,197 @@ pub(crate) fn reconcile_completed_codex_runs(
     Ok(completed)
 }
 
+fn claude_transcript_path(projects_root: &Path, worktree_path: &str, session_id: &str) -> PathBuf {
+    projects_root
+        .join(worktree_path.replace('/', "-"))
+        .join(format!("{session_id}.jsonl"))
+}
+
+fn claude_transcript_for_run(
+    projects_root: &Path,
+    worktree_path: &str,
+    stored_session_id: Option<&str>,
+    instructions_path: &str,
+) -> Option<(PathBuf, String)> {
+    if let Some(session_id) = stored_session_id {
+        let path = claude_transcript_path(projects_root, worktree_path, session_id);
+        return claude_transcript_matches_run(&path, worktree_path, instructions_path)
+            .then(|| (path, session_id.to_string()));
+    }
+    let project_dir = projects_root.join(worktree_path.replace('/', "-"));
+    let mut candidates = std::fs::read_dir(project_dir)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let session_id = path.file_stem()?.to_str()?.to_string();
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                return None;
+            }
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((path, session_id, modified))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|(_, _, modified)| std::cmp::Reverse(*modified));
+    candidates
+        .into_iter()
+        .find(|(path, _, _)| claude_transcript_matches_run(path, worktree_path, instructions_path))
+        .map(|(path, session_id, _)| (path, session_id))
+}
+
+fn claude_transcript_matches_run(
+    path: &Path,
+    worktree_path: &str,
+    instructions_path: &str,
+) -> bool {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let expected_prompt =
+        format!("Read and execute the automation instructions in `{instructions_path}`.");
+    contents.lines().find_map(|line| {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            return None;
+        };
+        if value["cwd"].as_str() == Some(worktree_path) && value["type"].as_str() == Some("user") {
+            return Some(value["message"]["content"].as_str() == Some(expected_prompt.as_str()));
+        }
+        None
+    }) == Some(true)
+}
+
+fn claude_transcript_completed(path: &Path, worktree_path: &str) -> bool {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let mut background_tool_ids = HashSet::new();
+    let mut completed = false;
+    for line in contents.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value["cwd"].as_str() != Some(worktree_path) {
+            continue;
+        }
+        if value["type"].as_str() == Some("assistant") {
+            if let Some(content) = value["message"]["content"].as_array() {
+                for item in content {
+                    if item["type"].as_str() == Some("tool_use")
+                        && item["input"]["run_in_background"].as_bool() == Some(true)
+                    {
+                        if let Some(tool_use_id) = item["id"].as_str() {
+                            background_tool_ids.insert(tool_use_id.to_string());
+                        }
+                    }
+                }
+            }
+            if value["message"]["stop_reason"].as_str() == Some("end_turn") {
+                completed = background_tool_ids.is_empty();
+            }
+        } else if value["type"].as_str() == Some("user") {
+            let notification = match &value["message"]["content"] {
+                serde_json::Value::String(text) => text.clone(),
+                serde_json::Value::Array(items) => items
+                    .iter()
+                    .filter_map(|item| item["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => String::new(),
+            };
+            if notification.contains("<task-notification>")
+                && (notification.contains("<status>completed</status>")
+                    || notification.contains("<status>failed</status>"))
+            {
+                background_tool_ids.retain(|tool_use_id| {
+                    !notification.contains(&format!("<tool-use-id>{tool_use_id}</tool-use-id>"))
+                });
+            }
+        }
+    }
+    completed
+}
+
+fn reconcile_completed_claude_runs_in(
+    conn: &Connection,
+    projects_root: &Path,
+) -> Result<Vec<ReconciledAutomationRun>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT r.id, a.name, r.worktree_path, r.agent_session_id, r.instructions_path
+             FROM automation_runs r
+             JOIN automations a ON a.id = r.automation_id
+             WHERE r.status = 'launched'
+               AND a.agent = 'claude'
+               AND r.worktree_path IS NOT NULL
+               AND r.instructions_path IS NOT NULL",
+        )
+        .map_err(|error| format!("Failed to prepare Claude automation recovery: {error}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(|error| format!("Failed to query Claude automation recovery: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Failed to read Claude automation recovery: {error}"))?;
+    drop(stmt);
+
+    let mut completed = Vec::new();
+    for (run_id, automation_name, worktree_path, stored_session_id, instructions_path) in rows {
+        let Some((transcript, session_id)) = claude_transcript_for_run(
+            projects_root,
+            &worktree_path,
+            stored_session_id.as_deref(),
+            &instructions_path,
+        ) else {
+            continue;
+        };
+        conn.execute(
+            "UPDATE automation_runs
+             SET agent_provider = 'claude', agent_session_id = ?2
+             WHERE id = ?1 AND status = 'launched'",
+            params![run_id, session_id],
+        )
+        .map_err(|error| format!("Failed to backfill Claude automation identity: {error}"))?;
+        if !claude_transcript_completed(&transcript, &worktree_path) {
+            continue;
+        }
+        let changed = conn
+            .execute(
+                "UPDATE automation_runs
+                 SET status = 'completed', error = NULL
+                 WHERE id = ?1 AND status = 'launched'",
+                params![run_id],
+            )
+            .map_err(|error| {
+                format!("Failed to reconcile Claude automation completion: {error}")
+            })?;
+        if changed > 0 {
+            completed.push(ReconciledAutomationRun {
+                run_id,
+                automation_name,
+                worktree_path,
+            });
+        }
+    }
+    Ok(completed)
+}
+
+fn reconcile_completed_claude_runs(
+    conn: &Connection,
+) -> Result<Vec<ReconciledAutomationRun>, String> {
+    let projects_root = dirs::home_dir()
+        .ok_or_else(|| "no home dir".to_string())?
+        .join(".claude")
+        .join("projects");
+    reconcile_completed_claude_runs_in(conn, &projects_root)
+}
+
 /// A user interrupt is a failed automation outcome, not a successful Stop.
 /// Returns the automation name when an active run was transitioned.
 pub fn fail_run_for_worktree(
@@ -1417,27 +1659,42 @@ pub fn start_completion_reconciler(
     caffeinators: std::sync::Arc<crate::hook_server::Caffeinators>,
 ) {
     tauri::async_runtime::spawn(async move {
-        // Run immediately on startup, then keep repairing a missed Stop while
-        // the app remains open. Codex writes task_complete before this poll.
+        // Run immediately on startup, then keep repairing missed provider
+        // Stop hooks from each provider's durable transcript.
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        let mut recover_completed_ptys = true;
         loop {
             interval.tick().await;
             // A dedicated SQLite connection keeps transcript I/O off the
             // shared application DB mutex used by latency-sensitive commands.
-            let completed = Connection::open(&db_path)
+            let reconciliation = Connection::open(&db_path)
                 .map_err(|error| format!("Failed to open automation database: {}", error))
-                .and_then(|conn| reconcile_completed_codex_runs(&conn));
-            let completed = match completed {
-                Ok(completed) => completed,
+                .and_then(|conn| {
+                    let mut completed = reconcile_completed_codex_runs(&conn)?;
+                    completed.extend(reconcile_completed_claude_runs(&conn)?);
+                    let cleanup_paths = if recover_completed_ptys {
+                        finished_global_run_worktrees(&conn)?
+                    } else {
+                        Vec::new()
+                    };
+                    Ok((completed, cleanup_paths))
+                });
+            let (completed, cleanup_paths) = match reconciliation {
+                Ok(result) => result,
                 Err(error) => {
-                    warn!(error = %error, "Codex automation completion reconciliation failed");
+                    warn!(error = %error, "automation completion reconciliation failed");
                     continue;
                 }
             };
+            recover_completed_ptys = false;
+            for worktree_path in cleanup_paths {
+                stop_completed_global_run_if_unclaimed(&app, &worktree_path);
+            }
             if completed.is_empty() {
                 continue;
             }
             for run in completed {
+                stop_completed_global_run_if_unclaimed(&app, &run.worktree_path);
                 let aggregate_status =
                     pane_statuses.observe(&run.worktree_path, "tab-agent", "idle");
                 crate::hook_server::publish_agent_pane_event(
@@ -1635,6 +1892,164 @@ pub fn run_automation_now(
     // Deliberately does not touch next_run_at — an ad-hoc run leaves the
     // cadence alone.
     dispatch(&app, &conn, &automation, chrono::Utc::now().timestamp())
+}
+
+#[tauri::command]
+pub fn claim_global_automation_run(
+    db: tauri::State<'_, crate::DbState>,
+    claims: tauri::State<'_, AutomationRunClaims>,
+    run_id: String,
+) -> Result<(), String> {
+    let conn =
+        db.0.lock()
+            .map_err(|error| format!("DB lock error: {error}"))?;
+    let worktree_path = active_global_run_worktree(&conn, &run_id)?;
+    // Completion takes the DB lock before consulting claims. Holding it
+    // through insertion makes either the claim or completion win atomically.
+    claims.claim(worktree_path)?;
+    drop(conn);
+    Ok(())
+}
+
+fn active_global_run_worktree(conn: &Connection, run_id: &str) -> Result<String, String> {
+    conn.query_row(
+        "SELECT r.worktree_path
+             FROM automation_runs r
+             JOIN automations a ON a.id = r.automation_id
+             WHERE r.id = ?1
+               AND a.repo_path = ''
+               AND r.status IN ('pending', 'launched')
+               AND r.worktree_path IS NOT NULL",
+        params![run_id],
+        |row| row.get(0),
+    )
+    .map_err(|_| "The global automation run is no longer active".to_string())
+}
+
+#[tauri::command]
+pub async fn release_global_automation_run(
+    app: AppHandle,
+    db: tauri::State<'_, crate::DbState>,
+    claims: tauri::State<'_, AutomationRunClaims>,
+    daemon: tauri::State<'_, crate::daemon_client::DaemonState>,
+    worktree_path: String,
+) -> Result<(), String> {
+    if !claims.begin_release(&worktree_path)? {
+        return Ok(());
+    }
+
+    let session_id = format!("pty-tab-agent-{worktree_path}");
+    let (changed, ()) = tokio::join!(
+        persist_automation_abort(&db, &worktree_path),
+        stop_automation_pty(&daemon, &session_id),
+    );
+    if changed {
+        let _ = app.emit("automation-runs-changed", ());
+    }
+    Ok(())
+}
+
+pub(crate) fn stop_completed_global_run_if_unclaimed(app: &AppHandle, worktree_path: &str) {
+    let db = app.state::<crate::DbState>();
+    let is_global =
+        db.0.lock()
+            .ok()
+            .and_then(|conn| {
+                conn.query_row(
+                    "SELECT EXISTS(
+                    SELECT 1
+                    FROM automation_runs r
+                    JOIN automations a ON a.id = r.automation_id
+                    WHERE r.worktree_path = ?1 AND a.repo_path = ''
+                )",
+                    params![worktree_path],
+                    |row| row.get::<_, bool>(0),
+                )
+                .ok()
+            })
+            .unwrap_or(false);
+    if !is_global {
+        return;
+    }
+    let claims = app.state::<AutomationRunClaims>();
+    if !claims
+        .begin_unclaimed_cleanup(worktree_path)
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let app = app.clone();
+    let session_id = format!("pty-tab-agent-{worktree_path}");
+    tauri::async_runtime::spawn(async move {
+        let daemon = app.state::<crate::daemon_client::DaemonState>();
+        stop_automation_pty(&daemon, &session_id).await;
+    });
+}
+
+async fn stop_automation_pty(daemon: &crate::daemon_client::DaemonState, session_id: &str) {
+    let mut attempts = 0_u32;
+    loop {
+        match crate::pty::kill_session(daemon, session_id).await {
+            Ok(()) => return,
+            Err(error) => {
+                attempts += 1;
+                if attempts == 1 || attempts % 10 == 0 {
+                    warn!(
+                        error = %error,
+                        session_id,
+                        attempts,
+                        "failed to stop global automation PTY; retrying"
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+async fn persist_automation_abort(db: &crate::DbState, worktree_path: &str) -> bool {
+    let mut attempts = 0_u32;
+    loop {
+        let result = match db.0.lock() {
+            Ok(conn) => abort_runs_for_worktree(&conn, worktree_path),
+            Err(error) => Err(format!("DB lock error: {error}")),
+        };
+        match result {
+            Ok(changed) => return changed,
+            Err(error) => {
+                attempts += 1;
+                if attempts == 1 || attempts % 10 == 0 {
+                    warn!(
+                        error = %error,
+                        worktree_path,
+                        attempts,
+                        "failed to persist global automation stop; retrying"
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+fn finished_global_run_worktrees(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT r.worktree_path
+             FROM automation_runs r
+             JOIN automations a ON a.id = r.automation_id
+             WHERE r.status IN ('completed', 'failed', 'aborted')
+               AND a.repo_path = ''
+               AND r.worktree_path IS NOT NULL",
+        )
+        .map_err(|error| format!("Failed to prepare finished global run cleanup: {error}"))?;
+    let paths = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(|error| format!("Failed to query finished global run cleanup: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Failed to read finished global run cleanup: {error}"))?;
+    Ok(paths)
 }
 
 #[tauri::command]
@@ -1967,6 +2382,59 @@ mod tests {
     }
 
     #[test]
+    fn only_active_global_runs_can_be_claimed() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let mut global_input = new_automation("0 9 * * *");
+        global_input.repo_path = String::new();
+        let global = create_automation_row(&conn, global_input, now).unwrap();
+        let global_run = insert_run(&conn, &global.id, now).unwrap().unwrap();
+        report_run(
+            &conn,
+            &global_run.id,
+            Some("/scratch/global"),
+            "launched",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            active_global_run_worktree(&conn, &global_run.id).unwrap(),
+            "/scratch/global"
+        );
+
+        report_run(&conn, &global_run.id, None, "completed", None).unwrap();
+        assert!(active_global_run_worktree(&conn, &global_run.id).is_err());
+        assert_eq!(
+            finished_global_run_worktrees(&conn).unwrap(),
+            vec!["/scratch/global"]
+        );
+
+        let project = create_automation_row(&conn, new_automation("0 9 * * *"), now + 1).unwrap();
+        let project_run = insert_run(&conn, &project.id, now + 1).unwrap().unwrap();
+        report_run(
+            &conn,
+            &project_run.id,
+            Some("/repo/worktree"),
+            "launched",
+            None,
+        )
+        .unwrap();
+        assert!(active_global_run_worktree(&conn, &project_run.id).is_err());
+    }
+
+    #[test]
+    fn automation_run_claims_are_released_with_the_view() {
+        let claims = AutomationRunClaims::default();
+        claims.claim("/scratch/global".to_string()).unwrap();
+        assert!(!claims.begin_unclaimed_cleanup("/scratch/global").unwrap());
+        assert!(claims.begin_release("/scratch/global").unwrap());
+        assert!(!claims.begin_release("/scratch/global").unwrap());
+        assert!(!claims.begin_unclaimed_cleanup("/scratch/global").unwrap());
+        assert!(claims.claim("/scratch/global".to_string()).is_err());
+    }
+
+    #[test]
     fn opening_one_finished_run_only_marks_that_run_seen() {
         let conn = test_conn();
         let now = chrono::Utc::now().timestamp();
@@ -2199,6 +2667,180 @@ mod tests {
         let interrupted = get_run(&conn, &run.id).unwrap();
         assert_eq!(interrupted.status, "failed");
         assert_eq!(interrupted.error.as_deref(), Some("Interrupted by user"));
+    }
+
+    #[test]
+    fn claude_completion_reconciliation_requires_the_run_worktree() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(&conn, new_automation("0 9 * * *"), now).unwrap();
+        let run = insert_run(&conn, &automation.id, now).unwrap().unwrap();
+        report_run(
+            &conn,
+            &run.id,
+            Some("/scratch/claude-run"),
+            "launched",
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE automation_runs SET instructions_path = ?2 WHERE id = ?1",
+            params![run.id, "/scratch/instructions.md"],
+        )
+        .unwrap();
+        let instructions_path = get_run(&conn, &run.id).unwrap().instructions_path.unwrap();
+
+        let projects = tempfile::tempdir().unwrap();
+        let transcript_dir = projects.path().join("-scratch-claude-run");
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        let transcript = transcript_dir.join("claude-session.jsonl");
+        std::fs::write(
+            &transcript,
+            [
+                serde_json::json!({
+                    "type": "user",
+                    "cwd": "/scratch/claude-run",
+                    "message": {
+                        "content": format!(
+                            "Read and execute the automation instructions in `{instructions_path}`."
+                        )
+                    }
+                })
+                .to_string(),
+                serde_json::json!({
+                    "type": "assistant",
+                    "cwd": "/somewhere/else",
+                    "message": { "stop_reason": "end_turn" }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            transcript_dir.join("newer-unrelated-session.jsonl"),
+            [
+                serde_json::json!({
+                    "type": "user",
+                    "cwd": "/scratch/claude-run",
+                    "message": { "content": "Unrelated interactive prompt" }
+                })
+                .to_string(),
+                serde_json::json!({
+                    "type": "user",
+                    "cwd": "/scratch/claude-run",
+                    "message": {
+                        "content": format!(
+                            "Read and execute the automation instructions in `{instructions_path}`."
+                        )
+                    }
+                })
+                .to_string(),
+                serde_json::json!({
+                    "type": "assistant",
+                    "cwd": "/scratch/claude-run",
+                    "message": { "stop_reason": "end_turn" }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        assert!(reconcile_completed_claude_runs_in(&conn, projects.path())
+            .unwrap()
+            .is_empty());
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .unwrap();
+        writeln!(
+            file,
+            "\n{}",
+            serde_json::json!({
+                "type": "assistant",
+                "cwd": "/scratch/claude-run",
+                "message": { "stop_reason": "end_turn" }
+            })
+        )
+        .unwrap();
+
+        let reconciled = reconcile_completed_claude_runs_in(&conn, projects.path()).unwrap();
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].run_id, run.id);
+        let completed = get_run(&conn, &run.id).unwrap();
+        assert_eq!(completed.status, "completed");
+        assert_eq!(
+            completed.agent_session_id.as_deref(),
+            Some("claude-session")
+        );
+    }
+
+    #[test]
+    fn claude_completion_waits_for_background_tool_notifications() {
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("session.jsonl");
+        let entry = |value: serde_json::Value| value.to_string();
+        std::fs::write(
+            &transcript,
+            [
+                entry(serde_json::json!({
+                    "type": "assistant",
+                    "cwd": "/scratch/claude-run",
+                    "message": {
+                        "stop_reason": "tool_use",
+                        "content": [{
+                            "type": "tool_use",
+                            "id": "background-1",
+                            "input": { "run_in_background": true }
+                        }]
+                    }
+                })),
+                entry(serde_json::json!({
+                    "type": "assistant",
+                    "cwd": "/scratch/claude-run",
+                    "message": {
+                        "stop_reason": "end_turn",
+                        "content": [{ "type": "text", "text": "Waiting" }]
+                    }
+                })),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        assert!(!claude_transcript_completed(
+            &transcript,
+            "/scratch/claude-run"
+        ));
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .unwrap();
+        writeln!(
+            file,
+            "\n{}\n{}",
+            entry(serde_json::json!({
+                "type": "user",
+                "cwd": "/scratch/claude-run",
+                "message": {
+                    "content": "<task-notification><tool-use-id>background-1</tool-use-id><status>completed</status></task-notification>"
+                }
+            })),
+            entry(serde_json::json!({
+                "type": "assistant",
+                "cwd": "/scratch/claude-run",
+                "message": {
+                    "stop_reason": "end_turn",
+                    "content": [{ "type": "text", "text": "Done" }]
+                }
+            }))
+        )
+        .unwrap();
+        assert!(claude_transcript_completed(
+            &transcript,
+            "/scratch/claude-run"
+        ));
     }
 
     #[test]

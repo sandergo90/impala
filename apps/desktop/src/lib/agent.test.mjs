@@ -1,23 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildAutomationResumeCommand,
-  buildAutomationRunCommand,
+  buildLaunchCommand,
 } from "./agent.ts";
 
 describe("global automation commands", () => {
-  test("runs Codex once and exits the PTY shell", () => {
+  test("starts the normal interactive provider TUI with the automation prompt", () => {
     expect(
-      buildAutomationRunCommand("codex", "--yolo", "do today's work", {
+      buildLaunchCommand("codex", "--yolo", "do today's work", {
         CODEX_HOME: "/tmp/codex home",
       }),
     ).toBe(
-      "CODEX_HOME='/tmp/codex home' codex --yolo 'exec' 'do today'\\''s work'; exit\n",
+      "CODEX_HOME='/tmp/codex home' codex --yolo 'do today'\\''s work'\n",
     );
-  });
-
-  test("runs Claude in noninteractive text mode and exits the PTY shell", () => {
-    expect(buildAutomationRunCommand("claude", "", "daily brief")).toBe(
-      "claude '--print' '--output-format' 'text' 'daily brief'; exit\n",
+    expect(buildLaunchCommand("claude", "", "daily brief")).toBe(
+      "claude 'daily brief'\n",
     );
   });
 

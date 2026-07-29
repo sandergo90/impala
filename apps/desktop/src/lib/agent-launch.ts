@@ -9,7 +9,6 @@ import {
 } from "./pane-ids";
 import {
   buildAutomationResumeCommand,
-  buildAutomationRunCommand,
   buildLaunchCommand,
   resolveFlags,
   type Agent,
@@ -28,9 +27,8 @@ export async function launchAgentHeadless(opts: {
   projectPath: string;
   agent: Agent;
   prompt: string;
-  oneShot?: boolean;
 }): Promise<void> {
-  const { worktreePath, projectPath, agent, prompt, oneShot = false } = opts;
+  const { worktreePath, projectPath, agent, prompt } = opts;
   const ptyId = agentPtySessionId(worktreePath);
   const hookPort = await getHookPort();
 
@@ -71,11 +69,9 @@ export async function launchAgentHeadless(opts: {
   });
 
   const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
-  if (isNew && (oneShot || !nav.agentLaunched)) {
+  if (isNew && !nav.agentLaunched) {
     const flags = await resolveFlags(agent, projectPath);
-    const cmd = oneShot
-      ? buildAutomationRunCommand(agent, flags, prompt, extraEnv)
-      : buildLaunchCommand(agent, flags, prompt, extraEnv);
+    const cmd = buildLaunchCommand(agent, flags, prompt, extraEnv);
     await awaitShellReady(ptyId);
     await invoke("pty_write", { sessionId: ptyId, data: encodePtyInput(cmd) });
     useUIStore
