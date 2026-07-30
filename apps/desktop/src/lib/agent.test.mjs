@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildAutomationResumeCommand,
+  buildAutomationResumeShellArgs,
   buildLaunchCommand,
 } from "./agent.ts";
 
@@ -24,6 +25,13 @@ describe("global automation commands", () => {
     );
     expect(buildAutomationResumeCommand("claude", "", "session-2")).toBe(
       "claude '--resume' 'session-2'",
+    );
+  });
+
+  test("loads interactive shell configuration for direct resume commands", () => {
+    expect(buildAutomationResumeShellArgs(["-l"])).toEqual(["-l", "-i"]);
+    expect(buildAutomationResumeShellArgs(["--rcfile", "/tmp/rc", "-l"])).toEqual(
+      ["--rcfile", "/tmp/rc", "-l", "-i"],
     );
   });
 });

@@ -66,6 +66,16 @@ export function buildAutomationResumeCommand(
   return buildAgentCommand(agent, flags, args, env);
 }
 
+/**
+ * Direct resume commands still need the user's interactive shell setup so
+ * provider executables installed by tools such as mise can be resolved.
+ */
+export function buildAutomationResumeShellArgs(
+  shellArgs: string[],
+): string[] {
+  return [...shellArgs, "-i"];
+}
+
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
