@@ -22,7 +22,10 @@ import {
 } from "../lib/terminal-url-underline";
 import { encodePtyInput } from "../lib/encode-pty";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
-import { isTerminalInterruptInput } from "../lib/terminal-input";
+import {
+  isTerminalInterruptInput,
+  stripBrokenMouseReports,
+} from "../lib/terminal-input";
 import {
   DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_SIZE,
@@ -264,6 +267,8 @@ async function createCachedTerminal(
 
   function writeToPty(text: string) {
     if (entry.exitedRef.current || entry.readOnlyRef.current) return;
+    text = stripBrokenMouseReports(text);
+    if (text.length === 0) return;
     const encoded = encodePtyInput(text);
     invoke("pty_write", { sessionId, data: encoded }).catch(() => {});
     if (isTerminalInterruptInput(text)) {
