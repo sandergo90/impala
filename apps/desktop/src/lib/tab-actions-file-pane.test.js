@@ -15,7 +15,11 @@ globalThis.localStorage = {
 globalThis.window = globalThis;
 
 const { useUIStore } = await import("../store.ts");
-const { openFileTabFromPane, openFileTabFromTree } = await import("./tab-actions.ts");
+const {
+  getActiveFilePath,
+  openFileTabFromPane,
+  openFileTabFromTree,
+} = await import("./tab-actions.ts");
 const { openFileFromFinder } = await import("./file-finder-actions.ts");
 
 const worktreePath = "/tmp/file-link-pane-routing";
@@ -251,6 +255,62 @@ describe("openFileTabFromPane", () => {
     expect(nav.agentTabSplitTree).toEqual(tree);
     expect(nav.userTabs).toHaveLength(1);
     expect(nav.userTabs[0].path).toBe("README.md");
+  });
+});
+
+describe("getActiveFilePath", () => {
+  test("resolves the active file in the focused agent split pane", () => {
+    const tree = split(
+      group("tab-agent", [
+        groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+      ]),
+      group(
+        "right-pane",
+        [
+          groupTab("file-a", { kind: "file", path: "src/a.ts" }),
+          groupTab("file-b", { kind: "file", path: "src/b.ts" }),
+        ],
+        "file-b",
+      ),
+    );
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+
+    expect(
+      getActiveFilePath({
+        ...nav,
+        activeTerminalsTab: "tab-agent",
+        agentTabSplitTree: tree,
+        agentTabFocusedPaneId: "right-pane",
+      }),
+    ).toBe("src/b.ts");
+  });
+
+  test("resolves the active file in the focused user split pane", () => {
+    const topTab = {
+      id: "terminal-1",
+      kind: "terminal",
+      terminalLaunch: "shell",
+      label: "Terminal 1",
+      createdAt: 1,
+      splitTree: split(
+        group("primary", [
+          groupTab("shell", { kind: "terminal", launch: "shell" }),
+        ]),
+        group("right-pane", [
+          groupTab("file", { kind: "file", path: "src/file.ts" }),
+        ]),
+      ),
+      focusedPaneId: "right-pane",
+    };
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+
+    expect(
+      getActiveFilePath({
+        ...nav,
+        activeTerminalsTab: topTab.id,
+        userTabs: [topTab],
+      }),
+    ).toBe("src/file.ts");
   });
 });
 

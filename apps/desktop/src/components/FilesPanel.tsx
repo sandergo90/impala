@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { useFileTreeData } from "../hooks/useFileTreeData";
 import { mapGitStatus } from "../lib/git-status";
-import { openFileTabFromTree } from "../lib/tab-actions";
+import { getActiveFilePath, openFileTabFromTree } from "../lib/tab-actions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { dirname } from "../lib/path-utils";
 import { FileTreeSelectionIntent } from "../lib/file-tree-selection-intent";
@@ -74,8 +74,7 @@ export function FilesPanel() {
     if (!wtPath) return null;
     const nav = s.worktreeNavStates[wtPath];
     if (!nav) return null;
-    const tab = nav.userTabs.find((t) => t.id === nav.activeTerminalsTab);
-    return tab && tab.kind === "file" ? tab.path ?? null : null;
+    return getActiveFilePath(nav);
   });
 
   // Trees expects directory paths to end with `/`. File paths must not.

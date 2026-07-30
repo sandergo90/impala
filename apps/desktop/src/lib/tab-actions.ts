@@ -1237,6 +1237,31 @@ function getActivePaneContext(worktreePath: string): {
   };
 }
 
+export function getActiveFilePath(nav: WorktreeNavState): string | null {
+  let tree: SplitNode;
+  let focusedPaneId: string;
+
+  if (nav.activeTerminalsTab === AGENT_PANE_ID) {
+    tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+    focusedPaneId = getEffectiveAgentTabFocusedPaneId(
+      nav.agentTabSplitTree,
+      nav.agentTabFocusedPaneId,
+    );
+  } else {
+    const topTab = nav.userTabs.find(
+      (candidate) => candidate.id === nav.activeTerminalsTab,
+    );
+    if (!topTab) return null;
+    tree = getEffectiveUserTabSplitTree(topTab);
+    focusedPaneId = getEffectiveUserTabFocusedPaneId(topTab);
+  }
+
+  const focusedGroup = findLeaf(tree, focusedPaneId);
+  if (!focusedGroup) return null;
+  const content = getActiveGroupTab(focusedGroup).content;
+  return content.kind === "file" ? content.path : null;
+}
+
 /** True once the active top-level tab has a real pane/group context. */
 export function shouldCreateTabInFocusedPane(worktreePath: string): boolean {
   const context = getActivePaneContext(worktreePath);
