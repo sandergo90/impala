@@ -744,6 +744,41 @@ fn apply_caffeinate(caffeinators: &Caffeinators, worktree_path: &str, status: &s
 #[cfg(not(target_os = "macos"))]
 fn apply_caffeinate(_caffeinators: &Caffeinators, _worktree_path: &str, _status: &str) {}
 
+#[derive(Clone, Copy)]
+enum AgentStatusSource {
+    Live,
+    Restored,
+}
+
+impl AgentStatusSource {
+    fn should_apply_caffeinate(self) -> bool {
+        matches!(self, Self::Live)
+    }
+}
+
+fn publish_agent_status_from_source(
+    app_handle: &AppHandle,
+    statuses: &AgentStatuses,
+    caffeinators: &Caffeinators,
+    worktree_path: &str,
+    status: &str,
+    source: AgentStatusSource,
+) {
+    if let Ok(mut map) = statuses.0.lock() {
+        map.insert(worktree_path.to_owned(), status.to_owned());
+    }
+    if source.should_apply_caffeinate() {
+        apply_caffeinate(caffeinators, worktree_path, status);
+    }
+    let _ = app_handle.emit(
+        "agent-status",
+        AgentStatusEvent {
+            worktree_path: worktree_path.to_owned(),
+            status: status.to_owned(),
+        },
+    );
+}
+
 pub fn publish_agent_status(
     app_handle: &AppHandle,
     statuses: &AgentStatuses,
@@ -751,16 +786,30 @@ pub fn publish_agent_status(
     worktree_path: &str,
     status: &str,
 ) {
-    if let Ok(mut map) = statuses.0.lock() {
-        map.insert(worktree_path.to_owned(), status.to_owned());
-    }
-    apply_caffeinate(caffeinators, worktree_path, status);
-    let _ = app_handle.emit(
-        "agent-status",
-        AgentStatusEvent {
-            worktree_path: worktree_path.to_owned(),
-            status: status.to_owned(),
-        },
+    publish_agent_status_from_source(
+        app_handle,
+        statuses,
+        caffeinators,
+        worktree_path,
+        status,
+        AgentStatusSource::Live,
+    );
+}
+
+pub fn publish_restored_agent_status(
+    app_handle: &AppHandle,
+    statuses: &AgentStatuses,
+    caffeinators: &Caffeinators,
+    worktree_path: &str,
+    status: &str,
+) {
+    publish_agent_status_from_source(
+        app_handle,
+        statuses,
+        caffeinators,
+        worktree_path,
+        status,
+        AgentStatusSource::Restored,
     );
 }
 
@@ -1300,13 +1349,19 @@ pub fn start(
 #[cfg(test)]
 mod tests {
     use super::{
-        hook_command, pane_status_for_hook_event, AgentPaneStatuses, AutomationCompletionTracker,
-        InterruptedAgentTurns, IMPALA_BROWSER_SKILL,
+        hook_command, pane_status_for_hook_event, AgentPaneStatuses, AgentStatusSource,
+        AutomationCompletionTracker, InterruptedAgentTurns, IMPALA_BROWSER_SKILL,
     };
     use std::fs;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn restored_agent_status_does_not_start_caffeinate() {
+        assert!(!AgentStatusSource::Restored.should_apply_caffeinate());
+        assert!(AgentStatusSource::Live.should_apply_caffeinate());
+    }
 
     #[test]
     fn browser_skill_requires_impala_runtime_context() {

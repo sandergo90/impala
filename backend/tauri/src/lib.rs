@@ -1891,7 +1891,7 @@ pub fn run() {
                 subagent_registry.clone(),
             );
             for (worktree_path, status) in restored_agent_statuses {
-                hook_server::publish_agent_status(
+                hook_server::publish_restored_agent_status(
                     app.handle(),
                     &agent_statuses,
                     &caffeinators,
