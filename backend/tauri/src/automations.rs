@@ -110,6 +110,7 @@ pub struct AutomationRun {
     /// pending → launched → completed | failed. aborted = the worktree was
     /// deleted while the run was in flight. skipped reserved.
     pub status: String,
+    pub seen: bool,
     pub error: Option<String>,
     pub created_at: String,
     pub agent_provider: Option<String>,
@@ -275,16 +276,17 @@ fn row_to_run(row: &rusqlite::Row) -> rusqlite::Result<AutomationRun> {
         worktree_path: row.get(3)?,
         instructions_path: row.get(4)?,
         status: row.get(5)?,
-        error: row.get(6)?,
-        created_at: row.get(7)?,
-        agent_provider: row.get(8)?,
-        agent_session_id: row.get(9)?,
-        agent_turn_id: row.get(10)?,
+        seen: row.get::<_, i64>(6)? != 0,
+        error: row.get(7)?,
+        created_at: row.get(8)?,
+        agent_provider: row.get(9)?,
+        agent_session_id: row.get(10)?,
+        agent_turn_id: row.get(11)?,
     })
 }
 
 const RUN_COLS: &str =
-    "id, automation_id, scheduled_for, worktree_path, instructions_path, status, error, created_at, agent_provider, agent_session_id, agent_turn_id";
+    "id, automation_id, scheduled_for, worktree_path, instructions_path, status, seen, error, created_at, agent_provider, agent_session_id, agent_turn_id";
 
 fn get_run(conn: &Connection, id: &str) -> Result<AutomationRun, String> {
     conn.query_row(
@@ -522,6 +524,7 @@ pub fn insert_run(
         worktree_path: None,
         instructions_path: None,
         status: "pending".to_string(),
+        seen: false,
         error: None,
         created_at: ts,
         agent_provider: None,
@@ -1541,6 +1544,15 @@ pub fn mark_run_seen(conn: &Connection, run_id: &str) -> Result<usize, String> {
     .map_err(|e| format!("Failed to mark run seen: {}", e))
 }
 
+pub fn mark_all_runs_seen(conn: &Connection) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE automation_runs SET seen = 1
+         WHERE seen = 0 AND status IN ('completed', 'failed')",
+        [],
+    )
+    .map_err(|e| format!("Failed to mark automation runs seen: {}", e))
+}
+
 /// Create the scratch git repo a global automation run executes in. A real
 /// repo (init + empty commit) so the main view's uncommitted diff shows
 /// everything the agent wrote.
@@ -2314,6 +2326,22 @@ pub fn mark_automation_run_seen(
     Ok(())
 }
 
+#[tauri::command]
+pub fn mark_all_automation_runs_seen(
+    app: AppHandle,
+    state: tauri::State<'_, crate::DbState>,
+) -> Result<usize, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let updated = mark_all_runs_seen(&conn)?;
+    if updated > 0 {
+        let _ = app.emit("automation-runs-changed", ());
+    }
+    Ok(updated)
+}
+
 /// Validate a schedule and preview its next `count` occurrences (unix
 /// seconds, local tz). Powers the schedule picker preview.
 #[tauri::command]
@@ -2457,6 +2485,32 @@ mod tests {
     }
 
     #[test]
+    fn marking_all_runs_seen_only_updates_finished_runs() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(&conn, new_automation("0 9 * * *"), now).unwrap();
+
+        for (scheduled_for, status) in [(1000, "completed"), (2000, "failed")] {
+            let run = insert_run(&conn, &automation.id, scheduled_for)
+                .unwrap()
+                .unwrap();
+            report_run(&conn, &run.id, None, status, None).unwrap();
+        }
+        let pending = insert_run(&conn, &automation.id, 3000).unwrap().unwrap();
+
+        assert_eq!(mark_all_runs_seen(&conn).unwrap(), 2);
+        assert_eq!(mark_all_runs_seen(&conn).unwrap(), 0);
+        assert_eq!(count_unseen_runs(&conn).unwrap().total, 0);
+
+        let runs = list_runs_by_repo(&conn, "/repo").unwrap();
+        assert!(runs
+            .iter()
+            .filter(|run| run.status == "completed" || run.status == "failed")
+            .all(|run| run.seen));
+        assert!(!get_run(&conn, &pending.id).unwrap().seen);
+    }
+
+    #[test]
     fn automation_crud_and_run_lifecycle() {
         let conn = test_conn();
         let now = chrono::Utc::now().timestamp();
@@ -2545,6 +2599,7 @@ mod tests {
         let runs = list_runs_by_repo(&conn, "/repo").unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "completed");
+        assert!(!runs[0].seen);
         assert_eq!(runs[0].worktree_path.as_deref(), Some("/wt/auto-1"));
 
         // Unseen badge: one completed run, cleared when that run is opened.
@@ -2557,6 +2612,7 @@ mod tests {
         );
         assert_eq!(mark_run_seen(&conn, &run.id).unwrap(), 1);
         assert_eq!(mark_run_seen(&conn, &run.id).unwrap(), 0);
+        assert!(list_runs_by_repo(&conn, "/repo").unwrap()[0].seen);
         assert_eq!(
             count_unseen_runs(&conn).unwrap(),
             UnseenRunCounts {

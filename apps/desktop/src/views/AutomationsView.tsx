@@ -180,6 +180,7 @@ export function AutomationsView() {
     template: AutomationTemplate | null;
   } | null>(null);
   const [deleting, setDeleting] = useState<Automation | null>(null);
+  const [markingAllSeen, setMarkingAllSeen] = useState(false);
 
   const refresh = useCallback(() => {
     // The view is unscoped: every project's automations plus global ones.
@@ -224,6 +225,10 @@ export function AutomationsView() {
     return map;
   }, [runs]);
   const selected = automations.find((a) => a.id === selectedId) ?? null;
+  const hasUnseenRuns = runs.some(
+    (run) =>
+      !run.seen && (run.status === "completed" || run.status === "failed"),
+  );
   const inspectedRun = inspectedWorktree
     ? runs.find((run) => run.worktree_path === inspectedWorktree.path)
     : undefined;
@@ -249,6 +254,40 @@ export function AutomationsView() {
       },
     );
   }, []);
+
+  const markAllRunsSeen = useCallback(async () => {
+    setMarkingAllSeen(true);
+    try {
+      await invoke<number>("mark_all_automation_runs_seen");
+      const finishedWorktreePaths = new Set(
+        runs.flatMap((run) =>
+          (run.status === "completed" || run.status === "failed") &&
+          run.worktree_path
+            ? [run.worktree_path]
+            : [],
+        ),
+      );
+      for (const worktreePath of finishedWorktreePaths) {
+        const state =
+          useDataStore.getState().worktreeDataStates[worktreePath];
+        if (!state?.hasUnseenResult) continue;
+        useDataStore.getState().updateWorktreeDataState(worktreePath, {
+          hasUnseenResult: false,
+        });
+      }
+      setRuns((current) =>
+        current.map((run) =>
+          run.status === "completed" || run.status === "failed"
+            ? { ...run, seen: true }
+            : run,
+        ),
+      );
+    } catch (error) {
+      toast.error(`Failed to mark automation runs as seen: ${error}`);
+    } finally {
+      setMarkingAllSeen(false);
+    }
+  }, [runs]);
 
   const openRunWorktree = useCallback(
     async (run: AutomationRun, automation?: Automation) => {
@@ -559,12 +598,25 @@ export function AutomationsView() {
               {automationWorktrees.length > 0 && (
                 <section className="mt-10" aria-labelledby="automation-worktrees-heading">
                   <div className="mb-6 border-t border-border/50" />
-                  <h2
-                    id="automation-worktrees-heading"
-                    className="px-3 text-xs font-semibold uppercase tracking-[1.2px] text-muted-foreground"
-                  >
-                    Worktrees from automation runs
-                  </h2>
+                  <div className="flex items-center gap-3 px-3">
+                    <h2
+                      id="automation-worktrees-heading"
+                      className="text-xs font-semibold uppercase tracking-[1.2px] text-muted-foreground"
+                    >
+                      Worktrees from automation runs
+                    </h2>
+                    <div className="flex-1" />
+                    {hasUnseenRuns && (
+                      <button
+                        type="button"
+                        onClick={markAllRunsSeen}
+                        disabled={markingAllSeen}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        {markingAllSeen ? "Marking…" : "Mark all as seen"}
+                      </button>
+                    )}
+                  </div>
                   <div className="mt-2 flex flex-col">
                     {automationWorktrees.map((worktree) => {
                       const run = runs.find(
@@ -578,6 +630,10 @@ export function AutomationsView() {
                       const stat = runStats[worktree.path];
                       const isOpen =
                         inspectedWorktree?.path === worktree.path;
+                      const needsReview =
+                        run != null &&
+                        !run.seen &&
+                        (run.status === "completed" || run.status === "failed");
 
                       return (
                         <div
@@ -597,10 +653,22 @@ export function AutomationsView() {
                             className="flex min-w-0 flex-1 items-center gap-3.5 rounded-lg py-3 pl-3 text-left disabled:cursor-default"
                           >
                             <span
-                              className={`h-2 w-2 shrink-0 rounded-full ${
-                                meta?.dot ?? "bg-muted-foreground/40"
+                              title={needsReview ? "To review" : undefined}
+                              className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border ${
+                                needsReview
+                                  ? "border-primary"
+                                  : "border-transparent"
                               }`}
-                            />
+                            >
+                              {needsReview && (
+                                <span className="sr-only">To review</span>
+                              )}
+                              <span
+                                className={`h-2 w-2 rounded-full ${
+                                  meta?.dot ?? "bg-muted-foreground/40"
+                                }`}
+                              />
+                            </span>
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-base font-medium">
                                 {worktree.title ??

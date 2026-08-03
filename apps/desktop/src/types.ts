@@ -99,6 +99,8 @@ export interface AutomationRun {
   /** Immutable Markdown snapshot supplied to the agent for this run. */
   instructions_path?: string | null;
   status: "pending" | "launched" | "completed" | "failed" | "aborted" | "skipped";
+  /** Finished run result has been opened for review. */
+  seen: boolean;
   error?: string | null;
   created_at: string;
   agent_provider?: "claude" | "codex" | null;

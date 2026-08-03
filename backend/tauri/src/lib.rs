@@ -2071,6 +2071,7 @@ pub fn run() {
             automations::cron_next_occurrences,
             automations::count_unseen_automation_runs,
             automations::mark_automation_run_seen,
+            automations::mark_all_automation_runs_seen,
             automations::prepare_automation_run_dir,
             automations::list_automation_run_worktrees,
             automations::list_recent_automation_worktrees,
