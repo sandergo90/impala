@@ -2160,7 +2160,7 @@ dependencies = [
 
 [[package]]
 name = "impala"
-version = "0.23.21"
+version = "0.23.22"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
@@ -2218,7 +2218,7 @@ dependencies = [
 
 [[package]]
 name = "impala-pty-daemon"
-version = "0.23.19"
+version = "0.23.22"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
