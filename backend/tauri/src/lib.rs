@@ -1052,6 +1052,24 @@ fn get_agent_pane_statuses(
 }
 
 #[tauri::command]
+fn register_agent_delegation(
+    delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
+    delegation_id: String,
+    pane_id: String,
+) -> bool {
+    delegations.register(&delegation_id, &pane_id)
+}
+
+#[tauri::command]
+fn fail_agent_delegation(
+    delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
+    delegation_id: String,
+    error: String,
+) -> bool {
+    delegations.fail(&delegation_id, &error)
+}
+
+#[tauri::command]
 fn clear_agent_pane_status(
     app: tauri::AppHandle,
     statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
@@ -1872,6 +1890,7 @@ pub fn run() {
             ))));
 
             let agent_pane_statuses = Arc::new(hook_server::AgentPaneStatuses::load_persisted());
+            let agent_delegations = Arc::new(hook_server::AgentDelegations::load_persisted());
             let restored_agent_statuses = agent_pane_statuses.aggregate_snapshot();
             let agent_statuses = Arc::new(hook_server::AgentStatuses(Mutex::new(
                 restored_agent_statuses.clone(),
@@ -1885,6 +1904,7 @@ pub fn run() {
                 app.handle().clone(),
                 agent_statuses.clone(),
                 agent_pane_statuses.clone(),
+                agent_delegations.clone(),
                 last_turn_snapshots.clone(),
                 caffeinators.clone(),
                 interrupted_turns.clone(),
@@ -1902,6 +1922,7 @@ pub fn run() {
             app.manage(HookPort(hook_port));
             app.manage(agent_statuses.clone());
             app.manage(agent_pane_statuses.clone());
+            app.manage(agent_delegations);
             app.manage(last_turn_snapshots);
             app.manage(caffeinators.clone());
             app.manage(interrupted_turns);
@@ -2123,6 +2144,8 @@ pub fn run() {
             get_hook_port,
             get_agent_statuses,
             get_agent_pane_statuses,
+            register_agent_delegation,
+            fail_agent_delegation,
             clear_agent_pane_status,
             clear_agent_worktree_status,
             interrupt_agent_turn,

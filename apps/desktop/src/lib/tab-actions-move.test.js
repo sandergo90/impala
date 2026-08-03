@@ -472,6 +472,7 @@ describe("createAgentTabFromRequest", () => {
         serviceTier: "fast",
       },
       "SQS-24 Street lighting",
+      "delegation-24",
     );
 
     const tree = getEffectiveAgentTabSplitTree(
@@ -490,6 +491,7 @@ describe("createAgentTabFromRequest", () => {
         reasoningEffort: "max",
         serviceTier: "fast",
       },
+      delegationId: "delegation-24",
     });
   });
 });

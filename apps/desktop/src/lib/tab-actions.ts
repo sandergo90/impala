@@ -174,6 +174,7 @@ interface PendingAgentLaunch {
   prompt: string;
   agent?: Agent;
   codexOptions?: CodexLaunchOptions;
+  delegationId?: string;
 }
 
 const pendingAgentLaunches = new Map<string, PendingAgentLaunch>();
@@ -1104,6 +1105,7 @@ export function createAgentTabFromRequest(
   placement: "auto" | "current" | "left" | "right" = "auto",
   codexOptions?: CodexLaunchOptions,
   initialName?: string,
+  delegationId?: string,
 ): string {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
@@ -1141,6 +1143,7 @@ export function createAgentTabFromRequest(
         prompt,
         agent: initialAgent,
         codexOptions,
+        delegationId,
       });
     }
     update(addTabToGroup(tree, targetGroupId, newTab), targetGroupId);
@@ -1206,6 +1209,7 @@ export function createAgentTabFromRequest(
         prompt: initialPrompt.trim(),
         agent: initialAgent,
         codexOptions,
+        delegationId,
       });
       if (name) {
         renamePaneGroupTab(
@@ -1231,6 +1235,7 @@ export function createAgentTabFromRequest(
     prompt: initialPrompt.trim(),
     agent: initialAgent,
     codexOptions,
+    delegationId,
   });
   if (name) {
     renameUserTab(worktreePath, topTab.id, name);

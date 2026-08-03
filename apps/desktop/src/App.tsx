@@ -116,12 +116,13 @@ export function RootLayout() {
         prompt: string;
         agent?: "claude" | "codex";
         name?: string;
+        delegationId?: string;
         sourcePaneId?: string;
         placement?: "auto" | "current" | "left" | "right";
       } & CodexLaunchOptions>(
         "agent-tab-request-open",
         (event) => {
-          createAgentTabFromRequest(
+          const paneId = createAgentTabFromRequest(
             event.payload.worktreePath,
             event.payload.prompt,
             event.payload.agent,
@@ -133,7 +134,14 @@ export function RootLayout() {
               serviceTier: event.payload.serviceTier,
             },
             event.payload.name,
+            event.payload.delegationId,
           );
+          if (event.payload.delegationId) {
+            invoke("register_agent_delegation", {
+              delegationId: event.payload.delegationId,
+              paneId,
+            }).catch(() => {});
+          }
         },
       ),
     );

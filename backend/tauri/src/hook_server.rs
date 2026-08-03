@@ -12,6 +12,32 @@ pub struct AgentPaneStatuses {
     persist: bool,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+struct AgentDelegation {
+    delegation_id: String,
+    worktree_path: String,
+    name: Option<String>,
+    pane_id: Option<String>,
+    started: bool,
+    error: Option<String>,
+    created_at: i64,
+}
+
+#[derive(Clone, Serialize)]
+pub struct AgentDelegationStatus {
+    pub delegation_id: String,
+    pub worktree_path: String,
+    pub name: Option<String>,
+    pub pane_id: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+pub struct AgentDelegations {
+    entries: Mutex<HashMap<String, AgentDelegation>>,
+    persist: bool,
+}
+
 fn runtime_state_path(file_name: &str) -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".impala").join(file_name))
 }
@@ -111,6 +137,15 @@ impl AgentPaneStatuses {
         panes.contains_key(&(worktree_path.to_owned(), pane_id.to_owned()))
     }
 
+    fn status(&self, worktree_path: &str, pane_id: &str) -> Option<String> {
+        let Ok(panes) = self.panes.lock() else {
+            return None;
+        };
+        panes
+            .get(&(worktree_path.to_owned(), pane_id.to_owned()))
+            .cloned()
+    }
+
     pub fn interrupt(&self, worktree_path: &str, pane_id: &str) -> Option<String> {
         self.clear(worktree_path, pane_id)
     }
@@ -165,6 +200,141 @@ impl AgentPaneStatuses {
                 (path, status)
             })
             .collect()
+    }
+}
+
+impl AgentDelegations {
+    pub fn load_persisted() -> Self {
+        let entries: Vec<AgentDelegation> =
+            read_runtime_state("agent-delegations.json").unwrap_or_default();
+        Self {
+            entries: Mutex::new(
+                entries
+                    .into_iter()
+                    .map(|entry| (entry.delegation_id.clone(), entry))
+                    .collect(),
+            ),
+            persist: true,
+        }
+    }
+
+    fn persist(&self, entries: &HashMap<String, AgentDelegation>) {
+        if self.persist {
+            write_runtime_state(
+                "agent-delegations.json",
+                &entries.values().cloned().collect::<Vec<_>>(),
+            );
+        }
+    }
+
+    pub fn open(&self, delegation_id: &str, worktree_path: &str, name: Option<&str>) {
+        let Ok(mut entries) = self.entries.lock() else {
+            return;
+        };
+        // Ponytail: keep the persisted registry bounded at 256 delegations;
+        // move history to SQLite if orchestration needs long-term reporting.
+        if entries.len() >= 256 && !entries.contains_key(delegation_id) {
+            if let Some(oldest) = entries
+                .values()
+                .min_by_key(|entry| entry.created_at)
+                .map(|entry| entry.delegation_id.clone())
+            {
+                entries.remove(&oldest);
+            }
+        }
+        entries.insert(
+            delegation_id.to_owned(),
+            AgentDelegation {
+                delegation_id: delegation_id.to_owned(),
+                worktree_path: worktree_path.to_owned(),
+                name: name.map(str::to_owned),
+                pane_id: None,
+                started: false,
+                error: None,
+                created_at: chrono::Utc::now().timestamp(),
+            },
+        );
+        self.persist(&entries);
+    }
+
+    pub fn register(&self, delegation_id: &str, pane_id: &str) -> bool {
+        let Ok(mut entries) = self.entries.lock() else {
+            return false;
+        };
+        let Some(entry) = entries.get_mut(delegation_id) else {
+            return false;
+        };
+        entry.pane_id = Some(pane_id.to_owned());
+        self.persist(&entries);
+        true
+    }
+
+    pub fn fail(&self, delegation_id: &str, error: &str) -> bool {
+        let Ok(mut entries) = self.entries.lock() else {
+            return false;
+        };
+        let Some(entry) = entries.get_mut(delegation_id) else {
+            return false;
+        };
+        entry.error = Some(error.to_owned());
+        self.persist(&entries);
+        true
+    }
+
+    fn observe_hook(&self, worktree_path: &str, pane_id: &str) {
+        let Ok(mut entries) = self.entries.lock() else {
+            return;
+        };
+        let Some(entry) = entries.values_mut().find(|entry| {
+            entry.worktree_path == worktree_path && entry.pane_id.as_deref() == Some(pane_id)
+        }) else {
+            return;
+        };
+        if !entry.started {
+            entry.started = true;
+            self.persist(&entries);
+        }
+    }
+
+    pub fn status(
+        &self,
+        delegation_id: &str,
+        pane_statuses: &AgentPaneStatuses,
+    ) -> Option<AgentDelegationStatus> {
+        let entries = self.entries.lock().ok()?;
+        let entry = entries.get(delegation_id)?;
+        let status = if entry.error.is_some() {
+            "failed"
+        } else if !entry.started {
+            "pending"
+        } else {
+            match entry
+                .pane_id
+                .as_deref()
+                .and_then(|pane_id| pane_statuses.status(&entry.worktree_path, pane_id))
+            {
+                Some(value) if value == "working" => "running",
+                Some(value) if value == "permission" => "waiting",
+                _ => "idle",
+            }
+        };
+        Some(AgentDelegationStatus {
+            delegation_id: entry.delegation_id.clone(),
+            worktree_path: entry.worktree_path.clone(),
+            name: entry.name.clone(),
+            pane_id: entry.pane_id.clone(),
+            status: status.to_owned(),
+            error: entry.error.clone(),
+        })
+    }
+}
+
+impl Default for AgentDelegations {
+    fn default() -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+            persist: false,
+        }
     }
 }
 
@@ -1060,8 +1230,20 @@ fn handle_agent_request(
     app: &AppHandle,
     path: &str,
     params: &HashMap<String, String>,
+    delegations: &AgentDelegations,
+    pane_statuses: &AgentPaneStatuses,
 ) -> serde_json::Value {
     let result = (|| -> Result<serde_json::Value, String> {
+        if path == "/agents/status" {
+            let delegation_id = params
+                .get("delegation_id")
+                .filter(|value| !value.trim().is_empty())
+                .ok_or("missing delegation_id")?;
+            return delegations
+                .status(delegation_id, pane_statuses)
+                .map(|status| serde_json::to_value(status).expect("serializable status"))
+                .ok_or_else(|| format!("delegation not found: {delegation_id}"));
+        }
         if path != "/agents/open" {
             return Err(format!("unknown agents endpoint: {path}"));
         }
@@ -1080,6 +1262,9 @@ fn handle_agent_request(
             }
         }
         let name = params.get("name").filter(|value| !value.trim().is_empty());
+        let delegation_id = params
+            .get("delegation_id")
+            .filter(|value| !value.trim().is_empty());
         let model = params.get("model").filter(|value| !value.trim().is_empty());
         let reasoning_effort = params
             .get("reasoning_effort")
@@ -1116,7 +1301,11 @@ fn handle_agent_request(
             return Err("placement must be 'auto', 'current', 'left', or 'right'".to_string());
         }
 
-        app.emit_to(
+        if let Some(delegation_id) = delegation_id {
+            delegations.open(delegation_id, worktree_path, name.map(String::as_str));
+        }
+
+        if let Err(error) = app.emit_to(
             "main",
             "agent-tab-request-open",
             serde_json::json!({
@@ -1124,17 +1313,23 @@ fn handle_agent_request(
                 "prompt": prompt,
                 "agent": agent,
                 "name": name,
+                "delegationId": delegation_id,
                 "sourcePaneId": source_pane_id,
                 "placement": placement,
                 "model": model,
                 "reasoningEffort": reasoning_effort,
                 "serviceTier": service_tier,
             }),
-        )
-        .map_err(|e| format!("failed to open agent tab: {e}"))?;
+        ) {
+            if let Some(delegation_id) = delegation_id {
+                delegations.fail(delegation_id, &error.to_string());
+            }
+            return Err(format!("failed to open agent tab: {error}"));
+        }
 
         Ok(serde_json::json!({
             "opened": true,
+            "delegation_id": delegation_id,
             "agent": agent.map(|value| value.as_str()).unwrap_or("configured"),
         }))
     })();
@@ -1155,6 +1350,7 @@ pub fn start(
     app_handle: AppHandle,
     statuses: Arc<AgentStatuses>,
     pane_statuses: Arc<AgentPaneStatuses>,
+    delegations: Arc<AgentDelegations>,
     snapshots: Arc<LastTurnSnapshots>,
     caffeinators: Arc<Caffeinators>,
     interrupted_turns: Arc<InterruptedAgentTurns>,
@@ -1205,11 +1401,13 @@ pub fn start(
                 || path.starts_with("/agents/")
             {
                 let app = app_handle.clone();
+                let pane_statuses = pane_statuses.clone();
+                let delegations = delegations.clone();
                 std::thread::spawn(move || {
                     let body = if path.starts_with("/browser/") {
                         handle_browser_request(&app, &path, &params)
                     } else if path.starts_with("/agents/") {
-                        handle_agent_request(&app, &path, &params)
+                        handle_agent_request(&app, &path, &params, &delegations, &pane_statuses)
                     } else {
                         handle_automation_request(&app, &path, &params)
                     };
@@ -1270,6 +1468,7 @@ pub fn start(
             }
 
             if !pane_id.is_empty() {
+                delegations.observe_hook(&worktree_path, &pane_id);
                 subagents.ingest_hook(
                     &app_handle,
                     &worktree_path,
@@ -1379,8 +1578,9 @@ pub fn start(
 #[cfg(test)]
 mod tests {
     use super::{
-        hook_command, pane_status_for_hook_event, AgentPaneStatuses, AgentStatusSource,
-        AutomationCompletionTracker, InterruptedAgentTurns, IMPALA_BROWSER_SKILL,
+        hook_command, pane_status_for_hook_event, AgentDelegations, AgentPaneStatuses,
+        AgentStatusSource, AutomationCompletionTracker, InterruptedAgentTurns,
+        IMPALA_BROWSER_SKILL,
     };
     use std::fs;
     use std::io::Write;
@@ -1391,6 +1591,43 @@ mod tests {
     fn restored_agent_status_does_not_start_caffeinate() {
         assert!(!AgentStatusSource::Restored.should_apply_caffeinate());
         assert!(AgentStatusSource::Live.should_apply_caffeinate());
+    }
+
+    #[test]
+    fn delegation_status_follows_the_registered_pane() {
+        let delegations = AgentDelegations::default();
+        let panes = AgentPaneStatuses::default();
+
+        delegations.open("delegation-1", "/worktree", Some("SQS-24"));
+        assert_eq!(
+            delegations.status("delegation-1", &panes).unwrap().status,
+            "pending"
+        );
+        assert!(delegations.register("delegation-1", "pane-1"));
+
+        delegations.observe_hook("/worktree", "pane-1");
+        panes.observe("/worktree", "pane-1", "working");
+        assert_eq!(
+            delegations.status("delegation-1", &panes).unwrap().status,
+            "running"
+        );
+
+        panes.observe("/worktree", "pane-1", "permission");
+        assert_eq!(
+            delegations.status("delegation-1", &panes).unwrap().status,
+            "waiting"
+        );
+
+        panes.observe("/worktree", "pane-1", "idle");
+        assert_eq!(
+            delegations.status("delegation-1", &panes).unwrap().status,
+            "idle"
+        );
+
+        assert!(delegations.fail("delegation-1", "PTY spawn failed"));
+        let status = delegations.status("delegation-1", &panes).unwrap();
+        assert_eq!(status.status, "failed");
+        assert_eq!(status.error.as_deref(), Some("PTY spawn failed"));
     }
 
     #[test]

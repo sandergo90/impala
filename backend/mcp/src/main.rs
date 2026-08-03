@@ -477,7 +477,12 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
     if !matches!(placement, "auto" | "current" | "left" | "right") {
         return Err("placement must be 'auto', 'current', 'left', or 'right'".to_string());
     }
-    let mut params = vec![("worktree_path", wt.as_str()), ("prompt", prompt)];
+    let delegation_id = uuid::Uuid::new_v4().to_string();
+    let mut params = vec![
+        ("worktree_path", wt.as_str()),
+        ("prompt", prompt),
+        ("delegation_id", delegation_id.as_str()),
+    ];
     if let Some(agent) = agent {
         params.push(("agent", agent));
     }
@@ -501,6 +506,15 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
     }
     params.push(("placement", placement));
     browser_get("/agents/open", &params).map(strip_ok)
+}
+
+fn tool_get_agent_tab_status(args: &Value) -> Result<Value, String> {
+    let delegation_id = args
+        .get("delegation_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("missing required parameter: delegation_id")?;
+    browser_get("/agents/status", &[("delegation_id", delegation_id)]).map(strip_ok)
 }
 
 fn tool_browser_screenshot(args: &Value) -> Result<String, String> {
@@ -803,7 +817,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "open_agent_tab",
-                "description": "Delegate work to a fresh agent thread in a new Impala Agent tab for this worktree. The caller pane is detected automatically. Set placement='right' or 'left' to open the tab in that neighboring split pane, or placement='current' for the caller's pane. With the default placement='auto', a caller in a secondary split pane opens locally; otherwise the tab opens in the main workspace strip. Use when the user says to investigate, implement, continue, or do something 'in a new thread', 'in another agent tab', or equivalent. Pass agent='claude' or agent='codex' when the user names a provider; omit it to use the worktree's configured agent. The new thread has no access to this conversation: turn references such as 'this issue' or 'this plan' into a self-contained prompt with the relevant paths, requirements, and context. After opening the tab, do not also perform the delegated task in the current thread unless the user explicitly asks you to.",
+                "description": "Delegate work to a fresh agent thread in a new Impala Agent tab for this worktree. Returns a delegation_id for get_agent_tab_status. The caller pane is detected automatically. Set placement='right' or 'left' to open the tab in that neighboring split pane, or placement='current' for the caller's pane. With the default placement='auto', a caller in a secondary split pane opens locally; otherwise the tab opens in the main workspace strip. Use when the user says to investigate, implement, continue, or do something 'in a new thread', 'in another agent tab', or equivalent. Pass agent='claude' or agent='codex' when the user names a provider; omit it to use the worktree's configured agent. The new thread has no access to this conversation: turn references such as 'this issue' or 'this plan' into a self-contained prompt with the relevant paths, requirements, and context. After opening the tab, do not also perform the delegated task in the current thread unless the user explicitly asks you to.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -847,6 +861,20 @@ fn tool_definitions() -> Value {
                         }
                     },
                     "required": ["prompt"]
+                }
+            },
+            {
+                "name": "get_agent_tab_status",
+                "description": "Get lifecycle status for a tab opened by open_agent_tab. Returns pending while the pane or first turn is starting, running while the agent works, waiting when it needs permission, idle after its turn stops, and failed when Impala could not launch it. An idle status is not integration proof; verify the worker's expected commit separately.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "delegation_id": {
+                            "type": "string",
+                            "description": "Stable delegation id returned by open_agent_tab"
+                        }
+                    },
+                    "required": ["delegation_id"]
                 }
             },
             {
@@ -1096,6 +1124,7 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_scroll" => tool_browser_scroll(&tool_args),
                 "browser_type" => tool_browser_type(&tool_args),
                 "open_agent_tab" => tool_open_agent_tab(&tool_args),
+                "get_agent_tab_status" => tool_get_agent_tab_status(&tool_args),
                 "list_automations" => tool_list_automations(&tool_args),
                 "create_automation" => tool_create_automation(&tool_args),
                 "update_automation" => tool_update_automation(&tool_args),

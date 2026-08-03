@@ -1014,6 +1014,12 @@ const TabBody = memo(function TabBody({
         })
         .catch((err) => {
           console.error("Failed to spawn PTY:", err);
+          if (delegatedLaunch?.delegationId) {
+            invoke("fail_agent_delegation", {
+              delegationId: delegatedLaunch.delegationId,
+              error: String(err),
+            }).catch(() => {});
+          }
           spawningRef.current = false;
         });
     });
