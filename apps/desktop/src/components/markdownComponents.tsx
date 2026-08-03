@@ -285,7 +285,7 @@ export const markdownComponents: Partial<Components> = {
   li: ({ children, className }) => {
     const isTaskItem = className?.includes("task-list-item");
     return (
-      <li className={isTaskItem ? "list-none flex items-start gap-2" : undefined}>
+      <li className={isTaskItem ? "list-none [&>input]:mr-2" : undefined}>
         {children}
       </li>
     );
