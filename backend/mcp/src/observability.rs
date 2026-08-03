@@ -30,15 +30,13 @@ pub fn init() -> Guard {
         .map(|dsn| {
             sentry::init((
                 dsn,
-                sentry::ClientOptions {
-                    release: Some(RELEASE_NAME.into()),
-                    environment: Some(environment().into()),
-                    traces_sample_rate: traces_sample_rate(),
-                    attach_stacktrace: true,
-                    send_default_pii: false,
-                    enable_logs: true,
-                    ..Default::default()
-                },
+                sentry::ClientOptions::new()
+                    .release(RELEASE_NAME)
+                    .environment(environment())
+                    .traces_sample_rate(traces_sample_rate())
+                    .attach_stacktrace(true)
+                    .send_default_pii(false)
+                    .enable_logs(true),
             ))
         });
 
