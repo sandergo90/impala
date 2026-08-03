@@ -1079,6 +1079,7 @@ fn handle_agent_request(
                 return Err("agent must be 'claude' or 'codex'".to_string());
             }
         }
+        let name = params.get("name").filter(|value| !value.trim().is_empty());
         let model = params.get("model").filter(|value| !value.trim().is_empty());
         let reasoning_effort = params
             .get("reasoning_effort")
@@ -1122,6 +1123,7 @@ fn handle_agent_request(
                 "worktreePath": worktree_path,
                 "prompt": prompt,
                 "agent": agent,
+                "name": name,
                 "sourcePaneId": source_pane_id,
                 "placement": placement,
                 "model": model,

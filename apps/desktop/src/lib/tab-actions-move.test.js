@@ -19,6 +19,8 @@ const {
   addTabToPane,
   addTabToAgentPrimaryPane,
   createUserTab,
+  createAgentTabFromRequest,
+  getPendingAgentLaunch,
   getEffectiveAgentTabSplitTree,
   getEffectiveUserTabSplitTree,
   moveWorkspaceTab,
@@ -444,6 +446,51 @@ describe("addTabToAgentPrimaryPane", () => {
       "browser-session",
       "local-shell",
     ]);
+  });
+});
+
+describe("createAgentTabFromRequest", () => {
+  test("applies the requested ticket name and Codex configuration", () => {
+    const primary = group(
+      "tab-agent",
+      groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+    );
+    setTabs([], "tab-agent", {
+      agentTabSplitTree: primary,
+      agentTabFocusedPaneId: primary.id,
+    });
+
+    const createdId = createAgentTabFromRequest(
+      worktreePath,
+      "$implement /tmp/SQS-24.md",
+      "codex",
+      "tab-agent",
+      "current",
+      {
+        model: "gpt-5.6-luna",
+        reasoningEffort: "max",
+        serviceTier: "fast",
+      },
+      "SQS-24 Street lighting",
+    );
+
+    const tree = getEffectiveAgentTabSplitTree(
+      useUIStore.getState().getWorktreeNavState(worktreePath).agentTabSplitTree,
+    );
+    expect(findGroup(tree, "tab-agent").tabs.find((tab) => tab.id === createdId))
+      .toMatchObject({
+        label: "SQS-24 Street lighting",
+        userLabel: "SQS-24 Street lighting",
+      });
+    expect(getPendingAgentLaunch(createdId)).toEqual({
+      prompt: "$implement /tmp/SQS-24.md",
+      agent: "codex",
+      codexOptions: {
+        model: "gpt-5.6-luna",
+        reasoningEffort: "max",
+        serviceTier: "fast",
+      },
+    });
   });
 });
 

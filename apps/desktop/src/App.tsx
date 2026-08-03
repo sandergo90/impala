@@ -115,6 +115,7 @@ export function RootLayout() {
         worktreePath: string;
         prompt: string;
         agent?: "claude" | "codex";
+        name?: string;
         sourcePaneId?: string;
         placement?: "auto" | "current" | "left" | "right";
       } & CodexLaunchOptions>(
@@ -131,6 +132,7 @@ export function RootLayout() {
               reasoningEffort: event.payload.reasoningEffort,
               serviceTier: event.payload.serviceTier,
             },
+            event.payload.name,
           );
         },
       ),

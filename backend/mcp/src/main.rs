@@ -438,6 +438,10 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
             return Err("agent must be 'claude' or 'codex'".to_string());
         }
     }
+    let name = args
+        .get("name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty());
     let model = args.get("model").and_then(|value| value.as_str());
     let reasoning_effort = args
         .get("reasoning_effort")
@@ -476,6 +480,9 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
     let mut params = vec![("worktree_path", wt.as_str()), ("prompt", prompt)];
     if let Some(agent) = agent {
         params.push(("agent", agent));
+    }
+    if let Some(name) = name {
+        params.push(("name", name));
     }
     if let Some(model) = model {
         params.push(("model", model));
@@ -812,6 +819,11 @@ fn tool_definitions() -> Value {
                             "type": "string",
                             "enum": ["claude", "codex"],
                             "description": "Agent provider for this tab. Defaults to the worktree's configured agent."
+                        },
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Display name for the new Agent tab, for example the ticket id and title."
                         },
                         "model": {
                             "type": "string",

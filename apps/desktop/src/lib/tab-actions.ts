@@ -1103,9 +1103,11 @@ export function createAgentTabFromRequest(
   sourcePaneId?: string,
   placement: "auto" | "current" | "left" | "right" = "auto",
   codexOptions?: CodexLaunchOptions,
+  initialName?: string,
 ): string {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
+  const name = initialName?.trim();
 
   const addToRequestedGroup = (
     tree: SplitNode,
@@ -1129,7 +1131,10 @@ export function createAgentTabFromRequest(
       return null;
     }
 
-    const newTab = createGroup({ kind: "terminal", launch: "agent" }).tabs[0];
+    const created = createGroup({ kind: "terminal", launch: "agent" }).tabs[0];
+    const newTab = name
+      ? { ...created, label: name, userLabel: name }
+      : created;
     const prompt = initialPrompt.trim();
     if (prompt) {
       pendingAgentLaunches.set(newTab.id, {
@@ -1202,6 +1207,14 @@ export function createAgentTabFromRequest(
         agent: initialAgent,
         codexOptions,
       });
+      if (name) {
+        renamePaneGroupTab(
+          worktreePath,
+          nav.activeTerminalsTab,
+          paneTabId,
+          name,
+        );
+      }
       uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
       return paneTabId;
     }
@@ -1219,6 +1232,10 @@ export function createAgentTabFromRequest(
     agent: initialAgent,
     codexOptions,
   });
+  if (name) {
+    renameUserTab(worktreePath, topTab.id, name);
+    renamePaneGroupTab(worktreePath, topTab.id, paneTabId, name);
+  }
   uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
   return paneTabId;
 }
