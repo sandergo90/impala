@@ -2,6 +2,20 @@ import { invoke } from "@/lib/invoke";
 
 export type Agent = "claude" | "codex";
 
+export interface CodexLaunchOptions {
+  model?: string;
+  reasoningEffort?:
+    | "none"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "max"
+    | "ultra";
+  serviceTier?: "default" | "fast" | "standard";
+}
+
 /**
  * Resolve the agent for a worktree. Agent is chosen at creation time and
  * stored at worktree scope; nothing else feeds the resolution. Worktrees
@@ -29,11 +43,23 @@ export function buildLaunchCommand(
   flags: string,
   initialPrompt?: string,
   env?: Record<string, string>,
+  codexOptions?: CodexLaunchOptions,
 ): string {
+  const args: string[] = [];
+  if (agent === "codex" && codexOptions?.model) {
+    args.push("-m", codexOptions.model);
+  }
+  if (agent === "codex" && codexOptions?.reasoningEffort) {
+    args.push("-c", `model_reasoning_effort=${codexOptions.reasoningEffort}`);
+  }
+  if (agent === "codex" && codexOptions?.serviceTier) {
+    args.push("-c", `service_tier=${codexOptions.serviceTier}`);
+  }
+  if (initialPrompt) args.push(initialPrompt);
   return `${buildAgentCommand(
     agent,
     flags,
-    initialPrompt ? [initialPrompt] : [],
+    args,
     env,
   )}\n`;
 }

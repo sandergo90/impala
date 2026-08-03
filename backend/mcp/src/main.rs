@@ -438,6 +438,34 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
             return Err("agent must be 'claude' or 'codex'".to_string());
         }
     }
+    let model = args.get("model").and_then(|value| value.as_str());
+    let reasoning_effort = args
+        .get("reasoning_effort")
+        .and_then(|value| value.as_str());
+    if let Some(value) = reasoning_effort {
+        if !matches!(
+            value,
+            "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+        ) {
+            return Err(
+                "reasoning_effort must be one of: none, minimal, low, medium, high, xhigh, max, ultra"
+                    .to_string(),
+            );
+        }
+    }
+    let service_tier = args.get("service_tier").and_then(|value| value.as_str());
+    if let Some(value) = service_tier {
+        if !matches!(value, "default" | "fast" | "standard") {
+            return Err("service_tier must be 'default', 'fast', or 'standard'".to_string());
+        }
+    }
+    if (model.is_some() || reasoning_effort.is_some() || service_tier.is_some())
+        && agent != Some("codex")
+    {
+        return Err(
+            "model, reasoning_effort, and service_tier require agent='codex'".to_string(),
+        );
+    }
     let placement = args
         .get("placement")
         .and_then(|value| value.as_str())
@@ -448,6 +476,15 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
     let mut params = vec![("worktree_path", wt.as_str()), ("prompt", prompt)];
     if let Some(agent) = agent {
         params.push(("agent", agent));
+    }
+    if let Some(model) = model {
+        params.push(("model", model));
+    }
+    if let Some(reasoning_effort) = reasoning_effort {
+        params.push(("reasoning_effort", reasoning_effort));
+    }
+    if let Some(service_tier) = service_tier {
+        params.push(("service_tier", service_tier));
     }
     let source_pane_id = std::env::var("IMPALA_PANE_ID")
         .ok()
@@ -775,6 +812,21 @@ fn tool_definitions() -> Value {
                             "type": "string",
                             "enum": ["claude", "codex"],
                             "description": "Agent provider for this tab. Defaults to the worktree's configured agent."
+                        },
+                        "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Codex model for this tab, for example gpt-5.6-luna. Requires agent='codex'."
+                        },
+                        "reasoning_effort": {
+                            "type": "string",
+                            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+                            "description": "Codex reasoning effort for this tab. Requires agent='codex'."
+                        },
+                        "service_tier": {
+                            "type": "string",
+                            "enum": ["default", "fast", "standard"],
+                            "description": "Codex service tier for this tab. Requires agent='codex'."
                         },
                         "placement": {
                             "type": "string",

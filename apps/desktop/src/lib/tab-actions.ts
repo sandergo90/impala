@@ -40,7 +40,7 @@ import type {
   UserTab,
   WorktreeNavState,
 } from "../types";
-import type { Agent } from "./agent";
+import type { Agent, CodexLaunchOptions } from "./agent";
 
 // The pane content a single-leaf tab shows, derived from its top-level fields.
 // Keep in sync with the leaf content written at creation and the migrations.
@@ -173,6 +173,7 @@ export function createUserTab(
 interface PendingAgentLaunch {
   prompt: string;
   agent?: Agent;
+  codexOptions?: CodexLaunchOptions;
 }
 
 const pendingAgentLaunches = new Map<string, PendingAgentLaunch>();
@@ -1101,6 +1102,7 @@ export function createAgentTabFromRequest(
   initialAgent?: Agent,
   sourcePaneId?: string,
   placement: "auto" | "current" | "left" | "right" = "auto",
+  codexOptions?: CodexLaunchOptions,
 ): string {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
@@ -1130,7 +1132,11 @@ export function createAgentTabFromRequest(
     const newTab = createGroup({ kind: "terminal", launch: "agent" }).tabs[0];
     const prompt = initialPrompt.trim();
     if (prompt) {
-      pendingAgentLaunches.set(newTab.id, { prompt, agent: initialAgent });
+      pendingAgentLaunches.set(newTab.id, {
+        prompt,
+        agent: initialAgent,
+        codexOptions,
+      });
     }
     update(addTabToGroup(tree, targetGroupId, newTab), targetGroupId);
     return newTab.id;
@@ -1191,6 +1197,11 @@ export function createAgentTabFromRequest(
       initialAgent,
     );
     if (paneTabId) {
+      pendingAgentLaunches.set(paneTabId, {
+        prompt: initialPrompt.trim(),
+        agent: initialAgent,
+        codexOptions,
+      });
       uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
       return paneTabId;
     }
@@ -1202,8 +1213,14 @@ export function createAgentTabFromRequest(
     initialPrompt,
     initialAgent,
   );
+  const paneTabId = getPrimaryGroupTabId(topTab);
+  pendingAgentLaunches.set(paneTabId, {
+    prompt: initialPrompt.trim(),
+    agent: initialAgent,
+    codexOptions,
+  });
   uiState.updateWorktreeNavState(worktreePath, { activeTab: "terminal" });
-  return getPrimaryGroupTabId(topTab);
+  return paneTabId;
 }
 
 function getActivePaneContext(worktreePath: string): {

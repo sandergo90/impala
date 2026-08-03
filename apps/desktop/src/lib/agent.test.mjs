@@ -19,6 +19,23 @@ describe("global automation commands", () => {
     );
   });
 
+  test("applies shell-safe per-tab Codex configuration", () => {
+    expect(
+      buildLaunchCommand("codex", "--yolo", "$implement the ticket", undefined, {
+        model: "gpt-5.6-luna",
+        reasoningEffort: "max",
+        serviceTier: "fast",
+      }),
+    ).toBe(
+      "codex --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' '-c' 'service_tier=fast' '$implement the ticket'\n",
+    );
+    expect(
+      buildLaunchCommand("codex", "--yolo", "prompt", undefined, {
+        model: "model'; echo unsafe",
+      }),
+    ).toBe("codex --yolo '-m' 'model'\\''; echo unsafe' 'prompt'\n");
+  });
+
   test("builds direct resume commands without an echoed shell exit", () => {
     expect(buildAutomationResumeCommand("codex", "--yolo", "session-1")).toBe(
       "codex --yolo 'resume' 'session-1'",

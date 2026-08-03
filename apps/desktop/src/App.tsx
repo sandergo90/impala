@@ -35,6 +35,7 @@ import {
 } from "./lib/tab-actions";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AGENT_PANE_ID, RUN_PANE_ID } from "./lib/pane-ids";
+import type { CodexLaunchOptions } from "./lib/agent";
 import { releaseCachedTerminal } from "./components/XtermTerminal";
 
 export function RootLayout() {
@@ -116,7 +117,7 @@ export function RootLayout() {
         agent?: "claude" | "codex";
         sourcePaneId?: string;
         placement?: "auto" | "current" | "left" | "right";
-      }>(
+      } & CodexLaunchOptions>(
         "agent-tab-request-open",
         (event) => {
           createAgentTabFromRequest(
@@ -125,6 +126,11 @@ export function RootLayout() {
             event.payload.agent,
             event.payload.sourcePaneId,
             event.payload.placement,
+            {
+              model: event.payload.model,
+              reasoningEffort: event.payload.reasoningEffort,
+              serviceTier: event.payload.serviceTier,
+            },
           );
         },
       ),

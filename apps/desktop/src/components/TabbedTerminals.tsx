@@ -977,7 +977,13 @@ const TabBody = memo(function TabBody({
                 ? `Read the ${issue.provider} issue from @docs/issues/${issue.identifier}.md`
                 : undefined);
 
-            const cmd = buildLaunchCommand(agent, flags, initialPrompt, extraEnv);
+            const cmd = buildLaunchCommand(
+              agent,
+              flags,
+              initialPrompt,
+              extraEnv,
+              delegatedLaunch?.codexOptions,
+            );
             const encoded = encodePtyInput(cmd);
 
             // Wait for the shell to finish sourcing rc files before writing.

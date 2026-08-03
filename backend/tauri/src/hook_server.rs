@@ -1079,6 +1079,31 @@ fn handle_agent_request(
                 return Err("agent must be 'claude' or 'codex'".to_string());
             }
         }
+        let model = params.get("model").filter(|value| !value.trim().is_empty());
+        let reasoning_effort = params
+            .get("reasoning_effort")
+            .filter(|value| !value.trim().is_empty());
+        if let Some(value) = reasoning_effort {
+            if !matches!(
+                value.as_str(),
+                "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+            ) {
+                return Err("invalid reasoning_effort".to_string());
+            }
+        }
+        let service_tier = params
+            .get("service_tier")
+            .filter(|value| !value.trim().is_empty());
+        if let Some(value) = service_tier {
+            if !matches!(value.as_str(), "default" | "fast" | "standard") {
+                return Err("invalid service_tier".to_string());
+            }
+        }
+        if (model.is_some() || reasoning_effort.is_some() || service_tier.is_some())
+            && agent.map(String::as_str) != Some("codex")
+        {
+            return Err("Codex launch options require agent=codex".to_string());
+        }
         let source_pane_id = params
             .get("source_pane_id")
             .filter(|value| !value.trim().is_empty());
@@ -1099,6 +1124,9 @@ fn handle_agent_request(
                 "agent": agent,
                 "sourcePaneId": source_pane_id,
                 "placement": placement,
+                "model": model,
+                "reasoningEffort": reasoning_effort,
+                "serviceTier": service_tier,
             }),
         )
         .map_err(|e| format!("failed to open agent tab: {e}"))?;
