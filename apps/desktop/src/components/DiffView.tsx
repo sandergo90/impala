@@ -12,9 +12,7 @@ import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { openFileTab } from "../lib/tab-actions";
-import { adjacentChangedFile, changedFileIndex } from "../lib/change-navigation";
 import { ChangedFileContextMenu } from "./ChangedFileContextMenu";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -414,18 +412,6 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
     () => (hideViewed ? changedFiles.filter((f) => !viewedFiles.has(f.path)) : changedFiles),
     [hideViewed, changedFiles, viewedFiles]
   );
-  const selectedFileIndex = changedFileIndex(visibleChangedFiles, selectedFile?.path ?? null);
-  const selectAdjacentFile = useCallback((direction: -1 | 1) => {
-    if (!worktreePath) return;
-    const nextFile = adjacentChangedFile(
-      visibleChangedFiles,
-      selectedFile?.path ?? null,
-      direction,
-    );
-    if (!nextFile) return;
-    useUIStore.getState().updateWorktreeNavState(worktreePath, { selectedFile: nextFile });
-    updateData({ diffText: fileDiffs[nextFile.path] ?? "" });
-  }, [fileDiffs, selectedFile?.path, updateData, visibleChangedFiles, worktreePath]);
   const showAllFiles = !selectedFile && hasFileDiffs;
   const showSingleFile = selectedFile && diffText;
 
@@ -612,41 +598,6 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
         </button>
       </div>
       <div className="flex-1" />
-      {visibleChangedFiles.length > 0 && (
-        <div className="flex min-w-0 items-center gap-1 text-sm" aria-label="Changed file navigation">
-          <button
-            type="button"
-            onClick={() => selectAdjacentFile(-1)}
-            disabled={selectedFileIndex <= 0}
-            aria-label="Previous changed file"
-            title="Previous changed file"
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-          >
-            <ChevronLeft aria-hidden="true" className="size-4" />
-          </button>
-          <span
-            className="max-w-48 truncate text-muted-foreground"
-            title={selectedFile?.path ?? "All changed files"}
-          >
-            {selectedFile?.path ?? "All files"}
-          </span>
-          <span className="shrink-0 tabular-nums text-muted-foreground/90">
-            {selectedFileIndex >= 0
-              ? `${selectedFileIndex + 1} / ${visibleChangedFiles.length}`
-              : `-- / ${visibleChangedFiles.length}`}
-          </span>
-          <button
-            type="button"
-            onClick={() => selectAdjacentFile(1)}
-            disabled={selectedFileIndex < 0 || selectedFileIndex >= visibleChangedFiles.length - 1}
-            aria-label="Next changed file"
-            title="Next changed file"
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-          >
-            <ChevronRight aria-hidden="true" className="size-4" />
-          </button>
-        </div>
-      )}
       <div className="flex items-center gap-1 text-sm">
         {showAllFiles && changedFiles.length > 0 && (
           <>
