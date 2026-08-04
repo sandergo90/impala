@@ -1297,8 +1297,10 @@ fn handle_agent_request(
             .get("placement")
             .map(String::as_str)
             .unwrap_or("auto");
-        if !matches!(placement, "auto" | "current" | "left" | "right") {
-            return Err("placement must be 'auto', 'current', 'left', or 'right'".to_string());
+        if !matches!(placement, "auto" | "current" | "left" | "right" | "split") {
+            return Err(
+                "placement must be 'auto', 'current', 'left', 'right', or 'split'".to_string(),
+            );
         }
 
         if let Some(delegation_id) = delegation_id {

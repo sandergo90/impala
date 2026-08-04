@@ -474,8 +474,8 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
         .get("placement")
         .and_then(|value| value.as_str())
         .unwrap_or("auto");
-    if !matches!(placement, "auto" | "current" | "left" | "right") {
-        return Err("placement must be 'auto', 'current', 'left', or 'right'".to_string());
+    if !matches!(placement, "auto" | "current" | "left" | "right" | "split") {
+        return Err("placement must be 'auto', 'current', 'left', 'right', or 'split'".to_string());
     }
     let delegation_id = uuid::Uuid::new_v4().to_string();
     let mut params = vec![
@@ -817,7 +817,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "open_agent_tab",
-                "description": "Delegate work to a fresh agent thread in a new Impala Agent tab for this worktree. Returns a delegation_id for get_agent_tab_status. The caller pane is detected automatically. Set placement='right' or 'left' to open the tab in that neighboring split pane, or placement='current' for the caller's pane. With the default placement='auto', a caller in a secondary split pane opens locally; otherwise the tab opens in the main workspace strip. Use when the user says to investigate, implement, continue, or do something 'in a new thread', 'in another agent tab', or equivalent. Pass agent='claude' or agent='codex' when the user names a provider; omit it to use the worktree's configured agent. The new thread has no access to this conversation: turn references such as 'this issue' or 'this plan' into a self-contained prompt with the relevant paths, requirements, and context. After opening the tab, do not also perform the delegated task in the current thread unless the user explicitly asks you to.",
+                "description": "Delegate work to a fresh agent thread in a new Impala Agent tab for this worktree. Returns a delegation_id for get_agent_tab_status. The caller pane is detected automatically. Set placement='split' to create a new right-hand split pane, placement='right' or 'left' to use an existing neighboring split pane, or placement='current' for the caller's pane. With the default placement='auto', a caller in a secondary split pane opens locally; otherwise the tab opens in the main workspace strip. Use when the user says to investigate, implement, continue, or do something 'in a new thread', 'in another agent tab', or equivalent. Pass agent='claude' or agent='codex' when the user names a provider; omit it to use the worktree's configured agent. The new thread has no access to this conversation: turn references such as 'this issue' or 'this plan' into a self-contained prompt with the relevant paths, requirements, and context. After opening the tab, do not also perform the delegated task in the current thread unless the user explicitly asks you to.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -856,8 +856,8 @@ fn tool_definitions() -> Value {
                         },
                         "placement": {
                             "type": "string",
-                            "enum": ["auto", "current", "left", "right"],
-                            "description": "Where to open the tab relative to the calling agent pane. Defaults to auto."
+                            "enum": ["auto", "current", "left", "right", "split"],
+                            "description": "Where to open the tab relative to the calling agent pane. Split creates a new right-hand pane. Defaults to auto."
                         }
                     },
                     "required": ["prompt"]

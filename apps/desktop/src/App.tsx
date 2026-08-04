@@ -118,7 +118,7 @@ export function RootLayout() {
         name?: string;
         delegationId?: string;
         sourcePaneId?: string;
-        placement?: "auto" | "current" | "left" | "right";
+        placement?: "auto" | "current" | "left" | "right" | "split";
       } & CodexLaunchOptions>(
         "agent-tab-request-open",
         (event) => {

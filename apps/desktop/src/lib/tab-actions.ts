@@ -1102,7 +1102,7 @@ export function createAgentTabFromRequest(
   initialPrompt: string,
   initialAgent?: Agent,
   sourcePaneId?: string,
-  placement: "auto" | "current" | "left" | "right" = "auto",
+  placement: "auto" | "current" | "left" | "right" | "split" = "auto",
   codexOptions?: CodexLaunchOptions,
   initialName?: string,
   delegationId?: string,
@@ -1123,6 +1123,34 @@ export function createAgentTabFromRequest(
         ? findLeaf(tree, fallbackGroupId)
         : null;
     if (!sourceGroup) return null;
+
+    if (placement === "split") {
+      const result = splitNode(tree, sourceGroup.id, "vertical", {
+        kind: "terminal",
+        launch: "agent",
+      });
+      if (!result) return null;
+
+      const created = getActiveGroupTab(findLeaf(result.tree, result.newLeafId)!);
+      const nextTree = name
+        ? updateGroupTab(result.tree, created.id, (tab) => ({
+            ...tab,
+            label: name,
+            userLabel: name,
+          }))
+        : result.tree;
+      const prompt = initialPrompt.trim();
+      if (prompt) {
+        pendingAgentLaunches.set(created.id, {
+          prompt,
+          agent: initialAgent,
+          codexOptions,
+          delegationId,
+        });
+      }
+      update(nextTree, result.newLeafId);
+      return created.id;
+    }
 
     const targetGroupId =
       placement === "left" || placement === "right"

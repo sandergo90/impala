@@ -450,6 +450,37 @@ describe("addTabToAgentPrimaryPane", () => {
 });
 
 describe("createAgentTabFromRequest", () => {
+  test("creates a right-hand split for split placement", () => {
+    const primary = group(
+      "tab-agent",
+      groupTab("tab-agent", { kind: "terminal", launch: "agent" }),
+    );
+    setTabs([], "tab-agent", {
+      agentTabSplitTree: primary,
+      agentTabFocusedPaneId: primary.id,
+    });
+
+    const createdId = createAgentTabFromRequest(
+      worktreePath,
+      "Investigate the renderer",
+      "codex",
+      "tab-agent",
+      "split",
+    );
+
+    const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    const leaves = getLeaves(getEffectiveAgentTabSplitTree(nav.agentTabSplitTree));
+    expect(leaves).toHaveLength(2);
+    expect(leaves[0].tabs.map((tab) => tab.id)).toEqual(["tab-agent"]);
+    expect(leaves[1].tabs.map((tab) => tab.id)).toEqual([createdId]);
+    expect(nav.agentTabFocusedPaneId).toBe(leaves[1].id);
+    expect(nav.userTabs).toHaveLength(0);
+    expect(getPendingAgentLaunch(createdId)).toMatchObject({
+      prompt: "Investigate the renderer",
+      agent: "codex",
+    });
+  });
+
   test("applies the requested ticket name and Codex configuration", () => {
     const primary = group(
       "tab-agent",
