@@ -191,6 +191,7 @@ export const HOTKEYS = {
     category: "Worktree",
   },
   SWITCH_TAB_TERMINAL: { label: "Open Workspace", default: "ctrl+1", category: "Navigation" },
+  SWITCH_TAB_DIFF: { label: "Open Changes", default: "ctrl+2", category: "Navigation" },
   JUMP_TO_WORKTREE_1: { label: "Jump to Worktree 1", default: "meta+1", category: "Worktree" },
   JUMP_TO_WORKTREE_2: { label: "Jump to Worktree 2", default: "meta+2", category: "Worktree" },
   JUMP_TO_WORKTREE_3: { label: "Jump to Worktree 3", default: "meta+3", category: "Worktree" },
@@ -201,6 +202,18 @@ export const HOTKEYS = {
   JUMP_TO_WORKTREE_8: { label: "Jump to Worktree 8", default: "meta+8", category: "Worktree" },
   JUMP_TO_WORKTREE_9: { label: "Jump to Worktree 9", default: "meta+9", category: "Worktree" },
 } as const satisfies Record<string, HotkeyDefinition>;
+
+export function migrateHotkeyOverrides(
+  overrides: Record<string, string | null>,
+): Record<string, string | null> {
+  if ("SWITCH_TAB_DIFF" in overrides) return overrides;
+  const changesDefault = HOTKEYS.SWITCH_TAB_DIFF.default;
+  return Object.entries(overrides).some(
+    ([id, keys]) => id in HOTKEYS && keys?.toLowerCase() === changesDefault,
+  )
+    ? { ...overrides, SWITCH_TAB_DIFF: null }
+    : overrides;
+}
 
 // ---------------------------------------------------------------------------
 // Categories in display order

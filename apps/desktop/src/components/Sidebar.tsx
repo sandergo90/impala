@@ -61,6 +61,7 @@ import {
   runPtySessionId,
 } from "../lib/pane-ids";
 import { cleanupWorktreeForDeletion } from "../lib/worktree-cleanup";
+import { openSidebarWorktree } from "../lib/automation-run-acknowledgement";
 
 function ProjectBadge({ name, iconUrl }: { name: string; iconUrl?: string }) {
   const [iconError, setIconError] = useState(false);
@@ -142,6 +143,24 @@ const RUN_STATUS_DOT: Record<AutomationRun["status"], string> = {
   aborted: "bg-muted-foreground/40",
   skipped: "bg-muted-foreground/40",
 };
+
+function selectSidebarWorktree(wt: Worktree, runId?: string) {
+  return openSidebarWorktree(
+    runId,
+    wt.path,
+    () => sharedSelectWorktree(wt),
+    (id) => {
+      invoke("mark_automation_run_seen", { runId: id }).catch(() => {});
+    },
+    (worktreePath) => {
+      const state = useDataStore.getState().worktreeDataStates[worktreePath];
+      if (!state?.hasUnseenResult) return;
+      useDataStore.getState().updateWorktreeDataState(worktreePath, {
+        hasUnseenResult: false,
+      });
+    },
+  );
+}
 
 /** One rendered line of the worktree section: a worktree card or a
  *  collapsible per-automation group row. */
@@ -231,6 +250,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const projectIcons = useDataStore((s) => s.projectIcons);
   const worktrees = useFilteredWorktrees();
   const projectWorktrees = useDataStore((s) => s.worktrees);
+  const runInfo = useWorktreeRunInfo();
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
   const agentStatuses = useDataStore(
@@ -344,7 +364,9 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
           return (
             <button
               key={wt.path}
-              onClick={() => sharedSelectWorktree(wt)}
+              onClick={() =>
+                selectSidebarWorktree(wt, runInfo[wt.path]?.runId)
+              }
               aria-pressed={isSelected}
               // The status-dot branches below replace BranchIcon, which is the
               // only non-color selection cue. The inset ring survives them, so
@@ -619,9 +641,9 @@ export function Sidebar() {
     }
   };
 
-  const selectWorktree = (wt: Worktree) => {
+  const selectWorktree = async (wt: Worktree) => {
     useUIStore.getState().setGeneralTerminalActive(false);
-    return sharedSelectWorktree(wt);
+    await selectSidebarWorktree(wt, runInfo[wt.path]?.runId);
   };
 
   // Load persisted projects on mount and restore selections

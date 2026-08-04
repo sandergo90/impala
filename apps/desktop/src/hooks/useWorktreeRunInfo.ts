@@ -4,6 +4,7 @@ import { invoke } from "@/lib/invoke";
 import type { Automation, AutomationRun } from "../types";
 
 export interface WorktreeRunInfo {
+  runId: string;
   automationId: string;
   automationName: string;
   status: AutomationRun["status"];
@@ -34,6 +35,7 @@ export function useWorktreeRunInfo(): Record<string, WorktreeRunInfo> {
         for (const run of runs) {
           if (!run.worktree_path || next[run.worktree_path]) continue;
           next[run.worktree_path] = {
+            runId: run.id,
             automationId: run.automation_id,
             automationName: names.get(run.automation_id) ?? "Automation",
             status: run.status,

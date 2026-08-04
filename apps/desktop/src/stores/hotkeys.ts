@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@/lib/invoke";
 import {
   HOTKEYS,
+  migrateHotkeyOverrides,
   type HotkeyId,
 } from "../lib/hotkeys";
 
@@ -65,7 +66,9 @@ export const useHotkeysStore = create<HotkeysStore>()((set, get) => ({
       const result = await invoke<Record<string, string | null>>(
         "read_hotkey_overrides",
       );
-      set({ overrides: result as HotkeyOverrides, loaded: true });
+      const overrides = migrateHotkeyOverrides(result) as HotkeyOverrides;
+      set({ overrides, loaded: true });
+      if (overrides !== result) await persistOverrides(overrides);
     } catch (e) {
       console.error("Failed to load hotkey overrides:", e);
       set({ loaded: true }); // proceed with defaults

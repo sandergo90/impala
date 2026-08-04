@@ -127,6 +127,7 @@ export function MainView() {
   }, []);
 
   useAppHotkey("SWITCH_TAB_TERMINAL", openWorkspace);
+  useAppHotkey("SWITCH_TAB_DIFF", toggleChanges);
 
   useEffect(() => {
     if (activeTab !== "diff" || !wtPath) return;
