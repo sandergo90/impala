@@ -44,7 +44,13 @@ import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
 import { useAppHotkey } from "../hooks/useAppHotkey";
-import { resolveAgent, resolveFlags, buildLaunchCommand } from "../lib/agent";
+import {
+  resolveAgent,
+  resolveFlags,
+  buildDirectLaunchCommand,
+  buildInteractiveShellArgs,
+  buildLaunchCommand,
+} from "../lib/agent";
 import { awaitShellReady, markShellReady } from "../lib/pty-ready";
 import {
   AGENT_PANE_ID,
@@ -904,11 +910,11 @@ const TabBody = memo(function TabBody({
     })();
 
     const ptyId = `pty-${paneId}-${worktreePath}`;
+    const delegatedLaunch = getPendingAgentLaunch(paneId);
 
     getHookPort().then(async (hookPort) => {
       const projectPath =
         useUIStore.getState().selectedProject?.path ?? worktreePath;
-      const delegatedLaunch = getPendingAgentLaunch(paneId);
       const agent = delegatedLaunch?.agent ?? (await resolveAgent(worktreePath));
       let extraEnv: Record<string, string> = {};
       try {
@@ -924,12 +930,23 @@ const TabBody = memo(function TabBody({
         shell_args: string[];
         env: Record<string, string>;
       }>("prepare_shell_launch");
-      invoke<boolean>("pty_spawn", {
+      const delegatedCommand = delegatedLaunch
+        ? buildDirectLaunchCommand(
+            agent,
+            await resolveFlags(agent, projectPath),
+            delegatedLaunch.prompt,
+            extraEnv,
+            delegatedLaunch.codexOptions,
+          )
+        : null;
+      return invoke<boolean>("pty_spawn", {
         sessionId: ptyId,
         cwd: worktreePath,
-        command: null,
+        command: delegatedCommand ? [delegatedCommand] : null,
         shellPath: shellLaunch.shell_path,
-        shellArgs: shellLaunch.shell_args,
+        shellArgs: delegatedCommand
+          ? buildInteractiveShellArgs(shellLaunch.shell_args)
+          : shellLaunch.shell_args,
         envVars: {
           ...shellLaunch.env,
           ...extraEnv,
@@ -945,6 +962,8 @@ const TabBody = memo(function TabBody({
             paneSessions: { ...data.paneSessions, [paneId]: ptyId },
           });
 
+          if (delegatedLaunch) clearPendingAgentLaunch(paneId);
+
           if (!isNew) {
             // Re-attaching to a PTY that survived restart — its shell is past
             // prompt-1 by now, so don't wait on a marker that won't arrive.
@@ -953,6 +972,15 @@ const TabBody = memo(function TabBody({
 
           if (launch === "agent" && isNew) {
             const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+
+            if (delegatedLaunch) {
+              if (isPrimaryAgent) {
+                useUIStore
+                  .getState()
+                  .updateWorktreeNavState(worktreePath, { agentLaunched: true });
+              }
+              return;
+            }
 
             // The PTY daemon keeps live agent sessions across normal app
             // restarts (isNew=false → reattach above). A fresh PTY for the
@@ -970,19 +998,16 @@ const TabBody = memo(function TabBody({
             // CLAUDE.local.md / AGENTS.md.
             await refreshPromise;
             const issue = await issuePromise;
-            const delegatedPrompt = delegatedLaunch?.prompt;
             const initialPrompt =
-              delegatedPrompt ??
-              (issue
+              issue
                 ? `Read the ${issue.provider} issue from @docs/issues/${issue.identifier}.md`
-                : undefined);
+                : undefined;
 
             const cmd = buildLaunchCommand(
               agent,
               flags,
               initialPrompt,
               extraEnv,
-              delegatedLaunch?.codexOptions,
             );
             const encoded = encodePtyInput(cmd);
 
@@ -999,10 +1024,8 @@ const TabBody = memo(function TabBody({
 
             try {
               await invoke("pty_write", { sessionId: ptyId, data: encoded });
-              if (delegatedLaunch) clearPendingAgentLaunch(paneId);
             } catch {
-              // Keep a delegated prompt pending so a successful remount can
-              // still deliver it.
+              // The bare shell remains available for a manual launch.
             }
 
             if (isPrimaryAgent) {
@@ -1011,17 +1034,16 @@ const TabBody = memo(function TabBody({
                 .updateWorktreeNavState(worktreePath, { agentLaunched: true });
             }
           }
-        })
-        .catch((err) => {
-          console.error("Failed to spawn PTY:", err);
-          if (delegatedLaunch?.delegationId) {
-            invoke("fail_agent_delegation", {
-              delegationId: delegatedLaunch.delegationId,
-              error: String(err),
-            }).catch(() => {});
-          }
-          spawningRef.current = false;
         });
+    }).catch((err) => {
+      console.error("Failed to spawn PTY:", err);
+      if (delegatedLaunch?.delegationId) {
+        invoke("fail_agent_delegation", {
+          delegationId: delegatedLaunch.delegationId,
+          error: String(err),
+        }).catch(() => {});
+      }
+      spawningRef.current = false;
     });
   }, [paneId, launch, isPrimaryAgent, worktreePath, sessionId]);
 

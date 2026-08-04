@@ -45,6 +45,23 @@ export function buildLaunchCommand(
   env?: Record<string, string>,
   codexOptions?: CodexLaunchOptions,
 ): string {
+  return `${buildDirectLaunchCommand(
+    agent,
+    flags,
+    initialPrompt,
+    env,
+    codexOptions,
+  )}\n`;
+}
+
+/** Build an agent command passed directly to the PTY's shell. */
+export function buildDirectLaunchCommand(
+  agent: Agent,
+  flags: string,
+  initialPrompt?: string,
+  env?: Record<string, string>,
+  codexOptions?: CodexLaunchOptions,
+): string {
   const args: string[] = [];
   if (agent === "codex" && codexOptions?.model) {
     args.push("-m", codexOptions.model);
@@ -56,12 +73,7 @@ export function buildLaunchCommand(
     args.push("-c", `service_tier=${codexOptions.serviceTier}`);
   }
   if (initialPrompt) args.push(initialPrompt);
-  return `${buildAgentCommand(
-    agent,
-    flags,
-    args,
-    env,
-  )}\n`;
+  return buildAgentCommand(agent, flags, args, env);
 }
 
 function buildAgentCommand(
@@ -92,13 +104,8 @@ export function buildAutomationResumeCommand(
   return buildAgentCommand(agent, flags, args, env);
 }
 
-/**
- * Direct resume commands still need the user's interactive shell setup so
- * provider executables installed by tools such as mise can be resolved.
- */
-export function buildAutomationResumeShellArgs(
-  shellArgs: string[],
-): string[] {
+/** Direct commands still need shell setup for tools such as mise. */
+export function buildInteractiveShellArgs(shellArgs: string[]): string[] {
   return [...shellArgs, "-i"];
 }
 

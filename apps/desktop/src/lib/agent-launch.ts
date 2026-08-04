@@ -9,7 +9,7 @@ import {
 } from "./pane-ids";
 import {
   buildAutomationResumeCommand,
-  buildAutomationResumeShellArgs,
+  buildInteractiveShellArgs,
   buildLaunchCommand,
   resolveFlags,
   type Agent,
@@ -141,7 +141,7 @@ export async function launchAutomationResume(opts: {
       buildAutomationResumeCommand(agent, flags, sessionId, extraEnv),
     ],
     shellPath: launch.shell_path,
-    shellArgs: buildAutomationResumeShellArgs(launch.shell_args),
+    shellArgs: buildInteractiveShellArgs(launch.shell_args),
     envVars: {
       ...launch.env,
       ...extraEnv,
