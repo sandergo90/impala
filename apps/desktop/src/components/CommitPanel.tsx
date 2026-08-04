@@ -142,7 +142,18 @@ function statsKeyForMode(
   return null;
 }
 
-export function CommitPanel() {
+interface CommitPanelProps {
+  variant?: "sidebar" | "popover";
+  onSelection?: () => void;
+  onRevealInFiles?: () => void;
+}
+
+export function CommitPanel({
+  variant = "sidebar",
+  onSelection,
+  onRevealInFiles,
+}: CommitPanelProps) {
+  const isPopover = variant === "popover";
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const wtPath = selectedWorktree?.path;
 
@@ -304,6 +315,7 @@ export function CommitPanel() {
     clearScheduledAutoRefresh();
     updateNav({ viewMode: 'all-changes', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
+    onSelection?.();
     try {
       const payload = await loadDiffPayload("all-changes");
       if (selectionRequestRef.current !== requestId) return;
@@ -332,6 +344,7 @@ export function CommitPanel() {
     clearScheduledAutoRefresh();
     updateNav({ viewMode: 'uncommitted', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
     updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
+    onSelection?.();
     try {
       const payload = await loadDiffPayload("uncommitted");
       if (selectionRequestRef.current !== requestId) return;
@@ -360,6 +373,7 @@ export function CommitPanel() {
     const currentFileDiffs = useDataStore.getState().getWorktreeDataState(worktreePath).fileDiffs;
     const diff = currentFileDiffs[file.path] ?? "";
     updateData({ diffText: diff });
+    onSelection?.();
   };
 
   // Auto-refresh when files or git refs change on disk
@@ -552,32 +566,37 @@ export function CommitPanel() {
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0">
-        {/* Last Turn — always shown; empty until the first agent turn happens */}
-        <button
-          onClick={selectLastTurn}
-          className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
-            viewMode === 'last-turn'
-              ? "bg-primary/12"
-              : "hover:bg-accent"
-          }`}
-        >
-          <div className={`text-sm font-medium ${viewMode === 'last-turn' ? "text-foreground" : "text-muted-foreground"}`}>
-            Last Turn
-          </div>
-          <div className="flex items-center gap-1 text-sm text-muted-foreground/90 mt-0.5 font-mono">
-            <span>{hasLastTurnSnapshot ? "Since last prompt" : "No turn recorded yet"}</span>
-            {(lastTurnStats.additions > 0 || lastTurnStats.deletions > 0) && (
-              <span className="ml-auto">
-                <span className="text-success">+{lastTurnStats.additions}</span>
-                {" "}
-                <span className="text-danger">-{lastTurnStats.deletions}</span>
-              </span>
-            )}
-          </div>
-        </button>
+        {/* Last Turn — the sidebar keeps its existing empty state; the popover
+            only exposes the scope once a snapshot is available. */}
+        {(!isPopover || hasLastTurnSnapshot) && (
+          <button
+            autoFocus={isPopover && hasLastTurnSnapshot}
+            onClick={selectLastTurn}
+            className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
+              viewMode === 'last-turn'
+                ? "bg-primary/12"
+                : "hover:bg-accent"
+            }`}
+          >
+            <div className={`text-sm font-medium ${viewMode === 'last-turn' ? "text-foreground" : "text-muted-foreground"}`}>
+              Last Turn
+            </div>
+            <div className="flex items-center gap-1 text-sm text-muted-foreground/90 mt-0.5 font-mono">
+              <span>{hasLastTurnSnapshot ? "Since last prompt" : "No turn recorded yet"}</span>
+              {(lastTurnStats.additions > 0 || lastTurnStats.deletions > 0) && (
+                <span className="ml-auto">
+                  <span className="text-success">+{lastTurnStats.additions}</span>
+                  {" "}
+                  <span className="text-danger">-{lastTurnStats.deletions}</span>
+                </span>
+              )}
+            </div>
+          </button>
+        )}
 
         {/* Uncommitted Changes */}
         <button
+          autoFocus={isPopover && !hasLastTurnSnapshot}
           onClick={selectUncommitted}
           className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
             viewMode === 'uncommitted'
@@ -739,7 +758,11 @@ export function CommitPanel() {
                 }}
               >
                 {worktreePath && file ? (
-                  <ChangedFileContextMenu worktreePath={worktreePath} filePath={file.path}>
+                  <ChangedFileContextMenu
+                    worktreePath={worktreePath}
+                    filePath={file.path}
+                    onRevealInFiles={onRevealInFiles}
+                  >
                     {button}
                   </ChangedFileContextMenu>
                 ) : (

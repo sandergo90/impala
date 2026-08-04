@@ -9,10 +9,12 @@ import { useUIStore } from "../store";
 export function ChangedFileContextMenu({
   worktreePath,
   filePath,
+  onRevealInFiles,
   children,
 }: {
   worktreePath: string;
   filePath: string;
+  onRevealInFiles?: () => void;
   children: ReactNode;
 }) {
   const revealFileInTree = useUIStore((s) => s.revealFileInTree);
@@ -20,7 +22,10 @@ export function ChangedFileContextMenu({
   const items: ContextMenuItem[] = [
     {
       label: "Reveal in Files",
-      onSelect: () => revealFileInTree(worktreePath, filePath),
+      onSelect: () => {
+        revealFileInTree(worktreePath, filePath);
+        onRevealInFiles?.();
+      },
     },
   ];
 

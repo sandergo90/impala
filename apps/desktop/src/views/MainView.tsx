@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { Sidebar, CollapsedSidebar } from "../components/Sidebar";
-import { RightSidebar } from "../components/RightSidebar";
+import { RightSidebar, type RightSidebarTab } from "../components/RightSidebar";
 import { DiffView } from "../components/DiffView";
 import { SplitTreeRenderer } from "../components/SplitTreeRenderer";
 import { GeneralTerminalLeaf } from "../components/GeneralTerminalLeaf";
@@ -21,7 +21,8 @@ import { WorktreeTerminals } from "../components/WorktreeTerminals";
 import { useAppHotkey } from "../hooks/useAppHotkey";
 import { useHotkeyTooltip } from "../components/HotkeyDisplay";
 import { RunActionsButton } from "../components/RunActionsButton";
-import { SquareTerminal } from "lucide-react";
+import { CommitPanel } from "../components/CommitPanel";
+import { FileDiff, SquareTerminal } from "lucide-react";
 import { TabPill } from "../components/TabPill";
 import { activateGeneralTerminal } from "../hooks/useWorktreeActions";
 import {
@@ -32,11 +33,16 @@ import {
   shouldCreateTabInFocusedPane,
   stepActiveTab,
 } from "../lib/tab-actions";
+import { shouldOpenChangesNavigator } from "../lib/change-navigation";
+import { Popover } from "@base-ui/react/popover";
 
 let cachedHomeDir: string | null = null;
 
 export function MainView() {
   const [showSidebar, setShowSidebar] = useState(true);
+  const [rightSidebarTab, setRightSidebarTab] = useState<RightSidebarTab>("changes");
+  const [changesPopoverOpen, setChangesPopoverOpen] = useState(false);
+  const changesButtonRef = useRef<HTMLButtonElement>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarWidth = useUIStore((s) => s.sidebarWidth) ?? DEFAULT_SIDEBAR_WIDTH;
   const rightSidebarWidth =
@@ -89,6 +95,36 @@ export function MainView() {
       .getState()
       .updateWorktreeNavState(selectedWorktree.path, { activeTab: "terminal" });
   };
+
+  const closeChanges = useCallback(() => {
+    setChangesPopoverOpen(false);
+  }, []);
+
+  const toggleChanges = () => {
+    if (changesPopoverOpen) {
+      closeChanges();
+      return;
+    }
+    if (!selectedWorktree) return;
+    const currentNav = useUIStore.getState().getWorktreeNavState(selectedWorktree.path);
+    useUIStore.getState().updateWorktreeNavState(selectedWorktree.path, { activeTab: "diff" });
+    setRightSidebarTab("changes");
+    setShowSidebar(false);
+    setChangesPopoverOpen(
+      shouldOpenChangesNavigator(currentNav.activeTab, currentNav.viewMode),
+    );
+  };
+
+  const revealInFiles = useCallback(() => {
+    setChangesPopoverOpen(false);
+    setRightSidebarTab("files");
+    setShowSidebar(true);
+  }, []);
+
+  const toggleRightSidebar = useCallback(() => {
+    setChangesPopoverOpen(false);
+    setShowSidebar((prev) => !prev);
+  }, []);
 
   useAppHotkey("SWITCH_TAB_TERMINAL", openWorkspace);
 
@@ -181,7 +217,7 @@ export function MainView() {
   });
 
   useAppHotkey("TOGGLE_RIGHT_SIDEBAR", () => {
-    setShowSidebar((prev) => !prev);
+    toggleRightSidebar();
   });
 
   useAppHotkey("OPEN_IN_EDITOR", async () => {
@@ -308,6 +344,53 @@ export function MainView() {
                   <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-danger" aria-label="Run failed" />
                 )}
               </button>
+              <Popover.Root
+                open={changesPopoverOpen}
+                onOpenChange={(open) => {
+                  if (!open) closeChanges();
+                }}
+              >
+                <button
+                  ref={changesButtonRef}
+                  type="button"
+                  onClick={toggleChanges}
+                  className={`relative z-30 flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold outline-none transition-colors ${
+                    activeTab === "diff" || changesPopoverOpen || (showSidebar && rightSidebarTab === "changes")
+                      ? "bg-accent text-foreground"
+                      : "text-foreground/70 hover:bg-accent/60 hover:text-foreground"
+                  }`}
+                  aria-haspopup="dialog"
+                  aria-expanded={changesPopoverOpen}
+                  aria-controls={changesPopoverOpen ? "changes-popover" : undefined}
+                  aria-pressed={activeTab === "diff" || changesPopoverOpen || (showSidebar && rightSidebarTab === "changes")}
+                >
+                  <FileDiff aria-hidden="true" className="size-4" />
+                  Changes
+                </button>
+                <Popover.Portal>
+                  <Popover.Positioner
+                    anchor={changesButtonRef}
+                    side="bottom"
+                    sideOffset={8}
+                    align="center"
+                    positionMethod="fixed"
+                    className="z-50"
+                  >
+                    <Popover.Popup
+                      id="changes-popover"
+                      finalFocus={changesButtonRef}
+                      className="flex h-[min(640px,calc(100vh-5rem))] w-[min(380px,calc(100vw-1rem))] flex-col overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-foreground/10 outline-none"
+                    >
+                      <Popover.Title className="sr-only">Changes navigator</Popover.Title>
+                      <CommitPanel
+                        variant="popover"
+                        onSelection={closeChanges}
+                        onRevealInFiles={revealInFiles}
+                      />
+                    </Popover.Popup>
+                  </Popover.Positioner>
+                </Popover.Portal>
+              </Popover.Root>
             </>
           )}
         </div>
@@ -318,7 +401,7 @@ export function MainView() {
             <OpenInEditorButton worktreePath={selectedWorktree.path} tooltip={openInEditorTooltip} />
           )}
           <span className="mx-0.5 w-px h-3.5 bg-border/50" />
-          <TabPill label="Sidebar" isActive={showSidebar} onClick={() => setShowSidebar(!showSidebar)} />
+          <TabPill label="Sidebar" isActive={showSidebar} onClick={toggleRightSidebar} />
         </div>
       </div>
 
@@ -393,7 +476,7 @@ export function MainView() {
                 <div
                   className={`absolute inset-0 bg-background ${activeTab === "diff" ? "z-10" : "z-0 invisible"}`}
                 >
-                  <DiffView />
+                  <DiffView onRevealInFiles={revealInFiles} />
                 </div>
                 <div className={`absolute inset-0 ${activeTab !== "diff" ? "z-10" : "z-0 invisible"}`}>
                   <WorktreeTerminals
@@ -421,7 +504,10 @@ export function MainView() {
                   .setRightSidebarWidth(DEFAULT_RIGHT_SIDEBAR_WIDTH)
               }
             >
-              <RightSidebar />
+              <RightSidebar
+                activeTab={rightSidebarTab}
+                onActiveTabChange={setRightSidebarTab}
+              />
             </ResizablePanel>
           )}
         </div>
