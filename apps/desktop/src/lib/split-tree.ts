@@ -298,6 +298,24 @@ export function updateRatio(tree: SplitNode, splitId: string, ratio: number): Sp
   };
 }
 
+export function getEqualSplitRatios(
+  tree: SplitNode,
+): Array<{ splitId: string; ratio: number }> {
+  const ratios: Array<{ splitId: string; ratio: number }> = [];
+
+  function visit(node: SplitNode): { count: number; firstGroupId: string } {
+    if (node.type === "group") return { count: 1, firstGroupId: node.id };
+    const first = visit(node.first);
+    const second = visit(node.second);
+    const count = first.count + second.count;
+    ratios.push({ splitId: second.firstGroupId, ratio: first.count / count });
+    return { count, firstGroupId: first.firstGroupId };
+  }
+
+  visit(tree);
+  return ratios;
+}
+
 export function updateGroup(
   tree: SplitNode,
   groupId: string,

@@ -6,7 +6,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import type { SplitNode } from "../types";
-import { getLeaves } from "../lib/split-tree";
+import { getEqualSplitRatios, getLeaves } from "../lib/split-tree";
 import { useUIStore } from "../store";
 
 type GroupNode = Extract<SplitNode, { type: "group" }>;
@@ -51,7 +51,19 @@ function bracketHandleDrag(): void {
  * ratio write-back — while `renderLeaf` fills each pane with content.
  */
 export function SplitTreeRenderer(props: SplitTreeRendererProps) {
-  return <SplitNodeRenderer node={props.tree} {...props} />;
+  const equalizeSplits = () => {
+    for (const { splitId, ratio } of getEqualSplitRatios(props.tree)) {
+      props.onRatioChange(splitId, ratio);
+    }
+  };
+
+  return (
+    <SplitNodeRenderer
+      node={props.tree}
+      equalizeSplits={equalizeSplits}
+      {...props}
+    />
+  );
 }
 
 function SplitNodeRenderer({
@@ -60,8 +72,12 @@ function SplitNodeRenderer({
   isActive = true,
   onFocusPane,
   onRatioChange,
+  equalizeSplits,
   renderLeaf,
-}: { node: SplitNode } & Omit<SplitTreeRendererProps, "tree">) {
+}: {
+  node: SplitNode;
+  equalizeSplits: () => void;
+} & Omit<SplitTreeRendererProps, "tree">) {
   if (node.type === "group") {
     const isFocused = node.id === focusedPaneId;
     return (
@@ -80,7 +96,7 @@ function SplitNodeRenderer({
   // is the opposite (stacking axis). horizontal divider → vertical stack.
   const panelOrientation =
     node.orientation === "horizontal" ? "vertical" : "horizontal";
-  const firstPercent = Math.round(node.ratio * 100);
+  const firstPercent = node.ratio * 100;
 
   // `splitId` (leading leaf of `second`) is globally unique per split, so
   // deriving both panel ids from it keeps them unique across nested groups.
@@ -111,10 +127,16 @@ function SplitNodeRenderer({
           isActive={isActive}
           onFocusPane={onFocusPane}
           onRatioChange={onRatioChange}
+          equalizeSplits={equalizeSplits}
           renderLeaf={renderLeaf}
         />
       </ResizablePanel>
-      <ResizableHandle withHandle onPointerDown={bracketHandleDrag} />
+      <ResizableHandle
+        withHandle
+        disableDoubleClick
+        onDoubleClick={equalizeSplits}
+        onPointerDown={bracketHandleDrag}
+      />
       <ResizablePanel id={secondPanelId} defaultSize={`${100 - firstPercent}%`} minSize={10}>
         <SplitNodeRenderer
           node={node.second}
@@ -122,6 +144,7 @@ function SplitNodeRenderer({
           isActive={isActive}
           onFocusPane={onFocusPane}
           onRatioChange={onRatioChange}
+          equalizeSplits={equalizeSplits}
           renderLeaf={renderLeaf}
         />
       </ResizablePanel>

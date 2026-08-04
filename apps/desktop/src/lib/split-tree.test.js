@@ -8,8 +8,9 @@ import {
   getActiveGroupTab,
   getAdjacentGroupTabId,
   getAdjacentLeafId,
-  getLeaves,
+  getEqualSplitRatios,
   getHorizontalNeighborGroupId,
+  getLeaves,
   normalizeLegacySplitTree,
   insertGroupTab,
   insertGroupAtEdge,
@@ -261,6 +262,19 @@ describe("group-bearing split trees", () => {
 
     expect(resized.ratio).toBe(0.7);
     expect(resized.first.ratio).toBe(0.5);
+  });
+
+  test("calculates equal sizes for every pane in a nested split tree", () => {
+    const root = group("root", { kind: "agent" });
+    const first = splitNode(root, root.id, "vertical", { kind: "shell" });
+    const second = splitNode(first.tree, root.id, "vertical", {
+      kind: "browser",
+    });
+
+    expect(getEqualSplitRatios(second.tree)).toEqual([
+      { splitId: second.newLeafId, ratio: 0.5 },
+      { splitId: first.newLeafId, ratio: 2 / 3 },
+    ]);
   });
 
   test("updates tab content and collapses a removed group", () => {
