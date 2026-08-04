@@ -1,5 +1,9 @@
-import type { ReactNode } from "react";
-import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
+import { useRef, type ReactNode } from "react";
+import type {
+  GroupImperativeHandle,
+  Layout,
+  LayoutChangedMeta,
+} from "react-resizable-panels";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -10,6 +14,7 @@ import { getEqualSplitRatios, getLeaves } from "../lib/split-tree";
 import { useUIStore } from "../store";
 
 type GroupNode = Extract<SplitNode, { type: "group" }>;
+type SplitGroupHandle = Pick<GroupImperativeHandle, "setLayout">;
 
 interface SplitTreeRendererProps {
   tree: SplitNode;
@@ -44,6 +49,20 @@ function bracketHandleDrag(): void {
   window.addEventListener("pointercancel", end);
 }
 
+export function applyEqualSplitLayouts(
+  tree: SplitNode,
+  splitGroups: Map<string, SplitGroupHandle>,
+  onRatioChange: (splitId: string, ratio: number) => void,
+): void {
+  for (const { splitId, ratio } of getEqualSplitRatios(tree)) {
+    splitGroups.get(splitId)?.setLayout({
+      [`${splitId}:a`]: ratio * 100,
+      [`${splitId}:b`]: (1 - ratio) * 100,
+    });
+    onRatioChange(splitId, ratio);
+  }
+}
+
 /**
  * Recursive split-tree renderer shared by every splittable surface (user tabs,
  * the agent system tab, the general terminal). It owns the layout algebra —
@@ -51,16 +70,16 @@ function bracketHandleDrag(): void {
  * ratio write-back — while `renderLeaf` fills each pane with content.
  */
 export function SplitTreeRenderer(props: SplitTreeRendererProps) {
+  const splitGroups = useRef(new Map<string, SplitGroupHandle>()).current;
   const equalizeSplits = () => {
-    for (const { splitId, ratio } of getEqualSplitRatios(props.tree)) {
-      props.onRatioChange(splitId, ratio);
-    }
+    applyEqualSplitLayouts(props.tree, splitGroups, props.onRatioChange);
   };
 
   return (
     <SplitNodeRenderer
       node={props.tree}
       equalizeSplits={equalizeSplits}
+      splitGroups={splitGroups}
       {...props}
     />
   );
@@ -73,10 +92,12 @@ function SplitNodeRenderer({
   onFocusPane,
   onRatioChange,
   equalizeSplits,
+  splitGroups,
   renderLeaf,
 }: {
   node: SplitNode;
   equalizeSplits: () => void;
+  splitGroups: Map<string, SplitGroupHandle>;
 } & Omit<SplitTreeRendererProps, "tree">) {
   if (node.type === "group") {
     const isFocused = node.id === focusedPaneId;
@@ -118,6 +139,10 @@ function SplitNodeRenderer({
     <ResizablePanelGroup
       orientation={panelOrientation}
       className="h-full w-full"
+      groupRef={(handle) => {
+        if (handle) splitGroups.set(splitId, handle);
+        else splitGroups.delete(splitId);
+      }}
       onLayoutChanged={handleLayoutChanged}
     >
       <ResizablePanel id={firstPanelId} defaultSize={`${firstPercent}%`} minSize={10}>
@@ -128,6 +153,7 @@ function SplitNodeRenderer({
           onFocusPane={onFocusPane}
           onRatioChange={onRatioChange}
           equalizeSplits={equalizeSplits}
+          splitGroups={splitGroups}
           renderLeaf={renderLeaf}
         />
       </ResizablePanel>
@@ -145,6 +171,7 @@ function SplitNodeRenderer({
           onFocusPane={onFocusPane}
           onRatioChange={onRatioChange}
           equalizeSplits={equalizeSplits}
+          splitGroups={splitGroups}
           renderLeaf={renderLeaf}
         />
       </ResizablePanel>
