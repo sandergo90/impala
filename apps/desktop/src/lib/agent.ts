@@ -33,10 +33,9 @@ export async function resolveAgent(worktreePath: string): Promise<Agent> {
  * Build the shell command string written to the PTY to launch the agent.
  * `initialPrompt`, when provided, is shell-quoted and passed as the agent's
  * positional `[prompt]` argument so it becomes the first user message.
- * `env` entries are prefixed as command-line assignments (`KEY='v' agent`):
- * PTY env vars can be stomped by the user's shell rc files (a zshrc
- * `export CODEX_HOME=~/.codex` silently rebinds every session to the global
- * config), and a command-line assignment runs after rc files, so it wins.
+ * `env` entries are prefixed as command-line assignments (`KEY='v' agent`).
+ * Impala does not add CODEX_HOME here: an inherited custom value stays in
+ * effect, and Codex uses its normal ~/.codex default when none is supplied.
  */
 export function buildLaunchCommand(
   agent: Agent,

@@ -921,6 +921,7 @@ const TabBody = memo(function TabBody({
         extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
           worktreePath,
           agent,
+          resumeSessionId: null,
         });
       } catch (err) {
         console.warn("Failed to prepare agent config:", err);

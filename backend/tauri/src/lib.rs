@@ -806,6 +806,7 @@ fn clear_viewed_files(
 async fn prepare_agent_config(
     worktree_path: String,
     agent: String,
+    resume_session_id: Option<String>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let path = std::path::PathBuf::from(&worktree_path);
     let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
@@ -813,7 +814,7 @@ async fn prepare_agent_config(
 
     let env = tokio::task::spawn_blocking(
         move || -> Result<std::collections::HashMap<String, String>, String> {
-            let mut env = std::collections::HashMap::new();
+            let env = std::collections::HashMap::new();
             if agent != "claude" && agent != "codex" {
                 return Err(format!("unknown agent: {}", agent));
             }
@@ -822,11 +823,18 @@ async fn prepare_agent_config(
             // that runtime switch remains pane-aware.
             setup_claude_integration_sync()?;
             agent_config::write_claude_config(&path)?;
-            let codex_home = agent_config::write_codex_config(&path, &mcp_binary)?;
-            env.insert(
-                "CODEX_HOME".to_string(),
-                codex_home.to_string_lossy().to_string(),
-            );
+            agent_config::write_codex_config(&path, &mcp_binary, agent == "codex")?;
+            if agent == "codex" {
+                if let Some(session_id) = resume_session_id.filter(|id| !id.is_empty()) {
+                    let codex_home = agent_config::codex_home_path()
+                        .ok_or_else(|| "no Codex home".to_string())?;
+                    subagents::migrate_legacy_codex_session(
+                        &path.to_string_lossy(),
+                        &session_id,
+                        &codex_home,
+                    )?;
+                }
+            }
             Ok(env)
         },
     )

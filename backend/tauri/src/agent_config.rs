@@ -1,10 +1,53 @@
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
+
+static CODEX_CONFIG_LOCK: Mutex<()> = Mutex::new(());
+static CODEX_CONFIG_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+struct CodexConfigFileLock(fs::File);
+
+impl Drop for CodexConfigFileLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+fn lock_codex_config_file(codex_home: &Path) -> Result<CodexConfigFileLock, String> {
+    let path = codex_home.join(".impala-config.lock");
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|e| format!("open {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(format!(
+            "lock {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(CodexConfigFileLock(file))
+}
 
 /// Lines we append to <worktree>/.git/info/exclude so the per-worktree config
 /// files don't show up as untracked changes in the user's git status.
-const EXCLUDE_LINES: &[&str] = &["# Added by Impala", "/.claude/settings.local.json"];
+const EXCLUDE_LINES: &[&str] = &[
+    "# Added by Impala",
+    "/.claude/settings.local.json",
+    "/.impala/",
+];
 
 /// Write per-worktree Claude config: <worktree>/.claude/settings.local.json
 /// registers Impala hooks. Claude Code merges settings.local.json (gitignored
@@ -95,39 +138,24 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) const CODEX_EXCLUDE_LINES: &[&str] = &["# Added by Impala", "/.impala/"];
+/// Resolve the Codex state root used by launched processes. The parent
+/// process supplies CODEX_HOME when it is configured; Codex itself falls back
+/// to ~/.codex when it is not.
+pub(crate) fn codex_home_path() -> Option<PathBuf> {
+    let configured = std::env::var_os("CODEX_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    resolve_codex_home(configured, dirs::home_dir())
+}
 
-/// Make sure <CODEX_HOME>/auth.json is a symlink to ~/.codex/auth.json so
-/// `codex login` only has to happen once per machine. If a real auth.json
-/// already exists in the worktree (user logged in before this code shipped),
-/// migrate it up to ~/.codex first.
-fn link_codex_auth(codex_home: &Path) -> Result<(), String> {
-    use std::os::unix::fs::symlink;
+fn resolve_codex_home(configured: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
+    configured.or_else(|| home.map(|path| path.join(".codex")))
+}
 
-    let user_codex = dirs::home_dir()
-        .ok_or_else(|| "no home dir".to_string())?
-        .join(".codex");
-    fs::create_dir_all(&user_codex).map_err(|e| format!("mkdir ~/.codex: {}", e))?;
-    let user_auth = user_codex.join("auth.json");
-    let worktree_auth = codex_home.join("auth.json");
-
-    if let Ok(meta) = worktree_auth.symlink_metadata() {
-        if meta.file_type().is_symlink() {
-            if fs::read_link(&worktree_auth)
-                .map(|t| t == user_auth)
-                .unwrap_or(false)
-            {
-                return Ok(());
-            }
-        } else if !user_auth.exists() {
-            // Real file from a pre-symlink login — preserve it user-globally.
-            fs::rename(&worktree_auth, &user_auth)
-                .map_err(|e| format!("migrate auth.json to ~/.codex: {}", e))?;
-        }
-        let _ = fs::remove_file(&worktree_auth);
-    }
-    symlink(&user_auth, &worktree_auth).map_err(|e| format!("symlink auth.json: {}", e))?;
-    Ok(())
+fn trusted_project_root(worktree_path: &Path, trust_project: bool) -> Option<PathBuf> {
+    trust_project
+        .then(|| main_worktree_root(worktree_path))
+        .flatten()
 }
 
 /// Resolve a worktree to its main repo path (the one Codex uses as the
@@ -149,27 +177,6 @@ pub(crate) fn main_worktree_root(worktree_path: &Path) -> Option<PathBuf> {
         return gitdir.parent()?.parent()?.parent().map(|p| p.to_path_buf());
     }
     None
-}
-
-/// Read the user's ~/.codex/config.toml as the seed for a worktree config.
-/// Missing file or parse failure → empty table (we still want to write a
-/// usable per-worktree config; the user just loses their global settings
-/// for this session, with a warning logged).
-fn read_user_codex_config() -> toml::value::Table {
-    let Some(path) = dirs::home_dir().map(|h| h.join(".codex").join("config.toml")) else {
-        return toml::value::Table::new();
-    };
-    let Ok(contents) = fs::read_to_string(&path) else {
-        return toml::value::Table::new();
-    };
-    match toml::from_str::<toml::Value>(&contents) {
-        Ok(toml::Value::Table(t)) => t,
-        Ok(_) => toml::value::Table::new(),
-        Err(e) => {
-            eprintln!("impala: failed to parse ~/.codex/config.toml: {}", e);
-            toml::value::Table::new()
-        }
-    }
 }
 
 fn codex_hook_event_key_label(event_name: &str) -> Result<&'static str, String> {
@@ -271,7 +278,7 @@ fn trust_codex_hook(
         .entry("state".to_string())
         .or_insert_with(|| Value::Table(toml::value::Table::new()))
         .as_table_mut()
-        .ok_or_else(|| "hooks.state in ~/.codex/config.toml is not a table".to_string())?;
+        .ok_or_else(|| "hooks.state in Codex config.toml is not a table".to_string())?;
     let key = codex_hook_trust_key(hook_source_path, event_name, group_index)?;
     let mut trust = toml::value::Table::new();
     trust.insert(
@@ -289,7 +296,7 @@ fn upsert_codex_mcp_server(root: &mut toml::value::Table, mcp_binary: &str) -> R
         .entry("mcp_servers".to_string())
         .or_insert_with(|| Value::Table(toml::value::Table::new()))
         .as_table_mut()
-        .ok_or_else(|| "mcp_servers in ~/.codex/config.toml is not a table".to_string())?;
+        .ok_or_else(|| "mcp_servers in Codex config.toml is not a table".to_string())?;
     let mut impala_mcp = toml::value::Table::new();
     impala_mcp.insert("command".into(), Value::String(mcp_binary.to_string()));
     impala_mcp.insert("args".into(), Value::Array(vec![]));
@@ -321,26 +328,24 @@ fn write_codex_commands(codex_home: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn write_user_codex_config(
+fn write_codex_config_at(
+    codex_home: &Path,
     registrations: &[CodexHookRegistration],
     mcp_binary: &str,
+    trusted_project: Option<&Path>,
 ) -> Result<(), String> {
     use toml::Value;
 
-    let user_codex = dirs::home_dir()
-        .ok_or_else(|| "no home dir".to_string())?
-        .join(".codex");
-    fs::create_dir_all(&user_codex).map_err(|e| format!("mkdir ~/.codex: {}", e))?;
-    write_codex_commands(&user_codex)?;
-
-    let config_path = user_codex.join("config.toml");
+    fs::create_dir_all(codex_home)
+        .map_err(|e| format!("mkdir Codex home {}: {}", codex_home.display(), e))?;
+    let config_path = codex_home.join("config.toml");
     let mut root = if config_path.exists() {
         let contents =
             fs::read_to_string(&config_path).map_err(|e| format!("read config.toml: {}", e))?;
         match toml::from_str::<toml::Value>(&contents) {
             Ok(Value::Table(table)) => table,
             Ok(_) => toml::value::Table::new(),
-            Err(e) => return Err(format!("parse ~/.codex/config.toml: {}", e)),
+            Err(e) => return Err(format!("parse {}: {}", config_path.display(), e)),
         }
     } else {
         toml::value::Table::new()
@@ -348,11 +353,25 @@ fn write_user_codex_config(
 
     upsert_codex_mcp_server(&mut root, mcp_binary)?;
 
+    if let Some(project_path) = trusted_project {
+        let projects = root
+            .entry("projects".to_string())
+            .or_insert_with(|| Value::Table(toml::value::Table::new()))
+            .as_table_mut()
+            .ok_or_else(|| "projects in Codex config.toml is not a table".to_string())?;
+        let project = projects
+            .entry(project_path.to_string_lossy().into_owned())
+            .or_insert_with(|| Value::Table(toml::value::Table::new()))
+            .as_table_mut()
+            .ok_or_else(|| "project in Codex config.toml is not a table".to_string())?;
+        project.insert("trust_level".into(), Value::String("trusted".into()));
+    }
+
     let hooks = root
         .entry("hooks".to_string())
         .or_insert_with(|| Value::Table(toml::value::Table::new()))
         .as_table_mut()
-        .ok_or_else(|| "hooks in ~/.codex/config.toml is not a table".to_string())?;
+        .ok_or_else(|| "hooks in Codex config.toml is not a table".to_string())?;
 
     for registration in registrations {
         trust_codex_hook(
@@ -366,9 +385,34 @@ fn write_user_codex_config(
 
     let body = toml::to_string_pretty(&Value::Table(root))
         .map_err(|e| format!("serialize config.toml: {}", e))?;
-    fs::write(&config_path, body).map_err(|e| format!("write config.toml: {}", e))?;
+    write_codex_config_atomically(&config_path, body.as_bytes())?;
 
-    Ok(())
+    write_codex_commands(codex_home)
+}
+
+fn write_codex_config_atomically(path: &Path, body: &[u8]) -> Result<(), String> {
+    let id = CODEX_CONFIG_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+    let temp_path = path.with_extension(format!("toml.impala-{}-{id}", std::process::id()));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|e| format!("create {}: {}", temp_path.display(), e))?;
+        if let Ok(metadata) = fs::metadata(path) {
+            file.set_permissions(metadata.permissions())
+                .map_err(|e| format!("set permissions on {}: {}", temp_path.display(), e))?;
+        }
+        file.write_all(body)
+            .map_err(|e| format!("write {}: {}", temp_path.display(), e))?;
+        file.sync_all()
+            .map_err(|e| format!("sync {}: {}", temp_path.display(), e))?;
+        fs::rename(&temp_path, path).map_err(|e| format!("replace {}: {}", path.display(), e))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
 }
 
 struct CodexHookRegistration {
@@ -376,13 +420,6 @@ struct CodexHookRegistration {
     group_index: usize,
     command: String,
     source_path: PathBuf,
-}
-
-fn ensure_user_codex_hooks() -> Result<Vec<CodexHookRegistration>, String> {
-    let user_codex = dirs::home_dir()
-        .ok_or_else(|| "no home dir".to_string())?
-        .join(".codex");
-    ensure_codex_hooks_in(&user_codex)
 }
 
 /// Write/merge Impala's status hooks into <codex_dir>/hooks.json, returning
@@ -496,92 +533,29 @@ fn ensure_codex_hooks_in(codex_dir: &Path) -> Result<Vec<CodexHookRegistration>,
     Ok(registrations)
 }
 
-/// Build the merged TOML written to <CODEX_HOME>/config.toml. Starts from the
-/// user's ~/.codex/config.toml so settings like `model`, `model_provider`,
-/// `sandbox_mode`, custom MCP servers, etc. carry over. Then layers Impala-
-/// managed sections on top:
-/// - `mcp_servers.impala` — overwritten with the bundled MCP binary
-/// - `projects.<repo_root>.trust_level = "trusted"` — pre-trust the repo
-/// - `hooks.state` — trusts the Impala handlers written to ~/.codex/hooks.json.
-fn build_codex_config(
+/// Prepare the inherited/default Codex home. Impala deliberately does not
+/// return CODEX_HOME to the launcher; the parent process supplies it when
+/// configured and Codex defaults to ~/.codex otherwise.
+pub fn write_codex_config(
     worktree_path: &Path,
     mcp_binary: &str,
-    hook_registrations: &[CodexHookRegistration],
-) -> Result<String, String> {
-    use toml::Value;
-    let mut root = read_user_codex_config();
-
-    // mcp_servers.impala — preserve siblings, overwrite our key.
-    upsert_codex_mcp_server(&mut root, mcp_binary)?;
-
-    // projects.<repo_root>.trust_level — keyed by main repo path.
-    if let Some(repo_root) = main_worktree_root(worktree_path) {
-        let projects = root
-            .entry("projects".to_string())
-            .or_insert_with(|| Value::Table(toml::value::Table::new()))
-            .as_table_mut()
-            .ok_or_else(|| "projects in ~/.codex/config.toml is not a table".to_string())?;
-        let mut trust = toml::value::Table::new();
-        trust.insert("trust_level".into(), Value::String("trusted".into()));
-        projects.insert(repo_root.to_string_lossy().to_string(), Value::Table(trust));
-    }
-
-    let hooks = root
-        .entry("hooks".to_string())
-        .or_insert_with(|| Value::Table(toml::value::Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| "hooks in ~/.codex/config.toml is not a table".to_string())?;
-    // Seeded ~/.codex trust keys a hooks.json Codex won't load here; re-trust ours below.
-    hooks.remove("state");
-    for registration in hook_registrations {
-        trust_codex_hook(
-            hooks,
-            &registration.source_path,
-            &registration.event_name,
-            registration.group_index,
-            &registration.command,
-        )?;
-    }
-
-    let body = toml::to_string_pretty(&Value::Table(root))
-        .map_err(|e| format!("serialize codex config.toml: {}", e))?;
-    Ok(format!(
-        "# Managed by Impala — regenerated on each worktree open.\n\
-         # Seeded from ~/.codex/config.toml so your global settings carry over.\n\
-         # Impala overrides: mcp_servers.impala, projects.<repo>.trust_level, hooks.state\n\n\
-         {}",
-        body
-    ))
-}
-
-/// Write per-worktree Codex config under <worktree>/.impala/codex/config.toml.
-/// Returns the path to use as CODEX_HOME.
-pub fn write_codex_config(worktree_path: &Path, mcp_binary: &str) -> Result<PathBuf, String> {
-    let codex_home = worktree_path.join(".impala").join("codex");
-    fs::create_dir_all(&codex_home).map_err(|e| format!("mkdir .impala/codex: {}", e))?;
-
-    // Symlink auth.json from ~/.codex so login persists across worktrees.
-    // Without this, every worktree has its own CODEX_HOME and Codex would
-    // ask the user to sign in again every time.
-    link_codex_auth(&codex_home)?;
-
-    let config_path = codex_home.join("config.toml");
-    // Codex loads hooks from <CODEX_HOME>/hooks.json, so write+trust them there too.
-    let user_registrations = ensure_user_codex_hooks()?;
-    write_user_codex_config(&user_registrations, mcp_binary)?;
-    let worktree_registrations = ensure_codex_hooks_in(&codex_home)?;
-    let toml_out = build_codex_config(worktree_path, mcp_binary, &worktree_registrations)?;
-
-    fs::write(&config_path, toml_out).map_err(|e| format!("write codex config.toml: {}", e))?;
-
-    // Write Codex slash command files inside CODEX_HOME. Codex reads
-    // slash commands from <CODEX_HOME>/commands/*.md.
-    write_codex_commands(&codex_home)?;
-
-    crate::issue_context::ensure_codex_context(worktree_path)?;
-
-    add_git_excludes(worktree_path, CODEX_EXCLUDE_LINES)?;
-    Ok(codex_home)
+    trust_project: bool,
+) -> Result<(), String> {
+    let _guard = CODEX_CONFIG_LOCK
+        .lock()
+        .map_err(|e| format!("lock Codex config: {e}"))?;
+    let codex_home = codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+    fs::create_dir_all(&codex_home)
+        .map_err(|e| format!("mkdir Codex home {}: {e}", codex_home.display()))?;
+    let _file_guard = lock_codex_config_file(&codex_home)?;
+    let registrations = ensure_codex_hooks_in(&codex_home)?;
+    let trusted_project = trusted_project_root(worktree_path, trust_project);
+    write_codex_config_at(
+        &codex_home,
+        &registrations,
+        mcp_binary,
+        trusted_project.as_deref(),
+    )
 }
 
 #[cfg(test)]
@@ -612,6 +586,33 @@ mod tests {
         assert_eq!(
             codex_config_key_source(&config_path),
             fs::canonicalize(dir.path()).unwrap().join("config.toml")
+        );
+    }
+
+    #[test]
+    fn codex_home_prefers_the_parent_supplied_custom_path() {
+        let custom = PathBuf::from("/tmp/custom-codex-home");
+        let home = PathBuf::from("/tmp/user-home");
+
+        assert_eq!(
+            resolve_codex_home(Some(custom.clone()), Some(home.clone())),
+            Some(custom)
+        );
+        assert_eq!(
+            resolve_codex_home(None, Some(home)),
+            Some(PathBuf::from("/tmp/user-home/.codex"))
+        );
+    }
+
+    #[test]
+    fn codex_project_trust_requires_a_codex_launch() {
+        let worktree = tempfile::tempdir().unwrap();
+        fs::create_dir(worktree.path().join(".git")).unwrap();
+
+        assert_eq!(trusted_project_root(worktree.path(), false), None);
+        assert_eq!(
+            trusted_project_root(worktree.path(), true),
+            Some(worktree.path().to_path_buf())
         );
     }
 
@@ -658,6 +659,105 @@ mod tests {
                 .and_then(|env_vars| env_vars.as_array()),
             Some(&vec![Value::String("IMPALA_HOOK_PORT".into())])
         );
+    }
+
+    #[test]
+    fn canonical_codex_setup_preserves_user_files_and_skips_worktree_home() {
+        let worktree = tempfile::tempdir().unwrap();
+        let codex_home = tempfile::tempdir().unwrap();
+        let config_path = codex_home.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"model = "user-model"
+
+[mcp_servers.other]
+command = "other-mcp"
+
+[projects."/tmp/project"]
+custom_setting = "keep-me"
+
+[hooks.state]
+user_hook = { trusted_hash = "sha256:user" }
+"#,
+        )
+        .unwrap();
+        fs::write(
+            codex_home.path().join("hooks.json"),
+            serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [{
+                        "hooks": [{ "type": "command", "command": "user-hook" }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(codex_home.path().join("AGENTS.md"), "user instructions\n").unwrap();
+
+        let registrations = ensure_codex_hooks_in(codex_home.path()).unwrap();
+        write_codex_config_at(
+            codex_home.path(),
+            &registrations,
+            "/Applications/Impala.app/impala-mcp",
+            Some(Path::new("/tmp/project")),
+        )
+        .unwrap();
+
+        assert!(!worktree.path().join(".impala/codex/config.toml").exists());
+        assert!(!worktree.path().join(".impala/codex/AGENTS.md").exists());
+        assert_eq!(
+            fs::read_to_string(codex_home.path().join("AGENTS.md")).unwrap(),
+            "user instructions\n"
+        );
+        for command in ["impala-review", "impala-browser", "impala-automations"] {
+            assert!(codex_home
+                .path()
+                .join("commands")
+                .join(format!("{command}.md"))
+                .exists());
+        }
+
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(config["model"].as_str(), Some("user-model"));
+        assert_eq!(
+            config["mcp_servers"]["other"]["command"].as_str(),
+            Some("other-mcp")
+        );
+        assert_eq!(
+            config["mcp_servers"]["impala"]["env_vars"]
+                .as_array()
+                .and_then(|vars| vars.first())
+                .and_then(|var| var.as_str()),
+            Some("IMPALA_HOOK_PORT")
+        );
+        assert_eq!(
+            config["projects"]["/tmp/project"]["trust_level"].as_str(),
+            Some("trusted")
+        );
+        assert_eq!(
+            config["projects"]["/tmp/project"]["custom_setting"].as_str(),
+            Some("keep-me")
+        );
+        assert_eq!(
+            config["hooks"]["state"]["user_hook"]["trusted_hash"].as_str(),
+            Some("sha256:user")
+        );
+
+        let hooks: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(codex_home.path().join("hooks.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(hooks["hooks"]["UserPromptSubmit"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|group| group["hooks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|hook| hook["command"] == "user-hook")));
     }
 }
 

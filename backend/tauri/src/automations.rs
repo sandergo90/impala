@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use chrono::TimeZone;
 use rusqlite::{params, Connection};
@@ -1046,15 +1046,63 @@ struct CodexTranscriptState {
     modified_at: std::time::SystemTime,
 }
 
-fn collect_codex_transcripts(root: &Path, paths: &mut Vec<PathBuf>) {
+static CODEX_FALLBACK_SCANS: OnceLock<Mutex<HashMap<String, Vec<Option<std::time::SystemTime>>>>> =
+    OnceLock::new();
+
+fn codex_roots_signature(roots: &[PathBuf]) -> Vec<Option<std::time::SystemTime>> {
+    let today = chrono::Utc::now().format("%Y/%m/%d").to_string();
+    roots
+        .iter()
+        .flat_map(|root| [root.clone(), root.join(&today)])
+        .map(|path| {
+            std::fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        })
+        .collect()
+}
+
+fn collect_codex_transcripts(
+    root: &Path,
+    not_before: std::time::SystemTime,
+    paths: &mut Vec<PathBuf>,
+) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_codex_transcripts(&path, paths);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            collect_codex_transcripts(&path, not_before, paths);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+            && entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|modified| modified >= not_before)
+        {
+            paths.push(path);
+        }
+    }
+}
+
+fn codex_rollout_filename_matches(path: &Path, session_id: &str) -> bool {
+    let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    stem == session_id || stem.ends_with(&format!("-{session_id}"))
+}
+
+fn collect_codex_transcripts_for_session(root: &Path, session_id: &str, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_codex_transcripts_for_session(&path, session_id, paths);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+            && codex_rollout_filename_matches(&path, session_id)
+        {
             paths.push(path);
         }
     }
@@ -1072,13 +1120,16 @@ fn read_codex_transcript_state(path: &Path, worktree_path: &str) -> Option<Codex
         if value["type"] == "session_meta" {
             let payload = &value["payload"];
             if payload["cwd"].as_str() != Some(worktree_path)
-                || payload
-                    .get("agent_path")
-                    .is_some_and(|agent_path| !agent_path.is_null())
+                || payload.get("agent_path").is_some_and(|agent_path| {
+                    !agent_path.is_null() && agent_path.as_str() != Some("/root")
+                })
             {
                 return None;
             }
-            session_id = payload["id"].as_str().map(str::to_owned);
+            session_id = payload["id"]
+                .as_str()
+                .or_else(|| payload["session_id"].as_str())
+                .map(str::to_owned);
             continue;
         }
         if value["type"] != "event_msg" {
@@ -1108,29 +1159,82 @@ fn read_codex_transcript_state(path: &Path, worktree_path: &str) -> Option<Codex
     })
 }
 
-fn codex_transcript_for_run(
+fn codex_transcript_roots(worktree_path: &str, canonical_home: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = vec![Path::new(worktree_path)
+        .join(".impala")
+        .join("codex")
+        .join("sessions")];
+    if let Some(home) = canonical_home {
+        for root in [home.join("sessions"), home.join("archived_sessions")] {
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    roots
+}
+
+fn codex_transcript_for_run_in(
     worktree_path: &str,
     expected_session_id: Option<&str>,
+    fallback_not_before: std::time::SystemTime,
+    canonical_home: Option<&Path>,
 ) -> Option<CodexTranscriptState> {
-    let mut paths = Vec::new();
-    collect_codex_transcripts(
-        &Path::new(worktree_path)
-            .join(".impala")
-            .join("codex")
-            .join("sessions"),
-        &mut paths,
+    let roots = codex_transcript_roots(worktree_path, canonical_home);
+    let fallback_key = format!(
+        "{worktree_path}\0{}",
+        fallback_not_before
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
     );
-    let mut transcripts = paths
-        .iter()
-        .filter_map(|path| read_codex_transcript_state(path, worktree_path))
-        .filter(|state| {
-            expected_session_id
-                .map(|expected| state.session_id == expected)
-                .unwrap_or(true)
-        })
-        .collect::<Vec<_>>();
-    transcripts.sort_by_key(|state| state.modified_at);
-    transcripts.pop()
+    let roots_signature = codex_roots_signature(&roots);
+    if expected_session_id.is_none()
+        && CODEX_FALLBACK_SCANS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .ok()?
+            .get(&fallback_key)
+            == Some(&roots_signature)
+    {
+        return None;
+    }
+
+    for root in roots {
+        let mut paths = Vec::new();
+        if let Some(session_id) = expected_session_id {
+            collect_codex_transcripts_for_session(&root, session_id, &mut paths);
+        } else {
+            // Legacy rows without identity inspect only transcripts modified
+            // after this run was scheduled. A failed lookup is cached until a
+            // relevant session directory changes; a durable Codex session index
+            // would remove the remaining O(days) cache-miss traversal.
+            collect_codex_transcripts(&root, fallback_not_before, &mut paths);
+        }
+
+        let mut transcripts = paths
+            .iter()
+            .filter_map(|path| read_codex_transcript_state(path, worktree_path))
+            .filter(|state| {
+                expected_session_id
+                    .map(|expected| state.session_id == expected)
+                    .unwrap_or(true)
+            })
+            .collect::<Vec<_>>();
+        if transcripts.is_empty() {
+            continue;
+        }
+        transcripts.sort_by_key(|state| state.modified_at);
+        return transcripts.pop();
+    }
+    if expected_session_id.is_none() {
+        CODEX_FALLBACK_SCANS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .ok()?
+            .insert(fallback_key, roots_signature);
+    }
+    None
 }
 
 /// Recover Codex automation completion from its durable JSONL transcript.
@@ -1139,9 +1243,17 @@ fn codex_transcript_for_run(
 pub(crate) fn reconcile_completed_codex_runs(
     conn: &Connection,
 ) -> Result<Vec<ReconciledAutomationRun>, String> {
+    let canonical_home = crate::agent_config::codex_home_path();
+    reconcile_completed_codex_runs_in(conn, canonical_home.as_deref())
+}
+
+fn reconcile_completed_codex_runs_in(
+    conn: &Connection,
+    canonical_home: Option<&Path>,
+) -> Result<Vec<ReconciledAutomationRun>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT r.id, a.name, r.worktree_path, r.agent_session_id, r.agent_turn_id
+            "SELECT r.id, a.name, r.worktree_path, r.agent_session_id, r.agent_turn_id, r.scheduled_for
              FROM automation_runs r
              JOIN automations a ON a.id = r.automation_id
              WHERE r.status = 'launched'
@@ -1157,6 +1269,7 @@ pub(crate) fn reconcile_completed_codex_runs(
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
             ))
         })
         .map_err(|e| format!("Failed to query Codex automation recovery: {}", e))?
@@ -1165,10 +1278,23 @@ pub(crate) fn reconcile_completed_codex_runs(
     drop(stmt);
 
     let mut completed = Vec::new();
-    for (run_id, automation_name, worktree_path, stored_session_id, stored_turn_id) in rows {
-        let Some(transcript) =
-            codex_transcript_for_run(&worktree_path, stored_session_id.as_deref())
-        else {
+    for (
+        run_id,
+        automation_name,
+        worktree_path,
+        stored_session_id,
+        stored_turn_id,
+        scheduled_for,
+    ) in rows
+    {
+        let fallback_not_before = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_secs(scheduled_for.max(0) as u64);
+        let Some(transcript) = codex_transcript_for_run_in(
+            &worktree_path,
+            stored_session_id.as_deref(),
+            fallback_not_before,
+            canonical_home,
+        ) else {
             continue;
         };
         let turn_id = stored_turn_id.or(transcript.first_turn_id);
@@ -2358,6 +2484,7 @@ pub fn cron_next_occurrences(schedule: String, count: usize) -> Result<Vec<i64>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn test_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -3031,6 +3158,123 @@ mod tests {
                 Some("turn-backfill".into())
             )
         );
+    }
+
+    #[test]
+    fn codex_identity_lookup_only_collects_matching_rollout_names() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("rollout-target.jsonl"), "target").unwrap();
+        fs::write(root.path().join("rollout-unrelated.jsonl"), "unrelated").unwrap();
+
+        let mut paths = Vec::new();
+        collect_codex_transcripts_for_session(root.path(), "target", &mut paths);
+
+        assert_eq!(paths, vec![root.path().join("rollout-target.jsonl")]);
+    }
+
+    #[test]
+    fn codex_completion_reconciliation_uses_matching_canonical_rollout() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(
+            &conn,
+            NewAutomation {
+                agent: "codex".into(),
+                ..new_automation("0 9 * * *")
+            },
+            now,
+        )
+        .unwrap();
+        let run = insert_run(&conn, &automation.id, now).unwrap().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let worktree = workspace.path().to_string_lossy().to_string();
+        report_run(&conn, &run.id, Some(&worktree), "launched", None).unwrap();
+        record_run_agent_lifecycle(
+            &conn,
+            &worktree,
+            "codex",
+            Some("canonical-session"),
+            Some("automation-turn"),
+        )
+        .unwrap();
+
+        let canonical = tempfile::tempdir().unwrap();
+        let active = canonical.path().join("sessions/2026/08/05");
+        let archived = canonical.path().join("archived_sessions/2026/08/05");
+        fs::create_dir_all(&active).unwrap();
+        fs::create_dir_all(&archived).unwrap();
+        let wrong_worktree = active.join("rollout-canonical-session.jsonl");
+        fs::write(
+            &wrong_worktree,
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "canonical-session",
+                        "cwd": "/another-worktree",
+                        "agent_path": null
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "task_complete", "turn_id": "automation-turn" }
+                }),
+            ]
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            active.join("rollout-unrelated-session.jsonl"),
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "unrelated-session",
+                        "cwd": worktree.clone(),
+                        "agent_path": null
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "task_complete", "turn_id": "automation-turn" }
+                }),
+            ]
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            archived.join("rollout-canonical-session.jsonl"),
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "canonical-session",
+                        "cwd": worktree.clone(),
+                        "agent_path": null
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "task_complete", "turn_id": "automation-turn" }
+                }),
+            ]
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        )
+        .unwrap();
+
+        let reconciled = reconcile_completed_codex_runs_in(&conn, Some(canonical.path())).unwrap();
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].run_id, run.id);
+        assert_eq!(get_run(&conn, &run.id).unwrap().status, "completed");
     }
 
     #[test]

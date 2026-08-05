@@ -37,6 +37,12 @@ describe("global automation commands", () => {
     ).toBe("codex --yolo '-m' 'model'\\''; echo unsafe' 'prompt'\n");
   });
 
+  test("leaves the inherited Codex home untouched", () => {
+    const command = buildLaunchCommand("codex", "--yolo", "prompt");
+    expect(command).not.toContain("CODEX_HOME=");
+    expect(command).not.toContain(".impala/codex");
+  });
+
   test("builds delegated multiline prompts as a direct PTY command", () => {
     expect(
       buildDirectLaunchCommand(

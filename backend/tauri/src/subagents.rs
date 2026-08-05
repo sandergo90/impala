@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
 #[derive(Clone, Debug, Serialize)]
@@ -72,7 +72,8 @@ impl SubagentRegistry {
         let runtime_provider = detect_runtime_provider(
             provider,
             &value,
-            find_session_file(&session_files, session_id).is_some(),
+            find_session_file_for_worktree(&session_files, session_id, worktree_path, None)
+                .is_some(),
         );
 
         let key = pane_key(worktree_path, pane_id);
@@ -94,7 +95,7 @@ impl SubagentRegistry {
             if runtime_provider == "claude" {
                 changed |= ingest_claude_event(session, event_type, &value);
             } else if runtime_provider == "codex" {
-                changed |= refresh_codex_session_from_files(session, &session_files);
+                changed |= refresh_codex_session_from_files(session, &session_files, worktree_path);
             }
         }
 
@@ -119,7 +120,7 @@ impl SubagentRegistry {
                 let session = sessions.get_mut(&key)?;
                 if session.provider == "codex" {
                     let session_files = codex_session_files(worktree_path, &session.session_id);
-                    refresh_codex_session_from_files(session, &session_files);
+                    refresh_codex_session_from_files(session, &session_files, worktree_path);
                 }
                 Some(
                     session
@@ -244,8 +245,14 @@ fn ingest_claude_event(session: &mut PaneSession, event_type: &str, value: &Valu
     changed
 }
 
-fn refresh_codex_session_from_files(session: &mut PaneSession, session_files: &[PathBuf]) -> bool {
-    let Some(parent_path) = find_session_file(&session_files, &session.session_id) else {
+fn refresh_codex_session_from_files(
+    session: &mut PaneSession,
+    session_files: &[PathBuf],
+    worktree_path: &str,
+) -> bool {
+    let Some(parent_path) =
+        find_session_file_for_worktree(session_files, &session.session_id, worktree_path, None)
+    else {
         return false;
     };
     let Ok(contents) = fs::read_to_string(parent_path) else {
@@ -281,7 +288,12 @@ fn refresh_codex_session_from_files(session: &mut PaneSession, session_files: &[
         if agent_path == "/root" {
             continue;
         }
-        let transcript_path = find_session_file(&session_files, thread_id);
+        let transcript_path = find_session_file_for_worktree(
+            session_files,
+            thread_id,
+            worktree_path,
+            Some(agent_path),
+        );
         let completed = transcript_path
             .as_deref()
             .is_some_and(codex_session_is_complete);
@@ -311,19 +323,145 @@ fn refresh_codex_session_from_files(session: &mut PaneSession, session_files: &[
 }
 
 fn codex_session_files(worktree_path: &str, session_id: &str) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    collect_session_files(
-        &Path::new(worktree_path)
-            .join(".impala")
-            .join("codex")
-            .join("sessions"),
-        &mut files,
-    );
-    if find_session_file(&files, session_id).is_some() {
-        return files;
+    let canonical_home = crate::agent_config::codex_home_path();
+    codex_session_files_in(worktree_path, session_id, canonical_home.as_deref())
+}
+
+pub(crate) fn migrate_legacy_codex_session(
+    worktree_path: &str,
+    session_id: &str,
+    canonical_home: &Path,
+) -> Result<bool, String> {
+    let canonical_roots = [
+        canonical_home.join("sessions"),
+        canonical_home.join("archived_sessions"),
+    ];
+    if find_codex_session_file(&canonical_roots, session_id, worktree_path, None).is_some() {
+        return Ok(false);
     }
-    if let Some(global_sessions) = dirs::home_dir().map(|home| home.join(".codex/sessions")) {
-        collect_session_files(&global_sessions, &mut files);
+
+    let legacy_root = Path::new(worktree_path)
+        .join(".impala")
+        .join("codex")
+        .join("sessions");
+    let Some(source) = find_codex_session_file(
+        std::slice::from_ref(&legacy_root),
+        session_id,
+        worktree_path,
+        None,
+    ) else {
+        return Ok(false);
+    };
+    if codex_session_metadata_identity_matches(&source, session_id, worktree_path, None)
+        != Some(true)
+    {
+        return Err(format!(
+            "legacy Codex session {} has no matching session metadata",
+            source.display()
+        ));
+    }
+
+    let relative = source
+        .strip_prefix(&legacy_root)
+        .map_err(|e| format!("resolve legacy Codex session path: {e}"))?;
+    let destination = canonical_home.join("sessions").join(relative);
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "canonical Codex session has no parent directory".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("mkdir canonical Codex session directory: {e}"))?;
+    let mut input = fs::File::open(&source)
+        .map_err(|e| format!("open legacy Codex session {}: {e}", source.display()))?;
+    let temp = destination.with_extension(format!("jsonl.impala-migrate-{}", uuid::Uuid::new_v4()));
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|e| format!("create migration file {}: {e}", temp.display()))?;
+    let copied = std::io::copy(&mut input, &mut output)
+        .map_err(|e| format!("copy legacy Codex session {}: {e}", source.display()))
+        .and_then(|_| {
+            output.sync_all().map_err(|e| {
+                format!(
+                    "sync canonical Codex session {}: {e}",
+                    destination.display()
+                )
+            })
+        });
+    if let Err(error) = copied {
+        drop(output);
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
+    drop(output);
+
+    let published = match fs::hard_link(&temp, &destination) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if codex_session_metadata_matches(&destination, session_id, worktree_path, None) {
+                Ok(false)
+            } else {
+                Err(format!(
+                    "canonical Codex session {} already exists but has different metadata",
+                    destination.display()
+                ))
+            }
+        }
+        Err(error) => Err(format!(
+            "publish canonical Codex session {}: {error}",
+            destination.display()
+        )),
+    };
+    let _ = fs::remove_file(temp);
+    published
+}
+
+fn codex_session_files_in(
+    worktree_path: &str,
+    session_id: &str,
+    canonical_home: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut roots = vec![Path::new(worktree_path)
+        .join(".impala")
+        .join("codex")
+        .join("sessions")];
+    if let Some(home) = canonical_home {
+        for root in [home.join("sessions"), home.join("archived_sessions")] {
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+
+    let Some(parent) = find_codex_session_file(&roots, session_id, worktree_path, None) else {
+        return Vec::new();
+    };
+    let mut files = vec![parent.clone()];
+    let Ok(contents) = fs::read_to_string(parent) else {
+        return files;
+    };
+    for line in contents.lines() {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let payload = &value["payload"];
+        if value["type"] != "event_msg"
+            || payload["type"] != "sub_agent_activity"
+            || payload["kind"] != "started"
+        {
+            continue;
+        }
+        let (Some(thread_id), Some(agent_path)) = (
+            payload["agent_thread_id"].as_str(),
+            payload["agent_path"].as_str(),
+        ) else {
+            continue;
+        };
+        if let Some(path) =
+            find_codex_session_file(&roots, thread_id, worktree_path, Some(agent_path))
+        {
+            files.push(path);
+        }
     }
     files
 }
@@ -342,29 +480,156 @@ fn same_agent_state(
         })
 }
 
-fn collect_session_files(root: &Path, files: &mut Vec<PathBuf>) {
+#[derive(Clone)]
+struct CodexSessionPathCacheEntry {
+    path: Option<PathBuf>,
+    roots_signature: Vec<Option<std::time::SystemTime>>,
+}
+
+static CODEX_SESSION_PATHS: OnceLock<Mutex<HashMap<String, CodexSessionPathCacheEntry>>> =
+    OnceLock::new();
+
+fn codex_session_roots_signature(roots: &[PathBuf]) -> Vec<Option<std::time::SystemTime>> {
+    let today = chrono::Utc::now().format("%Y/%m/%d").to_string();
+    roots
+        .iter()
+        .flat_map(|root| [root.clone(), root.join(&today)])
+        .map(|path| {
+            fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        })
+        .collect()
+}
+
+fn find_codex_session_file(
+    roots: &[PathBuf],
+    session_id: &str,
+    worktree_path: &str,
+    expected_agent_path: Option<&str>,
+) -> Option<PathBuf> {
+    let key = format!(
+        "{worktree_path}\0{session_id}\0{}\0{}",
+        expected_agent_path.unwrap_or_default(),
+        roots
+            .iter()
+            .map(|root| root.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("\0")
+    );
+    let cache = CODEX_SESSION_PATHS.get_or_init(|| Mutex::new(HashMap::new()));
+    let roots_signature = codex_session_roots_signature(roots);
+    if let Some(entry) = cache.lock().ok()?.get(&key).cloned() {
+        if let Some(path) = entry.path.filter(|path| path.exists()) {
+            return Some(path);
+        }
+        if entry.roots_signature == roots_signature {
+            return None;
+        }
+    }
+
+    let mut candidates = Vec::new();
+    for root in roots {
+        collect_session_files_for_id(root, session_id, &mut candidates);
+    }
+    let path =
+        find_session_file_for_worktree(&candidates, session_id, worktree_path, expected_agent_path);
+    cache.lock().ok()?.insert(
+        key,
+        CodexSessionPathCacheEntry {
+            path: path.clone(),
+            roots_signature,
+        },
+    );
+    path
+}
+
+fn collect_session_files_for_id(root: &Path, session_id: &str, files: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_session_files(&path, files);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            collect_session_files_for_id(&path, session_id, files);
+        } else if codex_rollout_filename_matches(&path, session_id) {
             files.push(path);
         }
     }
 }
 
-fn find_session_file(files: &[PathBuf], session_id: &str) -> Option<PathBuf> {
+fn codex_rollout_filename_matches(path: &Path, session_id: &str) -> bool {
+    let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+        && (stem == session_id || stem.ends_with(&format!("-{session_id}")))
+}
+
+fn find_session_file_for_worktree(
+    files: &[PathBuf],
+    session_id: &str,
+    worktree_path: &str,
+    expected_agent_path: Option<&str>,
+) -> Option<PathBuf> {
     files
         .iter()
+        .filter(|path| {
+            let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+                return false;
+            };
+            stem == session_id || stem.ends_with(&format!("-{session_id}"))
+        })
         .find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.contains(session_id))
+            codex_session_metadata_matches(path, session_id, worktree_path, expected_agent_path)
         })
         .cloned()
+}
+
+fn codex_session_metadata_matches(
+    path: &Path,
+    session_id: &str,
+    worktree_path: &str,
+    expected_agent_path: Option<&str>,
+) -> bool {
+    let legacy_root = Path::new(worktree_path)
+        .join(".impala")
+        .join("codex")
+        .join("sessions");
+    codex_session_metadata_identity_matches(path, session_id, worktree_path, expected_agent_path)
+        .unwrap_or_else(|| path.starts_with(legacy_root))
+}
+
+fn codex_session_metadata_identity_matches(
+    path: &Path,
+    session_id: &str,
+    worktree_path: &str,
+    expected_agent_path: Option<&str>,
+) -> Option<bool> {
+    let contents = fs::read_to_string(path).ok()?;
+    for line in contents.lines() {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value["type"] != "session_meta" {
+            continue;
+        }
+        let payload = &value["payload"];
+        let file_session_id = payload["id"]
+            .as_str()
+            .or_else(|| payload["session_id"].as_str());
+        if file_session_id != Some(session_id) || payload["cwd"].as_str() != Some(worktree_path) {
+            return Some(false);
+        }
+        if let Some(agent_path) = payload["agent_path"].as_str() {
+            let expected = expected_agent_path.unwrap_or("/root");
+            if agent_path != expected {
+                return Some(false);
+            }
+        }
+        return Some(true);
+    }
+    None
 }
 
 fn codex_session_is_complete(path: &Path) -> bool {
@@ -387,6 +652,66 @@ mod tests {
             std::process::id(),
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
         ))
+    }
+
+    #[test]
+    fn explicit_resume_copies_legacy_session_without_removing_or_overwriting_it() {
+        let workspace = temp_workspace("legacy-resume");
+        let canonical = temp_workspace("canonical-resume");
+        let relative = Path::new("2026/08/05/rollout-parent-session.jsonl");
+        let legacy = workspace.join(".impala/codex/sessions").join(relative);
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        let body = serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "id": "parent-session",
+                "cwd": workspace.to_string_lossy(),
+                "agent_path": "/root"
+            }
+        })
+        .to_string();
+        fs::write(&legacy, format!("{body}\n")).unwrap();
+
+        assert!(migrate_legacy_codex_session(
+            workspace.to_str().unwrap(),
+            "parent-session",
+            &canonical,
+        )
+        .unwrap());
+        let migrated = canonical.join("sessions").join(relative);
+        assert_eq!(fs::read_to_string(&migrated).unwrap(), format!("{body}\n"));
+        assert!(legacy.exists());
+
+        fs::write(&legacy, "changed legacy source\n").unwrap();
+        assert!(!migrate_legacy_codex_session(
+            workspace.to_str().unwrap(),
+            "parent-session",
+            &canonical,
+        )
+        .unwrap());
+        assert_eq!(fs::read_to_string(&migrated).unwrap(), format!("{body}\n"));
+
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(canonical).unwrap();
+    }
+
+    #[test]
+    fn explicit_resume_rejects_legacy_session_without_matching_metadata() {
+        let workspace = temp_workspace("legacy-resume-invalid");
+        let canonical = temp_workspace("canonical-resume-invalid");
+        let legacy =
+            workspace.join(".impala/codex/sessions/2026/08/05/rollout-parent-session.jsonl");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, "{\"type\":\"event_msg\"}\n").unwrap();
+
+        let error =
+            migrate_legacy_codex_session(workspace.to_str().unwrap(), "parent-session", &canonical)
+                .unwrap_err();
+        assert!(error.contains("has no matching session metadata"));
+        assert!(legacy.exists());
+        assert!(!canonical.join("sessions").exists());
+
+        fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
@@ -453,7 +778,10 @@ mod tests {
                 "agent_type": ""
             }),
         );
-        assert_eq!(session.agents.get("agent-1").unwrap().summary.name, "Subagent");
+        assert_eq!(
+            session.agents.get("agent-1").unwrap().summary.name,
+            "Subagent"
+        );
     }
 
     #[test]
@@ -511,13 +839,133 @@ mod tests {
             agents: HashMap::new(),
         };
         let files = codex_session_files(workspace.to_str().unwrap(), "parent-session");
-        assert!(refresh_codex_session_from_files(&mut session, &files));
+        assert!(refresh_codex_session_from_files(
+            &mut session,
+            &files,
+            workspace.to_str().unwrap(),
+        ));
         let child = session.agents.get("child-session").unwrap();
         assert_eq!(child.summary.name, "reviewer");
         assert_eq!(child.summary.depth, 1);
         assert_eq!(child.summary.status, "done");
 
         fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn discovers_codex_subagent_from_canonical_sessions_with_identity_filters() {
+        let workspace = temp_workspace("canonical-codex");
+        let canonical = temp_workspace("canonical-home");
+        let sessions = canonical.join("sessions/2026/08/05");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&sessions).unwrap();
+        let worktree = workspace.to_string_lossy().to_string();
+        fs::write(
+            sessions.join("rollout-parent-session.jsonl"),
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "parent-session",
+                        "cwd": worktree.clone(),
+                        "agent_path": null
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "sub_agent_activity",
+                        "kind": "started",
+                        "agent_thread_id": "child-session",
+                        "agent_path": "/root/reviewer",
+                        "occurred_at_ms": 42
+                    }
+                }),
+            ]
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            sessions.join("rollout-child-session.jsonl"),
+            [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "child-session",
+                        "cwd": worktree.clone(),
+                        "agent_path": "/root/reviewer"
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "task_complete" }
+                }),
+            ]
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        )
+        .unwrap();
+
+        let mut session = PaneSession {
+            session_id: "parent-session".to_string(),
+            provider: "codex".to_string(),
+            current_turn_started_at: 0,
+            agents: HashMap::new(),
+        };
+        let files = codex_session_files_in(
+            workspace.to_str().unwrap(),
+            "parent-session",
+            Some(&canonical),
+        );
+        assert!(files.iter().all(|path| path.starts_with(&canonical)));
+        assert!(refresh_codex_session_from_files(
+            &mut session,
+            &files,
+            workspace.to_str().unwrap(),
+        ));
+        assert_eq!(session.agents["child-session"].summary.status, "done");
+
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(canonical).unwrap();
+    }
+
+    #[test]
+    fn canonical_codex_lookup_requires_session_metadata() {
+        let workspace = temp_workspace("canonical-missing-metadata-worktree");
+        let canonical = temp_workspace("canonical-missing-metadata-home");
+        let sessions = canonical.join("sessions/2026/08/05");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(
+            sessions.join("rollout-parent-session.jsonl"),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "task_complete" }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let files = codex_session_files_in(
+            workspace.to_str().unwrap(),
+            "parent-session",
+            Some(&canonical),
+        );
+        assert!(find_session_file_for_worktree(
+            &files,
+            "parent-session",
+            workspace.to_str().unwrap(),
+            None,
+        )
+        .is_none());
+
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(canonical).unwrap();
     }
 
     #[test]
@@ -552,7 +1000,11 @@ mod tests {
             agents: HashMap::new(),
         };
         let files = codex_session_files(workspace.to_str().unwrap(), "parent-session");
-        assert!(refresh_codex_session_from_files(&mut session, &files));
+        assert!(refresh_codex_session_from_files(
+            &mut session,
+            &files,
+            workspace.to_str().unwrap(),
+        ));
         assert_eq!(session.agents["child-session"].summary.status, "running");
         registry.0.lock().unwrap().insert(key, session);
 

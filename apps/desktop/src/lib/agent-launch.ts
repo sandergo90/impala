@@ -55,6 +55,7 @@ export async function launchAgentHeadless(opts: {
     extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
       worktreePath,
       agent,
+      resumeSessionId: null,
     });
   } catch (err) {
     console.warn("Failed to prepare agent config:", err);
@@ -119,15 +120,11 @@ export async function launchAutomationResume(opts: {
   const ptyId = automationRunResumePtySessionId(runId);
   const hookPort = await getHookPort();
 
-  let extraEnv: Record<string, string> = {};
-  try {
-    extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
-      worktreePath,
-      agent,
-    });
-  } catch (err) {
-    console.warn("Failed to prepare agent config:", err);
-  }
+  const extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
+    worktreePath,
+    agent,
+    resumeSessionId: sessionId,
+  });
   const launch = await invoke<{
     shell_path: string;
     shell_args: string[];
