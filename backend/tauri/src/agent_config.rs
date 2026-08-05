@@ -293,6 +293,10 @@ fn upsert_codex_mcp_server(root: &mut toml::value::Table, mcp_binary: &str) -> R
     let mut impala_mcp = toml::value::Table::new();
     impala_mcp.insert("command".into(), Value::String(mcp_binary.to_string()));
     impala_mcp.insert("args".into(), Value::Array(vec![]));
+    impala_mcp.insert(
+        "env_vars".into(),
+        Value::Array(vec![Value::String("IMPALA_HOOK_PORT".into())]),
+    );
     mcp_servers.insert("impala".into(), Value::Table(impala_mcp));
 
     Ok(())
@@ -646,6 +650,13 @@ mod tests {
                 .and_then(|server| server.get("command"))
                 .and_then(|command| command.as_str()),
             Some("/Applications/Impala.app/impala-mcp")
+        );
+        assert_eq!(
+            servers
+                .get("impala")
+                .and_then(|server| server.get("env_vars"))
+                .and_then(|env_vars| env_vars.as_array()),
+            Some(&vec![Value::String("IMPALA_HOOK_PORT".into())])
         );
     }
 }

@@ -1,6 +1,6 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Response, Server};
@@ -1361,12 +1361,8 @@ pub fn start(
     let server = Arc::new(Server::http("127.0.0.1:0").expect("Failed to start hook server"));
     let port = server.server_addr().to_ip().unwrap().port();
 
-    // Write port to a well-known file so persistent PTY sessions can
-    // discover the current hook server after an app restart.
     if let Some(home) = dirs::home_dir() {
-        let dir = home.join(".impala");
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join("hook-port"), port.to_string());
+        let _ = publish_hook_port(&home, port);
     }
 
     std::thread::spawn(move || {
@@ -1577,15 +1573,36 @@ pub fn start(
     port
 }
 
+/// Publish the hook server used as a fallback by sessions that outlive their
+/// launching Impala instance. A short-lived second instance must not replace a
+/// healthy primary's discovery port.
+fn publish_hook_port(home: &Path, port: u16) -> std::io::Result<()> {
+    let dir = home.join(".impala");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("hook-port");
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        if let Ok(existing) = existing.trim().parse::<u16>() {
+            let address = std::net::SocketAddr::from(([127, 0, 0, 1], existing));
+            if std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_millis(100))
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
+    std::fs::write(path, port.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        hook_command, pane_status_for_hook_event, AgentDelegations, AgentPaneStatuses,
-        AgentStatusSource, AutomationCompletionTracker, InterruptedAgentTurns,
+        hook_command, pane_status_for_hook_event, publish_hook_port, AgentDelegations,
+        AgentPaneStatuses, AgentStatusSource, AutomationCompletionTracker, InterruptedAgentTurns,
         IMPALA_BROWSER_SKILL,
     };
     use std::fs;
     use std::io::Write;
+    use std::net::TcpListener;
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Command, Stdio};
 
@@ -1593,6 +1610,43 @@ mod tests {
     fn restored_agent_status_does_not_start_caffeinate() {
         assert!(!AgentStatusSource::Restored.should_apply_caffeinate());
         assert!(AgentStatusSource::Live.should_apply_caffeinate());
+    }
+
+    #[test]
+    fn hook_port_discovery_preserves_a_reachable_primary() {
+        let temp = tempfile::tempdir().unwrap();
+        let primary = TcpListener::bind("127.0.0.1:0").unwrap();
+        let primary_port = primary.local_addr().unwrap().port();
+        let secondary = TcpListener::bind("127.0.0.1:0").unwrap();
+        let secondary_port = secondary.local_addr().unwrap().port();
+        let impala_dir = temp.path().join(".impala");
+        fs::create_dir_all(&impala_dir).unwrap();
+        fs::write(impala_dir.join("hook-port"), primary_port.to_string()).unwrap();
+
+        publish_hook_port(temp.path(), secondary_port).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(impala_dir.join("hook-port")).unwrap(),
+            primary_port.to_string()
+        );
+    }
+
+    #[test]
+    fn hook_port_discovery_replaces_a_stale_port() {
+        let temp = tempfile::tempdir().unwrap();
+        let stale = TcpListener::bind("127.0.0.1:0").unwrap();
+        let stale_port = stale.local_addr().unwrap().port();
+        drop(stale);
+        let impala_dir = temp.path().join(".impala");
+        fs::create_dir_all(&impala_dir).unwrap();
+        fs::write(impala_dir.join("hook-port"), stale_port.to_string()).unwrap();
+
+        publish_hook_port(temp.path(), 60158).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(impala_dir.join("hook-port")).unwrap(),
+            "60158"
+        );
     }
 
     #[test]
