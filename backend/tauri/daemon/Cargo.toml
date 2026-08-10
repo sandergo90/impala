@@ -1,6 +1,6 @@
 [package]
 name = "impala-pty-daemon"
-version = "0.23.22"
+version = "0.23.29"
 edition = "2021"
 
 [[bin]]
