@@ -43,15 +43,13 @@ pub fn init() -> Guard {
         let release_for_init = RELEASE_NAME.to_string();
         sentry::init((
             dsn,
-            sentry::ClientOptions {
-                release: Some(release_for_init.into()),
-                environment: Some(environment().into()),
-                traces_sample_rate: traces_sample_rate(),
-                attach_stacktrace: true,
-                send_default_pii: false,
-                enable_logs: true,
-                ..Default::default()
-            },
+            sentry::ClientOptions::new()
+                .release(release_for_init)
+                .environment(environment())
+                .traces_sample_rate(traces_sample_rate())
+                .attach_stacktrace(true)
+                .send_default_pii(false)
+                .enable_logs(true),
         ))
     });
 

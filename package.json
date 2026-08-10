@@ -7,7 +7,7 @@
   ],
   "overrides": {
     "@codemirror/state": "6.7.1",
-    "@codemirror/view": "6.43.7",
+    "@codemirror/view": "6.43.8",
     "@lezer/markdown": "^1.6.4"
   },
   "scripts": {
@@ -17,6 +17,6 @@
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
-    "turbo": "2.10.8"
+    "turbo": "2.10.9"
   }
 }
