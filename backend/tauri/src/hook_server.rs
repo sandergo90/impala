@@ -462,27 +462,6 @@ struct AgentPaneKey {
 /// replaces it; lost on app restart (acceptable — rebuilds on next turn).
 pub struct LastTurnSnapshots(pub Mutex<HashMap<String, String>>);
 
-/// One `caffeinate -i` child per worktree currently in "working" status.
-/// Spawned on the working transition, killed on idle/permission. Exposed so
-/// the app's RunEvent::Exit handler can drain it on shutdown; otherwise the
-/// reparented caffeinate processes would linger.
-pub struct Caffeinators(pub Mutex<HashMap<String, std::process::Child>>);
-
-impl Caffeinators {
-    pub fn new() -> Self {
-        Self(Mutex::new(HashMap::new()))
-    }
-
-    /// Kill every caffeinate child and clear the map. Idempotent.
-    pub fn kill_all(&self) {
-        let Ok(mut map) = self.0.lock() else { return };
-        for (_, mut child) in map.drain() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
-
 #[derive(Clone, Serialize)]
 pub struct AgentStatusEvent {
     pub worktree_path: String,
@@ -870,75 +849,14 @@ pub fn install_impala_review_skill() {
     install_skill("impala-automations", IMPALA_AUTOMATIONS_SKILL);
 }
 
-/// macOS only. Maintains one `caffeinate -i` process per worktree that is
-/// currently in "working" status. On idle/permission the child is killed
-/// so the system can resume normal idle-sleep behaviour.
-#[cfg(target_os = "macos")]
-fn apply_caffeinate(caffeinators: &Caffeinators, worktree_path: &str, status: &str) {
-    let Ok(mut map) = caffeinators.0.lock() else {
-        return;
-    };
-    match status {
-        "working" => {
-            if map.contains_key(worktree_path) {
-                return;
-            }
-            match std::process::Command::new("caffeinate")
-                .arg("-i")
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-            {
-                Ok(child) => {
-                    map.insert(worktree_path.to_string(), child);
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[impala] caffeinate spawn failed for {}: {}",
-                        worktree_path, e
-                    );
-                }
-            }
-        }
-        "idle" | "permission" => {
-            if let Some(mut child) = map.remove(worktree_path) {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-        _ => {}
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn apply_caffeinate(_caffeinators: &Caffeinators, _worktree_path: &str, _status: &str) {}
-
-#[derive(Clone, Copy)]
-enum AgentStatusSource {
-    Live,
-    Restored,
-}
-
-impl AgentStatusSource {
-    fn should_apply_caffeinate(self) -> bool {
-        matches!(self, Self::Live)
-    }
-}
-
-fn publish_agent_status_from_source(
+pub fn publish_agent_status(
     app_handle: &AppHandle,
     statuses: &AgentStatuses,
-    caffeinators: &Caffeinators,
     worktree_path: &str,
     status: &str,
-    source: AgentStatusSource,
 ) {
     if let Ok(mut map) = statuses.0.lock() {
         map.insert(worktree_path.to_owned(), status.to_owned());
-    }
-    if source.should_apply_caffeinate() {
-        apply_caffeinate(caffeinators, worktree_path, status);
     }
     let _ = app_handle.emit(
         "agent-status",
@@ -946,40 +864,6 @@ fn publish_agent_status_from_source(
             worktree_path: worktree_path.to_owned(),
             status: status.to_owned(),
         },
-    );
-}
-
-pub fn publish_agent_status(
-    app_handle: &AppHandle,
-    statuses: &AgentStatuses,
-    caffeinators: &Caffeinators,
-    worktree_path: &str,
-    status: &str,
-) {
-    publish_agent_status_from_source(
-        app_handle,
-        statuses,
-        caffeinators,
-        worktree_path,
-        status,
-        AgentStatusSource::Live,
-    );
-}
-
-pub fn publish_restored_agent_status(
-    app_handle: &AppHandle,
-    statuses: &AgentStatuses,
-    caffeinators: &Caffeinators,
-    worktree_path: &str,
-    status: &str,
-) {
-    publish_agent_status_from_source(
-        app_handle,
-        statuses,
-        caffeinators,
-        worktree_path,
-        status,
-        AgentStatusSource::Restored,
     );
 }
 
@@ -1354,7 +1238,6 @@ pub fn start(
     pane_statuses: Arc<AgentPaneStatuses>,
     delegations: Arc<AgentDelegations>,
     snapshots: Arc<LastTurnSnapshots>,
-    caffeinators: Arc<Caffeinators>,
     interrupted_turns: Arc<InterruptedAgentTurns>,
     subagents: Arc<crate::subagents::SubagentRegistry>,
 ) -> u16 {
@@ -1532,13 +1415,7 @@ pub fn start(
             if !status.is_empty() && !worktree_path.is_empty() {
                 let aggregate_status = pane_statuses.observe(&worktree_path, &pane_id, status);
                 publish_agent_pane_event(&app_handle, &worktree_path, &pane_id, status);
-                publish_agent_status(
-                    &app_handle,
-                    &statuses,
-                    &caffeinators,
-                    &worktree_path,
-                    &aggregate_status,
-                );
+                publish_agent_status(&app_handle, &statuses, &worktree_path, &aggregate_status);
             }
 
             // Snapshot the worktree at the start of every turn so the "Last
@@ -1597,7 +1474,7 @@ fn publish_hook_port(home: &Path, port: u16) -> std::io::Result<()> {
 mod tests {
     use super::{
         hook_command, pane_status_for_hook_event, publish_hook_port, AgentDelegations,
-        AgentPaneStatuses, AgentStatusSource, AutomationCompletionTracker, InterruptedAgentTurns,
+        AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns,
         IMPALA_BROWSER_SKILL,
     };
     use std::fs;
@@ -1605,12 +1482,6 @@ mod tests {
     use std::net::TcpListener;
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Command, Stdio};
-
-    #[test]
-    fn restored_agent_status_does_not_start_caffeinate() {
-        assert!(!AgentStatusSource::Restored.should_apply_caffeinate());
-        assert!(AgentStatusSource::Live.should_apply_caffeinate());
-    }
 
     #[test]
     fn hook_port_discovery_preserves_a_reachable_primary() {

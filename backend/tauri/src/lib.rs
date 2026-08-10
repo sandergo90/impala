@@ -1082,7 +1082,6 @@ fn clear_agent_pane_status(
     app: tauri::AppHandle,
     statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
     pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
-    caffeinators: tauri::State<'_, Arc<hook_server::Caffeinators>>,
     worktree_path: String,
     pane_id: String,
 ) {
@@ -1090,13 +1089,7 @@ fn clear_agent_pane_status(
         return;
     };
     hook_server::publish_agent_pane_event(&app, &worktree_path, &pane_id, "idle");
-    hook_server::publish_agent_status(
-        &app,
-        &statuses,
-        &caffeinators,
-        &worktree_path,
-        &aggregate_status,
-    );
+    hook_server::publish_agent_status(&app, &statuses, &worktree_path, &aggregate_status);
 }
 
 #[tauri::command]
@@ -1104,13 +1097,12 @@ fn clear_agent_worktree_status(
     app: tauri::AppHandle,
     statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
     pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
-    caffeinators: tauri::State<'_, Arc<hook_server::Caffeinators>>,
     worktree_path: String,
 ) {
     if !pane_statuses.clear_worktree(&worktree_path) {
         return;
     }
-    hook_server::publish_agent_status(&app, &statuses, &caffeinators, &worktree_path, "idle");
+    hook_server::publish_agent_status(&app, &statuses, &worktree_path, "idle");
 }
 
 #[tauri::command]
@@ -1119,7 +1111,6 @@ fn interrupt_agent_turn(
     db: tauri::State<'_, DbState>,
     statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
     pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
-    caffeinators: tauri::State<'_, Arc<hook_server::Caffeinators>>,
     interrupted_turns: tauri::State<'_, Arc<hook_server::InterruptedAgentTurns>>,
     worktree_path: String,
     pane_id: String,
@@ -1140,13 +1131,7 @@ fn interrupt_agent_turn(
     }
     interrupted_turns.mark(&worktree_path, &pane_id);
     hook_server::publish_agent_pane_event(&app, &worktree_path, &pane_id, "idle");
-    hook_server::publish_agent_status(
-        &app,
-        &statuses,
-        &caffeinators,
-        &worktree_path,
-        &aggregate_status,
-    );
+    hook_server::publish_agent_status(&app, &statuses, &worktree_path, &aggregate_status);
     Ok(())
 }
 
@@ -1905,7 +1890,6 @@ pub fn run() {
             )));
             let last_turn_snapshots =
                 Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
-            let caffeinators = Arc::new(hook_server::Caffeinators::new());
             let interrupted_turns = Arc::new(hook_server::InterruptedAgentTurns::load_persisted());
             let subagent_registry = Arc::new(subagents::SubagentRegistry::default());
             let hook_port = hook_server::start(
@@ -1914,15 +1898,13 @@ pub fn run() {
                 agent_pane_statuses.clone(),
                 agent_delegations.clone(),
                 last_turn_snapshots.clone(),
-                caffeinators.clone(),
                 interrupted_turns.clone(),
                 subagent_registry.clone(),
             );
             for (worktree_path, status) in restored_agent_statuses {
-                hook_server::publish_restored_agent_status(
+                hook_server::publish_agent_status(
                     app.handle(),
                     &agent_statuses,
-                    &caffeinators,
                     &worktree_path,
                     &status,
                 );
@@ -1932,7 +1914,6 @@ pub fn run() {
             app.manage(agent_pane_statuses.clone());
             app.manage(agent_delegations);
             app.manage(last_turn_snapshots);
-            app.manage(caffeinators.clone());
             app.manage(interrupted_turns);
             app.manage(subagent_registry);
 
@@ -1942,7 +1923,6 @@ pub fn run() {
                 db_path.clone(),
                 agent_pane_statuses.clone(),
                 agent_statuses.clone(),
-                caffeinators.clone(),
             );
 
             // Bring up the detached PTY daemon in the background. Commands
@@ -2198,16 +2178,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                // Reap any caffeinate children still alive so they don't
-                // linger reparented to launchd after the app exits.
-                if let Some(caffeinators) = app_handle.try_state::<Arc<hook_server::Caffeinators>>()
-                {
-                    caffeinators.kill_all();
-                }
-            }
-        });
+        .run(|_, _| {});
 }
 
 #[cfg(test)]

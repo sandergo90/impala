@@ -1794,7 +1794,6 @@ pub fn start_completion_reconciler(
     db_path: PathBuf,
     pane_statuses: std::sync::Arc<crate::hook_server::AgentPaneStatuses>,
     statuses: std::sync::Arc<crate::hook_server::AgentStatuses>,
-    caffeinators: std::sync::Arc<crate::hook_server::Caffeinators>,
 ) {
     tauri::async_runtime::spawn(async move {
         // Run immediately on startup, then keep repairing missed provider
@@ -1844,7 +1843,6 @@ pub fn start_completion_reconciler(
                 crate::hook_server::publish_agent_status(
                     &app,
                     &statuses,
-                    &caffeinators,
                     &run.worktree_path,
                     &aggregate_status,
                 );
