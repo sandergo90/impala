@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "impala"
-version = "0.23.29"
+version = "0.23.30"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
