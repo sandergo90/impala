@@ -14,21 +14,30 @@
 use crate::issue_tracker::{Issue, IssueComment, IssueDetail, IssueTracker};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 static CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(reqwest::blocking::Client::new);
+static CLOUD_IDS: LazyLock<Mutex<HashMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+const FORMS_API_BASE: &str = "https://api.atlassian.com/jira/forms/cloud";
 
 /// Jira-backed `IssueTracker`. `base_url` is a clean `https://...` origin;
 /// `email`/`token` form the Basic auth credential.
 pub struct JiraTracker {
     base_url: String,
+    forms_api_base: String,
     auth: String,
 }
 
 impl JiraTracker {
     pub fn new(base_url: String, email: String, token: String) -> Self {
         let auth = format!("Basic {}", STANDARD.encode(format!("{}:{}", email, token)));
-        Self { base_url, auth }
+        Self {
+            base_url,
+            forms_api_base: FORMS_API_BASE.to_string(),
+            auth,
+        }
     }
 
     fn browse_url(&self, key: &str) -> String {
@@ -36,10 +45,18 @@ impl JiraTracker {
     }
 
     fn get(&self, path: &str) -> Result<Value, String> {
-        let resp = CLIENT
-            .get(format!("{}{}", self.base_url, path))
-            .header("Authorization", &self.auth)
-            .header("Accept", "application/json")
+        self.get_url(&format!("{}{}", self.base_url, path), true, false)
+    }
+
+    fn get_url(&self, url: &str, authenticated: bool, experimental: bool) -> Result<Value, String> {
+        let mut request = CLIENT.get(url).header("Accept", "application/json");
+        if authenticated {
+            request = request.header("Authorization", &self.auth);
+        }
+        if experimental {
+            request = request.header("X-ExperimentalApi", "opt-in");
+        }
+        let resp = request
             .send()
             .map_err(|e| format!("Jira request failed: {}", e))?;
         let status = resp.status();
@@ -54,6 +71,70 @@ impl JiraTracker {
             ));
         }
         serde_json::from_str(&text).map_err(|e| format!("Failed to parse Jira response: {}", e))
+    }
+
+    fn cloud_id(&self) -> Result<String, String> {
+        if let Some(cloud_id) = CLOUD_IDS
+            .lock()
+            .map_err(|_| "Jira cloud ID cache lock poisoned".to_string())?
+            .get(&self.base_url)
+            .cloned()
+        {
+            return Ok(cloud_id);
+        }
+
+        let data = self.get_url(
+            &format!("{}/_edge/tenant_info", self.base_url),
+            false,
+            false,
+        )?;
+        let cloud_id = data
+            .get("cloudId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| "Jira tenant info did not contain a cloudId".to_string())?
+            .to_string();
+        CLOUD_IDS
+            .lock()
+            .map_err(|_| "Jira cloud ID cache lock poisoned".to_string())?
+            .insert(self.base_url.clone(), cloud_id.clone());
+        Ok(cloud_id)
+    }
+
+    fn forms_markdown(&self, issue_key: &str) -> Result<String, String> {
+        let cloud_id = self.cloud_id()?;
+        let forms_url = format!(
+            "{}/{}/issue/{}/form",
+            self.forms_api_base, cloud_id, issue_key
+        );
+        let data = self.get_url(&forms_url, true, true)?;
+        let forms = data
+            .as_array()
+            .or_else(|| data.get("forms").and_then(Value::as_array))
+            .ok_or_else(|| "Jira Forms response was not a form list".to_string())?;
+        let mut markdown = String::new();
+
+        for form in forms {
+            let Some(id) = form.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let name = form
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("Untitled");
+            let answers_url = format!("{}/{}/format/answers", forms_url, id);
+            match self.get_url(&answers_url, true, true) {
+                Ok(answers) => markdown.push_str(&format_form(name, &answers)),
+                Err(error) => tracing::warn!(
+                    issue_key,
+                    form_id = id,
+                    error = %error,
+                    "failed to fetch Jira form answers"
+                ),
+            }
+        }
+
+        Ok(markdown)
     }
 
     fn post(&self, path: &str, body: &Value) -> Result<(), String> {
@@ -179,11 +260,26 @@ impl IssueTracker for JiraTracker {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let description = fields
+        let mut description = fields
             .and_then(|f| f.get("description"))
             .filter(|d| !d.is_null())
             .map(adf::to_markdown)
             .filter(|s| !s.trim().is_empty());
+
+        match self.forms_markdown(key) {
+            Ok(forms) if !forms.is_empty() => {
+                description = Some(match description {
+                    Some(description) => format!("{}\n\n{}", description, forms.trim_end()),
+                    None => forms.trim_end().to_string(),
+                });
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(
+                issue_key = key,
+                error = %error,
+                "failed to fetch Jira forms"
+            ),
+        }
 
         let comments = fields
             .and_then(|f| f.get("comment"))
@@ -276,6 +372,33 @@ impl IssueTracker for JiraTracker {
             &serde_json::json!({ "transition": { "id": id } }),
         )
     }
+}
+
+fn format_form(name: &str, answers: &Value) -> String {
+    let Some(answers) = answers.as_array() else {
+        return String::new();
+    };
+    let mut body = String::new();
+    for answer in answers {
+        let label = answer
+            .get("label")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let value = answer
+            .get("answer")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if label.is_empty() || value.is_empty() {
+            continue;
+        }
+        body.push_str(&format!("**{}**\n{}\n\n", label, value));
+    }
+    if body.is_empty() {
+        return body;
+    }
+    format!("## Form: {}\n\n{}", name, body.trim_end_matches('\n')) + "\n"
 }
 
 /// Pull the first message out of a Jira `{ "errorMessages": [...], "errors": {...} }`
@@ -618,5 +741,69 @@ mod tests {
         });
         let md = adf::to_markdown(&doc);
         assert_eq!(md, "[site](https://x.com) and `code`");
+    }
+
+    #[test]
+    fn issue_detail_includes_forms_and_ignores_one_failed_form() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let address = server.server_addr().to_ip().unwrap();
+        let base_url = format!("http://{}", address);
+        let handle = std::thread::spawn(move || {
+            for _ in 0..5 {
+                let request = server.recv().unwrap();
+                let url = request.url();
+                let forms_request = url.starts_with("/jira/forms/");
+                let (status, body) = match url {
+                    "/rest/api/3/issue/SQST-9?fields=summary,description,comment,status" => (
+                        200,
+                        r#"{"key":"SQST-9","fields":{"summary":"Site security","description":null,"status":{"name":"Open"},"comment":{"comments":[]}}}"#,
+                    ),
+                    "/_edge/tenant_info" => (200, r#"{"cloudId":"cloud-1"}"#),
+                    "/jira/forms/cloud/cloud-1/issue/SQST-9/form" => (
+                        200,
+                        r#"[{"id":"form-1","name":"Feedback"},{"id":"form-2","name":"Broken"}]"#,
+                    ),
+                    "/jira/forms/cloud/cloud-1/issue/SQST-9/form/form-1/format/answers" => (
+                        200,
+                        r#"[{"label":"Requirements","answer":"Access control\nCameras"},{"label":"Attachments","answer":""}]"#,
+                    ),
+                    "/jira/forms/cloud/cloud-1/issue/SQST-9/form/form-2/format/answers" => {
+                        (500, "unavailable")
+                    }
+                    unexpected => panic!("unexpected Jira request: {unexpected}"),
+                };
+                let has_header = |name| {
+                    request
+                        .headers()
+                        .iter()
+                        .any(|header| header.field.equiv(name))
+                };
+                assert_eq!(has_header("Authorization"), url != "/_edge/tenant_info");
+                assert_eq!(
+                    request.headers().iter().any(|header| {
+                        header.field.equiv("X-ExperimentalApi") && header.value.as_str() == "opt-in"
+                    }),
+                    forms_request
+                );
+                request
+                    .respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(tiny_http::StatusCode(status)),
+                    )
+                    .unwrap();
+            }
+        });
+
+        let mut tracker =
+            JiraTracker::new(base_url.clone(), "me@example.com".into(), "token".into());
+        tracker.forms_api_base = format!("{}/jira/forms/cloud", base_url);
+        let detail = tracker.issue_detail("SQST-9").unwrap();
+
+        assert_eq!(
+            detail.description.as_deref(),
+            Some("## Form: Feedback\n\n**Requirements**\nAccess control\nCameras")
+        );
+        assert_eq!(tracker.cloud_id().unwrap(), "cloud-1");
+        handle.join().unwrap();
     }
 }
