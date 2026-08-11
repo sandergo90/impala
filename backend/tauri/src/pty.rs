@@ -143,6 +143,14 @@ pub struct ShellLaunch {
     pub env: HashMap<String, String>,
 }
 
+fn original_zdotdir(
+    impala_original: Option<String>,
+    zdotdir: Option<String>,
+    home: Option<String>,
+) -> String {
+    impala_original.or(zdotdir).or(home).unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn prepare_shell_launch() -> ShellLaunch {
     use std::path::Path;
@@ -163,10 +171,11 @@ pub fn prepare_shell_launch() -> ShellLaunch {
     let mut env = HashMap::new();
     let shell_args = match shell_basename.as_str() {
         "zsh" => {
-            let original = std::env::var("ZDOTDIR")
-                .ok()
-                .or_else(|| std::env::var("HOME").ok())
-                .unwrap_or_default();
+            let original = original_zdotdir(
+                std::env::var("IMPALA_ORIG_ZDOTDIR").ok(),
+                std::env::var("ZDOTDIR").ok(),
+                std::env::var("HOME").ok(),
+            );
             env.insert("IMPALA_ORIG_ZDOTDIR".into(), original);
             env.insert("ZDOTDIR".into(), zsh_dir.to_string_lossy().into_owned());
             vec!["-l".into()]
@@ -189,5 +198,22 @@ pub fn prepare_shell_launch() -> ShellLaunch {
         shell_path,
         shell_args,
         env,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::original_zdotdir;
+
+    #[test]
+    fn inherited_impala_original_wins_over_wrapper_zdotdir() {
+        assert_eq!(
+            original_zdotdir(
+                Some("/Users/test".into()),
+                Some("/tmp/impala/shell-wrappers/zsh".into()),
+                Some("/fallback".into()),
+            ),
+            "/Users/test"
+        );
     }
 }
