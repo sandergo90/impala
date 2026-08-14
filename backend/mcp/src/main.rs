@@ -1265,4 +1265,19 @@ mod tests {
             json!(["delegation_id", "prompt"])
         );
     }
+
+    #[test]
+    fn follow_up_agent_tab_rejects_blank_inputs() {
+        assert_eq!(
+            tool_follow_up_agent_tab(&json!({})),
+            Err("missing required parameter: delegation_id".to_string())
+        );
+        assert_eq!(
+            tool_follow_up_agent_tab(&json!({
+                "delegation_id": "delegation-1",
+                "prompt": " "
+            })),
+            Err("missing required parameter: prompt".to_string())
+        );
+    }
 }

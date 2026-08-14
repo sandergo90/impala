@@ -298,14 +298,8 @@ impl AgentDelegations {
         }
     }
 
-    pub fn status(
-        &self,
-        delegation_id: &str,
-        pane_statuses: &AgentPaneStatuses,
-    ) -> Option<AgentDelegationStatus> {
-        let entries = self.entries.lock().ok()?;
-        let entry = entries.get(delegation_id)?;
-        let status = if entry.error.is_some() {
+    fn status_for(entry: &AgentDelegation, pane_statuses: &AgentPaneStatuses) -> &'static str {
+        if entry.error.is_some() {
             "failed"
         } else if !entry.started {
             "pending"
@@ -319,7 +313,17 @@ impl AgentDelegations {
                 Some(value) if value == "permission" => "waiting",
                 _ => "idle",
             }
-        };
+        }
+    }
+
+    pub fn status(
+        &self,
+        delegation_id: &str,
+        pane_statuses: &AgentPaneStatuses,
+    ) -> Option<AgentDelegationStatus> {
+        let entries = self.entries.lock().ok()?;
+        let entry = entries.get(delegation_id)?;
+        let status = Self::status_for(entry, pane_statuses);
         Some(AgentDelegationStatus {
             delegation_id: entry.delegation_id.clone(),
             worktree_path: entry.worktree_path.clone(),
@@ -335,19 +339,6 @@ impl AgentDelegations {
         delegation_id: &str,
         pane_statuses: &AgentPaneStatuses,
     ) -> Result<(String, String), String> {
-        let status = self
-            .status(delegation_id, pane_statuses)
-            .ok_or_else(|| format!("delegation not found: {delegation_id}"))?;
-        if status.status != "idle" {
-            return Err(format!(
-                "delegation is {}; follow-ups require an idle tab",
-                status.status
-            ));
-        }
-        let pane_id = status
-            .pane_id
-            .ok_or_else(|| "delegation has no registered pane".to_string())?;
-        let target = (status.worktree_path, pane_id);
         let mut entries = self
             .entries
             .lock()
@@ -355,6 +346,18 @@ impl AgentDelegations {
         let entry = entries
             .get_mut(delegation_id)
             .ok_or_else(|| format!("delegation not found: {delegation_id}"))?;
+        let status = Self::status_for(entry, pane_statuses);
+        if status != "idle" {
+            return Err(format!(
+                "delegation is {}; follow-ups require an idle tab",
+                status
+            ));
+        }
+        let pane_id = entry
+            .pane_id
+            .clone()
+            .ok_or_else(|| "delegation has no registered pane".to_string())?;
+        let target = (entry.worktree_path.clone(), pane_id);
         entry.started = false;
         self.persist(&entries);
         Ok(target)
@@ -1299,23 +1302,29 @@ fn write_agent_follow_up(
     pane_id: &str,
     prompt: &str,
 ) -> Result<(), String> {
-    let session_id = format!("pty-{pane_id}-{worktree_path}");
-    let data_b64 = STANDARD.encode(format!("{prompt}\r").as_bytes());
     let daemon = app.state::<crate::daemon_client::DaemonState>();
     let response = tauri::async_runtime::block_on(async {
         daemon
             .client()
             .await?
-            .request(Request::Write {
-                session_id,
-                data_b64,
-            })
+            .request(agent_follow_up_write_request(
+                worktree_path,
+                pane_id,
+                prompt,
+            ))
             .await
     })?;
     match response {
         DaemonResponse::Wrote => Ok(()),
         DaemonResponse::Error { message } => Err(message),
         _ => Err("unexpected daemon response while following up agent tab".to_string()),
+    }
+}
+
+fn agent_follow_up_write_request(worktree_path: &str, pane_id: &str, prompt: &str) -> Request {
+    Request::Write {
+        session_id: format!("pty-{pane_id}-{worktree_path}"),
+        data_b64: STANDARD.encode(format!("{prompt}\r").as_bytes()),
     }
 }
 
@@ -1563,15 +1572,18 @@ fn publish_hook_port(home: &Path, port: u16) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        hook_command, pane_status_for_hook_event, publish_hook_port, AgentDelegations,
-        AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns,
+        agent_follow_up_write_request, hook_command, pane_status_for_hook_event, publish_hook_port,
+        AgentDelegations, AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns,
         IMPALA_BROWSER_SKILL,
     };
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use impala_daemon_shared::wire::Request;
     use std::fs;
     use std::io::Write;
     use std::net::TcpListener;
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Command, Stdio};
+    use std::sync::{Arc, Barrier};
 
     #[test]
     fn hook_port_discovery_preserves_a_reachable_primary() {
@@ -1666,6 +1678,12 @@ mod tests {
             Err("delegation is running; follow-ups require an idle tab".to_string())
         );
 
+        panes.observe("/worktree", "pane-1", "permission");
+        assert_eq!(
+            delegations.begin_follow_up("delegation-1", &panes),
+            Err("delegation is waiting; follow-ups require an idle tab".to_string())
+        );
+
         panes.observe("/worktree", "pane-1", "idle");
         assert_eq!(
             delegations.begin_follow_up("delegation-1", &panes),
@@ -1675,6 +1693,77 @@ mod tests {
             delegations.status("delegation-1", &panes).unwrap().status,
             "pending"
         );
+
+        delegations.observe_hook("/worktree", "pane-1");
+        panes.observe("/worktree", "pane-1", "working");
+        assert_eq!(
+            delegations.status("delegation-1", &panes).unwrap().status,
+            "running"
+        );
+        panes.observe("/worktree", "pane-1", "idle");
+        assert_eq!(
+            delegations.status("delegation-1", &panes).unwrap().status,
+            "idle"
+        );
+
+        assert!(delegations.begin_follow_up("delegation-1", &panes).is_ok());
+        delegations.cancel_follow_up("delegation-1");
+        assert_eq!(
+            delegations.status("delegation-1", &panes).unwrap().status,
+            "idle"
+        );
+
+        delegations.open("failed", "/worktree", None);
+        assert!(delegations.fail("failed", "PTY failed"));
+        assert_eq!(
+            delegations.begin_follow_up("failed", &panes),
+            Err("delegation is failed; follow-ups require an idle tab".to_string())
+        );
+    }
+
+    #[test]
+    fn agent_follow_up_uses_the_existing_pane_pty_and_submits_the_prompt() {
+        match agent_follow_up_write_request("/worktree", "pane-1", "Fix the review") {
+            Request::Write {
+                session_id,
+                data_b64,
+            } => {
+                assert_eq!(session_id, "pty-pane-1-/worktree");
+                assert_eq!(STANDARD.decode(data_b64).unwrap(), b"Fix the review\r");
+            }
+            request => panic!("unexpected request: {request:?}"),
+        }
+    }
+
+    #[test]
+    fn concurrent_follow_ups_claim_an_idle_delegation_once() {
+        let delegations = Arc::new(AgentDelegations::default());
+        let panes = Arc::new(AgentPaneStatuses::default());
+        delegations.open("delegation-1", "/worktree", None);
+        assert!(delegations.register("delegation-1", "pane-1"));
+        delegations.observe_hook("/worktree", "pane-1");
+        panes.observe("/worktree", "pane-1", "idle");
+
+        let barrier = Arc::new(Barrier::new(3));
+        let claims: Vec<_> = (0..2)
+            .map(|_| {
+                let delegations = delegations.clone();
+                let panes = panes.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    delegations.begin_follow_up("delegation-1", &panes)
+                })
+            })
+            .collect();
+        barrier.wait();
+        let claims: Vec<_> = claims
+            .into_iter()
+            .map(|claim| claim.join().unwrap())
+            .collect();
+
+        assert_eq!(claims.iter().filter(|claim| claim.is_ok()).count(), 1);
+        assert_eq!(claims.iter().filter(|claim| claim.is_err()).count(), 1);
     }
 
     #[test]
