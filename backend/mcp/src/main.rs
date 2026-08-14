@@ -517,6 +517,24 @@ fn tool_get_agent_tab_status(args: &Value) -> Result<Value, String> {
     browser_get("/agents/status", &[("delegation_id", delegation_id)]).map(strip_ok)
 }
 
+fn tool_follow_up_agent_tab(args: &Value) -> Result<Value, String> {
+    let delegation_id = args
+        .get("delegation_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("missing required parameter: delegation_id")?;
+    let prompt = args
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("missing required parameter: prompt")?;
+    browser_get(
+        "/agents/follow_up",
+        &[("delegation_id", delegation_id), ("prompt", prompt)],
+    )
+    .map(strip_ok)
+}
+
 fn tool_browser_screenshot(args: &Value) -> Result<String, String> {
     let wt = param_or_cwd(args, "worktree_path")?;
     let body = browser_get("/browser/screenshot", &[("worktree_path", &wt)])?;
@@ -878,6 +896,24 @@ fn tool_definitions() -> Value {
                 }
             },
             {
+                "name": "follow_up_agent_tab",
+                "description": "Send a follow-up prompt to the existing idle Impala Agent tab opened by open_agent_tab. Reuses the same delegation_id and PTY; call get_agent_tab_status until idle before sending, then keep polling that same delegation_id for the new turn.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "delegation_id": {
+                            "type": "string",
+                            "description": "Stable delegation id returned by open_agent_tab"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "Follow-up task for the existing agent thread"
+                        }
+                    },
+                    "required": ["delegation_id", "prompt"]
+                }
+            },
+            {
                 "name": "list_automations",
                 "description": "List this project's scheduled automations in Impala (name, prompt, cron schedule, agent, enabled, next run) plus recent runs. Call before create_automation to avoid duplicates. Each automation run creates a fresh worktree, launches the agent with the stored prompt, and lands as a reviewable diff in Impala.",
                 "inputSchema": {
@@ -1125,6 +1161,7 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_type" => tool_browser_type(&tool_args),
                 "open_agent_tab" => tool_open_agent_tab(&tool_args),
                 "get_agent_tab_status" => tool_get_agent_tab_status(&tool_args),
+                "follow_up_agent_tab" => tool_follow_up_agent_tab(&tool_args),
                 "list_automations" => tool_list_automations(&tool_args),
                 "create_automation" => tool_create_automation(&tool_args),
                 "update_automation" => tool_update_automation(&tool_args),
@@ -1205,5 +1242,27 @@ fn main() {
             let _ = writeln!(stdout, "{}", response);
             let _ = stdout.flush();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_list_exposes_idle_agent_tab_follow_ups() {
+        let tools = tool_definitions();
+        let follow_up = tools
+            .get("tools")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "follow_up_agent_tab")
+            .expect("follow_up_agent_tab tool");
+
+        assert_eq!(
+            follow_up["inputSchema"]["required"],
+            json!(["delegation_id", "prompt"])
+        );
     }
 }

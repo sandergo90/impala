@@ -1,8 +1,10 @@
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use impala_daemon_shared::wire::{Request, Response as DaemonResponse};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tiny_http::{Response, Server};
 
 pub struct AgentStatuses(pub Mutex<HashMap<String, String>>);
@@ -326,6 +328,47 @@ impl AgentDelegations {
             status: status.to_owned(),
             error: entry.error.clone(),
         })
+    }
+
+    pub fn begin_follow_up(
+        &self,
+        delegation_id: &str,
+        pane_statuses: &AgentPaneStatuses,
+    ) -> Result<(String, String), String> {
+        let status = self
+            .status(delegation_id, pane_statuses)
+            .ok_or_else(|| format!("delegation not found: {delegation_id}"))?;
+        if status.status != "idle" {
+            return Err(format!(
+                "delegation is {}; follow-ups require an idle tab",
+                status.status
+            ));
+        }
+        let pane_id = status
+            .pane_id
+            .ok_or_else(|| "delegation has no registered pane".to_string())?;
+        let target = (status.worktree_path, pane_id);
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| "delegation registry is unavailable".to_string())?;
+        let entry = entries
+            .get_mut(delegation_id)
+            .ok_or_else(|| format!("delegation not found: {delegation_id}"))?;
+        entry.started = false;
+        self.persist(&entries);
+        Ok(target)
+    }
+
+    pub fn cancel_follow_up(&self, delegation_id: &str) {
+        let Ok(mut entries) = self.entries.lock() else {
+            return;
+        };
+        let Some(entry) = entries.get_mut(delegation_id) else {
+            return;
+        };
+        entry.started = true;
+        self.persist(&entries);
     }
 }
 
@@ -1128,6 +1171,27 @@ fn handle_agent_request(
                 .map(|status| serde_json::to_value(status).expect("serializable status"))
                 .ok_or_else(|| format!("delegation not found: {delegation_id}"));
         }
+        if path == "/agents/follow_up" {
+            let delegation_id = params
+                .get("delegation_id")
+                .filter(|value| !value.trim().is_empty())
+                .ok_or("missing delegation_id")?;
+            let prompt = params
+                .get("prompt")
+                .filter(|value| !value.trim().is_empty())
+                .ok_or("missing prompt")?;
+            let (worktree_path, pane_id) =
+                delegations.begin_follow_up(delegation_id, pane_statuses)?;
+            if let Err(error) = write_agent_follow_up(app, &worktree_path, &pane_id, prompt) {
+                delegations.cancel_follow_up(delegation_id);
+                return Err(error);
+            }
+            return Ok(serde_json::json!({
+                "followed_up": true,
+                "delegation_id": delegation_id,
+                "pane_id": pane_id,
+            }));
+        }
         if path != "/agents/open" {
             return Err(format!("unknown agents endpoint: {path}"));
         }
@@ -1226,6 +1290,32 @@ fn handle_agent_request(
             value
         }
         Err(error) => serde_json::json!({ "ok": false, "error": error }),
+    }
+}
+
+fn write_agent_follow_up(
+    app: &AppHandle,
+    worktree_path: &str,
+    pane_id: &str,
+    prompt: &str,
+) -> Result<(), String> {
+    let session_id = format!("pty-{pane_id}-{worktree_path}");
+    let data_b64 = STANDARD.encode(format!("{prompt}\r").as_bytes());
+    let daemon = app.state::<crate::daemon_client::DaemonState>();
+    let response = tauri::async_runtime::block_on(async {
+        daemon
+            .client()
+            .await?
+            .request(Request::Write {
+                session_id,
+                data_b64,
+            })
+            .await
+    })?;
+    match response {
+        DaemonResponse::Wrote => Ok(()),
+        DaemonResponse::Error { message } => Err(message),
+        _ => Err("unexpected daemon response while following up agent tab".to_string()),
     }
 }
 
@@ -1555,6 +1645,36 @@ mod tests {
         let status = delegations.status("delegation-1", &panes).unwrap();
         assert_eq!(status.status, "failed");
         assert_eq!(status.error.as_deref(), Some("PTY spawn failed"));
+    }
+
+    #[test]
+    fn delegation_follow_up_targets_only_an_idle_registered_pane() {
+        let delegations = AgentDelegations::default();
+        let panes = AgentPaneStatuses::default();
+
+        delegations.open("delegation-1", "/worktree", None);
+        assert_eq!(
+            delegations.begin_follow_up("delegation-1", &panes),
+            Err("delegation is pending; follow-ups require an idle tab".to_string())
+        );
+
+        assert!(delegations.register("delegation-1", "pane-1"));
+        delegations.observe_hook("/worktree", "pane-1");
+        panes.observe("/worktree", "pane-1", "working");
+        assert_eq!(
+            delegations.begin_follow_up("delegation-1", &panes),
+            Err("delegation is running; follow-ups require an idle tab".to_string())
+        );
+
+        panes.observe("/worktree", "pane-1", "idle");
+        assert_eq!(
+            delegations.begin_follow_up("delegation-1", &panes),
+            Ok(("/worktree".to_string(), "pane-1".to_string()))
+        );
+        assert_eq!(
+            delegations.status("delegation-1", &panes).unwrap().status,
+            "pending"
+        );
     }
 
     #[test]
