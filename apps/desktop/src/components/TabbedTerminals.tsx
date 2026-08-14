@@ -50,6 +50,7 @@ import {
   buildDirectLaunchCommand,
   buildInteractiveShellArgs,
   buildLaunchCommand,
+  usesImpalaCodexServer,
 } from "../lib/agent";
 import { awaitShellReady, markShellReady } from "../lib/pty-ready";
 import {
@@ -924,13 +925,16 @@ const TabBody = memo(function TabBody({
       const projectPath =
         useUIStore.getState().selectedProject?.path ?? worktreePath;
       const agent = delegatedLaunch?.agent ?? (await resolveAgent(worktreePath));
+      const launchesAgent = launch === "agent" || Boolean(delegatedLaunch);
+      const flags = launchesAgent ? await resolveFlags(agent, projectPath) : "";
       let extraEnv: Record<string, string> = {};
       try {
         extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
           worktreePath,
           agent,
           resumeSessionId: null,
-          ptySessionId: ptyId,
+          useCodexAppServer:
+            launchesAgent && usesImpalaCodexServer(agent, flags),
         });
       } catch (err) {
         console.warn("Failed to prepare agent config:", err);
@@ -943,7 +947,7 @@ const TabBody = memo(function TabBody({
       const delegatedCommand = delegatedLaunch
         ? buildDirectLaunchCommand(
             agent,
-            await resolveFlags(agent, projectPath),
+            flags,
             delegatedLaunch.prompt,
             extraEnv,
             delegatedLaunch.codexOptions,
@@ -999,8 +1003,6 @@ const TabBody = memo(function TabBody({
             // bare rather than relaunching. The agent is auto-launched exactly
             // once per worktree — on first open.
             if (isPrimaryAgent && nav.agentLaunched) return;
-
-            const flags = await resolveFlags(agent, projectPath);
 
             // On first launch with a linked issue, point the agent at the
             // issue context file via its initial prompt so it reads the issue

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Completion delivery playbook</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Reference 0003</p>
+    <h1>Completion delivery playbook</h1>
+    <p class="lede">An outbox state machine for waking one originating Codex thread without losing or duplicating the callback.</p>
+  </header>
+
+  <h2>Durable identity</h2>
+  <ul>
+    <li><strong>Server:</strong> resolved <code>CODEX_HOME</code> and control socket.</li>
+    <li><strong>Destination:</strong> originating <code>threadId</code>.</li>
+    <li><strong>Completion:</strong> stable identity derived from delegation and worker-turn identity.</li>
+    <li><strong>Message:</strong> one stable <code>clientUserMessageId</code> reused during reconciliation.</li>
+  </ul>
+
+  <h2>State machine</h2>
+  <div class="delivery-flow">
+    <div class="delivery-step"><strong>Pending</strong><small>Persist before network I/O.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="delivery-step"><strong>Routing</strong><small>Resume thread and inspect active state.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="delivery-step"><strong>Unknown</strong><small>Timeout means reconcile, never guess.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="delivery-step"><strong>Accepted</strong><small>Store turn or queue submission ID.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="delivery-step"><strong>Consumed</strong><small>Observe the resulting user turn.</small></div>
+  </div>
+
+  <h2>Routing rule</h2>
+  <div class="method-grid">
+    <section class="method"><h3>Idle</h3><p>Use <code>turn/start</code> with the stable client message ID.</p></section>
+    <section class="method"><h3>Active + queue</h3><p>Use experimental <code>thread/queue/add</code>; store its submission ID.</p></section>
+    <section class="method"><h3>Active, no queue</h3><p>Keep the outbox item pending until <code>turn/completed</code>, then start it.</p></section>
+  </div>
+
+  <h2>Reconciliation rule</h2>
+  <ol>
+    <li>Reconnect and initialize against the same server.</li>
+    <li>Resume the destination thread.</li>
+    <li>Search queued submissions and user-message history for the stable client message ID.</li>
+    <li>If found, mark accepted and do not resend.</li>
+    <li>If absent and the thread is routable, submit once and persist the acknowledgement.</li>
+  </ol>
+
+  <div class="callout"><strong>Do not overclaim.</strong> The protocol calls <code>clientUserMessageId</code> unique and returns it for correlation. The public reference does not document duplicate submission as an idempotent no-op, so Impala must reconcile before retrying.</div>
+
+  <h2>Minimum persisted outbox row</h2>
+  <ul>
+    <li><code>delivery_id</code> -- unique locally.</li>
+    <li><code>server_identity</code>, <code>thread_id</code>, <code>client_message_id</code>.</li>
+    <li><code>delegation_id</code>, completion status, and callback text.</li>
+    <li><code>state</code> -- pending, unknown, accepted, or consumed.</li>
+    <li>Optional accepted <code>turn_id</code> or queued-submission ID.</li>
+  </ul>
+
+  <p class="next"><a href="../lessons/0003-deliver-without-duplicates.html">Return to lesson 0003</a> · <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md">Primary protocol source</a></p>
+</main>
+</body>
+</html>

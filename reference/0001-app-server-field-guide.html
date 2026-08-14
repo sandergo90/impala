@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex app-server field guide</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Reference 0001</p>
+    <h1>Codex app-server field guide</h1>
+    <p class="lede">The smallest useful map for reviewing Impala’s structured Codex integration.</p>
+  </header>
+
+  <h2>Ownership</h2>
+  <div class="method-grid">
+    <section class="method"><h3>App server</h3><p>Owns threads, turns, items, tool execution, approvals, persistence, and event production.</p></section>
+    <section class="method"><h3>Client</h3><p>Sends JSON-RPC requests, subscribes to notifications, renders state, and answers approvals.</p></section>
+    <section class="method"><h3>Transport</h3><p>Carries protocol messages over stdio, WebSocket, or the managed Unix control socket.</p></section>
+  </div>
+
+  <h2>Lifecycle</h2>
+  <ol>
+    <li>Connect to the transport.</li>
+    <li>Send <code>initialize</code> first; then signal <code>initialized</code>.</li>
+    <li>Create or resume a thread.</li>
+    <li>Start, steer, or queue user input.</li>
+    <li>Consume <code>turn/started</code>, <code>item/*</code>, and <code>turn/completed</code>.</li>
+  </ol>
+
+  <h2>Input routing</h2>
+  <div class="method-grid">
+    <section class="method"><h3><code>turn/start</code></h3><p>The thread is idle. Create a new turn and trigger generation.</p></section>
+    <section class="method"><h3><code>turn/steer</code></h3><p>The thread is active. Amend that exact active turn using its expected turn ID.</p></section>
+    <section class="method"><h3><code>thread/queue/add</code></h3><p>The thread is active. Persist input for a later turn. Experimental API.</p></section>
+  </div>
+
+  <h2>Impala review checklist</h2>
+  <ul>
+    <li>Is the originating <code>threadId</code> captured when delegation starts?</li>
+    <li>Does every completion message have a stable client message ID for deduplication?</li>
+    <li>Does delivery distinguish idle from active threads?</li>
+    <li>Can daemon restart and socket loss be retried without duplicating a turn?</li>
+    <li>Does the PTY remain a rendering/input surface rather than the control protocol?</li>
+    <li>Are experimental queue semantics isolated behind a capability check?</li>
+  </ul>
+
+  <p class="next"><a href="../lessons/0001-who-owns-the-conversation.html">Return to lesson 0001</a> · <a href="../lessons/0002-one-daemon-two-clients.html">Continue to lesson 0002</a> · <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md">Primary protocol source</a></p>
+</main>
+</body>
+</html>

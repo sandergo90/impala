@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deliver without duplicates</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Lesson 0003 · 10 minutes</p>
+    <h1>Deliver without duplicates</h1>
+    <p class="lede">Your tangible win: route a worker-completion callback across active-turn races and ambiguous network failures without losing it or blindly sending it twice.</p>
+  </header>
+
+  <div class="callout">
+    <strong>Starting point.</strong> You already know that Impala needs both the correct app-server endpoint and the originating <code>threadId</code>. Now we make delivery reliable.
+  </div>
+
+  <h2>The dangerous failure is “unknown”</h2>
+  <p>Suppose Impala sends <code>turn/start</code>, then its socket closes before the response arrives. Two histories fit the evidence:</p>
+  <ul>
+    <li>The server never accepted the request; retrying is necessary.</li>
+    <li>The server accepted it; retrying may create a duplicate turn.</li>
+  </ul>
+
+  <p>A timeout is therefore not failure. It is <strong>unknown outcome</strong>. The correct next operation is reconciliation.</p>
+
+  <h2>Persist before sending</h2>
+  <p>When the worker reaches a terminal state, Impala first inserts one durable outbox record keyed by the delegation and worker completion. Repeated hooks find the existing record instead of creating another callback.</p>
+
+  <div class="delivery-flow" role="img" aria-label="Completion callback moves from durable pending through routing and possible unknown outcome to accepted and consumed">
+    <div class="delivery-step"><strong>Pending</strong><small>One durable completion record.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="delivery-step"><strong>Routing</strong><small>Resume and inspect source thread.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="delivery-step"><strong>Unknown</strong><small>Transport ended without proof.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="delivery-step"><strong>Accepted</strong><small>Turn or queue ID persisted.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="delivery-step"><strong>Consumed</strong><small>Callback user turn observed.</small></div>
+  </div>
+
+  <h2>Route by the source thread’s state</h2>
+  <div class="method-grid">
+    <section class="method"><h3>Idle thread</h3><p>Call <code>turn/start</code>. This callback is a new unit of work.</p></section>
+    <section class="method"><h3>Active thread</h3><p>Use <code>thread/queue/add</code> when the negotiated experimental capability is available.</p></section>
+    <section class="method"><h3>No queue capability</h3><p>Leave the outbox record pending and send after <code>turn/completed</code>.</p></section>
+  </div>
+
+  <p><code>turn/steer</code> is wrong for normal worker completion. Steering changes the meaning of work already running; completion should become a distinct later turn.</p>
+
+  <p>The <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md">current protocol</a> requires a unique <code>clientUserMessageId</code> for queued input and carries it into the queued submission. User-message items also expose the supplied client ID, making it useful for correlation after reconnect.</p>
+
+  <div class="callout">
+    <strong>Correlation is not automatically idempotency.</strong> The public protocol reference does not promise that submitting the same client message ID twice becomes one turn. Impala must search queue and thread state for that ID before retrying.
+  </div>
+
+  <h2>Reconcile after uncertainty</h2>
+  <ol>
+    <li>Reconnect and initialize against the same daemon.</li>
+    <li>Resume the originating thread.</li>
+    <li>List queued submissions and inspect returned user-message history for the client message ID.</li>
+    <li>If present, mark the outbox record accepted; do not resend.</li>
+    <li>If absent, route once according to current thread state and persist the returned turn or queue ID.</li>
+  </ol>
+
+  <p><code>thread/queue/add</code>, list, and delete are currently experimental and require <code>capabilities.experimentalApi</code>. A production Impala integration needs the pending-until-idle fallback rather than making queue support mandatory.</p>
+
+  <h2>Retrieval check</h2>
+
+  <form class="quiz" data-quiz data-correct="queue" data-success="Correct. Completion is distinct future work." data-retry="Try again. Do not mutate the current turn or start a competing one.">
+    <fieldset>
+      <legend>1. The source thread is active and queue capability is available.</legend>
+      <label><input type="radio" name="answer" value="queue"> Queue a later turn</label>
+      <label><input type="radio" name="answer" value="steer"> Steer the active turn</label>
+      <label><input type="radio" name="answer" value="parallel"> Start a parallel turn</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <form class="quiz" data-quiz data-correct="reconcile" data-success="Correct. A timeout leaves the outcome unknown." data-retry="Try again. Immediate retry risks duplication; dropping risks loss.">
+    <fieldset>
+      <legend>2. The socket closes after sending but before the response.</legend>
+      <label><input type="radio" name="answer" value="reconcile"> Reconcile before any retry</label>
+      <label><input type="radio" name="answer" value="retry"> Retry the request immediately</label>
+      <label><input type="radio" name="answer" value="drop"> Drop the callback permanently</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <form class="quiz" data-quiz data-correct="reuse" data-success="Correct. One completion maps to one outbox identity." data-retry="Try again. Repeated lifecycle evidence must converge on the existing record.">
+    <fieldset>
+      <legend>3. Impala receives the same worker-completion hook twice.</legend>
+      <label><input type="radio" name="answer" value="reuse"> Reuse one delivery identity</label>
+      <label><input type="radio" name="answer" value="create"> Create another client message</label>
+      <label><input type="radio" name="answer" value="restart"> Restart the source daemon</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <h2>The resulting Impala contract</h2>
+  <ol>
+    <li>Worker completion creates or finds one durable outbox record.</li>
+    <li>Delivery always targets the recorded server and thread identities.</li>
+    <li>Active threads queue or wait; they are not steered.</li>
+    <li>Network uncertainty triggers reconciliation.</li>
+    <li>Acknowledged turn or queue IDs close the retry window.</li>
+  </ol>
+
+  <div class="callout">
+    <strong>Review question.</strong> Why is a stable <code>clientUserMessageId</code> useful but insufficient justification for blindly retrying <code>turn/start</code> after a timeout?
+  </div>
+
+  <p class="next"><strong>Previous:</strong> <a href="0002-one-daemon-two-clients.html">one daemon, two clients</a>.<br><strong>Keep nearby:</strong> <a href="../reference/0003-completion-delivery-playbook.html">completion delivery playbook</a>.<br>Primary reading: <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md">Codex app-server protocol README</a>. Ask me about any unclear failure state; your answer to the review question will calibrate lesson 0004.</p>
+</main>
+</body>
+</html>

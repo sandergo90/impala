@@ -808,7 +808,7 @@ async fn prepare_agent_config(
     worktree_path: String,
     agent: String,
     resume_session_id: Option<String>,
-    pty_session_id: Option<String>,
+    use_codex_app_server: bool,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let path = std::path::PathBuf::from(&worktree_path);
     let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
@@ -827,8 +827,10 @@ async fn prepare_agent_config(
             agent_config::write_claude_config(&path)?;
             agent_config::write_codex_config(&path, &mcp_binary, agent == "codex")?;
             if agent == "codex" {
-                if let Some(pty_session_id) = pty_session_id.filter(|id| !id.is_empty()) {
-                    env.extend(codex_app_server::launch_environment(&pty_session_id)?);
+                if use_codex_app_server {
+                    let codex_home = agent_config::codex_home_path()
+                        .ok_or_else(|| "no Codex home".to_string())?;
+                    env.extend(codex_app_server::launch_environment(&codex_home)?);
                 }
                 if let Some(session_id) = resume_session_id.filter(|id| !id.is_empty()) {
                     let codex_home = agent_config::codex_home_path()
@@ -847,6 +849,47 @@ async fn prepare_agent_config(
     .map_err(|e| format!("task join: {}", e))??;
 
     Ok(env)
+}
+
+#[tauri::command]
+async fn get_codex_remote_snapshot() -> Result<codex_app_server::RemoteControlSnapshot, String> {
+    let codex_home = agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+    tokio::task::spawn_blocking(move || codex_app_server::remote_snapshot(&codex_home))
+        .await
+        .map_err(|error| format!("task join: {error}"))?
+}
+
+#[tauri::command]
+async fn start_codex_remote_pairing() -> Result<codex_app_server::RemoteControlPairing, String> {
+    let codex_home = agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+    tokio::task::spawn_blocking(move || codex_app_server::start_pairing(&codex_home))
+        .await
+        .map_err(|error| format!("task join: {error}"))?
+}
+
+#[tauri::command]
+async fn get_codex_remote_pairing_status(
+    pairing_code: String,
+) -> Result<codex_app_server::RemoteControlPairingStatus, String> {
+    let codex_home = agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+    tokio::task::spawn_blocking(move || {
+        codex_app_server::pairing_status(&codex_home, &pairing_code)
+    })
+    .await
+    .map_err(|error| format!("task join: {error}"))?
+}
+
+#[tauri::command]
+async fn revoke_codex_remote_client(
+    environment_id: String,
+    client_id: String,
+) -> Result<(), String> {
+    let codex_home = agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+    tokio::task::spawn_blocking(move || {
+        codex_app_server::revoke_client(&codex_home, &environment_id, &client_id)
+    })
+    .await
+    .map_err(|error| format!("task join: {error}"))?
 }
 
 fn setup_claude_integration_sync() -> Result<String, String> {
@@ -2174,6 +2217,10 @@ pub fn run() {
             check_viewed_files,
             clear_viewed_files,
             prepare_agent_config,
+            get_codex_remote_snapshot,
+            start_codex_remote_pairing,
+            get_codex_remote_pairing_status,
+            revoke_codex_remote_client,
             get_project_issue_tracker,
             list_my_issues,
             search_issues,

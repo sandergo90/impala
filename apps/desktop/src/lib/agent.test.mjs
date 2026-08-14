@@ -4,11 +4,11 @@ import {
   buildDirectLaunchCommand,
   buildInteractiveShellArgs,
   buildLaunchCommand,
+  usesImpalaCodexServer,
 } from "./agent.ts";
 
 const CODEX_ENV = {
   IMPALA_CODEX_APP_SERVER: "unix:///tmp/impala-codex.sock",
-  IMPALA_CODEX_APP_SERVER_LOG: "/tmp/impala-codex.log",
 };
 
 describe("global automation commands", () => {
@@ -19,7 +19,7 @@ describe("global automation commands", () => {
         CODEX_HOME: "/tmp/codex home",
       }),
     ).toBe(
-      "(codex app-server --listen 'unix:///tmp/impala-codex.sock' >>'/tmp/impala-codex.log' 2>&1 & IMPALA_CODEX_SERVER_PID=$!; trap 'kill \"$IMPALA_CODEX_SERVER_PID\" 2>/dev/null' EXIT HUP TERM; sleep 0.1; for _ in {1..100}; do [ -S '/tmp/impala-codex.sock' ] && break; sleep 0.05; done; IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' IMPALA_CODEX_APP_SERVER_LOG='/tmp/impala-codex.log' CODEX_HOME='/tmp/codex home' codex --remote 'unix:///tmp/impala-codex.sock' --yolo 'do today'\\''s work')\n",
+      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' CODEX_HOME='/tmp/codex home' codex --remote 'unix:///tmp/impala-codex.sock' --yolo 'do today'\\''s work'\n",
     );
     expect(buildLaunchCommand("claude", "", "daily brief")).toBe(
       "claude 'daily brief'\n",
@@ -34,14 +34,14 @@ describe("global automation commands", () => {
         serviceTier: "fast",
       }),
     ).toBe(
-      "(codex app-server --listen 'unix:///tmp/impala-codex.sock' >>'/tmp/impala-codex.log' 2>&1 & IMPALA_CODEX_SERVER_PID=$!; trap 'kill \"$IMPALA_CODEX_SERVER_PID\" 2>/dev/null' EXIT HUP TERM; sleep 0.1; for _ in {1..100}; do [ -S '/tmp/impala-codex.sock' ] && break; sleep 0.05; done; IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' IMPALA_CODEX_APP_SERVER_LOG='/tmp/impala-codex.log' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' '-c' 'service_tier=fast' '$implement the ticket')\n",
+      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' '-c' 'service_tier=fast' '$implement the ticket'\n",
     );
     expect(
       buildLaunchCommand("codex", "--yolo", "prompt", CODEX_ENV, {
         model: "model'; echo unsafe",
       }),
     ).toBe(
-      "(codex app-server --listen 'unix:///tmp/impala-codex.sock' >>'/tmp/impala-codex.log' 2>&1 & IMPALA_CODEX_SERVER_PID=$!; trap 'kill \"$IMPALA_CODEX_SERVER_PID\" 2>/dev/null' EXIT HUP TERM; sleep 0.1; for _ in {1..100}; do [ -S '/tmp/impala-codex.sock' ] && break; sleep 0.05; done; IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' IMPALA_CODEX_APP_SERVER_LOG='/tmp/impala-codex.log' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'model'\\''; echo unsafe' 'prompt')\n",
+      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'model'\\''; echo unsafe' 'prompt'\n",
     );
   });
 
@@ -61,13 +61,13 @@ describe("global automation commands", () => {
         { model: "gpt-5.6-luna", reasoningEffort: "max" },
       ),
     ).toBe(
-      "(codex app-server --listen 'unix:///tmp/impala-codex.sock' >>'/tmp/impala-codex.log' 2>&1 & IMPALA_CODEX_SERVER_PID=$!; trap 'kill \"$IMPALA_CODEX_SERVER_PID\" 2>/dev/null' EXIT HUP TERM; sleep 0.1; for _ in {1..100}; do [ -S '/tmp/impala-codex.sock' ] && break; sleep 0.05; done; IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' IMPALA_CODEX_APP_SERVER_LOG='/tmp/impala-codex.log' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' 'Read the ticket fully.\n\nImplement it.')",
+      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' 'Read the ticket fully.\n\nImplement it.'",
     );
   });
 
   test("builds direct resume commands without an echoed shell exit", () => {
     expect(buildAutomationResumeCommand("codex", "--yolo", "session-1", CODEX_ENV)).toBe(
-      "(codex app-server --listen 'unix:///tmp/impala-codex.sock' >>'/tmp/impala-codex.log' 2>&1 & IMPALA_CODEX_SERVER_PID=$!; trap 'kill \"$IMPALA_CODEX_SERVER_PID\" 2>/dev/null' EXIT HUP TERM; sleep 0.1; for _ in {1..100}; do [ -S '/tmp/impala-codex.sock' ] && break; sleep 0.05; done; IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' IMPALA_CODEX_APP_SERVER_LOG='/tmp/impala-codex.log' codex --remote 'unix:///tmp/impala-codex.sock' --yolo 'resume' 'session-1')",
+      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo 'resume' 'session-1'",
     );
     expect(buildAutomationResumeCommand("claude", "", "session-2")).toBe(
       "claude '--resume' 'session-2'",
@@ -83,8 +83,12 @@ describe("global automation commands", () => {
         CODEX_ENV,
       ),
     ).toBe(
-      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' IMPALA_CODEX_APP_SERVER_LOG='/tmp/impala-codex.log' IMPALA_CODEX_APP_SERVER='' codex --remote ws://127.0.0.1:4222 'prompt'\n",
+      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' IMPALA_CODEX_APP_SERVER='' codex --remote ws://127.0.0.1:4222 'prompt'\n",
     );
+    expect(usesImpalaCodexServer("codex", "--remote ws://127.0.0.1:4222")).toBe(false);
+    expect(usesImpalaCodexServer("codex", "--remote=ws://127.0.0.1:4222")).toBe(false);
+    expect(usesImpalaCodexServer("codex", "--yolo")).toBe(true);
+    expect(usesImpalaCodexServer("claude", "")).toBe(false);
   });
 
   test("loads interactive shell configuration for direct resume commands", () => {

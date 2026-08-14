@@ -61,6 +61,7 @@
     "dompurify": "^3.4.13",
     "fzf": "^0.5.2",
     "lucide-react": "1.31.0",
+    "qrcode.react": "^4.2.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",

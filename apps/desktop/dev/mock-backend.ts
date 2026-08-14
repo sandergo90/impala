@@ -28,6 +28,31 @@ const FIXED: Record<string, unknown> = {
   read_hotkey_overrides: {}, // store indexes this object by hotkey id
   get_agent_statuses: {},
   count_unseen_automation_runs: { total: 0, failed: 0 },
+  get_codex_remote_snapshot: {
+    status: "connected",
+    serverName: "Impala Developer Mac",
+    environmentId: "env_impala_demo",
+    clients: [
+      {
+        clientId: "client_iphone_demo",
+        displayName: "Demo iPhone",
+        deviceType: "phone",
+        platform: "iOS",
+        osVersion: "26.6",
+        deviceModel: "iPhone",
+        appVersion: "1.2026.209",
+        lastSeenAt: 1786722698,
+      },
+    ],
+  },
+  start_codex_remote_pairing: {
+    pairingCode: "impala-browser-demo",
+    manualPairingCode: "DEMO-CODE",
+    environmentId: "env_impala_demo",
+    expiresAt: 4102444800,
+  },
+  get_codex_remote_pairing_status: { claimed: false },
+  revoke_codex_remote_client: null,
   load_projects: [], // overwritten below when POPULATE
 };
 

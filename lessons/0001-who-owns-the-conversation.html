@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Who owns the conversation?</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Lesson 0001 · 8 minutes</p>
+    <h1>The app server owns the conversation</h1>
+    <p class="lede">Your tangible win: place the TUI, Impala, and app server on the correct side of the boundary, then route an agent-completion message safely.</p>
+  </header>
+
+  <div class="callout">
+    <strong>Core model.</strong> The TUI is a client, not the conversation. A thread can survive a client disconnect because the app server owns its state and execution.
+  </div>
+
+  <h2>One server, multiple clients</h2>
+  <p>Codex exposes a JSON-RPC protocol. A client connects, sends <code>initialize</code> as its first request, then creates or resumes threads and receives streaming notifications. The same semantics can travel over stdio, WebSocket, or the daemon’s Unix control socket.</p>
+
+  <div class="architecture" role="img" aria-label="Codex TUI and Impala both communicate with the app server, which controls model and tool execution">
+    <div class="node"><strong>Codex TUI</strong><small>Renders items, accepts keyboard input, shows approvals and process state.</small></div>
+    <div class="arrow" aria-hidden="true">↔</div>
+    <div class="node"><strong>Codex app server</strong><small>Owns thread history, active turns, tools, approvals, persistence, and notifications.</small></div>
+    <div class="arrow" aria-hidden="true">↔</div>
+    <div class="node"><strong>Impala</strong><small>Records thread identity, observes delegated work, and submits completion input.</small></div>
+  </div>
+  <p class="caption">The model provider and local tool processes sit behind the app server; clients do not coordinate them through terminal keystrokes.</p>
+
+  <p>This changes the Impala design. The PTY may still display and control the TUI, but PTY text injection should not wake a thread. Impala should connect as another protocol client and address the originating <code>threadId</code>.</p>
+
+  <h2>Thread, turn, item</h2>
+  <div class="method-grid">
+    <section class="method"><h3>Thread</h3><p>The durable conversation. It contains ordered turns and can be resumed by ID.</p></section>
+    <section class="method"><h3>Turn</h3><p>One user submission plus the generation and tool work it triggers.</p></section>
+    <section class="method"><h3>Item</h3><p>A typed unit inside a turn: messages, commands, file changes, plans, and more.</p></section>
+  </div>
+
+  <p>While a turn runs, the server emits <code>turn/started</code>, ordered <code>item/*</code> events, and finally <code>turn/completed</code>. The UI renders these events; it does not infer authoritative completion from whether a terminal looks quiet.</p>
+
+  <h2>Route completion input by thread state</h2>
+  <div class="method-grid">
+    <section class="method"><h3><code>turn/start</code></h3><p>Use when the thread is idle. It creates a new user turn and starts generation.</p></section>
+    <section class="method"><h3><code>turn/steer</code></h3><p>Use to amend the current active turn. It requires the expected active turn ID.</p></section>
+    <section class="method"><h3><code>thread/queue/add</code></h3><p>Use to preserve a later user turn while another runs. This API is experimental.</p></section>
+  </div>
+
+  <p>For Impala’s agent completion, the normal path is <code>turn/start</code> after the orchestrator is idle. If completion races with an active turn, queueing expresses “run this next” more accurately than steering, but Impala must capability-check and isolate that experimental API.</p>
+
+  <h2>Retrieval check</h2>
+  <p>Choose from the same three operations. Each answer has four words; formatting gives no hint.</p>
+
+  <form class="quiz" data-quiz data-correct="start" data-success="Correct. An idle thread needs a new turn." data-retry="Try again. The thread is idle, so there is nothing active to steer or wait behind.">
+    <fieldset>
+      <legend>1. The worker finished and the orchestrator thread is idle.</legend>
+      <label><input type="radio" name="answer" value="start"> Start a new turn</label>
+      <label><input type="radio" name="answer" value="queue"> Queue a later turn</label>
+      <label><input type="radio" name="answer" value="steer"> Steer the active turn</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <form class="quiz" data-quiz data-correct="queue" data-success="Correct. Queueing preserves a distinct next turn." data-retry="Try again. The completion is a separate future task, not a correction to current reasoning.">
+    <fieldset>
+      <legend>2. The worker finished while the orchestrator is still handling another user request.</legend>
+      <label><input type="radio" name="answer" value="start"> Start a new turn</label>
+      <label><input type="radio" name="answer" value="queue"> Queue a later turn</label>
+      <label><input type="radio" name="answer" value="steer"> Steer the active turn</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <form class="quiz" data-quiz data-correct="steer" data-success="Correct. This changes the exact active turn." data-retry="Try again. The user wants to modify work already in progress, not create a separate task.">
+    <fieldset>
+      <legend>3. The user says “focus on the failing test first” during the current turn.</legend>
+      <label><input type="radio" name="answer" value="start"> Start a new turn</label>
+      <label><input type="radio" name="answer" value="queue"> Queue a later turn</label>
+      <label><input type="radio" name="answer" value="steer"> Steer the active turn</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <h2>Apply it to Impala</h2>
+  <ol>
+    <li>Launch or connect the TUI to the managed app server.</li>
+    <li>Capture the orchestrator’s <code>threadId</code> when delegation begins.</li>
+    <li>Let Impala observe the worker’s authoritative lifecycle event.</li>
+    <li>Submit a deduplicated completion message to the originating thread.</li>
+    <li>Render the resulting turn through the already-connected TUI.</li>
+  </ol>
+
+  <div class="callout">
+    <strong>Review question.</strong> If an implementation knows only the pane ID and writes text into <code>pty-…</code>, which ownership boundary is it crossing incorrectly?
+  </div>
+
+  <p class="next"><strong>Keep nearby:</strong> <a href="../reference/0001-app-server-field-guide.html">app-server field guide</a>.<br><strong>Continue:</strong> <a href="0002-one-daemon-two-clients.html">one daemon, two clients</a>.<br>Primary reading: <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md">Codex app-server protocol README</a>. Ask me any follow-up question that remains unclear.</p>
+</main>
+</body>
+</html>

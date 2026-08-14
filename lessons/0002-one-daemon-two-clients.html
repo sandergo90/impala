@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>One daemon, two clients</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Lesson 0002 · 9 minutes</p>
+    <h1>One daemon, two clients</h1>
+    <p class="lede">Your tangible win: trace the TUI and Impala to one control socket, then recover without confusing a lost connection with a lost conversation.</p>
+  </header>
+
+  <div class="callout">
+    <strong>Starting point.</strong> You already know that the app server owns the thread and that Impala needs its <code>threadId</code>. This lesson locates that server and shows how both clients reach it.
+  </div>
+
+  <h2>The daemon is the shared owner</h2>
+  <p><code>codex app-server daemon start</code> starts the managed app server for the active <code>CODEX_HOME</code>. The command is idempotent and returns only after the server can answer an <code>initialize</code> handshake on its Unix control socket.</p>
+
+  <div class="architecture" role="img" aria-label="Codex TUI and Impala connect independently to one Unix control socket owned by the app-server daemon">
+    <div class="node"><strong>Codex TUI</strong><small>Launched with <code>--remote unix://</code>. Keeps terminal rendering and keyboard interaction.</small></div>
+    <div class="arrow" aria-hidden="true">↔</div>
+    <div class="node"><strong>Unix control socket</strong><small><code>$CODEX_HOME/app-server-control/app-server-control.sock</code><br>Private local rendezvous.</small></div>
+    <div class="arrow" aria-hidden="true">↔</div>
+    <div class="node"><strong>Impala client</strong><small>Initializes separately, resumes the stored thread, and submits completion input.</small></div>
+  </div>
+  <p class="caption">Both arrows terminate in the same daemon behind the socket. The clients do not connect to each other.</p>
+
+  <p>The word “remote” can be misleading here. <code>codex --remote unix://</code> means the TUI uses an app server outside its own process. That server can still be on the same Mac through a private Unix socket.</p>
+
+  <h2><code>CODEX_HOME</code> selects the server</h2>
+  <p>The default socket path is derived from <code>CODEX_HOME</code>, falling back to <code>~/.codex</code>. If Impala starts a daemon with one home but launches the TUI with another, both sides can look healthy while controlling different servers.</p>
+
+  <div class="method-grid">
+    <section class="method"><h3>Resolve once</h3><p>Impala determines the effective Codex home before daemon startup or TUI launch.</p></section>
+    <section class="method"><h3>Pass explicitly</h3><p>The TUI and control client use the same absolute socket address.</p></section>
+    <section class="method"><h3>Verify identity</h3><p>Thread resume must succeed on that server before Impala submits completion input.</p></section>
+  </div>
+
+  <h2>Connection state is not thread state</h2>
+  <p>A disconnected TUI is a missing view. A disconnected Impala client is a missing controller. Neither fact alone proves that the thread completed, failed, or disappeared.</p>
+
+  <p>After transport loss, a client reconnects, performs <code>initialize</code> again, and resumes the stored <code>threadId</code>. It then reconciles returned state before sending new input. A daemon restart is more serious than a client reconnect, so Impala must not assume that in-flight tool execution survived it.</p>
+
+  <div class="callout">
+    <strong>Two different daemons.</strong> Impala’s PTY daemon preserves terminal processes and scrollback. The Codex app-server daemon owns threads and turns. Keeping both may be correct; treating either one as the other is not.
+  </div>
+
+  <h2>Retrieval check</h2>
+
+  <form class="quiz" data-quiz data-correct="reuse" data-success="Correct. Start is safe to call during concurrent launch paths." data-retry="Try again. The command manages the app-server process, not threads or terminal input.">
+    <fieldset>
+      <legend>1. What should idempotent daemon start do?</legend>
+      <label><input type="radio" name="answer" value="reuse"> Reuse or start daemon</label>
+      <label><input type="radio" name="answer" value="restart"> Restart every active thread</label>
+      <label><input type="radio" name="answer" value="attach"> Attach to terminal input</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <form class="quiz" data-quiz data-correct="two" data-success="Correct. Different homes resolve different control sockets." data-retry="Try again. A healthy connection does not prove that both clients selected the same server.">
+    <fieldset>
+      <legend>2. Impala and the TUI use different <code>CODEX_HOME</code> values. What is the likely result?</legend>
+      <label><input type="radio" name="answer" value="two"> Two independent app servers</label>
+      <label><input type="radio" name="answer" value="one"> One shared remote thread</label>
+      <label><input type="radio" name="answer" value="render"> Only terminal rendering fails</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <form class="quiz" data-quiz data-correct="resume" data-success="Correct. Recover protocol state before issuing more work." data-retry="Try again. A transport loss should be repaired at the transport and protocol layers.">
+    <fieldset>
+      <legend>3. Impala loses its socket connection while the TUI remains open. What comes next?</legend>
+      <label><input type="radio" name="answer" value="resume"> Reconnect and resume thread</label>
+      <label><input type="radio" name="answer" value="type"> Type through terminal PTY</label>
+      <label><input type="radio" name="answer" value="tab"> Create another worktree tab</label>
+    </fieldset>
+    <button type="submit">Check</button>
+    <p class="feedback" aria-live="polite"></p>
+  </form>
+
+  <h2>Impala startup contract</h2>
+  <ol>
+    <li>Resolve one effective <code>CODEX_HOME</code> and absolute control-socket path.</li>
+    <li>Run idempotent daemon start and wait for readiness.</li>
+    <li>Launch the TUI against that socket while retaining its PTY.</li>
+    <li>Open and initialize Impala’s own connection only when it needs control access.</li>
+    <li>Persist thread identity separately from pane and transport identity.</li>
+  </ol>
+
+  <div class="callout">
+    <strong>Review question.</strong> Why is “the TUI still renders normally” insufficient evidence that Impala can deliver a completion callback to the correct app server?
+  </div>
+
+  <p class="next"><strong>Previous:</strong> <a href="0001-who-owns-the-conversation.html">the app server owns the conversation</a>.<br><strong>Continue:</strong> <a href="0003-deliver-without-duplicates.html">deliver without duplicates</a>.<br><strong>Keep nearby:</strong> <a href="../reference/0002-daemon-operations-card.html">daemon operations card</a>.<br>Primary reading: <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server-daemon/README.md">Codex app-server daemon README</a>. Ask me about any unclear step.</p>
+</main>
+</body>
+</html>

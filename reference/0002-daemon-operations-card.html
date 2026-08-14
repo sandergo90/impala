@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex app-server daemon operations card</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Reference 0002</p>
+    <h1>Daemon operations card</h1>
+    <p class="lede">Commands, invariants, and recovery rules for an Impala-managed local app server.</p>
+  </header>
+
+  <h2>Local topology</h2>
+  <ul>
+    <li>One Codex app-server daemon per <code>CODEX_HOME</code>.</li>
+    <li>Default socket: <code>$CODEX_HOME/app-server-control/app-server-control.sock</code>.</li>
+    <li>The socket directory is owner-only on Unix.</li>
+    <li>Each client connection performs its own <code>initialize</code> handshake.</li>
+  </ul>
+
+  <h2>Commands</h2>
+  <div class="method-grid">
+    <section class="method"><h3><code>daemon start</code></h3><p><code>codex app-server daemon start</code><br>Idempotent; returns when the socket is ready for initialization.</p></section>
+    <section class="method"><h3><code>--remote</code></h3><p><code>codex --remote unix://</code><br>Connects the TUI to the default socket for its <code>CODEX_HOME</code>.</p></section>
+    <section class="method"><h3>Explicit socket</h3><p><code>codex --remote unix://PATH</code><br>Removes ambiguity when Impala has already resolved the socket.</p></section>
+  </div>
+
+  <h2>Do not confuse</h2>
+  <ul>
+    <li><strong>Codex app-server daemon:</strong> owns Codex threads and turns.</li>
+    <li><strong>Impala PTY daemon:</strong> keeps terminal processes and buffers alive.</li>
+    <li><strong>Remote TUI:</strong> a TUI connected to another app-server process; the socket may still be local.</li>
+    <li><strong>Remote control:</strong> optional daemon exposure for remote clients; local Unix-socket use does not require treating it as the control plane.</li>
+  </ul>
+
+  <h2>Recovery sequence</h2>
+  <ol>
+    <li>Detect transport loss; do not translate it into thread completion.</li>
+    <li>Run idempotent daemon start if the managed daemon is unavailable.</li>
+    <li>Reconnect and repeat <code>initialize</code>.</li>
+    <li>Resume the stored <code>threadId</code>.</li>
+    <li>Reconcile the returned thread state before sending new input.</li>
+  </ol>
+
+  <div class="callout"><strong>Invariant.</strong> Impala, the TUI, and the callback client must resolve the same <code>CODEX_HOME</code> and socket. Otherwise they are controlling different app servers.</div>
+
+  <p class="next"><a href="../lessons/0002-one-daemon-two-clients.html">Return to lesson 0002</a> · <a href="../lessons/0003-deliver-without-duplicates.html">Continue to lesson 0003</a> · <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server-daemon/README.md">Primary daemon source</a></p>
+</main>
+</body>
+</html>

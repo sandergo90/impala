@@ -12,6 +12,7 @@ import {
   buildInteractiveShellArgs,
   buildLaunchCommand,
   resolveFlags,
+  usesImpalaCodexServer,
   type Agent,
 } from "./agent";
 import { useUIStore } from "../store";
@@ -49,6 +50,7 @@ export async function launchAgentHeadless(opts: {
   const { worktreePath, projectPath, agent, prompt } = opts;
   const ptyId = agentPtySessionId(worktreePath);
   const hookPort = await getHookPort();
+  const flags = await resolveFlags(agent, projectPath);
 
   let extraEnv: Record<string, string> = {};
   try {
@@ -56,7 +58,7 @@ export async function launchAgentHeadless(opts: {
       worktreePath,
       agent,
       resumeSessionId: null,
-      ptySessionId: ptyId,
+      useCodexAppServer: usesImpalaCodexServer(agent, flags),
     });
   } catch (err) {
     console.warn("Failed to prepare agent config:", err);
@@ -90,7 +92,6 @@ export async function launchAgentHeadless(opts: {
 
   const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
   if (isNew && !nav.agentLaunched) {
-    const flags = await resolveFlags(agent, projectPath);
     const cmd = buildLaunchCommand(agent, flags, prompt, extraEnv);
     await awaitShellReady(ptyId);
     await invoke("pty_write", { sessionId: ptyId, data: encodePtyInput(cmd) });
@@ -120,19 +121,19 @@ export async function launchAutomationResume(opts: {
   const { runId, worktreePath, agent, sessionId } = opts;
   const ptyId = automationRunResumePtySessionId(runId);
   const hookPort = await getHookPort();
+  const flags = await resolveFlags(agent, worktreePath);
 
   const extraEnv = await invoke<Record<string, string>>("prepare_agent_config", {
     worktreePath,
     agent,
     resumeSessionId: sessionId,
-    ptySessionId: ptyId,
+    useCodexAppServer: usesImpalaCodexServer(agent, flags),
   });
   const launch = await invoke<{
     shell_path: string;
     shell_args: string[];
     env: Record<string, string>;
   }>("prepare_shell_launch");
-  const flags = await resolveFlags(agent, worktreePath);
   const isNew = await invoke<boolean>("pty_spawn", {
     sessionId: ptyId,
     cwd: worktreePath,
