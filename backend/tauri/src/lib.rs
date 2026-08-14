@@ -1106,9 +1106,16 @@ fn clear_agent_pane_status(
     app: tauri::AppHandle,
     statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
     pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
+    delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
     worktree_path: String,
     pane_id: String,
 ) {
+    delegations.fail_nonterminal_pane(
+        &worktree_path,
+        &pane_id,
+        &pane_statuses,
+        "Agent tab closed before completion",
+    );
     let Some(aggregate_status) = pane_statuses.clear(&worktree_path, &pane_id) else {
         return;
     };
@@ -1121,8 +1128,14 @@ fn clear_agent_worktree_status(
     app: tauri::AppHandle,
     statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
     pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
+    delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
     worktree_path: String,
 ) {
+    delegations.fail_nonterminal_worktree(
+        &worktree_path,
+        &pane_statuses,
+        "Worktree closed before agent completion",
+    );
     if !pane_statuses.clear_worktree(&worktree_path) {
         return;
     }
@@ -1140,6 +1153,12 @@ fn interrupt_agent_turn(
     worktree_path: String,
     pane_id: String,
 ) -> Result<(), String> {
+    delegations.fail_nonterminal_pane(
+        &worktree_path,
+        &pane_id,
+        &pane_statuses,
+        "Agent turn interrupted",
+    );
     let Some(aggregate_status) = pane_statuses.interrupt(&worktree_path, &pane_id) else {
         return Ok(());
     };
