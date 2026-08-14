@@ -220,7 +220,104 @@ Three more things worth stealing:
 
 ---
 
-## 4. What ACP buys Impala, and what it costs
+## 4. The Claude adapter, read from source
+
+Read `agentclientprotocol/claude-agent-acp` at `main` (`src/acp-agent.ts`). It answers most
+of what §7 originally listed as open, and it answers it better than expected.
+
+### Auth: the subscription works, and Impala is unusually well placed to drive it
+
+`initialize` advertises (`src/acp-agent.ts:1690-1725`):
+
+```ts
+const claudeLoginMethod: AuthMethod = {
+  id: "claude-ai-login",
+  name: "Claude Subscription",
+  description: "Use Claude subscription ",
+  type: "terminal",
+  args: ["--cli", "auth", "login", "--claudeai"],
+};
+// plus:
+//   console-login          → Anthropic Console (API usage billing)
+//   gateway / gateway-bedrock → custom Anthropic/Bedrock gateway
+//   agentCapabilities.auth = { logout: {} }
+```
+
+Three details that matter:
+
+- **These are gated on the client.** They only appear if we advertise
+  `clientCapabilities.auth.terminal === true` (or `_meta["terminal-auth"] === true`). A
+  client that doesn't ask, doesn't get subscription login.
+- **`type: "terminal"` means the *client* runs the login, not the `authenticate` RPC.**
+  `authenticate()` only implements the gateway methods and throws
+  `"Method not implemented."` for everything else. With the `terminal-auth` capability the
+  adapter hands us the exact spawn spec — `_meta["terminal-auth"] = { command:
+  process.execPath, args: [...process.argv.slice(1), "--cli", "auth", "login",
+  "--claudeai"], label: "Claude Login" }`.
+- **This is the awkward part for most ACP clients and the easy part for us.** Editors
+  without a terminal have to shell out or embed one. Impala already owns
+  `impala-pty-daemon` and `XtermTerminal.tsx` — the login flow is "spawn that command in a
+  terminal pane we already have." Keeping the PTY path isn't just a fallback; it's what
+  makes the ACP path's auth pleasant.
+
+The adapter also detects remote environments (`SSH_CONNECTION`, `NO_BROWSER`,
+`CLAUDE_CODE_REMOTE`, …) where the OAuth localhost redirect fails, and swaps in a
+`claude-login` method that runs `claude /login` in a TUI instead. Relevant if Impala ever
+grows remote worktrees.
+
+### Capabilities it advertises
+
+```jsonc
+{
+  "loadSession": true,
+  "sessionCapabilities": { "additionalDirectories": {}, "close": {}, "delete": {},
+                           "fork": {}, "list": {}, "resume": {} },
+  "promptCapabilities": { "image": true, "embeddedContext": true },
+  "mcpCapabilities": { "http": true, "sse": true },
+  "auth": { "logout": {} },
+  "providers": {},                                  // providers/list|set|disable
+  "_meta": { "steering": { "supported": true },     // inject into a *running* turn
+             "claudeCode": { "promptQueueing": true } }
+}
+```
+
+`fork`, `list`, `resume`, `steering` and `providers` are all things the terminal path
+can't give us at all.
+
+### The originally-open questions, now answered
+
+- **Session persistence (was Q5).** `listSessions` delegates to the Agent SDK's
+  `listSessions({ dir })`, which reads Claude's on-disk session store and returns
+  `sessionId`, `cwd`, `title`, `updatedAt`. So session ids survive process and app
+  restarts and are enumerable per worktree. `automations.rs`'s resume-by-id model carries
+  over, and we get a "resume a previous thread here" picker essentially free.
+- **Hooks and MCP (was Q2).** `session/new` accepts `_meta.claudeCode.options`, where
+  `hooks`, `mcpServers` and `disallowedTools` are explicitly **merged** with ACP's rather
+  than replaced. Our `.claude/settings.local.json` hooks keep firing, so `hook_server.rs`
+  can stay untouched during a transition instead of being forked per session kind.
+  `cwd`, `permissionMode`, `canUseTool` and `executable` are taken over by ACP.
+- **Subagents (was Q3).** Not invisible: `parentToolUseId` attributes a subagent's tool
+  calls to the `Task` call that spawned them, carried in `_meta` on both the streamed and
+  permission paths. `TodoWrite` renders as a `plan` update and `Task*` is suppressed from
+  the stream but still resolved at tool-result time. So `subagents.rs`'s delegation model
+  has a real mapping — nested tool calls with parent attribution — rather than needing to
+  be rebuilt.
+- **Permission modes.** `default | acceptEdits | plan | bypassPermissions`, driven through
+  `session/set_mode`, with `bypassPermissions` refused when running as root. Permission
+  requests carry a `{ kind: "reject_once", name: "No, keep planning", optionId: "plan" }`
+  option — i.e. plan mode is a first-class approval outcome, not a flag.
+
+### The escape hatch
+
+`_meta.claudeCode.emitRawSDKMessages` (bool or a `SDKMessageFilter[]`) makes the adapter
+emit raw Agent SDK messages as `extNotification("_claude/sdkMessage", message)` alongside
+normal processing. This is the answer to "what if ACP's vocabulary is too narrow" — for
+Claude specifically we are **not** capped by the protocol, we can subscribe to the raw
+stream for anything Impala-specific and still render the standard 95% from typed events.
+
+---
+
+## 5. What ACP buys Impala, and what it costs
 
 ### Buys
 
@@ -260,13 +357,13 @@ Three more things worth stealing:
   0.67.0 and wraps the Agent SDK; new Claude Code features land in the CLI first. We would
   be one hop behind on both vendors, and t3code's git log shows they hit real ACP approval
   bugs.
-- **Auth.** `claude-agent-acp` uses the Claude Agent SDK, so it should pick up existing
-  `~/.claude` credentials — **needs verification, including subscription vs API-key auth**.
-  ACP has `authenticate` + auth method IDs (t3code passes `"cursor_login"`), but a browser
-  OAuth flow driven from a GUI is fiddlier than `claude /login` in a terminal.
 - **We give up the TUI.** Anything the CLI does that isn't in the protocol — vendor-specific
-  interactive prompts, `/resume` pickers, the status line, ctrl-key affordances — is gone in
-  ACP mode. This argues strongly for keeping the PTY path rather than replacing it.
+  interactive prompts, the status line, ctrl-key affordances — is gone in ACP mode. Less
+  severe than it first looked (`/resume` is covered by `session/list`, slash commands by
+  `available_commands_update`), but it still argues for keeping the PTY path rather than
+  replacing it — not least because terminal-type auth needs it (§4).
+- **Codex's auth story is unverified.** §4 covers Claude only. `codex-acp` depends on
+  `@openai/codex` and needs the same read before we assume ChatGPT-subscription auth works.
 - **v1→v2 churn is coming**, and v2 deletes `fs/*` and `terminal/*`. Don't build UI that
   assumes those exist forever.
 - **Subagents.** `subagents.rs` (1217 lines) and the delegation tracking in `hook_server.rs`
@@ -275,7 +372,7 @@ Three more things worth stealing:
 
 ---
 
-## 5. Proposed shape for Impala
+## 6. Proposed shape for Impala
 
 Mirror t3code's layering, but in Rust, and keep the terminal.
 
@@ -308,61 +405,78 @@ Four notes on why this shape:
    onto the existing `impala-pty-daemon` (`pty_spawn`, `pty_get_buffer` in `pty.rs`). A
    command the agent runs can render in a real terminal pane inside the session view — which
    is a nicer version of what we have now, not a regression.
-3. **Persistence.** Sessions must survive app restart. `session/load` replays history, so we
-   can rebuild a thread from the agent — but per t3code we need a replay gate so replayed
-   events don't re-fire notifications or re-open permission dialogs. Alternative: persist
-   `ImpalaSessionEvent`s to the existing SQLite DB (where annotations already live) and treat
-   the agent as the source of truth only for live turns. **This is the biggest open design
-   question** and probably deserves its own ADR.
+3. **Persistence.** Claude's adapter stores sessions on disk and exposes them via
+   `session/list` (§4), so the agent can be the source of truth: `session/load` replays
+   history, `session/resume` reconnects without replaying. Per t3code we still need a replay
+   gate so replayed events don't re-fire notifications or re-open permission dialogs.
+   Whether we *also* mirror `ImpalaSessionEvent`s into the existing SQLite DB (where
+   annotations already live) is now an optimisation — needed if we want thread search or
+   offline history, not needed for correctness. Still worth its own ADR, but no longer the
+   blocking unknown.
 4. **Agent choice stays per-worktree** (`selectedAgent`, `resolveAgent` in `lib/agent.ts`).
    Add a `sessionMode: "terminal" | "structured"` alongside it rather than overloading the
-   agent key.
+   agent key. The two modes are not exclusive per worktree — terminal-type auth (§4) means
+   an ACP session may need to *borrow* a terminal pane mid-flow.
 
 ### Phasing
 
 | Phase | Scope | Verify by |
 | --- | --- | --- |
-| 0 | Spike outside the app: Rust bin using `agent-client-protocol` + `npx @agentclientprotocol/claude-agent-acp`, dump `session/update` NDJSON for a real Impala worktree task | We can read a full turn's events, including a tool call with a diff, and know exactly what Claude's adapter does and does not emit |
+| 0 | Spike outside the app: Rust bin using `agent-client-protocol` + `npx @agentclientprotocol/claude-agent-acp`, advertising `clientCapabilities.auth.terminal`, dumping `session/update` NDJSON for a real Impala worktree task | A full turn's events captured — tool call with a diff, subagent `parentToolUseId` attribution, `stopReason` — and confirmation that an already-logged-in machine never needs `authenticate` |
 | 1 | `ImpalaSessionEvent` + `session/acp/client.rs` + `map.rs`; one read-only "ACP thread" pane behind a dev flag, next to the terminal | Prompt → streamed assistant text → tool calls with status → `stopReason`, rendered in-app |
-| 2 | Permissions + `session/set_mode` + cancel; `fs/*` handlers wired to Impala's file layer | Approve/deny from a dialog; Esc cancels a turn; agent reads reflect unsaved editor state |
+| 2 | Permissions + `session/set_mode` + cancel; `fs/*` handlers wired to Impala's file layer; terminal-type auth spawned into a pty pane | Approve/deny from a dialog; Esc cancels a turn; a logged-out machine can complete `claude-ai-login` without leaving Impala |
 | 3 | `terminal/*` → pty daemon; tool-call diffs into `DiffView`; `locations` → follow-along in `FilesPanel`; annotations anchored to tool calls | An `execute` tool renders live output in-pane; an `edit` tool shows its diff before it lands |
-| 4 | Persistence + `session/load` with a replay gate; MCP sidecar via `session/new` instead of config mutation | Restart the app mid-thread and get the thread back; delete the ACP branch's `agent_config.rs` writes |
+| 4 | `session/list` + `session/load` with a replay gate; MCP sidecar and hooks via `session/new` `_meta.claudeCode.options` instead of config mutation | Restart the app mid-thread and get the thread back; pick a prior thread for a worktree from a list; delete the ACP branch's `agent_config.rs` writes |
 | 5 | Registry-driven agent catalog; add Gemini/OpenCode/Cursor as data | A new provider is a registry entry, not code |
+| 6 | Opportunistic, once the above lands: `session/fork`, `steering` (inject into a running turn), `providers/*` model routing | Each is a small UI on top of an existing capability, none has a terminal equivalent |
 
 Nothing in phases 0–3 requires touching the PTY path. That's deliberate — the terminal keeps
 working the entire time, and if ACP disappoints us we stop at any phase.
 
 ---
 
-## 6. Open questions (need answers before phase 1)
+## 7. Open questions
 
-1. **Auth:** does `claude-agent-acp` reuse an existing Claude Code subscription login, or
-   does it demand `ANTHROPIC_API_KEY`? Same question for `codex-acp` and ChatGPT auth. If
-   either forces API-key billing, that changes the product, not just the plumbing.
-2. **Hooks:** does the Claude adapter still honour `.claude/settings.local.json` hooks (via
-   the Agent SDK's `settingSources`)? If yes, `hook_server.rs` can stay as-is during the
-   transition instead of being forked per session kind.
-3. **Subagents:** how does `claude-agent-acp` represent `Task`/subagent runs — nested tool
-   calls, or invisible? Determines whether `subagents.rs` survives.
-4. **Node dependency:** which distribution option (§4) do we accept? This gates phase 1's
-   spawn path and is the one call I'd want made before writing code.
-5. **Automations:** `automations.rs` resumes sessions by id (`buildAutomationResumeCommand`).
-   Do ACP `sessionId`s survive process restarts for both adapters, i.e. is `session/load`
-   usable across app launches, or only within one adapter process lifetime?
+Auth, hooks, subagents and session persistence were the original four; §4 closes all of
+them for Claude. What's left:
 
-## 7. Recommendation
+1. **Node dependency — the one real decision.** Which of the three distribution options in
+   §5 do we accept? This gates phase 1's spawn path and is the only question I'd want
+   settled before code is written.
+2. **Codex.** Everything in §4 is Claude-specific. `codex-acp` needs the same source read:
+   ChatGPT-subscription auth, whether Codex sessions are listable/resumable, and what its
+   `_meta` surface looks like. Assume nothing carries over.
+3. **Automations.** `automations.rs` resumes by id and expects a *non-interactive* run to
+   completion. ACP's `session/prompt` fits that well, but the scheduled path also needs to
+   decide what happens when a turn stops on `session/request_permission` with no user
+   present — auto-deny, `bypassPermissions` mode, or fail the run.
+4. **Where annotations attach.** Tool calls give us a much finer anchor than "this
+   worktree" — but `toolCallId` is session-scoped and its stability across `session/load`
+   replay is unverified. Affects the schema, so worth checking during phase 0.
 
-Do phase 0 this week — it's a day of work, needs no Impala changes, and answers questions
-1–3 and 5 empirically rather than from docs. Everything after that is a real product bet:
-ACP-mode sessions are a genuinely better Impala (structured diffs, real approvals,
-annotations anchored to tool calls, a dozen new providers), but they are an *addition* to
-the terminal, and the honest cost is a Node runtime dependency plus a permanent translation
-layer we don't control.
+## 8. Recommendation
+
+Stronger than when I started. The subscription-auth finding removes the one risk that could
+have made this a non-starter, and reading the adapter turned up several things with **no
+terminal equivalent at all**: `session/fork`, `session/list`, steering a running turn,
+`providers/*` model routing, and subagent tool calls with parent attribution.
+
+Do phase 0 anyway — a day, no Impala changes — but its purpose has shifted from "is this
+viable" to "capture the real event shapes before designing `ImpalaSessionEvent`." Get the
+Node-distribution call made in parallel, since that's now the gate.
+
+The honest remaining cost is unchanged and worth restating: a Node runtime dependency, a
+translation layer we don't control that lags the CLIs, and a v1→v2 protocol migration on
+the horizon. But ACP-mode sessions are an *addition* to the terminal, not a replacement —
+and terminal-type auth means the PTY earns its keep even in the ACP world.
 
 ## Sources
 
 - ACP docs: <https://agentclientprotocol.com> — v1 spec, [v2 migration](https://agentclientprotocol.com/protocol/v2/migration), [registry](https://agentclientprotocol.com/get-started/registry)
 - Rust SDK: <https://github.com/agentclientprotocol/rust-sdk> (crate `agent-client-protocol` 2.0.0)
-- Adapters: <https://github.com/agentclientprotocol/claude-agent-acp>, <https://github.com/agentclientprotocol/codex-acp>
+- Adapters: <https://github.com/agentclientprotocol/claude-agent-acp> (§4 is read from
+  `src/acp-agent.ts` at `main` — auth methods ~1629-1790, capabilities ~1745-1795,
+  `listSessions`/`loadSession`/`resumeSession` ~1828-1870, `NewSessionMeta` ~788-815,
+  subagent attribution ~5310-5330), <https://github.com/agentclientprotocol/codex-acp>
 - T3 Code: <https://github.com/pingdotgg/t3code> — `apps/server/src/provider/`, `packages/effect-acp/`, `packages/contracts/src/providerRuntime.ts`, `docs/internals/providers.md`
 - Zed's ACP page and agent list: <https://zed.dev/acp>
