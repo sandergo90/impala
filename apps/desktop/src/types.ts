@@ -30,6 +30,7 @@ export interface AgentRunChanges {
   summary: AgentRunChangeSummary;
   changed_files: ChangedFile[];
   diff: string;
+  content_ref: string;
 }
 
 export interface CommitInfo {
@@ -193,7 +194,7 @@ export interface WorktreeNavState {
   viewMode: "commit" | "all-changes" | "uncommitted" | "last-turn" | "agent-run";
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
-  selectedAgentRun: { paneId: string; label: string } | null;
+  selectedAgentRun: { paneId: string; label: string; contentRef?: string } | null;
   /**
    * ID of the currently active tab inside the terminals pane.
    * `"tab-agent"` and `"tab-run"` refer to the system tabs. Any other

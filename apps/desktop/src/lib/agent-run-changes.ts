@@ -46,7 +46,7 @@ export async function openAgentRunChanges(
     viewMode: "agent-run",
     selectedCommit: null,
     selectedFile: null,
-    selectedAgentRun: { paneId, label },
+    selectedAgentRun: { paneId, label, contentRef: changes.content_ref },
   });
   useDataStore.getState().updateWorktreeDataState(worktreePath, {
     changedFiles: files,

@@ -63,6 +63,7 @@ pub struct AgentRunChanges {
     pub summary: AgentRunChangeSummary,
     pub changed_files: Vec<crate::git::ChangedFile>,
     pub diff: String,
+    pub content_ref: String,
 }
 
 struct AgentRunChangeRefs {
@@ -444,6 +445,7 @@ impl AgentDelegations {
             &change_refs.start_tree,
             &change_refs.end_tree,
         )?;
+        let content_ref = change_refs.end_tree.clone();
         Ok(Some(AgentRunChanges {
             summary: AgentRunChangeSummary {
                 worktree_path: change_refs.worktree_path,
@@ -456,6 +458,7 @@ impl AgentDelegations {
             },
             changed_files,
             diff,
+            content_ref,
         }))
     }
 
@@ -2238,6 +2241,10 @@ mod tests {
             .changes(worktree_path, "pane-1")
             .unwrap()
             .unwrap();
+        let frozen_blob =
+            crate::git::blob_sha_at_ref(worktree_path, &frozen.content_ref, "file.txt").unwrap();
+        let current_blob = crate::git::hash_worktree_file(worktree_path, "file.txt").unwrap();
+        assert_ne!(frozen_blob, current_blob);
         assert!(frozen.diff.contains("+first"));
         assert!(!frozen.diff.contains("+unrelated later edit"));
         assert_eq!(frozen.changed_files.len(), frozen.summary.files as usize);

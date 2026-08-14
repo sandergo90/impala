@@ -1,31 +1,31 @@
 import { invoke } from "@/lib/invoke";
 
-export type ViewKind = "uncommitted" | "all-changes" | "commit" | "last-turn";
+export type ViewKind = "uncommitted" | "all-changes" | "commit" | "last-turn" | "agent-run";
 
 export const viewedFilesProvider = {
   async check(
     worktreePath: string,
     viewKind: ViewKind,
-    commitHash: string | null,
+    contentRef: string | null,
     filePaths: string[],
   ): Promise<string[]> {
     return invoke<string[]>("check_viewed_files", {
       worktreePath,
       viewKind,
-      commitHash,
+      commitHash: contentRef,
       filePaths,
     });
   },
   async set(
     worktreePath: string,
     viewKind: ViewKind,
-    commitHash: string | null,
+    contentRef: string | null,
     filePath: string,
   ): Promise<void> {
     await invoke("set_file_viewed", {
       worktreePath,
       viewKind,
-      commitHash,
+      commitHash: contentRef,
       filePath,
     });
   },
@@ -35,13 +35,13 @@ export const viewedFilesProvider = {
   async setMany(
     worktreePath: string,
     viewKind: ViewKind,
-    commitHash: string | null,
+    contentRef: string | null,
     filePaths: string[],
   ): Promise<void> {
     await invoke("set_files_viewed", {
       worktreePath,
       viewKind,
-      commitHash,
+      commitHash: contentRef,
       filePaths,
     });
   },

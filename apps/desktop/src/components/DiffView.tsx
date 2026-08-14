@@ -7,7 +7,7 @@ import { PatchDiff, CodeView } from "@pierre/diffs/react";
 import type { CodeViewHandle, CodeViewItem } from "@pierre/diffs/react";
 import { processFile } from "@pierre/diffs";
 import { sqliteProvider } from "../providers/sqlite-provider";
-import { viewedFilesProvider } from "../providers/viewed-files-provider";
+import { viewedFilesProvider, type ViewKind } from "../providers/viewed-files-provider";
 import { InlineAnnotationForm } from "./InlineAnnotationForm";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
 import { openFileInEditor } from "../lib/open-file-in-editor";
@@ -215,14 +215,17 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
       toast.error(`Failed to discard ${filePath}: ${e}`);
     }
   }, [fileToDiscard, worktreePath]);
-  const viewKindForViewed: "uncommitted" | "all-changes" | "commit" | "last-turn" | null =
+  const viewKindForViewed: ViewKind | null =
     viewMode === "commit" && selectedCommit ? "commit"
     : viewMode === "all-changes" ? "all-changes"
     : viewMode === "uncommitted" ? "uncommitted"
     : viewMode === "last-turn" ? "last-turn"
+    : viewMode === "agent-run" && selectedAgentRun?.contentRef ? "agent-run"
     : null;
-  const commitHashForViewed =
-    viewKindForViewed === "commit" && selectedCommit ? selectedCommit.hash : null;
+  const contentRefForViewed =
+    viewKindForViewed === "commit" ? selectedCommit?.hash ?? null
+    : viewKindForViewed === "agent-run" ? selectedAgentRun?.contentRef ?? null
+    : null;
 
   // Viewed state is keyed by content sha: the backend computes the right-side
   // blob sha for each changed file and checks it against the DB. Re-check on
@@ -236,7 +239,7 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
     const paths = changedFiles.map((f) => f.path);
     let cancelled = false;
     viewedFilesProvider
-      .check(worktreePath, viewKindForViewed, commitHashForViewed, paths)
+      .check(worktreePath, viewKindForViewed, contentRefForViewed, paths)
       .then((viewed) => {
         if (!cancelled) setViewedFiles(new Set(viewed));
       })
@@ -246,7 +249,7 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
     return () => {
       cancelled = true;
     };
-  }, [worktreePath, viewKindForViewed, commitHashForViewed, changedFiles]);
+  }, [worktreePath, viewKindForViewed, contentRefForViewed, changedFiles]);
 
   const toggleViewed = useCallback((path: string) => {
     if (!worktreePath || !viewKindForViewed) return;
@@ -259,11 +262,11 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
         next.delete(path);
         return next;
       } else {
-        viewedFilesProvider.set(worktreePath, viewKindForViewed, commitHashForViewed, path);
+        viewedFilesProvider.set(worktreePath, viewKindForViewed, contentRefForViewed, path);
         return new Set(prev).add(path);
       }
     });
-  }, [worktreePath, viewKindForViewed, commitHashForViewed]);
+  }, [worktreePath, viewKindForViewed, contentRefForViewed]);
 
   const toggleAllViewed = useCallback(() => {
     if (!worktreePath || !viewKindForViewed || changedFiles.length === 0) return;
@@ -277,12 +280,12 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
     } else {
       setViewedFiles(new Set(paths));
       viewedFilesProvider
-        .setMany(worktreePath, viewKindForViewed, commitHashForViewed, paths)
+        .setMany(worktreePath, viewKindForViewed, contentRefForViewed, paths)
         .catch(() => {
           toast.error("Failed to mark all files as viewed");
         });
     }
-  }, [worktreePath, viewKindForViewed, commitHashForViewed, changedFiles, viewedFiles]);
+  }, [worktreePath, viewKindForViewed, contentRefForViewed, changedFiles, viewedFiles]);
 
   // Load all annotations for this worktree
   useEffect(() => {

@@ -52,6 +52,7 @@ pub enum ViewKind<'a> {
     AllChanges,
     Commit(&'a str),
     LastTurn,
+    AgentRun(&'a str),
 }
 
 impl<'a> ViewKind<'a> {
@@ -60,6 +61,9 @@ impl<'a> ViewKind<'a> {
             "uncommitted" => Ok(ViewKind::Uncommitted),
             "all-changes" => Ok(ViewKind::AllChanges),
             "last-turn" => Ok(ViewKind::LastTurn),
+            "agent-run" => commit_hash
+                .map(ViewKind::AgentRun)
+                .ok_or_else(|| "agent-run view requires commit_hash".to_string()),
             "commit" => commit_hash
                 .map(ViewKind::Commit)
                 .ok_or_else(|| "commit view requires commit_hash".to_string()),
@@ -79,8 +83,10 @@ fn content_sha_for_file(worktree_path: &str, view: ViewKind, file_path: &str) ->
         }
         ViewKind::AllChanges => git::blob_sha_at_ref(worktree_path, "HEAD", file_path)
             .unwrap_or_else(|_| DELETED_SENTINEL.to_string()),
-        ViewKind::Commit(sha) => git::blob_sha_at_ref(worktree_path, sha, file_path)
-            .unwrap_or_else(|_| DELETED_SENTINEL.to_string()),
+        ViewKind::Commit(sha) | ViewKind::AgentRun(sha) => {
+            git::blob_sha_at_ref(worktree_path, sha, file_path)
+                .unwrap_or_else(|_| DELETED_SENTINEL.to_string())
+        }
     }
 }
 
@@ -99,7 +105,9 @@ fn content_shas_for_files(
             })
             .collect(),
         ViewKind::AllChanges => batch_blob_shas(worktree_path, "HEAD", file_paths),
-        ViewKind::Commit(sha) => batch_blob_shas(worktree_path, sha, file_paths),
+        ViewKind::Commit(sha) | ViewKind::AgentRun(sha) => {
+            batch_blob_shas(worktree_path, sha, file_paths)
+        }
     }
 }
 

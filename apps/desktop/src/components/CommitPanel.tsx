@@ -234,9 +234,15 @@ export function CommitPanel({
   const loadDiffPayload = useCallback(async (
     mode: WorktreeNavState["viewMode"],
     commit?: CommitInfo,
-  ): Promise<{ files: ChangedFile[]; fullDiff: string; generatedFiles: string[] }> => {
+  ): Promise<{
+    files: ChangedFile[];
+    fullDiff: string;
+    generatedFiles: string[];
+    agentRunContentRef?: string;
+  }> => {
     let files: ChangedFile[];
     let fullDiff: string;
+    let agentRunContentRef: string | undefined;
 
     if (mode === "uncommitted") {
       [files, fullDiff] = await Promise.all([
@@ -260,6 +266,7 @@ export function CommitPanel({
       if (!changes) throw new Error("Changes for this agent run are unavailable");
       files = changes.changed_files;
       fullDiff = changes.diff;
+      agentRunContentRef = changes.content_ref;
     } else if (mode === "all-changes") {
       [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
@@ -274,12 +281,17 @@ export function CommitPanel({
     }
 
     const generatedFiles = await loadGeneratedFiles(files);
-    return { files, fullDiff, generatedFiles };
+    return { files, fullDiff, generatedFiles, agentRunContentRef };
   }, [loadGeneratedFiles, worktreePath]);
 
   const applyDiffPayload = useCallback((
     mode: WorktreeNavState["viewMode"],
-    payload: { files: ChangedFile[]; fullDiff: string; generatedFiles: string[] },
+    payload: {
+      files: ChangedFile[];
+      fullDiff: string;
+      generatedFiles: string[];
+      agentRunContentRef?: string;
+    },
     force = false,
   ) => {
     const fileDiffs = splitDiffByFile(payload.fullDiff);
@@ -305,7 +317,20 @@ export function CommitPanel({
     if (Object.keys(updates).length > 0) {
       updateData(updates);
     }
-  }, [updateData, worktreePath]);
+    if (mode === "agent-run" && payload.agentRunContentRef) {
+      const agentRun = useUIStore
+        .getState()
+        .getWorktreeNavState(worktreePath).selectedAgentRun;
+      if (agentRun && agentRun.contentRef !== payload.agentRunContentRef) {
+        updateNav({
+          selectedAgentRun: {
+            ...agentRun,
+            contentRef: payload.agentRunContentRef,
+          },
+        });
+      }
+    }
+  }, [updateData, updateNav, worktreePath]);
 
   const selectAllChanges = async () => {
     const requestId = ++selectionRequestRef.current;
