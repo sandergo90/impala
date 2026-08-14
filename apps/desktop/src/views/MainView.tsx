@@ -81,6 +81,7 @@ export function MainView() {
   );
 
   const activeTab = navState?.activeTab ?? "diff";
+  const changesButtonActive = !showSidebar && (activeTab === "diff" || changesPopoverOpen);
 
   const hasUnreadRunFailure = useUIStore((s) =>
     wtPath ? s.worktreeNavStates[wtPath]?.hasUnreadRunFailure ?? false : false,
@@ -356,14 +357,14 @@ export function MainView() {
                   type="button"
                   onClick={toggleChanges}
                   className={`relative z-30 flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold outline-none transition-colors ${
-                    activeTab === "diff" || changesPopoverOpen || (showSidebar && rightSidebarTab === "changes")
+                    changesButtonActive
                       ? "bg-accent text-foreground"
                       : "text-foreground/70 hover:bg-accent/60 hover:text-foreground"
                   }`}
                   aria-haspopup="dialog"
                   aria-expanded={changesPopoverOpen}
                   aria-controls={changesPopoverOpen ? "changes-popover" : undefined}
-                  aria-pressed={activeTab === "diff" || changesPopoverOpen || (showSidebar && rightSidebarTab === "changes")}
+                  aria-pressed={changesButtonActive}
                 >
                   <FileDiff aria-hidden="true" className="size-4" />
                   Changes
