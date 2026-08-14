@@ -7,6 +7,7 @@ describe("changed-file navigation", () => {
     expect(shouldOpenChangesNavigator("terminal", "all-changes")).toBe(false);
     expect(shouldOpenChangesNavigator("terminal", "commit")).toBe(true);
     expect(shouldOpenChangesNavigator("terminal", "last-turn")).toBe(true);
+    expect(shouldOpenChangesNavigator("terminal", "agent-run")).toBe(true);
     expect(shouldOpenChangesNavigator("diff", "uncommitted")).toBe(true);
   });
 });

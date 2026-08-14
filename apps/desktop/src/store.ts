@@ -28,6 +28,7 @@ function createDefaultNavState(): WorktreeNavState {
     viewMode: "commit",
     selectedCommit: null,
     selectedFile: null,
+    selectedAgentRun: null,
     activeTerminalsTab: "tab-agent",
     setupRanAt: null,
     runStatus: "idle",

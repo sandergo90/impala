@@ -23,6 +23,10 @@ struct AgentDelegation {
     started: bool,
     error: Option<String>,
     created_at: i64,
+    #[serde(default)]
+    start_tree: Option<String>,
+    #[serde(default)]
+    end_tree: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -33,6 +37,33 @@ pub struct AgentDelegationStatus {
     pub pane_id: Option<String>,
     pub status: String,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct AgentRunChangeSummary {
+    pub worktree_path: String,
+    pub pane_id: String,
+    pub name: Option<String>,
+    pub files: u32,
+    pub additions: u32,
+    pub deletions: u32,
+    pub finished: bool,
+}
+
+#[derive(Serialize)]
+pub struct AgentRunChanges {
+    pub summary: AgentRunChangeSummary,
+    pub changed_files: Vec<crate::git::ChangedFile>,
+    pub diff: String,
+}
+
+struct AgentRunChangeRefs {
+    worktree_path: String,
+    pane_id: String,
+    name: Option<String>,
+    start_tree: String,
+    end_tree: String,
+    finished: bool,
 }
 
 pub struct AgentDelegations {
@@ -230,6 +261,16 @@ impl AgentDelegations {
     }
 
     pub fn open(&self, delegation_id: &str, worktree_path: &str, name: Option<&str>) {
+        let start_tree = match crate::git::snapshot_worktree(worktree_path) {
+            Ok(tree) => Some(tree),
+            Err(error) => {
+                eprintln!(
+                    "[impala] delegated agent change snapshot failed for {}: {}",
+                    worktree_path, error
+                );
+                None
+            }
+        };
         let Ok(mut entries) = self.entries.lock() else {
             return;
         };
@@ -254,6 +295,8 @@ impl AgentDelegations {
                 started: false,
                 error: None,
                 created_at: chrono::Utc::now().timestamp(),
+                start_tree,
+                end_tree: None,
             },
         );
         self.persist(&entries);
@@ -294,8 +337,146 @@ impl AgentDelegations {
         };
         if !entry.started {
             entry.started = true;
+            entry.end_tree = None;
             self.persist(&entries);
         }
+    }
+
+    fn change_refs(
+        &self,
+        worktree_path: &str,
+        pane_id: &str,
+    ) -> Result<Option<AgentRunChangeRefs>, String> {
+        let (name, start_tree, frozen_end) = {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| "delegation registry is unavailable".to_string())?;
+            let Some(entry) = entries.values().find(|entry| {
+                entry.worktree_path == worktree_path && entry.pane_id.as_deref() == Some(pane_id)
+            }) else {
+                return Ok(None);
+            };
+            let Some(start_tree) = entry.start_tree.clone() else {
+                return Ok(None);
+            };
+            (entry.name.clone(), start_tree, entry.end_tree.clone())
+        };
+        let finished = frozen_end.is_some();
+        let end_tree = match frozen_end {
+            Some(tree) => tree,
+            None => crate::git::snapshot_worktree(worktree_path)?,
+        };
+        Ok(Some(AgentRunChangeRefs {
+            worktree_path: worktree_path.to_owned(),
+            pane_id: pane_id.to_owned(),
+            name,
+            start_tree,
+            end_tree,
+            finished,
+        }))
+    }
+
+    pub fn change_summary(
+        &self,
+        worktree_path: &str,
+        pane_id: &str,
+    ) -> Result<Option<AgentRunChangeSummary>, String> {
+        let Some(change_refs) = self.change_refs(worktree_path, pane_id)? else {
+            return Ok(None);
+        };
+        let stat = crate::git::get_tree_diff_stat(
+            &change_refs.worktree_path,
+            &change_refs.start_tree,
+            &change_refs.end_tree,
+        )?;
+        Ok(Some(AgentRunChangeSummary {
+            worktree_path: change_refs.worktree_path,
+            pane_id: change_refs.pane_id,
+            name: change_refs.name,
+            files: stat.files,
+            additions: stat.additions,
+            deletions: stat.deletions,
+            finished: change_refs.finished,
+        }))
+    }
+
+    pub fn changes(
+        &self,
+        worktree_path: &str,
+        pane_id: &str,
+    ) -> Result<Option<AgentRunChanges>, String> {
+        let Some(change_refs) = self.change_refs(worktree_path, pane_id)? else {
+            return Ok(None);
+        };
+        let stat = crate::git::get_tree_diff_stat(
+            &change_refs.worktree_path,
+            &change_refs.start_tree,
+            &change_refs.end_tree,
+        )?;
+        let changed_files = crate::git::get_tree_changed_files(
+            &change_refs.worktree_path,
+            &change_refs.start_tree,
+            &change_refs.end_tree,
+        )?;
+        let diff = crate::git::get_tree_diff(
+            &change_refs.worktree_path,
+            &change_refs.start_tree,
+            &change_refs.end_tree,
+        )?;
+        Ok(Some(AgentRunChanges {
+            summary: AgentRunChangeSummary {
+                worktree_path: change_refs.worktree_path,
+                pane_id: change_refs.pane_id,
+                name: change_refs.name,
+                files: stat.files,
+                additions: stat.additions,
+                deletions: stat.deletions,
+                finished: change_refs.finished,
+            },
+            changed_files,
+            diff,
+        }))
+    }
+
+    pub fn finish(
+        &self,
+        worktree_path: &str,
+        pane_id: &str,
+    ) -> Result<Option<AgentRunChangeSummary>, String> {
+        {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| "delegation registry is unavailable".to_string())?;
+            let Some(entry) = entries.values().find(|entry| {
+                entry.worktree_path == worktree_path && entry.pane_id.as_deref() == Some(pane_id)
+            }) else {
+                return Ok(None);
+            };
+            if !entry.started || entry.end_tree.is_some() || entry.start_tree.is_none() {
+                return Ok(None);
+            }
+        }
+
+        let end_tree = crate::git::snapshot_worktree(worktree_path)?;
+        {
+            let mut entries = self
+                .entries
+                .lock()
+                .map_err(|_| "delegation registry is unavailable".to_string())?;
+            let Some(entry) = entries.values_mut().find(|entry| {
+                entry.worktree_path == worktree_path && entry.pane_id.as_deref() == Some(pane_id)
+            }) else {
+                return Ok(None);
+            };
+            if entry.end_tree.is_some() {
+                return Ok(None);
+            }
+            entry.end_tree = Some(end_tree);
+            self.persist(&entries);
+        }
+        self.change_summary(worktree_path, pane_id)
     }
 
     fn status_for(entry: &AgentDelegation, pane_statuses: &AgentPaneStatuses) -> &'static str {
@@ -1513,6 +1694,18 @@ pub fn start(
 
             if !status.is_empty() && !worktree_path.is_empty() {
                 let aggregate_status = pane_statuses.observe(&worktree_path, &pane_id, status);
+                if status == "idle" {
+                    match delegations.finish(&worktree_path, &pane_id) {
+                        Ok(Some(summary)) if summary.files > 0 => {
+                            let _ = app_handle.emit("agent-run-changes-completed", summary);
+                        }
+                        Ok(_) => {}
+                        Err(error) => eprintln!(
+                            "[impala] delegated agent completion snapshot failed for {}: {}",
+                            worktree_path, error
+                        ),
+                    }
+                }
                 publish_agent_pane_event(&app_handle, &worktree_path, &pane_id, status);
                 publish_agent_status(&app_handle, &statuses, &worktree_path, &aggregate_status);
             }
@@ -1764,6 +1957,63 @@ mod tests {
 
         assert_eq!(claims.iter().filter(|claim| claim.is_ok()).count(), 1);
         assert_eq!(claims.iter().filter(|claim| claim.is_err()).count(), 1);
+    }
+
+    #[test]
+    fn delegated_agent_changes_freeze_at_idle_and_extend_across_follow_ups() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        fs::write(repo.join("file.txt"), "before\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "initial"]);
+
+        let worktree_path = repo.to_str().unwrap();
+        let delegations = AgentDelegations::default();
+        let panes = AgentPaneStatuses::default();
+        delegations.open("delegation-1", worktree_path, Some("Luna implementation"));
+        assert!(delegations.register("delegation-1", "pane-1"));
+        delegations.observe_hook(worktree_path, "pane-1");
+        panes.observe(worktree_path, "pane-1", "working");
+        fs::write(repo.join("file.txt"), "first\n").unwrap();
+
+        let first = delegations
+            .finish(worktree_path, "pane-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.files, 1);
+        assert_eq!(first.name.as_deref(), Some("Luna implementation"));
+        assert!(first.finished);
+
+        fs::write(repo.join("file.txt"), "unrelated later edit\n").unwrap();
+        let frozen = delegations
+            .changes(worktree_path, "pane-1")
+            .unwrap()
+            .unwrap();
+        assert!(frozen.diff.contains("+first"));
+        assert!(!frozen.diff.contains("+unrelated later edit"));
+        assert_eq!(frozen.changed_files.len(), frozen.summary.files as usize);
+
+        panes.observe(worktree_path, "pane-1", "idle");
+        assert!(delegations.begin_follow_up("delegation-1", &panes).is_ok());
+        delegations.observe_hook(worktree_path, "pane-1");
+        fs::write(repo.join("follow-up.txt"), "review fix\n").unwrap();
+        let follow_up = delegations
+            .finish(worktree_path, "pane-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(follow_up.files, 2);
     }
 
     #[test]

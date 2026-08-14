@@ -98,6 +98,7 @@ import {
 } from "../lib/workspace-renderer-key";
 import { browserPaneNeedsHandoffCover } from "../lib/browser-underlay";
 import { SubagentMenu } from "./SubagentMenu";
+import { AgentRunChangesBadge } from "./AgentRunChangesBadge";
 import { useMountEffect } from "../hooks/useMountEffect";
 
 type TabKind = "terminal" | "agent" | "file" | "browser";
@@ -617,10 +618,17 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         </button>
       )}
       {t.kind === "agent" ? (
-        <SubagentMenu
-          worktreePath={worktreePath}
-          paneId={t.paneId}
-        />
+        <>
+          <AgentRunChangesBadge
+            worktreePath={worktreePath}
+            paneId={t.paneId}
+            label={t.label}
+          />
+          <SubagentMenu
+            worktreePath={worktreePath}
+            paneId={t.paneId}
+          />
+        </>
       ) : null}
       {!t.isSystem && (
         <button
@@ -1607,10 +1615,17 @@ function PaneTabGroup({
                   </button>
                 )}
                 {isAgent ? (
-                  <SubagentMenu
-                    worktreePath={worktreePath}
-                    paneId={tab.id}
-                  />
+                  <>
+                    <AgentRunChangesBadge
+                      worktreePath={worktreePath}
+                      paneId={tab.id}
+                      label={displayLabel}
+                    />
+                    <SubagentMenu
+                      worktreePath={worktreePath}
+                      paneId={tab.id}
+                    />
+                  </>
                 ) : null}
                 {canClose && (
                   <button

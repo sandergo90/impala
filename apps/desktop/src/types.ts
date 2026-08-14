@@ -19,6 +19,19 @@ export interface DiffStat {
   deletions: number;
 }
 
+export interface AgentRunChangeSummary extends DiffStat {
+  worktree_path: string;
+  pane_id: string;
+  name: string | null;
+  finished: boolean;
+}
+
+export interface AgentRunChanges {
+  summary: AgentRunChangeSummary;
+  changed_files: ChangedFile[];
+  diff: string;
+}
+
 export interface CommitInfo {
   hash: string;
   message: string;
@@ -177,9 +190,10 @@ export interface UserTab {
 export interface WorktreeNavState {
   activeTab: "terminal" | "diff";
   agentLaunched: boolean;
-  viewMode: "commit" | "all-changes" | "uncommitted" | "last-turn";
+  viewMode: "commit" | "all-changes" | "uncommitted" | "last-turn" | "agent-run";
   selectedCommit: CommitInfo | null;
   selectedFile: ChangedFile | null;
+  selectedAgentRun: { paneId: string; label: string } | null;
   /**
    * ID of the currently active tab inside the terminals pane.
    * `"tab-agent"` and `"tab-run"` refer to the system tabs. Any other

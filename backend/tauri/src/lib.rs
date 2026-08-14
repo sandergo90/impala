@@ -1060,6 +1060,30 @@ fn get_agent_pane_statuses(
 }
 
 #[tauri::command]
+async fn get_agent_run_change_summary(
+    state: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
+    worktree_path: String,
+    pane_id: String,
+) -> Result<Option<hook_server::AgentRunChangeSummary>, String> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || state.change_summary(&worktree_path, &pane_id))
+        .await
+        .map_err(|error| format!("Task join error: {error}"))?
+}
+
+#[tauri::command]
+async fn get_agent_run_changes(
+    state: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
+    worktree_path: String,
+    pane_id: String,
+) -> Result<Option<hook_server::AgentRunChanges>, String> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || state.changes(&worktree_path, &pane_id))
+        .await
+        .map_err(|error| format!("Task join error: {error}"))?
+}
+
+#[tauri::command]
 fn register_agent_delegation(
     delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
     delegation_id: String,
@@ -1111,6 +1135,7 @@ fn interrupt_agent_turn(
     db: tauri::State<'_, DbState>,
     statuses: tauri::State<'_, Arc<hook_server::AgentStatuses>>,
     pane_statuses: tauri::State<'_, Arc<hook_server::AgentPaneStatuses>>,
+    delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
     interrupted_turns: tauri::State<'_, Arc<hook_server::InterruptedAgentTurns>>,
     worktree_path: String,
     pane_id: String,
@@ -1128,6 +1153,11 @@ fn interrupt_agent_turn(
 
     if interrupted_automation.is_some() {
         let _ = app.emit("automation-runs-changed", ());
+    }
+    if let Some(summary) = delegations.finish(&worktree_path, &pane_id)? {
+        if summary.files > 0 {
+            let _ = app.emit("agent-run-changes-completed", summary);
+        }
     }
     interrupted_turns.mark(&worktree_path, &pane_id);
     hook_server::publish_agent_pane_event(&app, &worktree_path, &pane_id, "idle");
@@ -2132,6 +2162,8 @@ pub fn run() {
             get_hook_port,
             get_agent_statuses,
             get_agent_pane_statuses,
+            get_agent_run_change_summary,
+            get_agent_run_changes,
             register_agent_delegation,
             fail_agent_delegation,
             clear_agent_pane_status,

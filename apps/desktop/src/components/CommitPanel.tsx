@@ -8,7 +8,8 @@ import { useUIStore, useDataStore } from "../store";
 import { openFileInEditor } from "../lib/open-file-in-editor";
 import { useCmdHeld } from "../hooks/useCmdClickCursor";
 import { ChangedFileContextMenu } from "./ChangedFileContextMenu";
-import type { ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
+import type { AgentRunChanges, ChangedFile, CommitInfo, WorktreeNavState, WorktreeDataState } from "../types";
+import { splitDiffByFile } from "../lib/diff-files";
 
 // Same mapping the file tree uses (see `getTreesStyle` in themes/apply.ts): the
 // status tokens are derived per-theme from the terminal palette, so added stays
@@ -167,6 +168,7 @@ export function CommitPanel({
   const changedFiles = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.changedFiles ?? EMPTY_CHANGED_FILES : EMPTY_CHANGED_FILES);
   const selectedFile = useUIStore((s) => wtPath ? s.worktreeNavStates[wtPath]?.selectedFile ?? null : null);
   const viewMode = useUIStore((s) => wtPath ? s.worktreeNavStates[wtPath]?.viewMode ?? 'commit' : 'commit');
+  const selectedAgentRun = useUIStore((s) => wtPath ? s.worktreeNavStates[wtPath]?.selectedAgentRun ?? null : null);
   const uncommittedStats = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.uncommittedStats ?? ZERO_STATS : ZERO_STATS);
   const allChangesStats = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.allChangesStats ?? ZERO_STATS : ZERO_STATS);
   const lastTurnStats = useDataStore((s) => wtPath ? s.worktreeDataStates[wtPath]?.lastTurnStats ?? ZERO_STATS : ZERO_STATS);
@@ -218,23 +220,6 @@ export function CommitPanel({
     }
   }, []);
 
-  const splitPatch = useCallback((fullDiff: string): Record<string, string> => {
-    const fileDiffs: Record<string, string> = {};
-    // Strip `* Unmerged path <file>` lines that git emits for merge-conflicted
-    // files — @pierre/diffs' parser doesn't know what to do with them and
-    // throws. Conflicted files have no textual diff anyway.
-    const cleaned = fullDiff.replace(/^\* Unmerged path .*\n?/gm, "");
-    const parts = cleaned.split(/^diff --git /m).filter(Boolean);
-    for (const part of parts) {
-      const patch = "diff --git " + part;
-      const match = patch.match(/^diff --git a\/(.*?) b\//);
-      if (match) {
-        fileDiffs[match[1]] = patch;
-      }
-    }
-    return fileDiffs;
-  }, []);
-
   const loadGeneratedFiles = useCallback(async (files: ChangedFile[]): Promise<string[]> => {
     const current = useDataStore.getState().getWorktreeDataState(worktreePath);
     if (sameChangedFiles(current.changedFiles, files)) {
@@ -263,6 +248,18 @@ export function CommitPanel({
         invoke<ChangedFile[]>("get_last_turn_files", { worktreePath }),
         invoke<string>("get_last_turn_diff", { worktreePath }),
       ]);
+    } else if (mode === "agent-run") {
+      const agentRun = useUIStore
+        .getState()
+        .getWorktreeNavState(worktreePath).selectedAgentRun;
+      if (!agentRun) throw new Error("Missing agent run");
+      const changes = await invoke<AgentRunChanges | null>("get_agent_run_changes", {
+        worktreePath,
+        paneId: agentRun.paneId,
+      });
+      if (!changes) throw new Error("Changes for this agent run are unavailable");
+      files = changes.changed_files;
+      fullDiff = changes.diff;
     } else if (mode === "all-changes") {
       [files, fullDiff] = await Promise.all([
         invoke<ChangedFile[]>("get_all_changed_files", { worktreePath }),
@@ -285,7 +282,7 @@ export function CommitPanel({
     payload: { files: ChangedFile[]; fullDiff: string; generatedFiles: string[] },
     force = false,
   ) => {
-    const fileDiffs = splitPatch(payload.fullDiff);
+    const fileDiffs = splitDiffByFile(payload.fullDiff);
     const stats = countDiffStats(payload.fullDiff);
     const current = useDataStore.getState().getWorktreeDataState(worktreePath);
     const updates: Partial<WorktreeDataState> = {};
@@ -308,7 +305,7 @@ export function CommitPanel({
     if (Object.keys(updates).length > 0) {
       updateData(updates);
     }
-  }, [splitPatch, updateData, worktreePath]);
+  }, [updateData, worktreePath]);
 
   const selectAllChanges = async () => {
     const requestId = ++selectionRequestRef.current;
@@ -336,6 +333,22 @@ export function CommitPanel({
       applyDiffPayload("last-turn", payload, true);
     } catch (e) {
       toast.error("Failed to load last turn changes");
+    }
+  };
+
+  const selectAgentRun = async () => {
+    if (!selectedAgentRun) return;
+    const requestId = ++selectionRequestRef.current;
+    clearScheduledAutoRefresh();
+    updateNav({ viewMode: 'agent-run', selectedCommit: null, selectedFile: null, activeTab: 'diff' });
+    updateData({ changedFiles: [], diffText: null, fileDiffs: {}, generatedFiles: [] });
+    onSelection?.();
+    try {
+      const payload = await loadDiffPayload("agent-run");
+      if (selectionRequestRef.current !== requestId) return;
+      applyDiffPayload("agent-run", payload, true);
+    } catch {
+      toast.error("Failed to load agent changes");
     }
   };
 
@@ -566,11 +579,29 @@ export function CommitPanel({
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0">
+        {selectedAgentRun ? (
+          <button
+            autoFocus={isPopover && viewMode === "agent-run"}
+            onClick={selectAgentRun}
+            className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
+              viewMode === "agent-run"
+                ? "bg-primary/12"
+                : "hover:bg-accent"
+            }`}
+          >
+            <div className={`text-sm font-medium ${viewMode === "agent-run" ? "text-foreground" : "text-muted-foreground"}`}>
+              {selectedAgentRun.label}
+            </div>
+            <div className="mt-0.5 text-sm text-muted-foreground/90">
+              Changes during this agent run
+            </div>
+          </button>
+        ) : null}
         {/* Last Turn — the sidebar keeps its existing empty state; the popover
             only exposes the scope once a snapshot is available. */}
         {(!isPopover || hasLastTurnSnapshot) && (
           <button
-            autoFocus={isPopover && hasLastTurnSnapshot}
+            autoFocus={isPopover && hasLastTurnSnapshot && viewMode !== "agent-run"}
             onClick={selectLastTurn}
             className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
               viewMode === 'last-turn'
@@ -596,7 +627,7 @@ export function CommitPanel({
 
         {/* Uncommitted Changes */}
         <button
-          autoFocus={isPopover && !hasLastTurnSnapshot}
+          autoFocus={isPopover && !hasLastTurnSnapshot && viewMode !== "agent-run"}
           onClick={selectUncommitted}
           className={`w-full px-3.5 py-2 text-left transition-colors border-b border-border ${
             viewMode === 'uncommitted'

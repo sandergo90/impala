@@ -154,6 +154,9 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
   const selectedCommit = useUIStore((s) =>
     wtPath ? s.worktreeNavStates[wtPath]?.selectedCommit ?? null : null
   );
+  const selectedAgentRun = useUIStore((s) =>
+    wtPath ? s.worktreeNavStates[wtPath]?.selectedAgentRun ?? null : null
+  );
   const viewMode = useUIStore((s) =>
     wtPath ? s.worktreeNavStates[wtPath]?.viewMode ?? "commit" : "commit"
   );
@@ -598,8 +601,14 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
         </button>
       </div>
       <div className="flex-1" />
+      {viewMode === "agent-run" && selectedAgentRun ? (
+        <span className="truncate text-sm text-muted-foreground">
+          Changes during {selectedAgentRun.label}
+        </span>
+      ) : null}
+      <div className="flex-1" />
       <div className="flex items-center gap-1 text-sm">
-        {showAllFiles && changedFiles.length > 0 && (
+        {viewKindForViewed && showAllFiles && changedFiles.length > 0 ? (
           <>
             <span className="mx-1 text-border">|</span>
             <span className="text-muted-foreground tabular-nums">
@@ -628,7 +637,7 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
               Hide viewed
             </button>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -736,14 +745,16 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
           {deletions > 0 && additions > 0 && " "}
           {additions > 0 && <span style={{ color: "var(--diffs-addition-base, #3fb950)" }}>+{additions}</span>}
         </span>
-        <ViewedButton
-          isViewed={isViewed}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleViewed(filePath);
-            if (!isViewed) scrollToFile(filePath);
-          }}
-        />
+        {viewKindForViewed ? (
+          <ViewedButton
+            isViewed={isViewed}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleViewed(filePath);
+              if (!isViewed) scrollToFile(filePath);
+            }}
+          />
+        ) : null}
       </div>
     );
 
@@ -789,7 +800,9 @@ export function DiffView({ onRevealInFiles }: { onRevealInFiles?: () => void }) 
             <span className="text-sm px-1.5 py-0.5 rounded bg-muted">
               {isRenamed ? (file.status.startsWith("C") ? "Copied" : "Moved") : "New file"}
             </span>
-            <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+            {viewKindForViewed ? (
+              <ViewedButton isViewed={isViewed} onClick={() => toggleViewed(file.path)} />
+            ) : null}
           </div>
         );
         return (

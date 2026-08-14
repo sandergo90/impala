@@ -27,7 +27,7 @@ pub struct ChangedFile {
     pub path: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 pub struct DiffStat {
     pub files: u32,
     pub additions: u32,
@@ -858,6 +858,56 @@ pub fn snapshot_worktree(worktree_path: &str) -> Result<String, String> {
     result
 }
 
+pub fn get_tree_diff(
+    worktree_path: &str,
+    start_tree: &str,
+    end_tree: &str,
+) -> Result<String, String> {
+    run_git(worktree_path, &["diff", start_tree, end_tree])
+}
+
+pub fn get_tree_changed_files(
+    worktree_path: &str,
+    start_tree: &str,
+    end_tree: &str,
+) -> Result<Vec<ChangedFile>, String> {
+    let output = run_git(
+        worktree_path,
+        &["diff", "--name-status", start_tree, end_tree],
+    )?;
+    Ok(output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let mut parts = line.splitn(2, '\t');
+            ChangedFile {
+                status: parts.next().unwrap_or("?").to_string(),
+                path: parts.next().unwrap_or("").to_string(),
+            }
+        })
+        .collect())
+}
+
+pub fn get_tree_diff_stat(
+    worktree_path: &str,
+    start_tree: &str,
+    end_tree: &str,
+) -> Result<DiffStat, String> {
+    let output = run_git(worktree_path, &["diff", "--numstat", start_tree, end_tree])?;
+    let mut stat = DiffStat {
+        files: 0,
+        additions: 0,
+        deletions: 0,
+    };
+    for line in output.lines().filter(|line| !line.is_empty()) {
+        let mut parts = line.split('\t');
+        stat.additions += parts.next().unwrap_or("-").parse::<u32>().unwrap_or(0);
+        stat.deletions += parts.next().unwrap_or("-").parse::<u32>().unwrap_or(0);
+        stat.files += 1;
+    }
+    Ok(stat)
+}
+
 pub fn get_last_turn_files(
     worktree_path: &str,
     snapshot: &str,
@@ -1068,6 +1118,42 @@ mod tests {
         assert_eq!(stat.files, 1);
         assert_eq!(stat.additions, 3);
         assert_eq!(stat.deletions, 0);
+    }
+
+    #[test]
+    fn tree_diff_freezes_tracked_and_untracked_agent_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        std::fs::write(repo.join("tracked.txt"), "before\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "initial"]);
+
+        let start = snapshot_worktree(repo.to_str().unwrap()).unwrap();
+        std::fs::write(repo.join("tracked.txt"), "after\nsecond\n").unwrap();
+        std::fs::write(repo.join("new.txt"), "new\n").unwrap();
+        let end = snapshot_worktree(repo.to_str().unwrap()).unwrap();
+
+        let files = get_tree_changed_files(repo.to_str().unwrap(), &start, &end).unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|file| file.path == "tracked.txt"));
+        assert!(files.iter().any(|file| file.path == "new.txt"));
+        assert_eq!(
+            get_tree_diff_stat(repo.to_str().unwrap(), &start, &end).unwrap(),
+            DiffStat {
+                files: 2,
+                additions: 3,
+                deletions: 1,
+            }
+        );
+
+        std::fs::write(repo.join("tracked.txt"), "later\n").unwrap();
+        let frozen = get_tree_diff(repo.to_str().unwrap(), &start, &end).unwrap();
+        assert!(frozen.contains("+after"));
+        assert!(!frozen.contains("+later"));
     }
 
     #[test]
@@ -1297,4 +1383,3 @@ mod tests {
         assert_eq!(messages, vec!["f1"]);
     }
 }
-

@@ -2,8 +2,10 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@/lib/invoke";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { toast } from "sonner";
 import { useDataStore, useUIStore } from "../store";
-import type { WorktreeDataState } from "../types";
+import type { AgentRunChangeSummary, WorktreeDataState } from "../types";
+import { openAgentRunChanges } from "../lib/agent-run-changes";
 
 function isAgentStatus(status: string): status is WorktreeDataState["agentStatus"] {
   return status === "working" || status === "idle" || status === "permission";
@@ -111,6 +113,27 @@ export function useAgentStatusSync() {
         else next[pane_id] = status;
         useDataStore.getState().updateWorktreeDataState(worktree_path, {
           agentPaneStatuses: next,
+        });
+      }),
+      listen<AgentRunChangeSummary>("agent-run-changes-completed", (event) => {
+        const summary = event.payload;
+        const label = summary.name?.trim() || "Agent";
+        toast(`Changes during ${label}`, {
+          description: `${summary.files} ${summary.files === 1 ? "file" : "files"}, +${summary.additions} -${summary.deletions}`,
+          action: {
+            label: "Review changes",
+            onClick: () => {
+              openAgentRunChanges(
+                summary.worktree_path,
+                summary.pane_id,
+                label,
+              ).catch((error) =>
+                toast.error("Couldn't open agent changes", {
+                  description: String(error),
+                }),
+              );
+            },
+          },
         });
       }),
     ]);
