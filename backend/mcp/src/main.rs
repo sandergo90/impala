@@ -512,44 +512,29 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
     if let Some(source_pane_id) = source_pane_id.as_deref() {
         params.push(("source_pane_id", source_pane_id));
     }
+    let source_app_server = std::env::var("IMPALA_CODEX_APP_SERVER")
+        .ok()
+        .filter(|value| value.starts_with("unix:///"));
+    let source_thread_id = codex_source_thread_id(
+        source_app_server.as_deref(),
+        std::env::var("CODEX_THREAD_ID").ok().as_deref(),
+    );
+    if let Some(source_thread_id) = source_thread_id.as_deref() {
+        params.push(("source_thread_id", source_thread_id));
+        params.push(("source_app_server", source_app_server.as_deref().unwrap()));
+    }
     params.push(("placement", placement));
     browser_get("/agents/open", &params).map(strip_ok)
 }
 
-fn tool_get_agent_tab_status(args: &Value) -> Result<Value, String> {
-    let delegation_id = args
-        .get("delegation_id")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or("missing required parameter: delegation_id")?;
-    browser_get("/agents/status", &[("delegation_id", delegation_id)]).map(strip_ok)
-}
-
-fn tool_wait_agent_tab(args: &Value) -> Result<Value, String> {
-    let delegation_id = args
-        .get("delegation_id")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or("missing required parameter: delegation_id")?;
-    let timeout_seconds = match args.get("timeout_seconds") {
-        Some(value) => value
-            .as_u64()
-            .ok_or("timeout_seconds must be between 1 and 3600")?,
-        None => 60,
-    };
-    if !(1..=3600).contains(&timeout_seconds) {
-        return Err("timeout_seconds must be between 1 and 3600".to_string());
+fn codex_source_thread_id(remote: Option<&str>, thread_id: Option<&str>) -> Option<String> {
+    if !remote.is_some_and(|value| value.starts_with("unix:///")) {
+        return None;
     }
-    let timeout_ms = (timeout_seconds * 1000).to_string();
-    browser_get_with_timeout(
-        "/agents/wait",
-        &[
-            ("delegation_id", delegation_id),
-            ("timeout_ms", timeout_ms.as_str()),
-        ],
-        std::time::Duration::from_secs(timeout_seconds + 5),
-    )
-    .map(strip_ok)
+    thread_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 fn tool_follow_up_agent_tab(args: &Value) -> Result<Value, String> {
@@ -870,7 +855,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "open_agent_tab",
-                "description": "Delegate work to a fresh agent thread in a new Impala Agent tab for this worktree. Returns a delegation_id for wait_agent_tab or get_agent_tab_status. The caller pane is detected automatically. Set placement='split' to create a new right-hand split pane, placement='right' or 'left' to use an existing neighboring split pane, or placement='current' for the caller's pane. With the default placement='auto', a caller in a secondary split pane opens locally; otherwise the tab opens in the main workspace strip. Use when the user says to investigate, implement, continue, or do something 'in a new thread', 'in another agent tab', or equivalent. Pass agent='claude' or agent='codex' when the user names a provider; omit it to use the worktree's configured agent. The new thread has no access to this conversation: turn references such as 'this issue' or 'this plan' into a self-contained prompt with the relevant paths, requirements, and context. After opening the tab, do not also perform the delegated task in the current thread unless the user explicitly asks you to.",
+                "description": "Delegate work to a fresh agent thread in a new Impala Agent tab for this worktree. Returns a delegation_id plus callback_registered; when callback_registered is true, Impala starts a new turn in the caller thread after the delegated tab finishes. The caller pane is detected automatically. Set placement='split' to create a new right-hand split pane, placement='right' or 'left' to use an existing neighboring split pane, or placement='current' for the caller's pane. With the default placement='auto', a caller in a secondary split pane opens locally; otherwise the tab opens in the main workspace strip. Use when the user says to investigate, implement, continue, or do something 'in a new thread', 'in another agent tab', or equivalent. Pass agent='claude' or agent='codex' when the user names a provider; omit it to use the worktree's configured agent. The new thread has no access to this conversation: turn references such as 'this issue' or 'this plan' into a self-contained prompt with the relevant paths, requirements, and context. After opening the tab, do not also perform the delegated task in the current thread unless the user explicitly asks you to.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -917,43 +902,8 @@ fn tool_definitions() -> Value {
                 }
             },
             {
-                "name": "get_agent_tab_status",
-                "description": "Get lifecycle status for a tab opened by open_agent_tab. Returns pending while the pane or first turn is starting, running while the agent works, waiting when it needs permission, idle after its turn stops, and failed when Impala could not launch it. An idle status is not integration proof; verify the worker's expected commit separately.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "delegation_id": {
-                            "type": "string",
-                            "description": "Stable delegation id returned by open_agent_tab"
-                        }
-                    },
-                    "required": ["delegation_id"]
-                }
-            },
-            {
-                "name": "wait_agent_tab",
-                "description": "Wait until an Impala Agent tab opened by open_agent_tab becomes idle or fails. Returns immediately if it is already terminal, otherwise resumes when the tab posts its lifecycle event. A timeout returns the current status with timed_out=true; idle is not integration proof, so verify the expected commit or diff separately.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "delegation_id": {
-                            "type": "string",
-                            "description": "Stable delegation id returned by open_agent_tab"
-                        },
-                        "timeout_seconds": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 3600,
-                            "default": 60,
-                            "description": "Maximum time to wait before returning the current status"
-                        }
-                    },
-                    "required": ["delegation_id"]
-                }
-            },
-            {
                 "name": "follow_up_agent_tab",
-                "description": "Send a follow-up prompt to the existing idle Impala Agent tab opened by open_agent_tab. Reuses the same delegation_id and PTY; wait for idle before sending, then call wait_agent_tab on that same delegation_id for the new turn.",
+                "description": "Send a follow-up prompt to the existing idle Impala Agent tab opened by open_agent_tab. Reuses the same delegation_id and PTY and re-arms its completion callback; yield after this call until Impala starts the next turn in the orchestrator thread.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -1216,8 +1166,6 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_scroll" => tool_browser_scroll(&tool_args),
                 "browser_type" => tool_browser_type(&tool_args),
                 "open_agent_tab" => tool_open_agent_tab(&tool_args),
-                "get_agent_tab_status" => tool_get_agent_tab_status(&tool_args),
-                "wait_agent_tab" => tool_wait_agent_tab(&tool_args),
                 "follow_up_agent_tab" => tool_follow_up_agent_tab(&tool_args),
                 "list_automations" => tool_list_automations(&tool_args),
                 "create_automation" => tool_create_automation(&tool_args),
@@ -1307,23 +1255,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_list_exposes_idle_agent_tab_follow_ups() {
+    fn tool_list_exposes_callback_driven_agent_tab_follow_ups() {
         let tools = tool_definitions();
         let tools = tools.get("tools").and_then(Value::as_array).unwrap();
         let follow_up = tools
             .iter()
             .find(|tool| tool["name"] == "follow_up_agent_tab")
             .expect("follow_up_agent_tab tool");
-        let wait = tools
-            .iter()
-            .find(|tool| tool["name"] == "wait_agent_tab")
-            .expect("wait_agent_tab tool");
 
         assert_eq!(
             follow_up["inputSchema"]["required"],
             json!(["delegation_id", "prompt"])
         );
-        assert_eq!(wait["inputSchema"]["required"], json!(["delegation_id"]));
+        assert!(!tools.iter().any(|tool| matches!(
+            tool["name"].as_str(),
+            Some("get_agent_tab_status" | "wait_agent_tab")
+        )));
     }
 
     #[test]
@@ -1342,17 +1289,18 @@ mod tests {
     }
 
     #[test]
-    fn wait_agent_tab_rejects_invalid_timeouts() {
+    fn only_forwards_threads_connected_to_impalas_codex_server() {
         assert_eq!(
-            tool_wait_agent_tab(&json!({})),
-            Err("missing required parameter: delegation_id".to_string())
+            codex_source_thread_id(Some("unix:///tmp/impala.sock"), Some("thread-1")),
+            Some("thread-1".to_string())
         );
         assert_eq!(
-            tool_wait_agent_tab(&json!({
-                "delegation_id": "delegation-1",
-                "timeout_seconds": 0
-            })),
-            Err("timeout_seconds must be between 1 and 3600".to_string())
+            codex_source_thread_id(Some("ws://127.0.0.1:4222"), Some("thread-1")),
+            None
+        );
+        assert_eq!(
+            codex_source_thread_id(Some("unix:///tmp/impala.sock"), Some(" ")),
+            None
         );
     }
 }

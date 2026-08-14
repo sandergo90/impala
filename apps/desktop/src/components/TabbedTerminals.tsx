@@ -930,6 +930,7 @@ const TabBody = memo(function TabBody({
           worktreePath,
           agent,
           resumeSessionId: null,
+          ptySessionId: ptyId,
         });
       } catch (err) {
         console.warn("Failed to prepare agent config:", err);

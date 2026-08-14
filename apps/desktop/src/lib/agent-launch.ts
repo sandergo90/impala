@@ -56,6 +56,7 @@ export async function launchAgentHeadless(opts: {
       worktreePath,
       agent,
       resumeSessionId: null,
+      ptySessionId: ptyId,
     });
   } catch (err) {
     console.warn("Failed to prepare agent config:", err);
@@ -124,6 +125,7 @@ export async function launchAutomationResume(opts: {
     worktreePath,
     agent,
     resumeSessionId: sessionId,
+    ptySessionId: ptyId,
   });
   const launch = await invoke<{
     shell_path: string;

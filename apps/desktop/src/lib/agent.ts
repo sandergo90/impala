@@ -82,13 +82,30 @@ function buildAgentCommand(
   env?: Record<string, string>,
 ): string {
   const parts: string[] = [];
+  const configuredRemote = /(?:^|\s)--remote(?:=|\s|$)/.test(flags);
+  const appServer = env?.IMPALA_CODEX_APP_SERVER;
+  const usesImpalaCodexServer =
+    agent === "codex" &&
+    !configuredRemote &&
+    appServer?.startsWith("unix:///");
   for (const [key, value] of Object.entries(env ?? {})) {
     parts.push(`${key}=${shellQuote(value)}`);
   }
+  if (agent === "codex" && configuredRemote && appServer) {
+    parts.push("IMPALA_CODEX_APP_SERVER=''");
+  }
   parts.push(agent);
+  if (usesImpalaCodexServer) {
+    parts.push("--remote", shellQuote(appServer!));
+  }
   if (flags.trim()) parts.push(flags.trim());
   parts.push(...args.map(shellQuote));
-  return parts.join(" ");
+  const command = parts.join(" ");
+  if (!usesImpalaCodexServer) return command;
+
+  const socketPath = appServer!.slice("unix://".length);
+  const logPath = env?.IMPALA_CODEX_APP_SERVER_LOG ?? `${socketPath}.log`;
+  return `(codex app-server --listen ${shellQuote(appServer!)} >>${shellQuote(logPath)} 2>&1 & IMPALA_CODEX_SERVER_PID=$!; trap 'kill "$IMPALA_CODEX_SERVER_PID" 2>/dev/null' EXIT HUP TERM; sleep 0.1; for _ in {1..100}; do [ -S ${shellQuote(socketPath)} ] && break; sleep 0.05; done; ${command})`;
 }
 
 /** Build the direct command for a completed global automation's interactive PTY. */

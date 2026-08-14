@@ -3,6 +3,7 @@ mod annotations;
 mod automations;
 mod bitbucket;
 mod browser;
+mod codex_app_server;
 mod config;
 mod daemon_client;
 mod file_io;
@@ -807,6 +808,7 @@ async fn prepare_agent_config(
     worktree_path: String,
     agent: String,
     resume_session_id: Option<String>,
+    pty_session_id: Option<String>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let path = std::path::PathBuf::from(&worktree_path);
     let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
@@ -814,7 +816,7 @@ async fn prepare_agent_config(
 
     let env = tokio::task::spawn_blocking(
         move || -> Result<std::collections::HashMap<String, String>, String> {
-            let env = std::collections::HashMap::new();
+            let mut env = std::collections::HashMap::new();
             if agent != "claude" && agent != "codex" {
                 return Err(format!("unknown agent: {}", agent));
             }
@@ -825,6 +827,9 @@ async fn prepare_agent_config(
             agent_config::write_claude_config(&path)?;
             agent_config::write_codex_config(&path, &mcp_binary, agent == "codex")?;
             if agent == "codex" {
+                if let Some(pty_session_id) = pty_session_id.filter(|id| !id.is_empty()) {
+                    env.extend(codex_app_server::launch_environment(&pty_session_id)?);
+                }
                 if let Some(session_id) = resume_session_id.filter(|id| !id.is_empty()) {
                     let codex_home = agent_config::codex_home_path()
                         .ok_or_else(|| "no Codex home".to_string())?;
@@ -1098,7 +1103,13 @@ fn fail_agent_delegation(
     delegation_id: String,
     error: String,
 ) -> bool {
-    delegations.fail(&delegation_id, &error)
+    if !delegations.fail(&delegation_id, &error) {
+        return false;
+    }
+    if let Some(notification) = delegations.claim_completion_for_delegation(&delegation_id) {
+        hook_server::dispatch_completion(delegations.inner().clone(), notification);
+    }
+    true
 }
 
 #[tauri::command]
@@ -1110,12 +1121,18 @@ fn clear_agent_pane_status(
     worktree_path: String,
     pane_id: String,
 ) {
-    delegations.fail_nonterminal_pane(
+    let failed = delegations.fail_nonterminal_pane(
         &worktree_path,
         &pane_id,
         &pane_statuses,
         "Agent tab closed before completion",
     );
+    if failed {
+        if let Some(notification) = delegations.claim_completion_for_pane(&worktree_path, &pane_id)
+        {
+            hook_server::dispatch_completion(delegations.inner().clone(), notification);
+        }
+    }
     let Some(aggregate_status) = pane_statuses.clear(&worktree_path, &pane_id) else {
         return;
     };
@@ -1131,11 +1148,16 @@ fn clear_agent_worktree_status(
     delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
     worktree_path: String,
 ) {
-    delegations.fail_nonterminal_worktree(
+    let failed = delegations.fail_nonterminal_worktree(
         &worktree_path,
         &pane_statuses,
         "Worktree closed before agent completion",
     );
+    if failed > 0 {
+        for notification in delegations.claim_pending_completions(&pane_statuses) {
+            hook_server::dispatch_completion(delegations.inner().clone(), notification);
+        }
+    }
     if !pane_statuses.clear_worktree(&worktree_path) {
         return;
     }
@@ -1950,6 +1972,11 @@ pub fn run() {
                 interrupted_turns.clone(),
                 subagent_registry.clone(),
             );
+            for notification in
+                agent_delegations.claim_pending_completions(&agent_pane_statuses)
+            {
+                hook_server::dispatch_completion(agent_delegations.clone(), notification);
+            }
             for (worktree_path, status) in restored_agent_statuses {
                 hook_server::publish_agent_status(
                     app.handle(),

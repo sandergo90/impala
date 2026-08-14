@@ -3,8 +3,8 @@ use impala_daemon_shared::wire::{Request, Response as DaemonResponse};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tiny_http::{Response, Server};
 
@@ -28,23 +28,22 @@ struct AgentDelegation {
     start_tree: Option<String>,
     #[serde(default)]
     end_tree: Option<String>,
+    #[serde(default)]
+    source_thread_id: Option<String>,
+    #[serde(default)]
+    source_app_server: Option<String>,
+    #[serde(default)]
+    completion_notified: bool,
+    #[serde(skip)]
+    completion_notification_in_flight: bool,
 }
 
-#[derive(Clone, Serialize)]
-pub struct AgentDelegationStatus {
-    pub delegation_id: String,
-    pub worktree_path: String,
-    pub name: Option<String>,
-    pub pane_id: Option<String>,
-    pub status: String,
-    pub error: Option<String>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct AgentDelegationWait {
-    #[serde(flatten)]
-    pub status: AgentDelegationStatus,
-    pub timed_out: bool,
+#[derive(Clone)]
+pub struct AgentCompletionNotification {
+    delegation_id: String,
+    thread_id: String,
+    app_server: String,
+    prompt: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -77,7 +76,6 @@ struct AgentRunChangeRefs {
 
 pub struct AgentDelegations {
     entries: Mutex<HashMap<String, AgentDelegation>>,
-    changed: Condvar,
     persist: bool,
 }
 
@@ -257,7 +255,6 @@ impl AgentDelegations {
                     .map(|entry| (entry.delegation_id.clone(), entry))
                     .collect(),
             ),
-            changed: Condvar::new(),
             persist: true,
         }
     }
@@ -271,7 +268,14 @@ impl AgentDelegations {
         }
     }
 
-    pub fn open(&self, delegation_id: &str, worktree_path: &str, name: Option<&str>) {
+    pub fn open(
+        &self,
+        delegation_id: &str,
+        worktree_path: &str,
+        name: Option<&str>,
+        source_thread_id: Option<&str>,
+        source_app_server: Option<&str>,
+    ) {
         let start_tree = match crate::git::snapshot_worktree(worktree_path) {
             Ok(tree) => Some(tree),
             Err(error) => {
@@ -308,6 +312,10 @@ impl AgentDelegations {
                 created_at: chrono::Utc::now().timestamp(),
                 start_tree,
                 end_tree: None,
+                source_thread_id: source_thread_id.map(str::to_owned),
+                source_app_server: source_app_server.map(str::to_owned),
+                completion_notified: false,
+                completion_notification_in_flight: false,
             },
         );
         self.persist(&entries);
@@ -334,8 +342,86 @@ impl AgentDelegations {
         };
         entry.error = Some(error.to_owned());
         self.persist(&entries);
-        self.changed.notify_all();
         true
+    }
+
+    fn claim_completion(entry: &mut AgentDelegation) -> Option<AgentCompletionNotification> {
+        if entry.completion_notified || entry.completion_notification_in_flight {
+            return None;
+        }
+        let thread_id = entry.source_thread_id.clone()?;
+        let app_server = entry.source_app_server.clone()?;
+        entry.completion_notification_in_flight = true;
+        let label = entry.name.as_deref().unwrap_or("Agent tab");
+        let outcome = match entry.error.as_deref() {
+            Some(error) => format!("failed: {error}"),
+            None => "finished and is now idle".to_string(),
+        };
+        Some(AgentCompletionNotification {
+            delegation_id: entry.delegation_id.clone(),
+            thread_id,
+            app_server,
+            prompt: format!(
+                "Impala agent tab \"{label}\" {outcome}. Delegation id: {}. Inspect its changes and continue the delegated workflow.",
+                entry.delegation_id
+            ),
+        })
+    }
+
+    pub fn claim_completion_for_delegation(
+        &self,
+        delegation_id: &str,
+    ) -> Option<AgentCompletionNotification> {
+        let mut entries = self.entries.lock().ok()?;
+        let notification = Self::claim_completion(entries.get_mut(delegation_id)?)?;
+        self.persist(&entries);
+        Some(notification)
+    }
+
+    pub fn claim_completion_for_pane(
+        &self,
+        worktree_path: &str,
+        pane_id: &str,
+    ) -> Option<AgentCompletionNotification> {
+        let mut entries = self.entries.lock().ok()?;
+        let entry = entries.values_mut().find(|entry| {
+            entry.worktree_path == worktree_path && entry.pane_id.as_deref() == Some(pane_id)
+        })?;
+        let notification = Self::claim_completion(entry)?;
+        self.persist(&entries);
+        Some(notification)
+    }
+
+    pub fn claim_pending_completions(
+        &self,
+        pane_statuses: &AgentPaneStatuses,
+    ) -> Vec<AgentCompletionNotification> {
+        let Ok(mut entries) = self.entries.lock() else {
+            return Vec::new();
+        };
+        let notifications: Vec<_> = entries
+            .values_mut()
+            .filter(|entry| {
+                matches!(Self::status_for(entry, pane_statuses), "idle" | "failed")
+            })
+            .filter_map(Self::claim_completion)
+            .collect();
+        if !notifications.is_empty() {
+            self.persist(&entries);
+        }
+        notifications
+    }
+
+    fn finish_completion_notification(&self, delegation_id: &str, delivered: bool) {
+        let Ok(mut entries) = self.entries.lock() else {
+            return;
+        };
+        let Some(entry) = entries.get_mut(delegation_id) else {
+            return;
+        };
+        entry.completion_notification_in_flight = false;
+        entry.completion_notified |= delivered;
+        self.persist(&entries);
     }
 
     fn observe_hook(
@@ -520,35 +606,18 @@ impl AgentDelegations {
         }
     }
 
-    fn status_value(
-        entry: &AgentDelegation,
-        pane_statuses: &AgentPaneStatuses,
-    ) -> AgentDelegationStatus {
-        AgentDelegationStatus {
-            delegation_id: entry.delegation_id.clone(),
-            worktree_path: entry.worktree_path.clone(),
-            name: entry.name.clone(),
-            pane_id: entry.pane_id.clone(),
-            status: Self::status_for(entry, pane_statuses).to_owned(),
-            error: entry.error.clone(),
-        }
-    }
-
-    pub fn status(
+    #[cfg(test)]
+    fn test_status(
         &self,
         delegation_id: &str,
         pane_statuses: &AgentPaneStatuses,
-    ) -> Option<AgentDelegationStatus> {
+    ) -> Option<(String, Option<String>)> {
         let entries = self.entries.lock().ok()?;
         let entry = entries.get(delegation_id)?;
-        Some(Self::status_value(entry, pane_statuses))
-    }
-
-    pub fn notify_waiters(&self) {
-        let Ok(_entries) = self.entries.lock() else {
-            return;
-        };
-        self.changed.notify_all();
+        Some((
+            Self::status_for(entry, pane_statuses).to_owned(),
+            entry.error.clone(),
+        ))
     }
 
     pub fn fail_nonterminal_pane(
@@ -571,7 +640,6 @@ impl AgentDelegations {
         }
         entry.error = Some(error.to_owned());
         self.persist(&entries);
-        self.changed.notify_all();
         true
     }
 
@@ -596,46 +664,8 @@ impl AgentDelegations {
         }
         if failed > 0 {
             self.persist(&entries);
-            self.changed.notify_all();
         }
         failed
-    }
-
-    pub fn wait_for_terminal(
-        &self,
-        delegation_id: &str,
-        pane_statuses: &AgentPaneStatuses,
-        timeout: Duration,
-    ) -> Result<AgentDelegationWait, String> {
-        let started_at = Instant::now();
-        let mut entries = self
-            .entries
-            .lock()
-            .map_err(|_| "delegation registry is unavailable".to_string())?;
-        loop {
-            let entry = entries
-                .get(delegation_id)
-                .ok_or_else(|| format!("delegation not found: {delegation_id}"))?;
-            let status = Self::status_value(entry, pane_statuses);
-            if status.status == "idle" || status.status == "failed" {
-                return Ok(AgentDelegationWait {
-                    status,
-                    timed_out: false,
-                });
-            }
-            let remaining = timeout.saturating_sub(started_at.elapsed());
-            if remaining.is_zero() {
-                return Ok(AgentDelegationWait {
-                    status,
-                    timed_out: true,
-                });
-            }
-            let (next_entries, _) = self
-                .changed
-                .wait_timeout(entries, remaining)
-                .map_err(|_| "delegation registry is unavailable".to_string())?;
-            entries = next_entries;
-        }
     }
 
     pub fn begin_follow_up(
@@ -663,6 +693,8 @@ impl AgentDelegations {
             .ok_or_else(|| "delegation has no registered pane".to_string())?;
         let target = (entry.worktree_path.clone(), pane_id);
         entry.started = false;
+        entry.completion_notified = false;
+        entry.completion_notification_in_flight = false;
         self.persist(&entries);
         Ok(target)
     }
@@ -675,6 +707,8 @@ impl AgentDelegations {
             return;
         };
         entry.started = true;
+        entry.completion_notified = true;
+        entry.completion_notification_in_flight = false;
         self.persist(&entries);
     }
 }
@@ -683,7 +717,6 @@ impl Default for AgentDelegations {
     fn default() -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
-            changed: Condvar::new(),
             persist: false,
         }
     }
@@ -696,6 +729,38 @@ impl Default for AgentPaneStatuses {
             persist: false,
         }
     }
+}
+
+pub fn dispatch_completion(
+    delegations: Arc<AgentDelegations>,
+    notification: AgentCompletionNotification,
+) {
+    std::thread::spawn(move || {
+        let mut last_error = None;
+        // A very fast worker can finish while the originating turn is still
+        // returning from open_agent_tab. Retry until that turn becomes idle.
+        for _ in 0..150 {
+            match crate::codex_app_server::start_turn(
+                &notification.app_server,
+                &notification.thread_id,
+                &format!("impala-agent-completion:{}", notification.delegation_id),
+                &notification.prompt,
+            ) {
+                Ok(()) => {
+                    delegations.finish_completion_notification(&notification.delegation_id, true);
+                    return;
+                }
+                Err(error) => last_error = Some(error),
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        delegations.finish_completion_notification(&notification.delegation_id, false);
+        eprintln!(
+            "[impala] failed to wake Codex thread for delegation {}: {}",
+            notification.delegation_id,
+            last_error.as_deref().unwrap_or("unknown app-server error")
+        );
+    });
 }
 
 pub struct InterruptedAgentTurns {
@@ -1469,37 +1534,6 @@ fn handle_agent_request(
     pane_statuses: &AgentPaneStatuses,
 ) -> serde_json::Value {
     let result = (|| -> Result<serde_json::Value, String> {
-        if path == "/agents/wait" {
-            let delegation_id = params
-                .get("delegation_id")
-                .filter(|value| !value.trim().is_empty())
-                .ok_or("missing delegation_id")?;
-            let timeout_ms = params
-                .get("timeout_ms")
-                .ok_or("missing timeout_ms")?
-                .parse::<u64>()
-                .map_err(|_| "timeout_ms must be an integer".to_string())?;
-            if !(1..=3_600_000).contains(&timeout_ms) {
-                return Err("timeout_ms must be between 1 and 3600000".to_string());
-            }
-            return delegations
-                .wait_for_terminal(
-                    delegation_id,
-                    pane_statuses,
-                    Duration::from_millis(timeout_ms),
-                )
-                .map(|status| serde_json::to_value(status).expect("serializable status"));
-        }
-        if path == "/agents/status" {
-            let delegation_id = params
-                .get("delegation_id")
-                .filter(|value| !value.trim().is_empty())
-                .ok_or("missing delegation_id")?;
-            return delegations
-                .status(delegation_id, pane_statuses)
-                .map(|status| serde_json::to_value(status).expect("serializable status"))
-                .ok_or_else(|| format!("delegation not found: {delegation_id}"));
-        }
         if path == "/agents/follow_up" {
             let delegation_id = params
                 .get("delegation_id")
@@ -1570,6 +1604,20 @@ fn handle_agent_request(
         let source_pane_id = params
             .get("source_pane_id")
             .filter(|value| !value.trim().is_empty());
+        let source_thread_id = params
+            .get("source_thread_id")
+            .filter(|value| !value.trim().is_empty());
+        let source_app_server = params
+            .get("source_app_server")
+            .filter(|value| !value.trim().is_empty());
+        if source_thread_id.is_some() != source_app_server.is_some() {
+            return Err("source_thread_id and source_app_server must be provided together".to_string());
+        }
+        if let Some(remote) = source_app_server {
+            if !crate::codex_app_server::is_managed_remote(remote) {
+                return Err("source_app_server is not an Impala-managed Codex socket".to_string());
+            }
+        }
         let placement = params
             .get("placement")
             .map(String::as_str)
@@ -1581,7 +1629,13 @@ fn handle_agent_request(
         }
 
         if let Some(delegation_id) = delegation_id {
-            delegations.open(delegation_id, worktree_path, name.map(String::as_str));
+            delegations.open(
+                delegation_id,
+                worktree_path,
+                name.map(String::as_str),
+                source_thread_id.map(String::as_str),
+                source_app_server.map(String::as_str),
+            );
         }
 
         if let Err(error) = app.emit_to(
@@ -1610,6 +1664,7 @@ fn handle_agent_request(
             "opened": true,
             "delegation_id": delegation_id,
             "agent": agent.map(|value| value.as_str()).unwrap_or("configured"),
+            "callback_registered": source_thread_id.is_some(),
         }))
     })();
 
@@ -1850,8 +1905,12 @@ pub fn start(
                             worktree_path, error
                         ),
                     }
+                    if let Some(notification) =
+                        delegations.claim_completion_for_pane(&worktree_path, &pane_id)
+                    {
+                        dispatch_completion(delegations.clone(), notification);
+                    }
                 }
-                delegations.notify_waiters();
                 publish_agent_pane_event(&app_handle, &worktree_path, &pane_id, status);
                 publish_agent_status(&app_handle, &statuses, &worktree_path, &aggregate_status);
             }
@@ -1922,9 +1981,7 @@ mod tests {
     use std::net::TcpListener;
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Command, Stdio};
-    use std::sync::mpsc;
     use std::sync::{Arc, Barrier};
-    use std::time::{Duration, Instant};
 
     #[test]
     fn hook_port_discovery_preserves_a_reachable_primary() {
@@ -1968,115 +2025,83 @@ mod tests {
         let delegations = AgentDelegations::default();
         let panes = AgentPaneStatuses::default();
 
-        delegations.open("delegation-1", "/worktree", Some("SQS-24"));
+        delegations.open("delegation-1", "/worktree", Some("SQS-24"), None, None);
         assert_eq!(
-            delegations.status("delegation-1", &panes).unwrap().status,
+            delegations.test_status("delegation-1", &panes).unwrap().0,
             "pending"
         );
         assert!(delegations.register("delegation-1", "pane-1"));
 
         delegations.observe_hook("/worktree", "pane-1", &panes, "working");
         assert_eq!(
-            delegations.status("delegation-1", &panes).unwrap().status,
+            delegations.test_status("delegation-1", &panes).unwrap().0,
             "running"
         );
 
         panes.observe("/worktree", "pane-1", "permission");
         assert_eq!(
-            delegations.status("delegation-1", &panes).unwrap().status,
+            delegations.test_status("delegation-1", &panes).unwrap().0,
             "waiting"
         );
 
         panes.observe("/worktree", "pane-1", "idle");
         assert_eq!(
-            delegations.status("delegation-1", &panes).unwrap().status,
+            delegations.test_status("delegation-1", &panes).unwrap().0,
             "idle"
         );
 
         assert!(delegations.fail("delegation-1", "PTY spawn failed"));
-        let status = delegations.status("delegation-1", &panes).unwrap();
-        assert_eq!(status.status, "failed");
-        assert_eq!(status.error.as_deref(), Some("PTY spawn failed"));
+        let status = delegations.test_status("delegation-1", &panes).unwrap();
+        assert_eq!(status.0, "failed");
+        assert_eq!(status.1.as_deref(), Some("PTY spawn failed"));
     }
 
     #[test]
-    fn delegation_wait_wakes_when_the_agent_becomes_idle() {
-        let delegations = Arc::new(AgentDelegations::default());
-        let panes = Arc::new(AgentPaneStatuses::default());
-        delegations.open("delegation-1", "/worktree", None);
-        assert!(delegations.register("delegation-1", "pane-1"));
-        delegations.observe_hook("/worktree", "pane-1", &panes, "working");
-
-        let waiter = {
-            let delegations = delegations.clone();
-            let panes = panes.clone();
-            std::thread::spawn(move || {
-                delegations
-                    .wait_for_terminal("delegation-1", &panes, Duration::from_secs(1))
-                    .unwrap()
-            })
-        };
-        std::thread::sleep(Duration::from_millis(20));
-        assert!(!waiter.is_finished());
-
-        let wake_started = Instant::now();
-        panes.observe("/worktree", "pane-1", "idle");
-        delegations.notify_waiters();
-
-        let result = waiter.join().unwrap();
-        assert!(wake_started.elapsed() < Duration::from_millis(250));
-        assert_eq!(result.status.status, "idle");
-        assert!(!result.timed_out);
-    }
-
-    #[test]
-    fn delegation_failure_wakes_a_waiter() {
-        let delegations = Arc::new(AgentDelegations::default());
-        let panes = Arc::new(AgentPaneStatuses::default());
-        delegations.open("delegation-1", "/worktree", None);
-        let (sender, receiver) = mpsc::channel();
-        {
-            let delegations = delegations.clone();
-            let panes = panes.clone();
-            std::thread::spawn(move || {
-                sender
-                    .send(
-                        delegations
-                            .wait_for_terminal("delegation-1", &panes, Duration::from_secs(1))
-                            .unwrap(),
-                    )
-                    .unwrap();
-            });
-        }
-        std::thread::sleep(Duration::from_millis(20));
-
-        assert!(delegations.fail("delegation-1", "PTY spawn failed"));
-
-        let result = receiver.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(result.status.status, "failed");
-        assert_eq!(result.status.error.as_deref(), Some("PTY spawn failed"));
-        assert!(!result.timed_out);
-    }
-
-    #[test]
-    fn delegation_wait_reports_a_pending_timeout() {
+    fn delegation_completion_claims_one_codex_callback_until_delivery_finishes() {
         let delegations = AgentDelegations::default();
-        let panes = AgentPaneStatuses::default();
-        delegations.open("delegation-1", "/worktree", None);
+        delegations.open(
+            "delegation-1",
+            "/worktree",
+            Some("Luna implementation"),
+            Some("thread-1"),
+            Some("unix:///tmp/impala.sock"),
+        );
+        assert!(delegations.fail("delegation-1", "worker crashed"));
 
-        let result = delegations
-            .wait_for_terminal("delegation-1", &panes, Duration::from_millis(10))
+        let first = delegations
+            .claim_completion_for_delegation("delegation-1")
             .unwrap();
+        assert_eq!(first.thread_id, "thread-1");
+        assert!(first.prompt.contains("Luna implementation"));
+        assert!(first.prompt.contains("failed: worker crashed"));
+        assert!(delegations
+            .claim_completion_for_delegation("delegation-1")
+            .is_none());
 
-        assert_eq!(result.status.status, "pending");
-        assert!(result.timed_out);
+        delegations.finish_completion_notification("delegation-1", false);
+        let recovered = delegations.claim_pending_completions(&AgentPaneStatuses::default());
+        assert_eq!(recovered.len(), 1);
+        delegations.finish_completion_notification("delegation-1", true);
+        assert!(delegations
+            .claim_completion_for_delegation("delegation-1")
+            .is_none());
+    }
+
+    #[test]
+    fn delegation_without_an_impala_codex_thread_has_no_callback() {
+        let delegations = AgentDelegations::default();
+        delegations.open("delegation-1", "/worktree", None, None, None);
+        assert!(delegations.fail("delegation-1", "worker crashed"));
+        assert!(delegations
+            .claim_completion_for_delegation("delegation-1")
+            .is_none());
     }
 
     #[test]
     fn closing_a_pending_delegated_pane_reports_failure() {
         let delegations = AgentDelegations::default();
         let panes = AgentPaneStatuses::default();
-        delegations.open("delegation-1", "/worktree", None);
+        delegations.open("delegation-1", "/worktree", None, None, None);
         assert!(delegations.register("delegation-1", "pane-1"));
 
         assert!(delegations.fail_nonterminal_pane(
@@ -2086,14 +2111,41 @@ mod tests {
             "Agent tab closed before completion",
         ));
 
-        let result = delegations
-            .wait_for_terminal("delegation-1", &panes, Duration::from_secs(1))
-            .unwrap();
-        assert_eq!(result.status.status, "failed");
+        let result = delegations.test_status("delegation-1", &panes).unwrap();
+        assert_eq!(result.0, "failed");
         assert_eq!(
-            result.status.error.as_deref(),
+            result.1.as_deref(),
             Some("Agent tab closed before completion")
         );
+    }
+
+    #[test]
+    fn closing_a_worktree_claims_its_failed_completion_callback() {
+        let delegations = AgentDelegations::default();
+        let panes = AgentPaneStatuses::default();
+        delegations.open(
+            "delegation-1",
+            "/worktree",
+            None,
+            Some("thread-1"),
+            Some("unix:///tmp/impala.sock"),
+        );
+        assert!(delegations.register("delegation-1", "pane-1"));
+        delegations.observe_hook("/worktree", "pane-1", &panes, "working");
+
+        assert_eq!(
+            delegations.fail_nonterminal_worktree(
+                "/worktree",
+                &panes,
+                "Worktree closed before agent completion",
+            ),
+            1
+        );
+        let notifications = delegations.claim_pending_completions(&panes);
+        assert_eq!(notifications.len(), 1);
+        assert!(notifications[0]
+            .prompt
+            .contains("failed: Worktree closed before agent completion"));
     }
 
     #[test]
@@ -2101,7 +2153,7 @@ mod tests {
         let delegations = AgentDelegations::default();
         let panes = AgentPaneStatuses::default();
 
-        delegations.open("delegation-1", "/worktree", None);
+        delegations.open("delegation-1", "/worktree", None, None, None);
         assert_eq!(
             delegations.begin_follow_up("delegation-1", &panes),
             Err("delegation is pending; follow-ups require an idle tab".to_string())
@@ -2126,29 +2178,29 @@ mod tests {
             Ok(("/worktree".to_string(), "pane-1".to_string()))
         );
         assert_eq!(
-            delegations.status("delegation-1", &panes).unwrap().status,
+            delegations.test_status("delegation-1", &panes).unwrap().0,
             "pending"
         );
 
         delegations.observe_hook("/worktree", "pane-1", &panes, "working");
         assert_eq!(
-            delegations.status("delegation-1", &panes).unwrap().status,
+            delegations.test_status("delegation-1", &panes).unwrap().0,
             "running"
         );
         panes.observe("/worktree", "pane-1", "idle");
         assert_eq!(
-            delegations.status("delegation-1", &panes).unwrap().status,
+            delegations.test_status("delegation-1", &panes).unwrap().0,
             "idle"
         );
 
         assert!(delegations.begin_follow_up("delegation-1", &panes).is_ok());
         delegations.cancel_follow_up("delegation-1");
         assert_eq!(
-            delegations.status("delegation-1", &panes).unwrap().status,
+            delegations.test_status("delegation-1", &panes).unwrap().0,
             "idle"
         );
 
-        delegations.open("failed", "/worktree", None);
+        delegations.open("failed", "/worktree", None, None, None);
         assert!(delegations.fail("failed", "PTY failed"));
         assert_eq!(
             delegations.begin_follow_up("failed", &panes),
@@ -2174,7 +2226,7 @@ mod tests {
     fn concurrent_follow_ups_claim_an_idle_delegation_once() {
         let delegations = Arc::new(AgentDelegations::default());
         let panes = Arc::new(AgentPaneStatuses::default());
-        delegations.open("delegation-1", "/worktree", None);
+        delegations.open("delegation-1", "/worktree", None, None, None);
         assert!(delegations.register("delegation-1", "pane-1"));
         delegations.observe_hook("/worktree", "pane-1", &panes, "idle");
 
@@ -2223,7 +2275,13 @@ mod tests {
         let worktree_path = repo.to_str().unwrap();
         let delegations = AgentDelegations::default();
         let panes = AgentPaneStatuses::default();
-        delegations.open("delegation-1", worktree_path, Some("Luna implementation"));
+        delegations.open(
+            "delegation-1",
+            worktree_path,
+            Some("Luna implementation"),
+            None,
+            None,
+        );
         assert!(delegations.register("delegation-1", "pane-1"));
         delegations.observe_hook(worktree_path, "pane-1", &panes, "working");
         fs::write(repo.join("file.txt"), "first\n").unwrap();

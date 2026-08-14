@@ -41,6 +41,7 @@ ignore = "0.4"
 reqwest = { version = "0.13", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "fs", "macros", "time", "sync"] }
 tiny_http = "0.12"
+tungstenite = "0.30"
 urlencoding = "2"
 impala-daemon-shared = { path = "shared" }
 anyhow = "1"
