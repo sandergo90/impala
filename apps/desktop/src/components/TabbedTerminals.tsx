@@ -934,7 +934,7 @@ const TabBody = memo(function TabBody({
           agent,
           resumeSessionId: null,
           useCodexAppServer:
-            launchesAgent && usesImpalaCodexServer(agent, flags),
+            !launchesAgent || agent === "claude" || usesImpalaCodexServer(agent, flags),
         });
       } catch (err) {
         console.warn("Failed to prepare agent config:", err);

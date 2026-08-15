@@ -8,6 +8,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use anyhow::{Context, Result};
 
 const ZSH_133_HOOK: &str = r#"# Impala OSC 133;A prompt marker — fires after every precmd
@@ -34,6 +37,66 @@ function __impala_prompt_mark --on-event fish_prompt
 end
 "#;
 
+const CODEX_WRAPPER: &str = r#"#!/bin/sh
+real_codex="${IMPALA_CODEX_BIN:-}"
+if [ ! -x "$real_codex" ]; then
+  shim_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+  clean_path=""
+  old_ifs=$IFS
+  IFS=:
+  for entry in $PATH; do
+    [ "$entry" = "$shim_dir" ] && continue
+    clean_path="${clean_path:+$clean_path:}$entry"
+  done
+  IFS=$old_ifs
+  PATH=$clean_path
+  export PATH
+  real_codex=$(command -v codex 2>/dev/null || true)
+fi
+
+if [ -z "$real_codex" ]; then
+  echo "Impala could not find the Codex executable." >&2
+  exit 127
+fi
+
+export IMPALA_AGENT_PROVIDER=codex
+remote="${IMPALA_CODEX_APP_SERVER:-}"
+if [ -z "$remote" ]; then
+  exec "$real_codex" "$@"
+fi
+
+for arg in "$@"; do
+  case "$arg" in
+    --) break ;;
+    --remote|--remote=*) exec "$real_codex" "$@" ;;
+  esac
+done
+
+expect_value=false
+for arg in "$@"; do
+  if [ "$expect_value" = true ]; then
+    expect_value=false
+    continue
+  fi
+  case "$arg" in
+    --) break ;;
+    -c|--config|--enable|--disable|--remote-auth-token-env|-i|--image|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
+      expect_value=true
+      ;;
+    exec|e|review|login|logout|mcp|plugin|mcp-server|app-server|remote-control|app|completion|update|doctor|sandbox|debug|execpolicy|apply|a|archive|delete|migrate-rollouts|unarchive|cloud|cloud-tasks|responses-api-proxy|stdio-to-uds|exec-server|features|help)
+      exec "$real_codex" "$@"
+      ;;
+    -*) ;;
+    *) break ;;
+  esac
+done
+
+# This list follows Codex's current command surface. A future subcommand is
+# treated as a prompt until it is added above; replace this shim when Codex
+# exposes a native default-remote setting.
+exec "$real_codex" --remote "$remote" "$@"
+"#;
+
 #[allow(dead_code)]
 pub struct WrapperPaths {
     pub root: PathBuf,
@@ -46,14 +109,17 @@ pub struct WrapperPaths {
 /// `app_data_dir` is typically `~/Library/Application Support/be.kodeus.impala`.
 pub fn ensure_wrappers(app_data_dir: &Path) -> Result<WrapperPaths> {
     let root = app_data_dir.join("shell-wrappers");
+    let bin_dir = root.join("bin");
     let zsh_dir = root.join("zsh");
     let bash_dir = root.join("bash");
+    fs::create_dir_all(&bin_dir).context("create shell-wrappers/bin")?;
     fs::create_dir_all(&zsh_dir).context("create shell-wrappers/zsh")?;
     fs::create_dir_all(&bash_dir).context("create shell-wrappers/bash")?;
 
-    write_zsh_wrappers(&zsh_dir)?;
+    write_executable_if_changed(&bin_dir.join("codex"), CODEX_WRAPPER)?;
+    write_zsh_wrappers(&zsh_dir, &bin_dir)?;
     let bash_rcfile = bash_dir.join("rcfile");
-    write_if_changed(&bash_rcfile, &build_bash_rcfile())?;
+    write_if_changed(&bash_rcfile, &build_bash_rcfile(&bin_dir))?;
 
     let fish_init_command = build_fish_init_command();
 
@@ -65,7 +131,7 @@ pub fn ensure_wrappers(app_data_dir: &Path) -> Result<WrapperPaths> {
     })
 }
 
-fn write_zsh_wrappers(zsh_dir: &Path) -> Result<()> {
+fn write_zsh_wrappers(zsh_dir: &Path, bin_dir: &Path) -> Result<()> {
     let zshenv = format!(
         r#"# Impala zsh env wrapper
 _impala_orig="${{IMPALA_ORIG_ZDOTDIR:-$HOME}}"
@@ -107,22 +173,26 @@ if [[ -o interactive ]]; then
   [[ -f "$_impala_orig/.zlogin" ]] && source "$_impala_orig/.zlogin"
 fi
 {hook}
+export PATH={bin_dir}:$PATH
 ZDOTDIR={zsh_dir}
 "#,
         hook = ZSH_133_HOOK,
+        bin_dir = quote_for_shell(bin_dir.to_str().unwrap_or("")),
         zsh_dir = quote_for_shell(zsh_dir.to_str().unwrap_or("")),
     );
     write_if_changed(&zsh_dir.join(".zlogin"), &zlogin)?;
     Ok(())
 }
 
-fn build_bash_rcfile() -> String {
+fn build_bash_rcfile(bin_dir: &Path) -> String {
     format!(
         r#"# Impala bash rcfile wrapper
 [[ -f "$HOME/.bashrc" ]] && source "$HOME/.bashrc"
 {hook}
+export PATH={bin_dir}:$PATH
 "#,
         hook = BASH_133_HOOK,
+        bin_dir = quote_for_shell(bin_dir.to_str().unwrap_or("")),
     )
 }
 
@@ -146,9 +216,22 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
+fn write_executable_if_changed(path: &Path, contents: &str) -> Result<()> {
+    write_if_changed(path, contents)?;
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::process::Command;
     use tempfile::TempDir;
 
     #[test]
@@ -159,6 +242,7 @@ mod tests {
             assert!(paths.zsh_dir.join(f).exists(), "{f} missing");
         }
         assert!(paths.bash_rcfile.exists());
+        assert!(paths.root.join("bin/codex").exists());
     }
 
     #[test]
@@ -188,5 +272,84 @@ mod tests {
             mtime_before, mtime_after,
             "zshrc was rewritten unnecessarily"
         );
+    }
+
+    #[cfg(unix)]
+    fn run_codex_wrapper(args: &[&str], remote: Option<&str>) -> Vec<String> {
+        let tmp = TempDir::new().unwrap();
+        let paths = ensure_wrappers(tmp.path()).unwrap();
+        let real_codex = tmp.path().join("real-codex");
+        write_executable_if_changed(
+            &real_codex,
+            "#!/bin/sh\nprintf '%s\\n' \"$IMPALA_AGENT_PROVIDER\"\nprintf '%s\\n' \"$@\"\n",
+        )
+        .unwrap();
+
+        let mut command = Command::new(paths.root.join("bin/codex"));
+        command
+            .args(args)
+            .env("IMPALA_CODEX_BIN", real_codex)
+            .env_remove("IMPALA_CODEX_APP_SERVER");
+        if let Some(remote) = remote {
+            command.env("IMPALA_CODEX_APP_SERVER", remote);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{:?}", output);
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_wrapper_routes_interactive_sessions_to_the_managed_server() {
+        let remote = "unix:///tmp/impala-codex.sock";
+        assert_eq!(
+            run_codex_wrapper(&["--yolo"], Some(remote)),
+            ["codex", "--remote", remote, "--yolo"]
+        );
+        assert_eq!(
+            run_codex_wrapper(&["resume", "session-1"], Some(remote)),
+            ["codex", "--remote", remote, "resume", "session-1"]
+        );
+        assert_eq!(
+            run_codex_wrapper(&["fork", "--last"], Some(remote)),
+            ["codex", "--remote", remote, "fork", "--last"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_wrapper_preserves_explicit_remotes_and_non_interactive_commands() {
+        let remote = "unix:///tmp/impala-codex.sock";
+        assert_eq!(
+            run_codex_wrapper(
+                &["resume", "--remote", "ws://127.0.0.1:4222", "session-1"],
+                Some(remote),
+            ),
+            [
+                "codex",
+                "resume",
+                "--remote",
+                "ws://127.0.0.1:4222",
+                "session-1",
+            ]
+        );
+        assert_eq!(
+            run_codex_wrapper(&["--model", "gpt-5.6", "exec", "echo"], Some(remote)),
+            ["codex", "--model", "gpt-5.6", "exec", "echo"]
+        );
+        assert_eq!(
+            run_codex_wrapper(&["app-server", "daemon", "status"], Some(remote)),
+            ["codex", "app-server", "daemon", "status"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_wrapper_falls_back_to_the_normal_cli_without_a_managed_server() {
+        assert_eq!(run_codex_wrapper(&["--yolo"], None), ["codex", "--yolo"]);
     }
 }

@@ -826,12 +826,12 @@ async fn prepare_agent_config(
             setup_claude_integration_sync()?;
             agent_config::write_claude_config(&path)?;
             agent_config::write_codex_config(&path, &mcp_binary, agent == "codex")?;
+            if use_codex_app_server {
+                let codex_home =
+                    agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+                env.extend(codex_app_server::launch_environment(&codex_home)?);
+            }
             if agent == "codex" {
-                if use_codex_app_server {
-                    let codex_home = agent_config::codex_home_path()
-                        .ok_or_else(|| "no Codex home".to_string())?;
-                    env.extend(codex_app_server::launch_environment(&codex_home)?);
-                }
                 if let Some(session_id) = resume_session_id.filter(|id| !id.is_empty()) {
                     let codex_home = agent_config::codex_home_path()
                         .ok_or_else(|| "no Codex home".to_string())?;

@@ -160,6 +160,7 @@ pub fn prepare_shell_launch() -> ShellLaunch {
         .join("be.kodeus.impala");
     let zsh_dir = app_data.join("shell-wrappers/zsh");
     let bash_rcfile = app_data.join("shell-wrappers/bash/rcfile");
+    let wrapper_bin = app_data.join("shell-wrappers/bin");
 
     let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let shell_basename = Path::new(&shell_path)
@@ -169,6 +170,19 @@ pub fn prepare_shell_launch() -> ShellLaunch {
         .to_string();
 
     let mut env = HashMap::new();
+    let path = std::env::var_os("PATH")
+        .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .unwrap_or_default();
+    env.insert(
+        "PATH".into(),
+        std::env::join_paths(
+            std::iter::once(wrapper_bin.clone())
+                .chain(path.into_iter().filter(|entry| entry != &wrapper_bin)),
+        )
+        .unwrap_or_else(|_| wrapper_bin.into_os_string())
+        .to_string_lossy()
+        .into_owned(),
+    );
     let shell_args = match shell_basename.as_str() {
         "zsh" => {
             let original = original_zdotdir(
@@ -203,7 +217,7 @@ pub fn prepare_shell_launch() -> ShellLaunch {
 
 #[cfg(test)]
 mod tests {
-    use super::original_zdotdir;
+    use super::{original_zdotdir, prepare_shell_launch};
 
     #[test]
     fn inherited_impala_original_wins_over_wrapper_zdotdir() {
@@ -215,5 +229,17 @@ mod tests {
             ),
             "/Users/test"
         );
+    }
+
+    #[test]
+    fn shell_launch_prefers_impalas_command_wrappers() {
+        let launch = prepare_shell_launch();
+        let first_path = std::env::split_paths(launch.env["PATH"].as_str())
+            .next()
+            .unwrap();
+        let expected = dirs::data_local_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+            .join("be.kodeus.impala/shell-wrappers/bin");
+        assert_eq!(first_path, expected);
     }
 }

@@ -112,10 +112,19 @@ fn environment_from_daemon_outputs(
         &serde_json::from_slice(started)
             .map_err(|error| format!("parse Codex daemon start output: {error}"))?,
     )?;
-    Ok(HashMap::from([(
-        "IMPALA_CODEX_APP_SERVER".to_string(),
-        format!("unix://{}", socket.display()),
-    )]))
+    Ok(HashMap::from([
+        (
+            "IMPALA_CODEX_APP_SERVER".to_string(),
+            format!("unix://{}", socket.display()),
+        ),
+        (
+            "IMPALA_CODEX_BIN".to_string(),
+            codex_home
+                .join("packages/standalone/current/codex")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+    ]))
 }
 
 fn validate_daemon_socket(codex_home: &Path, output: &Value) -> Result<PathBuf, String> {
@@ -398,6 +407,10 @@ mod tests {
         assert_eq!(
             env["IMPALA_CODEX_APP_SERVER"],
             "unix:///Users/test/.codex/app-server-control/app-server-control.sock"
+        );
+        assert_eq!(
+            env["IMPALA_CODEX_BIN"],
+            "/Users/test/.codex/packages/standalone/current/codex"
         );
         assert!(environment_from_daemon_outputs(
             codex_home,
