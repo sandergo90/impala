@@ -892,6 +892,31 @@ async fn revoke_codex_remote_client(
     .map_err(|error| format!("task join: {error}"))?
 }
 
+/// Durable recovery source for native Codex surfaces after a webview reload.
+#[tauri::command]
+async fn get_codex_app_server_snapshot(
+    state: tauri::State<'_, codex_app_server::CodexAppServerState>,
+) -> Result<codex_app_server::CodexAppServerSnapshot, String> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || state.snapshot())
+        .await
+        .map_err(|error| format!("task join: {error}"))?
+}
+
+/// Completes a pending approval/input request delivered by the managed app-server.
+#[tauri::command]
+async fn respond_to_codex_app_server_request(
+    state: tauri::State<'_, codex_app_server::CodexAppServerState>,
+    request_id: serde_json::Value,
+    result: Option<serde_json::Value>,
+    error: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || state.respond_to_server_request(request_id, result, error))
+        .await
+        .map_err(|error| format!("task join: {error}"))?
+}
+
 fn setup_claude_integration_sync() -> Result<String, String> {
     let home = dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
 
@@ -1988,6 +2013,9 @@ pub fn run() {
 
             app.manage(DbState(Mutex::new(conn)));
             app.manage(daemon_client::DaemonState::new());
+            app.manage(codex_app_server::CodexAppServerState::new(
+                app.handle().clone(),
+            ));
             app.manage(automations::AutomationRunClaims::default());
             app.manage(browser::BrowserRegistry::default());
             app.manage(watcher::WatcherState::new());
@@ -2221,6 +2249,8 @@ pub fn run() {
             start_codex_remote_pairing,
             get_codex_remote_pairing_status,
             revoke_codex_remote_client,
+            get_codex_app_server_snapshot,
+            respond_to_codex_app_server_request,
             get_project_issue_tracker,
             list_my_issues,
             search_issues,
