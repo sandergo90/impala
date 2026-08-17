@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Per-tab state for every live browser webview, keyed by tab id. Lets
 /// worktree-scoped callers (hook-server endpoints, MCP tools) find "the
@@ -466,7 +466,6 @@ pub async fn browser_open(
                 return false;
             }
             if let Some(payload) = forwarded_key(url) {
-                debug!(id = %nav_id, "browser forwarded key chord");
                 let _ = nav_app.emit_to("main", "browser-forward-key", payload);
                 return false;
             }
@@ -486,7 +485,6 @@ pub async fn browser_open(
                 }
                 return false;
             }
-            debug!(id = %nav_id, url = %url, "browser on_navigation");
             if let Some(url) = toolbar_url_for_event(url, false) {
                 let _ = nav_app.emit_to("main", &format!("browser-nav-{nav_id}"), url);
             }
@@ -509,7 +507,6 @@ pub async fn browser_open(
         })
         .on_page_load(move |_wv, payload| {
             let loading = matches!(payload.event(), PageLoadEvent::Started);
-            debug!(id = %load_id, url = %payload.url(), loading, "browser on_page_load");
             // A committed main-page URL corrects any speculative/subframe
             // candidate previously seen by on_navigation (notably redirects).
             if let Some(url) = toolbar_url_for_event(payload.url(), true) {
@@ -590,7 +587,6 @@ const PARK_OFFSET: f64 = -20000.0;
 
 #[tauri::command]
 pub async fn browser_set_visible(app: AppHandle, id: String, visible: bool) -> Result<(), String> {
-    debug!(id = %id, visible, "browser_set_visible");
     let wv = get_webview(&app, &id)?;
     if underlay_ready() {
         #[cfg(target_os = "macos")]
@@ -705,7 +701,6 @@ pub fn webview_for_worktree(app: &AppHandle, worktree_path: &str) -> Result<Webv
 pub fn screenshot_png_base64(wv: &Webview) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     let png = native::take_screenshot(wv, Duration::from_secs(5))?;
-    debug!(bytes = png.len(), "browser screenshot captured");
     Ok(STANDARD.encode(png))
 }
 
