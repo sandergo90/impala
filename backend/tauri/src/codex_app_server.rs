@@ -320,7 +320,7 @@ impl CodexAppServerState {
             value.get("data").and_then(Value::as_array).cloned().ok_or_else(|| "Codex mcpServerStatus/list returned no data array".to_string())
         })?;
         let servers = items.into_iter().filter_map(sanitize_mcp_server).collect::<Vec<_>>();
-        let impala = servers.iter().find(|server| server.name == "impala-mcp");
+        let impala = find_configured_mcp_server(&servers);
         let impala_mcp_unhealthy_reason = match impala {
             None => Some("impala-mcp is not configured or did not report a status".to_string()),
             Some(server) => match server.auth_status.as_deref() {
@@ -471,6 +471,12 @@ fn sanitize_mcp_server(value: Value) -> Option<DiagnosticsMcpServer> {
         auth_status: value.get("authStatus").and_then(Value::as_str).map(str::to_string),
         tool_count: value.get("tools").and_then(Value::as_object).map_or(0, |tools| tools.len()),
     })
+}
+
+fn find_configured_mcp_server(servers: &[DiagnosticsMcpServer]) -> Option<&DiagnosticsMcpServer> {
+    servers
+        .iter()
+        .find(|server| server.name == crate::agent_config::CONFIGURED_MCP_SERVER_NAME)
 }
 
 fn app_server_worker(
@@ -1372,6 +1378,22 @@ mod tests {
     fn diagnostics_pagination_is_bounded_and_visible() {
         assert!(!diagnostics_page_limit_reached(DIAGNOSTICS_MAX_PAGES - 2));
         assert!(diagnostics_page_limit_reached(DIAGNOSTICS_MAX_PAGES - 1));
+    }
+
+    #[test]
+    fn diagnostics_recognize_configured_impala_mcp_server() {
+        let server = sanitize_mcp_server(json!({
+            "name": "impala",
+            "authStatus": "loggedIn",
+            "tools": { "list_annotations": {} },
+            "serverInfo": { "name": "impala-mcp" },
+        }))
+        .unwrap();
+
+        let servers = vec![server];
+        let selected = find_configured_mcp_server(&servers);
+
+        assert_eq!(selected.map(|server| server.name.as_str()), Some("impala"));
     }
 
     #[test]

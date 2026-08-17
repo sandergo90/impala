@@ -9,6 +9,7 @@ use std::sync::Mutex;
 
 static CODEX_CONFIG_LOCK: Mutex<()> = Mutex::new(());
 static CODEX_CONFIG_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+pub(crate) const CONFIGURED_MCP_SERVER_NAME: &str = "impala";
 
 struct CodexConfigFileLock(fs::File);
 
@@ -304,7 +305,7 @@ fn upsert_codex_mcp_server(root: &mut toml::value::Table, mcp_binary: &str) -> R
         "env_vars".into(),
         Value::Array(vec![Value::String("IMPALA_HOOK_PORT".into())]),
     );
-    mcp_servers.insert("impala".into(), Value::Table(impala_mcp));
+    mcp_servers.insert(CONFIGURED_MCP_SERVER_NAME.into(), Value::Table(impala_mcp));
 
     Ok(())
 }
