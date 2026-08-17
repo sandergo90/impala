@@ -1580,26 +1580,21 @@ fn handle_agent_request(
         let reasoning_effort = params
             .get("reasoning_effort")
             .filter(|value| !value.trim().is_empty());
-        if let Some(value) = reasoning_effort {
-            if !matches!(
-                value.as_str(),
-                "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
-            ) {
-                return Err("invalid reasoning_effort".to_string());
-            }
-        }
         let service_tier = params
             .get("service_tier")
             .filter(|value| !value.trim().is_empty());
-        if let Some(value) = service_tier {
-            if !matches!(value.as_str(), "default" | "fast" | "standard") {
-                return Err("invalid service_tier".to_string());
-            }
-        }
         if (model.is_some() || reasoning_effort.is_some() || service_tier.is_some())
             && agent.map(String::as_str) != Some("codex")
         {
             return Err("Codex launch options require agent=codex".to_string());
+        }
+        if agent.map(String::as_str) == Some("codex")
+            && (model.is_some() || reasoning_effort.is_some() || service_tier.is_some())
+        {
+            let settings = agent_open_codex_settings(model, reasoning_effort, service_tier)?;
+            app.state::<crate::codex_app_server::CodexAppServerState>()
+                .native_settings_supported(&settings)
+                .map_err(|error| format!("unsupported Codex launch settings: {error}"))?;
         }
         let source_pane_id = params
             .get("source_pane_id")
@@ -1675,6 +1670,25 @@ fn handle_agent_request(
         }
         Err(error) => serde_json::json!({ "ok": false, "error": error }),
     }
+}
+
+fn agent_open_codex_settings(
+    model: Option<&String>,
+    reasoning_effort: Option<&String>,
+    service_tier: Option<&String>,
+) -> Result<serde_json::Value, String> {
+    let mut settings = serde_json::json!({});
+    if let Some(model) = model {
+        settings["model"] = serde_json::Value::String(model.clone());
+    }
+    if let Some(effort) = reasoning_effort {
+        settings["effort"] = serde_json::Value::String(effort.clone());
+    }
+    if let Some(tier) = service_tier {
+        settings["serviceTier"] = serde_json::Value::String(tier.clone());
+    }
+    crate::automations::validate_native_codex_settings(&settings)?;
+    Ok(settings)
 }
 
 fn write_agent_follow_up(
@@ -1970,7 +1984,7 @@ fn publish_hook_port(home: &Path, port: u16) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_follow_up_write_request, hook_command, pane_status_for_hook_event, publish_hook_port,
+        agent_follow_up_write_request, agent_open_codex_settings, hook_command, pane_status_for_hook_event, publish_hook_port,
         AgentDelegations, AgentPaneStatuses, AutomationCompletionTracker, InterruptedAgentTurns,
         IMPALA_BROWSER_SKILL,
     };
@@ -1982,6 +1996,22 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Command, Stdio};
     use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn agent_open_uses_the_shared_catalog_for_future_codex_identifiers() {
+        let model = "future-model".to_string();
+        let effort = "deep".to_string();
+        let tier = "priority".to_string();
+        let settings = agent_open_codex_settings(Some(&model), Some(&effort), Some(&tier)).unwrap();
+        let catalog = [crate::codex_app_server::ModelCatalogEntry {
+            id: model,
+            is_default: true,
+            efforts: vec![effort],
+            tiers: vec![tier],
+            modalities: vec!["text".to_string()],
+        }];
+        assert!(crate::codex_app_server::validate_native_settings_catalog(&settings, &catalog).is_ok());
+    }
 
     #[test]
     fn hook_port_discovery_preserves_a_reachable_primary() {

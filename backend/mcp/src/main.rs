@@ -440,44 +440,11 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
         .and_then(|value| value.as_str())
         .filter(|value| !value.trim().is_empty())
         .ok_or("missing required parameter: prompt")?;
-    let agent = args.get("agent").and_then(|value| value.as_str());
-    if let Some(agent) = agent {
-        if agent != "claude" && agent != "codex" {
-            return Err("agent must be 'claude' or 'codex'".to_string());
-        }
-    }
+    let (agent, model, reasoning_effort, service_tier) = agent_open_codex_options(args)?;
     let name = args
         .get("name")
         .and_then(|value| value.as_str())
         .filter(|value| !value.trim().is_empty());
-    let model = args.get("model").and_then(|value| value.as_str());
-    let reasoning_effort = args
-        .get("reasoning_effort")
-        .and_then(|value| value.as_str());
-    if let Some(value) = reasoning_effort {
-        if !matches!(
-            value,
-            "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
-        ) {
-            return Err(
-                "reasoning_effort must be one of: none, minimal, low, medium, high, xhigh, max, ultra"
-                    .to_string(),
-            );
-        }
-    }
-    let service_tier = args.get("service_tier").and_then(|value| value.as_str());
-    if let Some(value) = service_tier {
-        if !matches!(value, "default" | "fast" | "standard") {
-            return Err("service_tier must be 'default', 'fast', or 'standard'".to_string());
-        }
-    }
-    if (model.is_some() || reasoning_effort.is_some() || service_tier.is_some())
-        && agent != Some("codex")
-    {
-        return Err(
-            "model, reasoning_effort, and service_tier require agent='codex'".to_string(),
-        );
-    }
     let placement = args
         .get("placement")
         .and_then(|value| value.as_str())
@@ -525,6 +492,25 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
     }
     params.push(("placement", placement));
     browser_get("/agents/open", &params).map(strip_ok)
+}
+
+fn agent_open_codex_options(args: &Value) -> Result<(Option<&str>, Option<&str>, Option<&str>, Option<&str>), String> {
+    let agent = args.get("agent").map(|value| value.as_str().ok_or("agent must be a string")).transpose()?;
+    if let Some(agent) = agent {
+        if agent != "claude" && agent != "codex" {
+            return Err("agent must be 'claude' or 'codex'".to_string());
+        }
+    }
+    let optional = |key: &str| -> Result<Option<&str>, String> {
+        args.get(key).map(|value| value.as_str().filter(|value| !value.trim().is_empty()).ok_or_else(|| format!("{key} must be a nonblank string"))).transpose()
+    };
+    let model = optional("model")?;
+    let reasoning_effort = optional("reasoning_effort")?;
+    let service_tier = optional("service_tier")?;
+    if (model.is_some() || reasoning_effort.is_some() || service_tier.is_some()) && agent != Some("codex") {
+        return Err("model, reasoning_effort, and service_tier require agent='codex'".to_string());
+    }
+    Ok((agent, model, reasoning_effort, service_tier))
 }
 
 fn codex_source_thread_id(remote: Option<&str>, thread_id: Option<&str>) -> Option<String> {
@@ -884,12 +870,12 @@ fn tool_definitions() -> Value {
                         },
                         "reasoning_effort": {
                             "type": "string",
-                            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+                            "minLength": 1,
                             "description": "Codex reasoning effort for this tab. Requires agent='codex'."
                         },
                         "service_tier": {
                             "type": "string",
-                            "enum": ["default", "fast", "standard"],
+                            "minLength": 1,
                             "description": "Codex service tier for this tab. Requires agent='codex'."
                         },
                         "placement": {
@@ -1302,5 +1288,22 @@ mod tests {
             codex_source_thread_id(Some("unix:///tmp/impala.sock"), Some(" ")),
             None
         );
+    }
+
+    #[test]
+    fn sidecar_forwards_future_codex_capability_identifiers() {
+        let args = json!({
+            "agent": "codex",
+            "model": "future-model",
+            "reasoning_effort": "deep",
+            "service_tier": "priority",
+        });
+        let options = agent_open_codex_options(&args).unwrap();
+        assert_eq!(options, (Some("codex"), Some("future-model"), Some("deep"), Some("priority")));
+        assert!(tool_definitions()["tools"].as_array().unwrap().iter().any(|tool| {
+            tool["name"] == "open_agent_tab"
+                && tool["inputSchema"]["properties"]["reasoning_effort"].get("enum").is_none()
+                && tool["inputSchema"]["properties"]["service_tier"].get("enum").is_none()
+        }));
     }
 }
