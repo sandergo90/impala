@@ -402,17 +402,19 @@ function NativeCodexPane({
     threadIdRef.current = opened.threadId;
     setPane(opened);
 
-    const [thread, snapshot] = await Promise.all([
-      invoke<unknown>("read_native_codex_pane", { worktreePath, paneId }),
-      invoke<{
-        threads: Array<{
-          threadId: string;
-          activeTurn?: string | null;
-          status?: string | null;
-          pendingServerRequests: PendingCodexRequest[];
-        }>;
-      }>("get_codex_app_server_snapshot"),
-    ]);
+    const thread = await invoke<unknown>("read_native_codex_pane", {
+      worktreePath,
+      paneId,
+    });
+    const snapshot = await invoke<{
+      threads: Array<{
+        threadId: string;
+        activeTurn?: string | null;
+        status?: string | null;
+        eventSequence?: number;
+        pendingServerRequests: PendingCodexRequest[];
+      }>;
+    }>("get_codex_app_server_snapshot");
     const threadSnapshot = snapshot.threads.find(
       (entry) => entry.threadId === opened.threadId,
     );

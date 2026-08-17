@@ -39,16 +39,23 @@ export const initialNativeCodexPaneState: NativeCodexPaneState = {
 export function seedNativeCodexPaneState(
   state: NativeCodexPaneState,
   pane: { currentTurnId?: string | null; state: string },
-  snapshot?: { activeTurn?: string | null; status?: string | null },
+  snapshot?: {
+    activeTurn?: string | null;
+    status?: string | null;
+    eventSequence?: number;
+  },
 ): NativeCodexPaneState {
-  const activeTurnId = snapshot
-    ? (snapshot.activeTurn ?? null)
+  const snapshotIsAuthoritative = Boolean(
+    snapshot?.eventSequence || snapshot?.activeTurn || snapshot?.status,
+  );
+  const activeTurnId = snapshotIsAuthoritative
+    ? (snapshot?.activeTurn ?? null)
     : (pane.currentTurnId ?? state.activeTurnId);
   return {
     ...state,
     activeTurnId,
     status:
-      snapshot?.status ??
+      (snapshotIsAuthoritative ? snapshot?.status : null) ??
       (activeTurnId ? "working" : pane.state || state.status),
   };
 }

@@ -65,16 +65,24 @@ test("durable transport ownership takes precedence over the creation setting", (
 
 test("seeds active turn controls from durable and authoritative reload state", () => {
   expect(
-    seedNativeCodexPaneState(initialNativeCodexPaneState, {
-      currentTurnId: "durable-turn",
-      state: "working",
-    }),
+    seedNativeCodexPaneState(
+      initialNativeCodexPaneState,
+      {
+        currentTurnId: "durable-turn",
+        state: "working",
+      },
+      { activeTurn: null, status: null, eventSequence: 0 },
+    ),
   ).toMatchObject({ activeTurnId: "durable-turn", status: "working" });
   expect(
     seedNativeCodexPaneState(
       { ...initialNativeCodexPaneState, activeTurnId: "stale-turn" },
       { currentTurnId: "durable-turn", state: "working" },
-      { activeTurn: "snapshot-turn", status: "waitingOnApproval" },
+      {
+        activeTurn: "snapshot-turn",
+        status: "waitingOnApproval",
+        eventSequence: 1,
+      },
     ),
   ).toMatchObject({
     activeTurnId: "snapshot-turn",

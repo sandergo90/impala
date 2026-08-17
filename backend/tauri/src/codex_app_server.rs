@@ -234,7 +234,12 @@ impl AppServerSnapshotState {
         }
     }
 
-    fn apply_thread_value(&mut self, value: &Value, fallback_thread_id: Option<&str>) {
+    fn apply_thread_value(
+        &mut self,
+        value: &Value,
+        fallback_thread_id: Option<&str>,
+        clear_missing_active_turn: bool,
+    ) {
         let thread = value.get("thread").unwrap_or(value);
         let thread_id = thread
             .get("id")
@@ -253,6 +258,8 @@ impl AppServerSnapshotState {
             .and_then(Value::as_str)
         {
             state.active_turn = Some(turn_id.to_string());
+        } else if clear_missing_active_turn {
+            state.active_turn = None;
         }
     }
 }
@@ -1031,7 +1038,7 @@ fn apply_notification(envelope: &Value, snapshot: &Arc<Mutex<AppServerSnapshotSt
     let thread_id = thread_id_from(params);
     if let Ok(mut state) = snapshot.lock() {
         state.record_event(envelope.clone(), thread_id.as_deref());
-        state.apply_thread_value(params, thread_id.as_deref());
+        state.apply_thread_value(params, thread_id.as_deref(), false);
         if let Some(thread_id) = thread_id
             .as_deref()
             .filter(|id| state.threads.contains_key(*id))
@@ -1176,7 +1183,7 @@ fn apply_response(
         if let Some(thread_id) = thread_id.as_deref() {
             if let Ok(mut state) = snapshot.lock() {
                 state.threads.entry(thread_id.to_string()).or_default();
-                state.apply_thread_value(result, Some(thread_id));
+                state.apply_thread_value(result, Some(thread_id), false);
                 state.record_event(
                     json!({ "method": method, "result": result }),
                     Some(thread_id),
@@ -1186,7 +1193,7 @@ fn apply_response(
         return;
     }
     if let Ok(mut state) = snapshot.lock() {
-        state.apply_thread_value(result, thread_id.as_deref());
+        state.apply_thread_value(result, thread_id.as_deref(), method == "thread/read");
         if let Some(thread_id) = thread_id.as_deref() {
             if let Some(thread) = state.threads.get_mut(thread_id) {
                 if method == "turn/start" || method == "turn/steer" {
@@ -1416,15 +1423,52 @@ fn validate_mcp_elicitation_response(params: &Value, result: &Value) -> Result<(
             }
             let content = result.get("content").and_then(Value::as_object)
                 .ok_or_else(|| "Codex MCP acceptance content must be an object".to_string())?;
-            if content.values().any(|value| !value.is_string() && !value.is_number() && !value.is_boolean()) {
-                return Err("Codex MCP acceptance content must use primitive values".to_string());
-            }
-            Ok(())
+            validate_mcp_form_content(params, content)
         }
         "decline" | "cancel" if result.len() == 1 => Ok(()),
         "decline" | "cancel" => Err("Codex MCP decline or cancel cannot include content".to_string()),
         _ => Err("Codex MCP elicitation action is invalid".to_string()),
     }
+}
+
+fn validate_mcp_form_content(
+    params: &Value,
+    content: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
+    let schema = params.get("requestedSchema").and_then(Value::as_object);
+    let properties = schema.and_then(|schema| schema.get("properties")).and_then(Value::as_object)
+        .cloned().unwrap_or_default();
+    if content.keys().any(|key| !properties.contains_key(key)) {
+        return Err("Codex MCP acceptance contains an unknown form field".to_string());
+    }
+    let required = match schema.and_then(|schema| schema.get("required")).and_then(Value::as_array) {
+        Some(fields) => fields.iter().map(Value::as_str).collect::<Option<Vec<_>>>()
+            .ok_or_else(|| "Codex MCP requested schema has invalid required fields".to_string())?,
+        None => Vec::new(),
+    };
+    if required.iter().any(|field| !properties.contains_key(*field) || !content.contains_key(*field)) {
+        return Err("Codex MCP acceptance is missing a required form field".to_string());
+    }
+    for (key, value) in content {
+        let definition = properties.get(key).and_then(Value::as_object)
+            .ok_or_else(|| "Codex MCP requested schema has an invalid property".to_string())?;
+        match definition.get("type").and_then(Value::as_str).unwrap_or("string") {
+            "string" if value.is_string() => {}
+            "boolean" if value.is_boolean() => {}
+            "number" if value.is_number() => {}
+            "integer" if value.as_i64().is_some() || value.as_u64().is_some() => {}
+            "string" | "boolean" | "number" | "integer" => {
+                return Err(format!("Codex MCP form field {key} has the wrong type"));
+            }
+            _ => return Err(format!("Codex MCP form field {key} has an unsupported type")),
+        }
+        if let Some(options) = definition.get("enum").and_then(Value::as_array) {
+            if !options.iter().any(|option| option == value) {
+                return Err(format!("Codex MCP form field {key} must use an offered value"));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn take_server_request(
@@ -1443,10 +1487,6 @@ fn take_server_request(
         }
     }
     None
-}
-
-fn has_server_request(snapshot: &Arc<Mutex<AppServerSnapshotState>>, request_id: &Value) -> bool {
-    find_server_request(snapshot, request_id).is_some()
 }
 
 fn consume_server_request_after_write(snapshot: &Arc<Mutex<AppServerSnapshotState>>, request_id: &Value, outcome: Result<(), String>) -> Result<(), String> {
@@ -1997,7 +2037,7 @@ mod tests {
             numeric_response["result"]
         );
         let recovered = snapshot.lock().unwrap().snapshot();
-        assert_eq!(recovered.threads[0].active_turn.as_deref(), Some("turn-2"));
+        assert_eq!(recovered.threads[0].active_turn, None);
         assert!(recovered
             .recent_events
             .iter()
@@ -2067,7 +2107,13 @@ mod tests {
         let tool = request("item/tool/requestUserInput", json!({ "questions": [{ "id": "choice" }] }));
         assert!(validate_server_request_response(&tool, &Some(json!({ "answers": { "choice": { "answers": ["Read"] } } })), &None).is_ok());
         assert!(validate_server_request_response(&tool, &Some(json!({ "answers": { "other": { "answers": ["Read"] } } })), &None).is_err());
-        let mcp = request("mcpServer/elicitation/request", json!({ "mode": "form" }));
+        let mcp = request("mcpServer/elicitation/request", json!({
+            "mode": "form",
+            "requestedSchema": {
+                "properties": { "count": { "type": "number" }, "enabled": { "type": "boolean" } },
+                "required": ["count", "enabled"]
+            }
+        }));
         assert!(validate_server_request_response(&mcp, &Some(json!({ "action": "accept", "content": { "count": 2, "enabled": true } })), &None).is_ok());
         assert!(validate_server_request_response(&mcp, &Some(json!({ "action": "accept" })), &None).is_err());
         let mcp_url = request("mcpServer/elicitation/request", json!({ "mode": "url" }));
@@ -2077,6 +2123,38 @@ mod tests {
         assert!(validate_server_request_response(&unknown, &Some(json!({})), &None).is_err());
         assert!(validate_server_request_response(&unknown, &None, &Some(json!({ "code": -32000, "message": "no" }))).is_err());
         assert!(validate_server_request_response(&command, &None, &Some(json!({ "code": "bad", "message": "no" }))).is_err());
+    }
+
+    #[test]
+    fn validates_mcp_form_content_against_the_requested_schema() {
+        let params = json!({
+            "mode": "form",
+            "requestedSchema": {
+                "properties": {
+                    "name": { "type": "string" },
+                    "count": { "type": "number" },
+                    "enabled": { "type": "boolean" },
+                    "action": { "type": "string", "enum": ["read"] }
+                },
+                "required": ["name", "count", "enabled", "action"]
+            }
+        });
+        let response = |content| json!({ "action": "accept", "content": content });
+        assert!(validate_mcp_elicitation_response(&params, &response(json!({
+            "name": "Codex", "count": 2, "enabled": true, "action": "read"
+        }))).is_ok());
+        assert!(validate_mcp_elicitation_response(&params, &response(json!({
+            "name": "Codex", "count": 2, "enabled": true, "action": "read", "extra": "no"
+        }))).is_err());
+        assert!(validate_mcp_elicitation_response(&params, &response(json!({
+            "name": "Codex", "enabled": true, "action": "read"
+        }))).is_err());
+        assert!(validate_mcp_elicitation_response(&params, &response(json!({
+            "name": "Codex", "count": "2", "enabled": true, "action": "read"
+        }))).is_err());
+        assert!(validate_mcp_elicitation_response(&params, &response(json!({
+            "name": "Codex", "count": 2, "enabled": true, "action": "write"
+        }))).is_err());
     }
 
     #[test]
@@ -2096,10 +2174,10 @@ mod tests {
                 thread_id: Some("thread-1".to_string()),
             });
         assert_eq!(consume_server_request_after_write(&snapshot, &json!(19), Err("write failed".to_string())).unwrap_err(), "write failed");
-        assert!(has_server_request(&snapshot, &json!(19)));
+        assert!(find_server_request(&snapshot, &json!(19)).is_some());
         // A successful write consumes it exactly once.
         consume_server_request_after_write(&snapshot, &json!(19), Ok(())).unwrap();
-        assert!(!has_server_request(&snapshot, &json!(19)));
+        assert!(find_server_request(&snapshot, &json!(19)).is_none());
         assert!(take_server_request(&snapshot, &json!(19)).is_none());
     }
 
@@ -2182,6 +2260,13 @@ mod tests {
     #[test]
     fn snapshots_recover_state_without_reconnecting() {
         let snapshot = test_snapshot(&["thread-1"]);
+        snapshot
+            .lock()
+            .unwrap()
+            .threads
+            .get_mut("thread-1")
+            .unwrap()
+            .active_turn = Some("stale-turn".to_string());
         apply_response(
             "thread/read",
             &json!({ "threadId": "thread-1" }),
@@ -2191,6 +2276,7 @@ mod tests {
         let first = snapshot.lock().unwrap().snapshot();
         let second = snapshot.lock().unwrap().snapshot();
         assert_eq!(first.connection.status, "connected");
+        assert_eq!(first.threads[0].active_turn, None);
         assert_eq!(first.threads[0].status, second.threads[0].status);
         assert_eq!(
             first.threads[0].event_sequence,
