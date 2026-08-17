@@ -451,4 +451,22 @@ test("validates required MCP forms before producing content", () => {
       { action: "write" },
     ),
   ).toEqual({ error: "action must use an offered value" });
+  expect(
+    coerceMcpForm(
+      { properties: { count: { type: "integer" } } },
+      { count: "1.5" },
+    ),
+  ).toEqual({ error: "count must be an integer" });
+  expect(
+    coerceMcpForm(
+      { properties: { count: { type: "integer" } } },
+      { count: "2" },
+    ),
+  ).toEqual({ content: { count: 2 } });
+  expect(
+    coerceMcpForm(
+      { properties: { ratio: { type: "number" } } },
+      { ratio: "1.5" },
+    ),
+  ).toEqual({ content: { ratio: 1.5 } });
 });

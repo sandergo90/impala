@@ -436,9 +436,15 @@ export function coerceMcpForm(
     if (!raw) continue;
     const type = object(definition)?.type;
     if (type === "boolean") content[key] = raw === "true";
-    else if (type === "number" || type === "integer") {
+    else if (type === "number") {
       const number = Number(raw);
       if (!Number.isFinite(number)) return { error: `${key} must be a number` };
+      content[key] = number;
+    } else if (type === "integer") {
+      const number = Number(raw);
+      if (!Number.isFinite(number) || !Number.isInteger(number)) {
+        return { error: `${key} must be an integer` };
+      }
       content[key] = number;
     } else content[key] = raw;
     const choices = object(definition)?.enum;
