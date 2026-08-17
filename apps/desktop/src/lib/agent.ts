@@ -2,6 +2,10 @@ import { invoke } from "@/lib/invoke";
 
 export type Agent = "claude" | "codex";
 
+export function agentForTerminalLaunch(agent: Agent, codexResumeThreadId?: string): Agent {
+  return codexResumeThreadId ? "codex" : agent;
+}
+
 export interface CodexLaunchOptions {
   model?: string;
   reasoningEffort?:
@@ -197,6 +201,10 @@ export function buildAutomationResumeCommand(
   const args =
     agent === "codex" ? ["resume", sessionId] : ["--resume", sessionId];
   return buildAgentCommand(agent, flags, args, env);
+}
+
+export function buildCodexResumeCommand(flags: string, threadId: string, env?: Record<string, string>): string {
+  return buildAgentCommand("codex", flags, ["resume", threadId], env);
 }
 
 /** Direct commands still need shell setup for tools such as mise. */

@@ -252,6 +252,58 @@ impl CodexAppServerState {
         )
     }
 
+    pub fn turn_steer(
+        &self,
+        thread_id: &str,
+        expected_turn_id: &str,
+        input: Value,
+    ) -> Result<Value, String> {
+        self.ensure_owned_thread(thread_id)?;
+        if expected_turn_id.trim().is_empty() {
+            return Err("Codex expected turn id is empty".to_string());
+        }
+        self.dispatch(
+            "turn/steer",
+            json!({ "threadId": thread_id, "expectedTurnId": expected_turn_id, "input": input }),
+        )
+    }
+
+    pub fn thread_fork(&self, thread_id: &str, params: Value) -> Result<Value, String> {
+        self.ensure_owned_thread(thread_id)?;
+        let mut params = params;
+        params["threadId"] = Value::String(thread_id.to_string());
+        self.dispatch("thread/fork", params)
+    }
+
+    pub fn thread_archive(&self, thread_id: &str) -> Result<Value, String> {
+        self.ensure_owned_thread(thread_id)?;
+        self.dispatch("thread/archive", json!({ "threadId": thread_id }))
+    }
+
+    pub fn thread_unarchive(&self, thread_id: &str) -> Result<Value, String> {
+        self.ensure_owned_thread(thread_id)?;
+        self.dispatch("thread/unarchive", json!({ "threadId": thread_id }))
+    }
+
+    pub fn review_start(&self, thread_id: &str, target: Value) -> Result<Value, String> {
+        self.ensure_owned_thread(thread_id)?;
+        self.dispatch(
+            "review/start",
+            json!({ "threadId": thread_id, "target": target, "delivery": "inline" }),
+        )
+    }
+
+    pub fn thread_unsubscribe(&self, thread_id: &str) -> Result<Value, String> {
+        self.ensure_owned_thread(thread_id)?;
+        self.dispatch("thread/unsubscribe", json!({ "threadId": thread_id }))
+    }
+
+    /// This is intentionally separate from unsubscribe so callers can make
+    /// their durable transport switch before giving up native recovery.
+    pub fn disown_thread_after_unsubscribe(&self, thread_id: &str) -> Result<(), String> {
+        self.disown_thread(thread_id)
+    }
+
     pub fn respond_to_server_request(
         &self,
         request_id: Value,
@@ -288,6 +340,21 @@ impl CodexAppServerState {
             .threads
             .contains_key(thread_id);
         if owned {
+            Ok(())
+        } else {
+            Err(format!("Codex thread {thread_id} is not Impala-owned"))
+        }
+    }
+
+    fn disown_thread(&self, thread_id: &str) -> Result<(), String> {
+        let removed = self
+            .snapshot
+            .lock()
+            .map_err(|_| "Codex app-server state lock poisoned".to_string())?
+            .threads
+            .remove(thread_id)
+            .is_some();
+        if removed {
             Ok(())
         } else {
             Err(format!("Codex thread {thread_id} is not Impala-owned"))
@@ -378,7 +445,16 @@ fn handle_worker_command(
         } => {
             if matches!(
                 method.as_str(),
-                "thread/resume" | "turn/start" | "turn/interrupt"
+                "thread/resume"
+                    | "thread/read"
+                    | "thread/fork"
+                    | "thread/archive"
+                    | "thread/unarchive"
+                    | "thread/unsubscribe"
+                    | "turn/start"
+                    | "turn/steer"
+                    | "turn/interrupt"
+                    | "review/start"
             ) {
                 let thread_id = params.get("threadId").and_then(Value::as_str);
                 if !thread_id.map(|id| is_owned(snapshot, id)).unwrap_or(false) {
@@ -425,11 +501,10 @@ fn handle_worker_command(
             error,
             reply,
         } => {
-            let request = take_server_request(snapshot, &request_id);
-            let Some(_request) = request else {
+            if !has_server_request(snapshot, &request_id) {
                 let _ = reply.send(Err("unknown Codex app-server server request".to_string()));
                 return;
-            };
+            }
             let outcome = match socket.as_mut() {
                 Some(active_socket) => {
                     let mut response = json!({ "id": request_id });
@@ -442,7 +517,7 @@ fn handle_worker_command(
                 }
                 None => Err("Codex app-server is disconnected".to_string()),
             };
-            let _ = reply.send(outcome);
+            let _ = reply.send(consume_server_request_after_write(snapshot, &request_id, outcome));
         }
     }
 }
@@ -615,6 +690,7 @@ fn handle_notification(
 ) {
     apply_notification(&envelope, snapshot);
     crate::automations::apply_native_codex_notification(app, &envelope);
+    crate::codex_panes::apply_native_codex_notification(app, &envelope);
     let _ = app.emit("codex-app-server-event", envelope);
 }
 
@@ -728,6 +804,7 @@ fn is_supported_server_request(method: &str) -> bool {
         method,
         "item/commandExecution/requestApproval"
             | "item/fileChange/requestApproval"
+            | "item/permissions/requestApproval"
             | "item/tool/requestUserInput"
             | "mcpServer/elicitation/request"
     )
@@ -784,7 +861,7 @@ fn apply_response(
         state.apply_thread_value(result, thread_id.as_deref());
         if let Some(thread_id) = thread_id.as_deref() {
             if let Some(thread) = state.threads.get_mut(thread_id) {
-                if method == "turn/start" {
+                if method == "turn/start" || method == "turn/steer" {
                     thread.active_turn = result
                         .get("turn")
                         .and_then(|turn| turn.get("id"))
@@ -926,6 +1003,27 @@ fn take_server_request(
         }
     }
     None
+}
+
+fn has_server_request(snapshot: &Arc<Mutex<AppServerSnapshotState>>, request_id: &Value) -> bool {
+    let Ok(key) = request_id_key(request_id) else {
+        return false;
+    };
+    snapshot
+        .lock()
+        .map(|state| {
+            state.threads.values().any(|thread| {
+                thread.pending_server_requests.iter().any(|request| {
+                    request_id_key(&request.request_id).ok().as_deref() == Some(&key)
+                })
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn consume_server_request_after_write(snapshot: &Arc<Mutex<AppServerSnapshotState>>, request_id: &Value, outcome: Result<(), String>) -> Result<(), String> {
+    if outcome.is_ok() { let _ = take_server_request(snapshot, request_id); }
+    outcome
 }
 
 fn connect_with_poll_timeout(remote: &str) -> Result<WebSocket<UnixStream>, String> {
@@ -1458,6 +1556,30 @@ mod tests {
                 .as_deref(),
             Some("thread-1")
         );
+    }
+
+    #[test]
+    fn server_request_is_retained_until_a_response_is_written_once() {
+        let snapshot = test_snapshot(&["thread-1"]);
+        snapshot
+            .lock()
+            .unwrap()
+            .threads
+            .get_mut("thread-1")
+            .unwrap()
+            .pending_server_requests
+            .push(CodexAppServerServerRequest {
+                request_id: json!(19),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({ "threadId": "thread-1" }),
+                thread_id: Some("thread-1".to_string()),
+            });
+        assert_eq!(consume_server_request_after_write(&snapshot, &json!(19), Err("write failed".to_string())).unwrap_err(), "write failed");
+        assert!(has_server_request(&snapshot, &json!(19)));
+        // A successful write consumes it exactly once.
+        consume_server_request_after_write(&snapshot, &json!(19), Ok(())).unwrap();
+        assert!(!has_server_request(&snapshot, &json!(19)));
+        assert!(take_server_request(&snapshot, &json!(19)).is_none());
     }
 
     #[test]

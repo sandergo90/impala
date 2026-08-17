@@ -4,6 +4,7 @@ import {
   buildDirectLaunchCommand,
   buildInteractiveShellArgs,
   buildLaunchCommand,
+  agentForTerminalLaunch,
   usesImpalaCodexServer,
   parseNativeCodexFlags,
 } from "./agent.ts";
@@ -75,6 +76,11 @@ describe("global automation commands", () => {
     );
   });
 
+  test("forces Codex provider for a durable Codex thread resume", () => {
+    expect(agentForTerminalLaunch("claude", "thread-1")).toBe("codex");
+    expect(agentForTerminalLaunch("claude")).toBe("claude");
+  });
+
   test("preserves an explicitly configured Codex remote", () => {
     expect(
       buildLaunchCommand(
@@ -99,7 +105,6 @@ describe("global automation commands", () => {
     );
   });
 });
-
 describe("native Codex automation flags", () => {
   test("maps the exact supported structured settings", () => {
     expect(parseNativeCodexFlags("--yolo -m gpt-5.6-luna -c model_reasoning_effort=max --config=service_tier=fast")).toEqual({

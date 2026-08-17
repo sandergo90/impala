@@ -130,7 +130,7 @@ export type TerminalLaunchProfile = "shell" | "agent";
 
 /** What fills a single pane. The leaf's content is the source of truth for it. */
 export type PaneContent =
-  | { kind: "terminal"; launch: TerminalLaunchProfile }
+  | { kind: "terminal"; launch: TerminalLaunchProfile; codexResumeThreadId?: string }
   | { kind: "file"; path: string }
   | { kind: "browser"; url?: string };
 

@@ -4,6 +4,7 @@ mod automations;
 mod bitbucket;
 mod browser;
 mod codex_app_server;
+mod codex_panes;
 mod config;
 mod daemon_client;
 mod file_io;
@@ -1962,6 +1963,8 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize pr_status table: {}", e))?;
             automations::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize automations tables: {}", e))?;
+            codex_panes::init_db(&conn)
+                .map_err(|e| format!("Failed to initialize native Codex panes table: {}", e))?;
 
             // The plan-review feature was removed. Drop its legacy tables so
             // they don't linger in existing databases.
@@ -2076,6 +2079,14 @@ pub fn run() {
                 tauri::async_runtime::spawn_blocking(move || {
                     if let Err(error) = automations::recover_native_codex_runs(&app_handle) {
                         tracing::warn!(%error, "native Codex automation recovery failed");
+                    }
+                });
+            }
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(error) = codex_panes::recover_native_codex_panes(&app_handle) {
+                        tracing::warn!(%error, "native Codex pane recovery failed");
                     }
                 });
             }
@@ -2261,6 +2272,16 @@ pub fn run() {
             revoke_codex_remote_client,
             get_codex_app_server_snapshot,
             respond_to_codex_app_server_request,
+            codex_panes::open_native_codex_pane,
+            codex_panes::get_native_codex_pane,
+            codex_panes::read_native_codex_pane,
+            codex_panes::send_native_codex_pane_input,
+            codex_panes::interrupt_native_codex_pane,
+            codex_panes::resume_native_codex_pane,
+            codex_panes::fork_native_codex_pane,
+            codex_panes::archive_native_codex_pane,
+            codex_panes::review_native_codex_pane,
+            codex_panes::handoff_native_codex_pane_to_terminal,
             get_project_issue_tracker,
             list_my_issues,
             search_issues,

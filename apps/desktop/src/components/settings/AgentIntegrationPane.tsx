@@ -4,6 +4,7 @@ import { CodexRemotePane } from "./CodexRemotePane";
 export function AgentIntegrationPane() {
   const [claudeFlags, setClaudeFlags] = useDebouncedSetting("claudeFlags", "global");
   const [codexFlags, setCodexFlags] = useDebouncedSetting("codexFlags", "global");
+  const [nativeCodexPanes, setNativeCodexPanes] = useDebouncedSetting("nativeCodexPanes", "global");
 
   return (
     <div className="max-w-2xl space-y-8">
@@ -35,6 +36,11 @@ export function AgentIntegrationPane() {
             className="w-full rounded-sm border bg-background px-3 py-1.5 font-mono text-sm"
           />
         </div>
+
+        <label className="flex items-start gap-3 rounded-lg border border-border bg-card p-4 text-sm">
+          <input type="checkbox" checked={nativeCodexPanes === "true"} onChange={(event) => setNativeCodexPanes(event.target.checked ? "true" : "false")} className="mt-0.5" />
+          <span><span className="block font-medium">Use native Codex pane</span><span className="text-muted-foreground">Use structured native Codex only when the launch flags can be translated exactly. Split and delegated agent panes remain terminal-backed.</span></span>
+        </label>
 
         <CodexRemotePane />
       </section>

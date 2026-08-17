@@ -1132,7 +1132,7 @@ fn fail_native_run(conn: &Connection, run_id: &str, error: &str) -> Result<(), S
     Ok(())
 }
 
-fn validate_native_codex_settings(settings: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn validate_native_codex_settings(settings: &serde_json::Value) -> Result<(), String> {
     let object = settings.as_object().ok_or_else(|| "native Codex settings must be an object".to_string())?;
     for (key, value) in object {
         let valid = match key.as_str() {

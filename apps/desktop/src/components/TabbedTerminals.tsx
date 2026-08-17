@@ -26,6 +26,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Bot, FileText, Globe2, GripVertical, Terminal, X } from "lucide-react";
+import { NativeCodexGate } from "./NativeCodexPane";
+import { nativeTerminalFallback } from "../lib/native-codex-pane-state";
 import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
 import { FileViewer } from "./FileViewer";
 import { BrowserPane } from "./BrowserPane";
@@ -39,7 +41,7 @@ import type {
   WorktreeIssue,
 } from "../types";
 import type { SplitGroup } from "../lib/split-tree";
-import { getActiveGroupTab, getLeaves } from "../lib/split-tree";
+import { getActiveGroupTab, getLeaves, updateGroupTab } from "../lib/split-tree";
 import { encodePtyInput } from "../lib/encode-pty";
 import { getHookPort } from "../lib/get-hook-port";
 import { sanitizeEventId } from "../lib/sanitize-event-id";
@@ -50,6 +52,9 @@ import {
   buildDirectLaunchCommand,
   buildInteractiveShellArgs,
   buildLaunchCommand,
+  buildCodexResumeCommand,
+  agentForTerminalLaunch,
+  parseNativeCodexFlags,
   usesImpalaCodexServer,
 } from "../lib/agent";
 import { awaitShellReady, markShellReady } from "../lib/pty-ready";
@@ -876,6 +881,7 @@ const TabBody = memo(function TabBody({
   worktreePath,
   sessionId,
   isActive,
+  codexResumeThreadId,
 }: {
   paneId: string;
   topTabId?: string;
@@ -885,6 +891,7 @@ const TabBody = memo(function TabBody({
   worktreePath: string;
   sessionId: string | null;
   isActive: boolean;
+  codexResumeThreadId?: string;
 }) {
   const spawningRef = useRef(false);
 
@@ -924,7 +931,8 @@ const TabBody = memo(function TabBody({
     getHookPort().then(async (hookPort) => {
       const projectPath =
         useUIStore.getState().selectedProject?.path ?? worktreePath;
-      const agent = delegatedLaunch?.agent ?? (await resolveAgent(worktreePath));
+      const selectedAgent = delegatedLaunch?.agent ?? (await resolveAgent(worktreePath));
+      const agent = agentForTerminalLaunch(selectedAgent, codexResumeThreadId);
       const launchesAgent = launch === "agent" || Boolean(delegatedLaunch);
       const flags = launchesAgent ? await resolveFlags(agent, projectPath) : "";
       let extraEnv: Record<string, string> = {};
@@ -1015,12 +1023,9 @@ const TabBody = memo(function TabBody({
                 ? `Read the ${issue.provider} issue from @docs/issues/${issue.identifier}.md`
                 : undefined;
 
-            const cmd = buildLaunchCommand(
-              agent,
-              flags,
-              initialPrompt,
-              extraEnv,
-            );
+            const cmd = codexResumeThreadId
+              ? `${buildCodexResumeCommand(flags, codexResumeThreadId, extraEnv)}\n`
+              : buildLaunchCommand(agent, flags, initialPrompt, extraEnv);
             const encoded = encodePtyInput(cmd);
 
             // Wait for the shell to finish sourcing rc files before writing.
@@ -1057,7 +1062,7 @@ const TabBody = memo(function TabBody({
       }
       spawningRef.current = false;
     });
-  }, [paneId, launch, isPrimaryAgent, worktreePath, sessionId]);
+  }, [paneId, launch, isPrimaryAgent, worktreePath, sessionId, codexResumeThreadId]);
 
   const handleRestart = useCallback(() => {
     if (!sessionId) return;
@@ -1114,6 +1119,33 @@ const TabBody = memo(function TabBody({
     />
   );
 });
+
+function PrimaryCodexPane({ worktreePath, paneId, codexResumeThreadId, fallback, onTerminalFallback }: {
+  worktreePath: string;
+  paneId: string;
+  codexResumeThreadId?: string;
+  fallback: (resumeThreadId?: string) => ReactNode;
+  onTerminalFallback: (threadId: string) => void;
+}) {
+  const [ready, setReady] = useState(false);
+  const [nativeSettings, setNativeSettings] = useState<ReturnType<typeof parseNativeCodexFlags>>(null);
+  const [initialPrompt, setInitialPrompt] = useState<string | undefined>();
+  useMountEffect(() => {
+    const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
+    void Promise.all([
+      invoke<string | null>("get_setting", { key: "nativeCodexPanes", scope: "global" }),
+      resolveAgent(worktreePath),
+      invoke<WorktreeIssue | null>("get_worktree_issue", { worktreePath }).catch(() => null),
+    ]).then(async ([enabled, agent, issue]) => {
+      if (enabled !== "true" || agent !== "codex") return;
+      setNativeSettings(parseNativeCodexFlags(await resolveFlags(agent, projectPath)));
+      if (issue) setInitialPrompt(`Read the ${issue.provider} issue from @docs/issues/${issue.identifier}.md`);
+    }).catch(() => {}).finally(() => setReady(true));
+  });
+  if (codexResumeThreadId) return <>{fallback(codexResumeThreadId)}</>;
+  if (!ready) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Preparing Codex…</div>;
+  return <NativeCodexGate worktreePath={worktreePath} paneId={paneId} settings={nativeSettings} initialPrompt={initialPrompt} fallback={fallback} onTerminalFallback={onTerminalFallback} />;
+}
 
 function PaneSplitControl({
   onFocus,
@@ -1462,7 +1494,7 @@ function PaneTabGroup({
       />
     );
   } else {
-    body = (
+    const terminalBody = (resumeThreadId?: string) => (
       <TabBody
         paneId={activeTab.id}
         topTabId={topTabId}
@@ -1472,8 +1504,27 @@ function PaneTabGroup({
         worktreePath={worktreePath}
         sessionId={paneSessions[activeTab.id] ?? null}
         isActive={isActive && isFocused}
+        codexResumeThreadId={resumeThreadId ?? content.codexResumeThreadId}
       />
     );
+    body = activeTab.id === AGENT_PANE_ID && content.launch === "agent" ? (
+      <PrimaryCodexPane
+        worktreePath={worktreePath}
+        paneId={activeTab.id}
+        codexResumeThreadId={content.codexResumeThreadId}
+        fallback={terminalBody}
+        onTerminalFallback={(threadId) => {
+          const nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+          const tree = getEffectiveAgentTabSplitTree(nav.agentTabSplitTree);
+          useUIStore.getState().updateWorktreeNavState(worktreePath, {
+            agentTabSplitTree: updateGroupTab(tree, AGENT_PANE_ID, (tab) => ({
+              ...tab,
+              content: nativeTerminalFallback(threadId),
+            })),
+          });
+        }}
+      />
+    ) : terminalBody();
   }
 
   return (
