@@ -1136,9 +1136,7 @@ pub(crate) fn validate_native_codex_settings(settings: &serde_json::Value) -> Re
     let object = settings.as_object().ok_or_else(|| "native Codex settings must be an object".to_string())?;
     for (key, value) in object {
         let valid = match key.as_str() {
-            "model" => value.as_str().map(|model| !model.is_empty() && model.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))).unwrap_or(false),
-            "effort" => matches!(value.as_str(), Some("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra")),
-            "serviceTier" => matches!(value.as_str(), Some("default" | "fast" | "standard")),
+            "model" | "effort" | "serviceTier" => value.as_str().is_some_and(native_codex_identifier),
             "approvalPolicy" => matches!(value.as_str(), Some("never" | "on-request" | "untrusted")),
             "sandbox" => matches!(value.as_str(), Some("danger-full-access" | "workspace-write" | "read-only")),
             _ => false,
@@ -1146,6 +1144,10 @@ pub(crate) fn validate_native_codex_settings(settings: &serde_json::Value) -> Re
         if !valid { return Err(format!("invalid native Codex setting: {key}")); }
     }
     Ok(())
+}
+
+fn native_codex_identifier(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
 }
 
 #[tauri::command]
@@ -1162,6 +1164,11 @@ pub async fn start_native_codex_automation(
         return Err("invalid native Codex automation launch input".to_string());
     }
     validate_native_codex_settings(&settings)?;
+    let catalog_state = app_server.inner().clone();
+    let catalog_settings = settings.clone();
+    tokio::task::spawn_blocking(move || catalog_state.native_settings_supported(&catalog_settings))
+        .await
+        .map_err(|error| format!("native Codex catalog task join: {error}"))??;
     let settings_json = serde_json::to_string(&settings).map_err(|error| format!("serialize native Codex settings: {error}"))?;
     { let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?;
       let valid: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM automation_runs WHERE id = ?1 AND status = 'pending' AND (worktree_path IS NULL OR worktree_path = ?2))", params![run_id, worktree_path], |row| row.get(0)).map_err(|error| format!("validate native automation run: {error}"))?;

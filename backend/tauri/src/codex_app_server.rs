@@ -6,12 +6,16 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tungstenite::{client, Message, WebSocket};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const WORKER_POLL_TIMEOUT: Duration = Duration::from_millis(100);
+/// Bounded pagination prevents a malformed server cursor from blocking the UI.
+/// Raise this cap only with protocol coverage for the larger catalog.
+const DIAGNOSTICS_MAX_PAGES: usize = 20;
+const MODEL_CATALOG_TTL: Duration = Duration::from_secs(5);
 const DAEMON_SOCKET: &str = "app-server-control/app-server-control.sock";
 static DAEMON_LAUNCH_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
 
@@ -42,6 +46,119 @@ pub struct CodexAppServerThreadSnapshot {
     pub event_sequence: u64,
     pub last_error: Option<String>,
     pub last_event: Option<Value>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexDiagnostics {
+    pub connection: CodexDiagnosticsConnection,
+    pub account: DiagnosticsSection<DiagnosticsAccount>,
+    pub rate_limits: DiagnosticsSection<DiagnosticsRateLimits>,
+    pub models: DiagnosticsSection<DiagnosticsModels>,
+    pub config: DiagnosticsSection<DiagnosticsConfig>,
+    pub mcp: DiagnosticsSection<DiagnosticsMcp>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsSection<T> {
+    pub data: Option<T>,
+    pub error: Option<String>,
+    pub truncated: bool,
+}
+
+impl<T> DiagnosticsSection<T> {
+    fn success(data: T, truncated: bool) -> Self {
+        Self { data: Some(data), error: None, truncated }
+    }
+
+    fn failure(error: String) -> Self {
+        Self { data: None, error: Some(error), truncated: false }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexDiagnosticsConnection {
+    pub status: String,
+    pub version: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsAccount {
+    pub account_type: Option<String>,
+    pub email: Option<String>,
+    pub plan: Option<String>,
+    pub requires_openai_auth: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsRateLimits {
+    pub primary_used_percent: Option<i64>,
+    pub secondary_used_percent: Option<i64>,
+    pub resets_at: Option<i64>,
+    pub reached: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsModels {
+    pub default_model: Option<String>,
+    pub models: Vec<DiagnosticsModel>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsModel {
+    pub id: String,
+    pub efforts: Vec<String>,
+    pub tiers: Vec<String>,
+    pub modalities: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsConfig {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub service_tier: Option<String>,
+    pub approval_policy: Option<String>,
+    pub sandbox: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsMcp {
+    pub impala_mcp_present: bool,
+    pub impala_mcp_unhealthy_reason: Option<String>,
+    pub servers: Vec<DiagnosticsMcpServer>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsMcpServer {
+    pub name: String,
+    pub auth_status: Option<String>,
+    pub tool_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ModelCatalogEntry {
+    pub id: String,
+    pub is_default: bool,
+    pub efforts: Vec<String>,
+    pub tiers: Vec<String>,
+    pub modalities: Vec<String>,
+}
+
+#[derive(Clone)]
+struct CachedModelCatalog {
+    fetched_at: Instant,
+    catalog: Vec<ModelCatalogEntry>,
+    truncated: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -144,6 +261,7 @@ impl AppServerSnapshotState {
 pub struct CodexAppServerState {
     sender: mpsc::Sender<WorkerCommand>,
     snapshot: Arc<Mutex<AppServerSnapshotState>>,
+    model_catalog: Arc<Mutex<Option<CachedModelCatalog>>>,
 }
 
 #[allow(dead_code)] // Phase 1 calls these typed dispatch paths.
@@ -180,7 +298,7 @@ impl CodexAppServerState {
         }));
         let worker_snapshot = snapshot.clone();
         std::thread::spawn(move || app_server_worker(receiver, worker_snapshot, app));
-        Self { sender, snapshot }
+        Self { sender, snapshot, model_catalog: Arc::new(Mutex::new(None)) }
     }
 
     pub fn snapshot(&self) -> Result<CodexAppServerSnapshot, String> {
@@ -329,6 +447,106 @@ impl CodexAppServerState {
             .map_err(|_| "Codex app-server server-request response timed out".to_string())?
     }
 
+    pub fn native_settings_supported(&self, settings: &Value) -> Result<(), String> {
+        let (catalog, truncated) = self.cached_or_model_catalog()?;
+        if truncated {
+            return Err("Codex model catalog exceeded Impala's safe page limit; use the terminal fallback".to_string());
+        }
+        validate_native_settings_catalog(settings, &catalog)
+    }
+
+    pub fn diagnostics(&self, cwd: &Path) -> CodexDiagnostics {
+        let account = match self.dispatch("account/read", json!({ "refreshToken": false })) {
+            Ok(value) => DiagnosticsSection::success(sanitize_account(&value), false),
+            Err(error) => DiagnosticsSection::failure(error),
+        };
+        let rate_limits = match self.dispatch("account/rateLimits/read", Value::Null) {
+            Ok(value) => DiagnosticsSection::success(sanitize_rate_limits(&value), false),
+            Err(error) => DiagnosticsSection::failure(error),
+        };
+        let models = match self.model_catalog() {
+            Ok((catalog, truncated)) => DiagnosticsSection::success(
+                DiagnosticsModels {
+                    default_model: catalog.iter().find(|model| model.is_default).map(|model| model.id.clone()),
+                    models: catalog.into_iter().map(|model| DiagnosticsModel {
+                        id: model.id, efforts: model.efforts, tiers: model.tiers, modalities: model.modalities,
+                    }).collect(),
+                },
+                truncated,
+            ),
+            Err(error) => DiagnosticsSection::failure(error),
+        };
+        let config = match self.dispatch("config/read", json!({ "cwd": cwd, "includeLayers": false })) {
+            Ok(value) => DiagnosticsSection::success(sanitize_config(&value), false),
+            Err(error) => DiagnosticsSection::failure(error),
+        };
+        let mcp = match self.mcp_status() {
+            Ok((data, truncated)) => DiagnosticsSection::success(data, truncated),
+            Err(error) => DiagnosticsSection::failure(error),
+        };
+
+        let connection = self.snapshot().map(|snapshot| CodexDiagnosticsConnection {
+            status: snapshot.connection.status,
+            version: safe_version(snapshot.connection.version.as_ref()),
+            error: snapshot.connection.last_error,
+        }).unwrap_or_else(|error| CodexDiagnosticsConnection {
+            status: "unknown".to_string(), version: None, error: Some(error),
+        });
+        CodexDiagnostics { connection, account, rate_limits, models, config, mcp }
+    }
+
+    fn model_catalog(&self) -> Result<(Vec<ModelCatalogEntry>, bool), String> {
+        let (items, truncated) = self.all_pages("model/list", json!({ "includeHidden": false }), |value| {
+            value.get("data").and_then(Value::as_array).cloned().ok_or_else(|| "Codex model/list returned no data array".to_string())
+        })?;
+        let catalog: Vec<ModelCatalogEntry> =
+            items.into_iter().filter_map(model_catalog_entry).collect();
+        self.model_catalog.lock().map_err(|_| "Codex model catalog lock poisoned".to_string())?
+            .replace(CachedModelCatalog { fetched_at: Instant::now(), catalog: catalog.clone(), truncated });
+        Ok((catalog, truncated))
+    }
+
+    fn cached_or_model_catalog(&self) -> Result<(Vec<ModelCatalogEntry>, bool), String> {
+        if let Some(cached) = self.model_catalog.lock().map_err(|_| "Codex model catalog lock poisoned".to_string())?.as_ref()
+            .filter(|cached| catalog_is_fresh(cached, Instant::now())) {
+            return Ok((cached.catalog.clone(), cached.truncated));
+        }
+        self.model_catalog()
+    }
+
+    fn mcp_status(&self) -> Result<(DiagnosticsMcp, bool), String> {
+        let (items, truncated) = self.all_pages("mcpServerStatus/list", json!({ "detail": "toolsAndAuthOnly" }), |value| {
+            value.get("data").and_then(Value::as_array).cloned().ok_or_else(|| "Codex mcpServerStatus/list returned no data array".to_string())
+        })?;
+        let servers = items.into_iter().filter_map(sanitize_mcp_server).collect::<Vec<_>>();
+        let impala = servers.iter().find(|server| server.name == "impala-mcp");
+        let impala_mcp_unhealthy_reason = match impala {
+            None => Some("impala-mcp is not configured or did not report a status".to_string()),
+            Some(server) => match server.auth_status.as_deref() {
+                Some("notLoggedIn") | Some("unknown") => Some(format!("authentication status: {}", server.auth_status.as_deref().unwrap_or_default())),
+                _ if server.tool_count == 0 => Some("no tools were reported".to_string()),
+                _ => None,
+            },
+        };
+        Ok((DiagnosticsMcp { impala_mcp_present: impala.is_some(), impala_mcp_unhealthy_reason, servers }, truncated))
+    }
+
+    fn all_pages<F>(&self, method: &str, mut params: Value, items: F) -> Result<(Vec<Value>, bool), String>
+    where
+        F: Fn(&Value) -> Result<Vec<Value>, String>,
+    {
+        let mut all = Vec::new();
+        for page in 0..DIAGNOSTICS_MAX_PAGES {
+            let result = self.dispatch(method, params.clone())?;
+            all.extend(items(&result)?);
+            let next = result.get("nextCursor").and_then(Value::as_str).filter(|cursor| !cursor.is_empty());
+            let Some(cursor) = next else { return Ok((all, false)); };
+            if diagnostics_page_limit_reached(page) { return Ok((all, true)); }
+            params["cursor"] = Value::String(cursor.to_string());
+        }
+        Ok((all, true))
+    }
+
     fn ensure_owned_thread(&self, thread_id: &str) -> Result<(), String> {
         if thread_id.trim().is_empty() {
             return Err("Codex app-server thread id is empty".to_string());
@@ -360,6 +578,112 @@ impl CodexAppServerState {
             Err(format!("Codex thread {thread_id} is not Impala-owned"))
         }
     }
+}
+
+fn diagnostics_page_limit_reached(page: usize) -> bool {
+    page + 1 >= DIAGNOSTICS_MAX_PAGES
+}
+
+fn catalog_is_fresh(cached: &CachedModelCatalog, now: Instant) -> bool {
+    now.duration_since(cached.fetched_at) < MODEL_CATALOG_TTL
+}
+
+fn safe_version(value: Option<&Value>) -> Option<String> {
+    value.and_then(|value| {
+        value.pointer("/serverInfo/version")
+            .or_else(|| value.get("version"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
+}
+
+fn strings(value: Option<&Value>) -> Vec<String> {
+    value.and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
+}
+
+fn model_catalog_entry(value: Value) -> Option<ModelCatalogEntry> {
+    // `model` is the request identifier; `id` is display/catalog identity.
+    let id = value.get("model").or_else(|| value.get("id"))?.as_str()?.to_string();
+    let efforts = value.get("supportedReasoningEfforts").and_then(Value::as_array).into_iter().flatten().filter_map(|effort| effort.get("reasoningEffort").and_then(Value::as_str)).map(str::to_string).collect();
+    let mut tiers = value.get("serviceTiers").and_then(Value::as_array).into_iter().flatten().filter_map(|tier| tier.get("id").and_then(Value::as_str)).map(str::to_string).collect::<Vec<_>>();
+    if let Some(tier) = value.get("defaultServiceTier").and_then(Value::as_str) {
+        if !tiers.iter().any(|candidate| candidate == tier) { tiers.push(tier.to_string()); }
+    }
+    for tier in strings(value.get("additionalSpeedTiers")) {
+        if !tiers.iter().any(|candidate| candidate == &tier) { tiers.push(tier); }
+    }
+    Some(ModelCatalogEntry {
+        id,
+        is_default: value.get("isDefault").and_then(Value::as_bool).unwrap_or(false),
+        efforts,
+        tiers,
+        modalities: strings(value.get("inputModalities")),
+    })
+}
+
+pub(crate) fn validate_native_settings_catalog(settings: &Value, catalog: &[ModelCatalogEntry]) -> Result<(), String> {
+    let settings = settings.as_object().ok_or_else(|| "native Codex settings must be an object".to_string())?;
+    let requested_model = settings.get("model").and_then(Value::as_str);
+    let model = match requested_model {
+        Some(id) => catalog.iter().find(|model| model.id == id),
+        None => catalog.iter().find(|model| model.is_default),
+    }.ok_or_else(|| match requested_model {
+        Some(id) => format!("Codex model {id} is unavailable"),
+        None => "Codex model catalog has no default model".to_string(),
+    })?;
+    if let Some(effort) = settings.get("effort").and_then(Value::as_str) {
+        if !model.efforts.iter().any(|candidate| candidate == effort) {
+            return Err(format!("Codex model {} does not support reasoning effort {effort}", model.id));
+        }
+    }
+    if let Some(tier) = settings.get("serviceTier").and_then(Value::as_str) {
+        if !model.tiers.iter().any(|candidate| candidate == tier) {
+            return Err(format!("Codex model {} does not support service tier {tier}", model.id));
+        }
+    }
+    Ok(())
+}
+
+fn sanitize_account(value: &Value) -> DiagnosticsAccount {
+    let account = value.get("account");
+    DiagnosticsAccount {
+        account_type: account.and_then(|account| account.get("type")).and_then(Value::as_str).map(str::to_string),
+        email: account.and_then(|account| account.get("email")).and_then(Value::as_str).map(str::to_string),
+        plan: account.and_then(|account| account.get("planType")).and_then(Value::as_str).map(str::to_string),
+        requires_openai_auth: value.get("requiresOpenaiAuth").and_then(Value::as_bool).unwrap_or(false),
+    }
+}
+
+fn sanitize_rate_limits(value: &Value) -> DiagnosticsRateLimits {
+    let limits = value.get("rateLimits").unwrap_or(value);
+    let primary = limits.get("primary");
+    let secondary = limits.get("secondary");
+    DiagnosticsRateLimits {
+        primary_used_percent: primary.and_then(|window| window.get("usedPercent")).and_then(Value::as_i64),
+        secondary_used_percent: secondary.and_then(|window| window.get("usedPercent")).and_then(Value::as_i64),
+        resets_at: primary.and_then(|window| window.get("resetsAt")).and_then(Value::as_i64).or_else(|| secondary.and_then(|window| window.get("resetsAt")).and_then(Value::as_i64)),
+        reached: limits.get("rateLimitReachedType").and_then(Value::as_str).map(str::to_string),
+    }
+}
+
+fn sanitize_config(value: &Value) -> DiagnosticsConfig {
+    let config = value.get("config").unwrap_or(value);
+    DiagnosticsConfig {
+        model: config.get("model").and_then(Value::as_str).map(str::to_string),
+        effort: config.get("model_reasoning_effort").and_then(Value::as_str).map(str::to_string),
+        service_tier: config.get("service_tier").and_then(Value::as_str).map(str::to_string),
+        approval_policy: config.get("approval_policy").and_then(Value::as_str).map(str::to_string),
+        sandbox: config.get("sandbox_mode").and_then(Value::as_str).map(str::to_string),
+    }
+}
+
+fn sanitize_mcp_server(value: Value) -> Option<DiagnosticsMcpServer> {
+    let name = value.get("name")?.as_str()?.to_string();
+    Some(DiagnosticsMcpServer {
+        name,
+        auth_status: value.get("authStatus").and_then(Value::as_str).map(str::to_string),
+        tool_count: value.get("tools").and_then(Value::as_object).map_or(0, |tools| tools.len()),
+    })
 }
 
 fn app_server_worker(
@@ -1448,6 +1772,68 @@ mod tests {
                 .insert((*thread_id).to_string(), ThreadState::default());
         }
         Arc::new(Mutex::new(state))
+    }
+
+    #[test]
+    fn validates_native_settings_against_the_0147_model_catalog() {
+        let catalog = vec![ModelCatalogEntry {
+            id: "gpt-5.6".to_string(),
+            is_default: true,
+            efforts: vec!["low".to_string(), "high".to_string()],
+            tiers: vec!["default".to_string(), "priority".to_string()],
+            modalities: vec!["text".to_string(), "image".to_string()],
+        }];
+        assert!(validate_native_settings_catalog(&json!({
+            "model": "gpt-5.6", "effort": "high", "serviceTier": "priority"
+        }), &catalog).is_ok());
+        assert!(validate_native_settings_catalog(&json!({ "effort": "high" }), &catalog).is_ok());
+        assert_eq!(validate_native_settings_catalog(&json!({ "model": "missing" }), &catalog).unwrap_err(), "Codex model missing is unavailable");
+        assert_eq!(validate_native_settings_catalog(&json!({ "effort": "max" }), &catalog).unwrap_err(), "Codex model gpt-5.6 does not support reasoning effort max");
+        assert_eq!(validate_native_settings_catalog(&json!({ "serviceTier": "fast" }), &catalog).unwrap_err(), "Codex model gpt-5.6 does not support service tier fast");
+
+        let exact_fixture = model_catalog_entry(json!({
+            "id": "catalog-id", "model": "gpt-5.6", "isDefault": true,
+            "supportedReasoningEfforts": [{ "reasoningEffort": "high" }],
+            "serviceTiers": [{ "id": "priority" }],
+            "defaultServiceTier": "default", "additionalSpeedTiers": ["fast", "priority"],
+            "inputModalities": ["text", "image"],
+        })).unwrap();
+        assert_eq!(exact_fixture.tiers, vec!["priority", "default", "fast"]);
+        assert!(validate_native_settings_catalog(&json!({ "model": "gpt-5.6", "serviceTier": "default" }), &[exact_fixture]).is_ok());
+    }
+
+    #[test]
+    fn native_catalog_cache_is_short_lived() {
+        let now = Instant::now();
+        let catalog = CachedModelCatalog { fetched_at: now, catalog: Vec::new(), truncated: false };
+        assert!(catalog_is_fresh(&catalog, now + MODEL_CATALOG_TTL - Duration::from_millis(1)));
+        assert!(!catalog_is_fresh(&catalog, now + MODEL_CATALOG_TTL));
+    }
+
+    #[test]
+    fn diagnostics_are_curated_and_sections_fail_independently() {
+        let account = sanitize_account(&json!({
+            "account": { "type": "chatgpt", "email": "person@example.com", "planType": "pro", "accessToken": "secret" },
+            "requiresOpenaiAuth": true,
+        }));
+        assert_eq!(account.email.as_deref(), Some("person@example.com"));
+        assert_eq!(account.plan.as_deref(), Some("pro"));
+        assert!(!serde_json::to_string(&account).unwrap().contains("secret"));
+        let config = sanitize_config(&json!({ "config": {
+            "model": "gpt-5.6", "model_reasoning_effort": "high", "service_tier": "priority",
+            "approval_policy": "on-request", "sandbox_mode": "workspace-write", "api_key": "secret"
+        }}));
+        assert_eq!(config.model.as_deref(), Some("gpt-5.6"));
+        assert!(!serde_json::to_string(&config).unwrap().contains("secret"));
+        let failed: DiagnosticsSection<DiagnosticsConfig> = DiagnosticsSection::failure("offline".to_string());
+        assert_eq!(failed.error.as_deref(), Some("offline"));
+        assert!(failed.data.is_none());
+    }
+
+    #[test]
+    fn diagnostics_pagination_is_bounded_and_visible() {
+        assert!(!diagnostics_page_limit_reached(DIAGNOSTICS_MAX_PAGES - 2));
+        assert!(diagnostics_page_limit_reached(DIAGNOSTICS_MAX_PAGES - 1));
     }
 
     #[test]

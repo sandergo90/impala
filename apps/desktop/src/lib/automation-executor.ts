@@ -127,7 +127,9 @@ async function executeRun({
       projectWorktree = worktree;
 
       // Sidebar list refresh — only meaningful when this project is selected.
-      if (useUIStore.getState().selectedProject?.path === automation.repo_path) {
+      if (
+        useUIStore.getState().selectedProject?.path === automation.repo_path
+      ) {
         const wts = await invoke<Worktree[]>("list_worktrees", {
           repoPath: automation.repo_path,
         });
@@ -171,7 +173,12 @@ async function executeRun({
         ? await resolveFlags("codex", automation.repo_path || runPath)
         : null;
     const nativeSettings = flags === null ? null : parseNativeCodexFlags(flags);
-    if (automation.agent === "codex" && nativeSettings) {
+    const nativeSupported = nativeSettings
+      ? await invoke<boolean>("preflight_native_codex_settings", {
+          settings: nativeSettings,
+        }).catch(() => false)
+      : false;
+    if (automation.agent === "codex" && nativeSettings && nativeSupported) {
       await invoke("start_native_codex_automation", {
         runId: run_id,
         worktreePath: runPath,

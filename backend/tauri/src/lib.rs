@@ -904,6 +904,36 @@ async fn get_codex_app_server_snapshot(
         .map_err(|error| format!("task join: {error}"))?
 }
 
+/// Read-only Codex account, model, effective-config, and MCP diagnostics.
+#[tauri::command]
+async fn get_codex_diagnostics(
+    state: tauri::State<'_, codex_app_server::CodexAppServerState>,
+    cwd: Option<String>,
+) -> Result<codex_app_server::CodexDiagnostics, String> {
+    let state = state.inner().clone();
+    let cwd = cwd
+        .filter(|cwd| !cwd.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or(std::env::current_dir().map_err(|error| format!("resolve diagnostics cwd: {error}"))?);
+    tokio::task::spawn_blocking(move || Ok::<_, String>(state.diagnostics(&cwd)))
+        .await
+        .map_err(|error| format!("task join: {error}"))?
+}
+
+/// Native starts remain opt-in. A missing or stale catalog is a terminal fallback.
+#[tauri::command]
+async fn preflight_native_codex_settings(
+    state: tauri::State<'_, codex_app_server::CodexAppServerState>,
+    settings: serde_json::Value,
+) -> Result<bool, String> {
+    automations::validate_native_codex_settings(&settings)?;
+    let state = state.inner().clone();
+    Ok(tokio::task::spawn_blocking(move || state.native_settings_supported(&settings))
+        .await
+        .map_err(|error| format!("task join: {error}"))?
+        .is_ok())
+}
+
 /// Completes a pending approval/input request delivered by the managed app-server.
 #[tauri::command]
 async fn respond_to_codex_app_server_request(
@@ -2271,6 +2301,8 @@ pub fn run() {
             get_codex_remote_pairing_status,
             revoke_codex_remote_client,
             get_codex_app_server_snapshot,
+            get_codex_diagnostics,
+            preflight_native_codex_settings,
             respond_to_codex_app_server_request,
             codex_panes::open_native_codex_pane,
             codex_panes::get_native_codex_pane,

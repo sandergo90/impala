@@ -118,4 +118,9 @@ describe("native Codex automation flags", () => {
       expect(parseNativeCodexFlags(flags)).toBeNull();
     }
   });
+  test("leaves future shell-safe catalog identifiers to backend preflight", () => {
+    expect(parseNativeCodexFlags("-m future-model -c model_reasoning_effort=deep --config=service_tier=priority")).toEqual({
+      model: "future-model", effort: "deep", serviceTier: "priority",
+    });
+  });
 });

@@ -198,7 +198,6 @@ pub async fn open_native_codex_pane(
     input: NativePaneOpen,
 ) -> Result<NativeCodexPane, String> {
     validate_input(&input.worktree_path, &input.pane_id)?;
-    crate::automations::validate_native_codex_settings(&input.settings)?;
     if let Some(existing) = {
         let conn =
             db.0.lock()
@@ -212,6 +211,13 @@ pub async fn open_native_codex_pane(
         { let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?; start_initial_prompt(&conn, &state, &existing, input.initial_prompt.as_deref())?; }
         return { let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?; find_pane(&conn, &input.worktree_path, &input.pane_id)?.ok_or_else(|| "native Codex pane disappeared".to_string()) };
     }
+    crate::automations::validate_native_codex_settings(&input.settings)?;
+    let catalog_state = app_server.inner().clone();
+    let catalog_settings = input.settings.clone();
+    let supported = tokio::task::spawn_blocking(move || catalog_state.native_settings_supported(&catalog_settings))
+        .await
+        .map_err(|error| format!("native Codex pane catalog task join: {error}"))?;
+    supported?;
     let state = app_server.inner().clone();
     let cwd = input.worktree_path.clone();
     let settings = input.settings.clone();

@@ -47,21 +47,39 @@ export function NativeCodexGate({
   onTerminalFallback,
 }: NativeCodexGateProps) {
   const [existing, setExisting] = useState<Pane | null | undefined>(undefined);
+  const [supported, setSupported] = useState<boolean | undefined>(undefined);
 
   useMountEffect(() => {
     void invoke<Pane | null>("get_native_codex_pane", { worktreePath, paneId })
-      .then(setExisting)
-      .catch(() => setExisting(null));
+      .then(async (pane) => {
+        setExisting(pane);
+        if (!pane && settings) {
+          setSupported(
+            await invoke<boolean>("preflight_native_codex_settings", {
+              settings,
+            }).catch(() => false),
+          );
+        } else {
+          setSupported(false);
+        }
+      })
+      .catch(() => {
+        setExisting(null);
+        setSupported(false);
+      });
   });
 
-  if (existing === undefined) {
+  if (
+    existing === undefined ||
+    (!existing && settings && supported === undefined)
+  ) {
     return <PaneLoading label="Preparing Codex…" />;
   }
 
   const decision = nativePaneDecision(
     existing,
     Boolean(settings),
-    Boolean(settings),
+    existing?.transport === "native" || Boolean(supported),
   );
   if (decision === "terminal") {
     return fallback(existing?.threadId);
