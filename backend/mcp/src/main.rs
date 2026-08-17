@@ -541,6 +541,12 @@ fn tool_follow_up_agent_tab(args: &Value) -> Result<Value, String> {
     .map(strip_ok)
 }
 
+fn tool_steer_agent_tab(args: &Value) -> Result<Value, String> {
+    let delegation_id = args.get("delegation_id").and_then(|value| value.as_str()).filter(|value| !value.trim().is_empty()).ok_or("missing required parameter: delegation_id")?;
+    let prompt = args.get("prompt").and_then(|value| value.as_str()).filter(|value| !value.trim().is_empty()).ok_or("missing required parameter: prompt")?;
+    browser_get("/agents/steer", &[("delegation_id", delegation_id), ("prompt", prompt)]).map(strip_ok)
+}
+
 fn tool_browser_screenshot(args: &Value) -> Result<String, String> {
     let wt = param_or_cwd(args, "worktree_path")?;
     let body = browser_get("/browser/screenshot", &[("worktree_path", &wt)])?;
@@ -889,7 +895,7 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "follow_up_agent_tab",
-                "description": "Send a follow-up prompt to the existing idle Impala Agent tab opened by open_agent_tab. Reuses the same delegation_id and PTY and re-arms its completion callback; yield after this call until Impala starts the next turn in the orchestrator thread.",
+                "description": "Send a follow-up prompt to the existing idle Impala Agent tab opened by open_agent_tab. Reuses the same delegation_id, starts a new turn on managed Codex tabs through Impala's app-server (or uses the legacy PTY path for Claude and legacy tabs), and re-arms its completion callback. Yield after this call until Impala starts the next turn in the orchestrator thread.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -901,6 +907,18 @@ fn tool_definitions() -> Value {
                             "type": "string",
                             "description": "Follow-up task for the existing agent thread"
                         }
+                    },
+                    "required": ["delegation_id", "prompt"]
+                }
+            },
+            {
+                "name": "steer_agent_tab",
+                "description": "Steer an actively running managed Codex Agent tab opened by open_agent_tab. This changes the current turn through Impala's app-server; use follow_up_agent_tab once the tab is idle. Rejects pending, waiting, idle, failed, Claude, and legacy tabs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "delegation_id": { "type": "string", "description": "Stable delegation id returned by open_agent_tab" },
+                        "prompt": { "type": "string", "description": "Correction or changed requirement for the active Codex turn" }
                     },
                     "required": ["delegation_id", "prompt"]
                 }
@@ -1153,6 +1171,7 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_type" => tool_browser_type(&tool_args),
                 "open_agent_tab" => tool_open_agent_tab(&tool_args),
                 "follow_up_agent_tab" => tool_follow_up_agent_tab(&tool_args),
+                "steer_agent_tab" => tool_steer_agent_tab(&tool_args),
                 "list_automations" => tool_list_automations(&tool_args),
                 "create_automation" => tool_create_automation(&tool_args),
                 "update_automation" => tool_update_automation(&tool_args),
@@ -1241,7 +1260,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_list_exposes_callback_driven_agent_tab_follow_ups() {
+    fn tool_list_exposes_callback_driven_agent_tab_controls() {
         let tools = tool_definitions();
         let tools = tools.get("tools").and_then(Value::as_array).unwrap();
         let follow_up = tools
@@ -1253,6 +1272,8 @@ mod tests {
             follow_up["inputSchema"]["required"],
             json!(["delegation_id", "prompt"])
         );
+        let steer = tools.iter().find(|tool| tool["name"] == "steer_agent_tab").expect("steer_agent_tab tool");
+        assert_eq!(steer["inputSchema"]["required"], json!(["delegation_id", "prompt"]));
         assert!(!tools.iter().any(|tool| matches!(
             tool["name"].as_str(),
             Some("get_agent_tab_status" | "wait_agent_tab")
@@ -1270,6 +1291,10 @@ mod tests {
                 "delegation_id": "delegation-1",
                 "prompt": " "
             })),
+            Err("missing required parameter: prompt".to_string())
+        );
+        assert_eq!(
+            tool_steer_agent_tab(&json!({ "delegation_id": "delegation-1", "prompt": " " })),
             Err("missing required parameter: prompt".to_string())
         );
     }

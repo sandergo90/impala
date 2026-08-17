@@ -1274,7 +1274,7 @@ pub fn start_turn(
     thread_id: &str,
     client_user_message_id: &str,
     prompt: &str,
-) -> Result<(), String> {
+) -> Result<Value, String> {
     if thread_id.trim().is_empty() {
         return Err("Codex thread id is empty".to_string());
     }
@@ -1283,12 +1283,47 @@ pub fn start_turn(
     }
 
     let mut socket = initialize_client(remote)?;
-    request(
+    let result = request(
         &mut socket,
         2,
         "turn/start",
         json!({
             "threadId": thread_id,
+            "clientUserMessageId": client_user_message_id,
+            "input": [{ "type": "text", "text": prompt }],
+        }),
+    )?;
+
+    let _ = socket.close(None);
+    let _ = socket.get_ref().shutdown(Shutdown::Both);
+    Ok(result)
+}
+
+pub fn steer_turn(
+    remote: &str,
+    thread_id: &str,
+    expected_turn_id: &str,
+    client_user_message_id: &str,
+    prompt: &str,
+) -> Result<(), String> {
+    if thread_id.trim().is_empty() {
+        return Err("Codex thread id is empty".to_string());
+    }
+    if expected_turn_id.trim().is_empty() {
+        return Err("Codex expected turn id is empty".to_string());
+    }
+    if prompt.trim().is_empty() {
+        return Err("Codex steer prompt is empty".to_string());
+    }
+
+    let mut socket = initialize_client(remote)?;
+    request(
+        &mut socket,
+        2,
+        "turn/steer",
+        json!({
+            "threadId": thread_id,
+            "expectedTurnId": expected_turn_id,
             "clientUserMessageId": client_user_message_id,
             "input": [{ "type": "text", "text": prompt }],
         }),
@@ -1552,6 +1587,10 @@ mod tests {
         assert_eq!(
             start_turn("unix:///tmp/codex.sock", "thread-1", "completion-1", " ").unwrap_err(),
             "Codex callback prompt is empty"
+        );
+        assert_eq!(
+            steer_turn("unix:///tmp/codex.sock", "thread-1", "", "steer-1", "continue").unwrap_err(),
+            "Codex expected turn id is empty"
         );
     }
 
