@@ -72,6 +72,17 @@ for arg in "$@"; do
   esac
 done
 
+# In --remote mode Codex only honors the terminal's directory when it is
+# passed explicitly via --cd; otherwise the thread lands in the app server's
+# own cwd. Inject --cd "$PWD" unless the user already chose a directory.
+has_cd=false
+for arg in "$@"; do
+  case "$arg" in
+    --) break ;;
+    -C|--cd|--cd=*) has_cd=true; break ;;
+  esac
+done
+
 expect_value=false
 for arg in "$@"; do
   if [ "$expect_value" = true ]; then
@@ -94,7 +105,10 @@ done
 # This list follows Codex's current command surface. A future subcommand is
 # treated as a prompt until it is added above; replace this shim when Codex
 # exposes a native default-remote setting.
-exec "$real_codex" --remote "$remote" "$@"
+if [ "$has_cd" = true ]; then
+  exec "$real_codex" --remote "$remote" "$@"
+fi
+exec "$real_codex" --remote "$remote" --cd "$PWD" "$@"
 "#;
 
 #[allow(dead_code)]
@@ -275,7 +289,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn run_codex_wrapper(args: &[&str], remote: Option<&str>) -> Vec<String> {
+    fn run_codex_wrapper_in(args: &[&str], remote: Option<&str>, cwd: &Path) -> Vec<String> {
         let tmp = TempDir::new().unwrap();
         let paths = ensure_wrappers(tmp.path()).unwrap();
         let real_codex = tmp.path().join("real-codex");
@@ -288,6 +302,7 @@ mod tests {
         let mut command = Command::new(paths.root.join("bin/codex"));
         command
             .args(args)
+            .current_dir(cwd)
             .env("IMPALA_CODEX_BIN", real_codex)
             .env_remove("IMPALA_CODEX_APP_SERVER");
         if let Some(remote) = remote {
@@ -303,20 +318,43 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn run_codex_wrapper(args: &[&str], remote: Option<&str>) -> Vec<String> {
+        run_codex_wrapper_in(args, remote, Path::new("/"))
+    }
+
+    #[cfg(unix)]
     #[test]
     fn codex_wrapper_routes_interactive_sessions_to_the_managed_server() {
         let remote = "unix:///tmp/impala-codex.sock";
         assert_eq!(
             run_codex_wrapper(&["--yolo"], Some(remote)),
-            ["codex", "--remote", remote, "--yolo"]
+            ["codex", "--remote", remote, "--cd", "/", "--yolo"]
         );
         assert_eq!(
             run_codex_wrapper(&["resume", "session-1"], Some(remote)),
-            ["codex", "--remote", remote, "resume", "session-1"]
+            ["codex", "--remote", remote, "--cd", "/", "resume", "session-1"]
         );
         assert_eq!(
             run_codex_wrapper(&["fork", "--last"], Some(remote)),
-            ["codex", "--remote", remote, "fork", "--last"]
+            ["codex", "--remote", remote, "--cd", "/", "fork", "--last"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_wrapper_sends_the_terminal_directory_to_the_managed_server() {
+        let remote = "unix:///tmp/impala-codex.sock";
+        assert_eq!(
+            run_codex_wrapper_in(&["--yolo"], Some(remote), Path::new("/private/tmp")),
+            ["codex", "--remote", remote, "--cd", "/private/tmp", "--yolo"]
+        );
+        assert_eq!(
+            run_codex_wrapper(&["--cd", "/elsewhere", "--yolo"], Some(remote)),
+            ["codex", "--remote", remote, "--cd", "/elsewhere", "--yolo"]
+        );
+        assert_eq!(
+            run_codex_wrapper(&["-C", "/elsewhere"], Some(remote)),
+            ["codex", "--remote", remote, "-C", "/elsewhere"]
         );
     }
 
