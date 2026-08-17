@@ -1,7 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@/lib/invoke";
 import { launchAgentHeadless } from "./agent-launch";
-import { parseNativeCodexFlags, resolveFlags } from "./agent";
+import {
+  canRunNativeCodexAutomation,
+  parseNativeCodexFlags,
+  resolveFlags,
+} from "./agent";
 import { createAutomationRunDispatcher } from "./automation-run-dispatcher";
 import { runPtySessionId, RUN_PANE_ID } from "./pane-ids";
 import { encodePtyInput } from "./encode-pty";
@@ -173,7 +177,7 @@ async function executeRun({
         ? await resolveFlags("codex", automation.repo_path || runPath)
         : null;
     const nativeSettings = flags === null ? null : parseNativeCodexFlags(flags);
-    const nativeSupported = nativeSettings
+    const nativeSupported = canRunNativeCodexAutomation(nativeSettings)
       ? await invoke<boolean>("preflight_native_codex_settings", {
           settings: nativeSettings,
         }).catch(() => false)

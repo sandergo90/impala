@@ -7,6 +7,7 @@ import {
   agentForTerminalLaunch,
   usesImpalaCodexServer,
   parseNativeCodexFlags,
+  canRunNativeCodexAutomation,
 } from "./agent.ts";
 
 const CODEX_ENV = {
@@ -122,5 +123,12 @@ describe("native Codex automation flags", () => {
     expect(parseNativeCodexFlags("-m future-model -c model_reasoning_effort=deep --config=service_tier=priority")).toEqual({
       model: "future-model", effort: "deep", serviceTier: "priority",
     });
+  });
+  test("allows native automation only when approvals are non-interactive", () => {
+    expect(canRunNativeCodexAutomation(parseNativeCodexFlags(""))).toBe(false);
+    expect(canRunNativeCodexAutomation(parseNativeCodexFlags("-a on-request"))).toBe(false);
+    expect(canRunNativeCodexAutomation(parseNativeCodexFlags("-a untrusted"))).toBe(false);
+    expect(canRunNativeCodexAutomation(parseNativeCodexFlags("-a never"))).toBe(true);
+    expect(canRunNativeCodexAutomation(parseNativeCodexFlags("--yolo"))).toBe(true);
   });
 });

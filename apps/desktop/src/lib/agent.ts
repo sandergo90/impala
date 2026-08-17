@@ -121,6 +121,13 @@ export function parseNativeCodexFlags(
   return settings;
 }
 
+/** Automations cannot answer app-server approval requests; panes can. */
+export function canRunNativeCodexAutomation(
+  settings: NativeCodexSettings | null,
+): settings is NativeCodexSettings & { approvalPolicy: "never" } {
+  return settings?.approvalPolicy === "never";
+}
+
 /**
  * Resolve the agent for a worktree. Agent is chosen at creation time and
  * stored at worktree scope; nothing else feeds the resolution. Worktrees
