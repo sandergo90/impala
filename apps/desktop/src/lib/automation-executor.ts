@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@/lib/invoke";
 import { launchAgentHeadless } from "./agent-launch";
+import { parseNativeCodexFlags, resolveFlags } from "./agent";
 import { createAutomationRunDispatcher } from "./automation-run-dispatcher";
 import { runPtySessionId, RUN_PANE_ID } from "./pane-ids";
 import { encodePtyInput } from "./encode-pty";
@@ -164,6 +165,21 @@ async function executeRun({
       runId: run_id,
       worktreePath: runPath,
     });
+
+    const flags =
+      automation.agent === "codex"
+        ? await resolveFlags("codex", automation.repo_path || runPath)
+        : null;
+    const nativeSettings = flags === null ? null : parseNativeCodexFlags(flags);
+    if (automation.agent === "codex" && nativeSettings) {
+      await invoke("start_native_codex_automation", {
+        runId: run_id,
+        worktreePath: runPath,
+        prompt: `Read and execute the automation instructions in \`${instructions_path}\`.`,
+        settings: nativeSettings,
+      });
+      return;
+    }
 
     // Mark global rows launched before writing the first prompt so a provider
     // Stop hook cannot arrive while the row is still pending and miss the

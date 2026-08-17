@@ -120,6 +120,10 @@ export interface AutomationRun {
   agent_provider?: "claude" | "codex" | null;
   agent_session_id?: string | null;
   agent_turn_id?: string | null;
+  /** CLI rows own a PTY; native Codex rows are owned by the app-server. */
+  agent_transport: "cli" | "app-server";
+  /** Immutable structured settings used for an app-server launch. */
+  agent_settings?: string | null;
 }
 
 export type TerminalLaunchProfile = "shell" | "agent";

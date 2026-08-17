@@ -2071,6 +2071,14 @@ pub fn run() {
                 agent_pane_statuses.clone(),
                 agent_statuses.clone(),
             );
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(error) = automations::recover_native_codex_runs(&app_handle) {
+                        tracing::warn!(%error, "native Codex automation recovery failed");
+                    }
+                });
+            }
 
             // Bring up the detached PTY daemon in the background. Commands
             // arriving during initialization wait on DaemonState; a startup
@@ -2223,6 +2231,8 @@ pub fn run() {
             automations::list_automation_runs,
             automations::list_pending_automation_runs,
             automations::report_automation_run,
+            automations::start_native_codex_automation,
+            automations::interrupt_native_codex_automation,
             automations::finalize_automation_run_instructions,
             automations::cron_next_occurrences,
             automations::count_unseen_automation_runs,

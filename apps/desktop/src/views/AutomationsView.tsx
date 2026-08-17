@@ -302,6 +302,7 @@ export function AutomationsView() {
         }
         if (
           automation?.repo_path === "" &&
+          run.agent_transport === "cli" &&
           (run.status === "pending" || run.status === "launched")
         ) {
           try {
@@ -928,7 +929,9 @@ function AutomationWorktreePane({
       </div>
 
       <div className="min-h-0 flex-1">
-        {automation?.repo_path === "" && run ? (
+        {run?.agent_transport === "app-server" ? (
+          <NativeAutomationStatus run={run} />
+        ) : automation?.repo_path === "" && run ? (
           <GlobalAutomationTerminal
             key={`${run.id}:${claimed ? "claimed" : (run.agent_session_id ?? "")}`}
             run={run}
@@ -956,6 +959,40 @@ function AutomationWorktreePane({
             }}
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+function NativeAutomationStatus({ run }: { run: AutomationRun }) {
+  const running = run.status === "pending" || run.status === "launched";
+  const [stopping, setStopping] = useState(false);
+  const stop = async () => {
+    setStopping(true);
+    try {
+      await invoke("interrupt_native_codex_automation", { runId: run.id });
+    } catch (error) {
+      toast.error(`Failed to stop Codex: ${error}`);
+      setStopping(false);
+    }
+  };
+  return (
+    <div className="flex h-full items-center justify-center px-8 text-center">
+      <div className="max-w-sm">
+        <p className="text-sm font-medium">
+          {running ? "Codex is running in the background" : "This Codex run is ready to review"}
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {running
+            ? "Impala will make the worktree reviewable when the turn completes."
+            : "Review the worktree and its diff without opening a second Codex subscriber."}
+        </p>
+        {running && (
+          <button type="button" onClick={stop} disabled={stopping} className="mt-4 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50">
+            {stopping ? "Stopping…" : "Stop"}
+          </button>
+        )}
+        {run.error && <p className="mt-3 text-sm text-danger">{run.error}</p>}
       </div>
     </div>
   );

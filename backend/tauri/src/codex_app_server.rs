@@ -190,6 +190,21 @@ impl CodexAppServerState {
             .map_err(|_| "Codex app-server state lock poisoned".to_string())
     }
 
+    /// Restore only durable Impala ownership. This never subscribes to an
+    /// arbitrary Codex thread; recovery callers must provide DB-owned ids.
+    pub fn adopt_thread(&self, thread_id: &str) -> Result<(), String> {
+        if thread_id.trim().is_empty() {
+            return Err("Codex app-server thread id is empty".to_string());
+        }
+        self.snapshot
+            .lock()
+            .map_err(|_| "Codex app-server state lock poisoned".to_string())?
+            .threads
+            .entry(thread_id.to_string())
+            .or_default();
+        Ok(())
+    }
+
     /// The generic protocol seam for later native-pane and automation phases.
     pub fn dispatch(&self, method: &str, params: Value) -> Result<Value, String> {
         let (reply_sender, reply_receiver) = mpsc::channel();
@@ -599,6 +614,7 @@ fn handle_notification(
     app: &tauri::AppHandle,
 ) {
     apply_notification(&envelope, snapshot);
+    crate::automations::apply_native_codex_notification(app, &envelope);
     let _ = app.emit("codex-app-server-event", envelope);
 }
 

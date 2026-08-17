@@ -116,6 +116,8 @@ pub struct AutomationRun {
     pub agent_provider: Option<String>,
     pub agent_session_id: Option<String>,
     pub agent_turn_id: Option<String>,
+    pub agent_transport: String,
+    pub agent_settings: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -169,6 +171,8 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             agent_provider TEXT,
             agent_session_id TEXT,
             agent_turn_id TEXT,
+            agent_transport TEXT NOT NULL DEFAULT 'cli',
+            agent_settings TEXT,
             status TEXT NOT NULL,
             error TEXT,
             created_at TEXT NOT NULL,
@@ -201,6 +205,14 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
     );
     let _ = conn.execute(
         "ALTER TABLE automation_runs ADD COLUMN agent_turn_id TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE automation_runs ADD COLUMN agent_transport TEXT NOT NULL DEFAULT 'cli'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE automation_runs ADD COLUMN agent_settings TEXT",
         [],
     );
     let _ = conn.execute(
@@ -282,11 +294,13 @@ fn row_to_run(row: &rusqlite::Row) -> rusqlite::Result<AutomationRun> {
         agent_provider: row.get(9)?,
         agent_session_id: row.get(10)?,
         agent_turn_id: row.get(11)?,
+        agent_transport: row.get(12)?,
+        agent_settings: row.get(13)?,
     })
 }
 
 const RUN_COLS: &str =
-    "id, automation_id, scheduled_for, worktree_path, instructions_path, status, seen, error, created_at, agent_provider, agent_session_id, agent_turn_id";
+    "id, automation_id, scheduled_for, worktree_path, instructions_path, status, seen, error, created_at, agent_provider, agent_session_id, agent_turn_id, agent_transport, agent_settings";
 
 fn get_run(conn: &Connection, id: &str) -> Result<AutomationRun, String> {
     conn.query_row(
@@ -530,6 +544,8 @@ pub fn insert_run(
         agent_provider: None,
         agent_session_id: None,
         agent_turn_id: None,
+        agent_transport: "cli".to_string(),
+        agent_settings: None,
     }))
 }
 
@@ -1031,6 +1047,243 @@ pub(crate) fn record_run_agent_lifecycle(
     Ok(())
 }
 
+fn native_turn_id(value: &serde_json::Value) -> Option<&str> {
+    value.get("turn")
+        .and_then(|turn| turn.get("id"))
+        .or_else(|| value.get("turnId"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn native_thread_id(value: &serde_json::Value) -> Option<&str> {
+    value.get("thread")
+        .and_then(|thread| thread.get("id"))
+        .or_else(|| value.get("threadId"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn native_error(turn: &serde_json::Value, fallback: &str) -> String {
+    turn.get("error")
+        .and_then(|error| error.get("message").or(Some(error)))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn transition_native_turn(
+    conn: &Connection,
+    thread_id: &str,
+    turn_id: &str,
+    turn: &serde_json::Value,
+) -> Result<Option<ReconciledAutomationRun>, String> {
+    let status = turn.get("status").and_then(serde_json::Value::as_str);
+    let (next, error) = match status {
+        Some("completed") => ("completed", None),
+        Some("failed") => ("failed", Some(native_error(turn, "Codex turn failed"))),
+        Some("interrupted") => ("failed", Some(native_error(turn, "Codex turn interrupted"))),
+        _ => return Ok(None),
+    };
+    let found = conn
+        .query_row(
+            "SELECT r.id, a.name, r.worktree_path FROM automation_runs r JOIN automations a ON a.id = r.automation_id
+             WHERE r.agent_transport = 'app-server' AND r.agent_session_id = ?1 AND r.agent_turn_id = ?2 AND r.status IN ('pending', 'launched')",
+            params![thread_id, turn_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?)),
+        )
+        .ok();
+    let Some((run_id, automation_name, worktree_path)) = found else { return Ok(None) };
+    let changed = conn.execute(
+        "UPDATE automation_runs SET status = ?1, error = ?2 WHERE id = ?3 AND agent_transport = 'app-server' AND agent_session_id = ?4 AND agent_turn_id = ?5 AND status IN ('pending', 'launched')",
+        params![next, error, run_id, thread_id, turn_id],
+    ).map_err(|error| format!("Failed to persist native Codex turn outcome: {error}"))?;
+    Ok((changed > 0).then(|| ReconciledAutomationRun { run_id, automation_name, worktree_path: worktree_path.unwrap_or_default() }))
+}
+
+/// Event authority for app-server owned automation runs. The exact pair is
+/// required because a thread can have later turns after a recovery boundary.
+pub(crate) fn apply_native_codex_notification(app: &AppHandle, envelope: &serde_json::Value) {
+    let Some(method) = envelope.get("method").and_then(serde_json::Value::as_str) else { return };
+    if method != "turn/completed" && method != "turn/failed" && method != "turn/interrupted" { return; }
+    let params = envelope.get("params").unwrap_or(&serde_json::Value::Null);
+    let Some(thread_id) = params.get("threadId").and_then(serde_json::Value::as_str) else { return };
+    let Some(turn) = params.get("turn") else { return };
+    let Some(turn_id) = turn.get("id").and_then(serde_json::Value::as_str) else { return };
+    let mut turn = turn.clone();
+    if turn.get("status").is_none() {
+        turn["status"] = serde_json::Value::String(match method { "turn/failed" => "failed", "turn/interrupted" => "interrupted", _ => "completed" }.to_string());
+    }
+    let result = app.state::<crate::DbState>().0.lock().map_err(|_| ()).and_then(|conn| transition_native_turn(&conn, thread_id, turn_id, &turn).map_err(|_| ()));
+    if let Ok(run) = result {
+        publish_native_transition(app, run);
+    }
+}
+
+fn publish_native_transition(app: &AppHandle, run: Option<ReconciledAutomationRun>) {
+    if let Some(run) = run {
+        let _ = app.emit("automation-run-completed", serde_json::json!({ "worktree_path": run.worktree_path, "automation_name": run.automation_name }));
+        let _ = app.emit("automation-runs-changed", ());
+    }
+}
+
+fn fail_native_run(conn: &Connection, run_id: &str, error: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE automation_runs SET status = 'failed', error = ?2 WHERE id = ?1 AND status IN ('pending', 'launched')",
+        params![run_id, error],
+    ).map_err(|error| format!("Failed to persist native Codex launch failure: {error}"))?;
+    Ok(())
+}
+
+fn validate_native_codex_settings(settings: &serde_json::Value) -> Result<(), String> {
+    let object = settings.as_object().ok_or_else(|| "native Codex settings must be an object".to_string())?;
+    for (key, value) in object {
+        let valid = match key.as_str() {
+            "model" => value.as_str().map(|model| !model.is_empty() && model.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))).unwrap_or(false),
+            "effort" => matches!(value.as_str(), Some("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra")),
+            "serviceTier" => matches!(value.as_str(), Some("default" | "fast" | "standard")),
+            "approvalPolicy" => matches!(value.as_str(), Some("never" | "on-request" | "untrusted")),
+            "sandbox" => matches!(value.as_str(), Some("danger-full-access" | "workspace-write" | "read-only")),
+            _ => false,
+        };
+        if !valid { return Err(format!("invalid native Codex setting: {key}")); }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_native_codex_automation(
+    app: AppHandle,
+    db: tauri::State<'_, crate::DbState>,
+    app_server: tauri::State<'_, crate::codex_app_server::CodexAppServerState>,
+    run_id: String,
+    worktree_path: String,
+    prompt: String,
+    settings: serde_json::Value,
+) -> Result<(), String> {
+    if run_id.trim().is_empty() || worktree_path.trim().is_empty() || prompt.trim().is_empty() || !Path::new(&worktree_path).is_dir() {
+        return Err("invalid native Codex automation launch input".to_string());
+    }
+    validate_native_codex_settings(&settings)?;
+    let settings_json = serde_json::to_string(&settings).map_err(|error| format!("serialize native Codex settings: {error}"))?;
+    { let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?;
+      let valid: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM automation_runs WHERE id = ?1 AND status = 'pending' AND (worktree_path IS NULL OR worktree_path = ?2))", params![run_id, worktree_path], |row| row.get(0)).map_err(|error| format!("validate native automation run: {error}"))?;
+      if !valid { return Err("automation run is not pending for this worktree".to_string()); }
+    }
+    let state = app_server.inner().clone();
+    let thread_settings = settings.clone();
+    let thread_path = worktree_path.clone();
+    let thread = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let mut thread_params = serde_json::json!({ "cwd": worktree_path });
+        if let Some(policy) = settings.get("approvalPolicy") { thread_params["approvalPolicy"] = policy.clone(); }
+        if let Some(sandbox) = settings.get("sandbox") { thread_params["sandbox"] = sandbox.clone(); }
+        if let Some(model) = settings.get("model") { thread_params["model"] = model.clone(); }
+        if let Some(tier) = settings.get("serviceTier") { thread_params["serviceTier"] = tier.clone(); }
+        let thread = state.thread_start(thread_params)?;
+        let thread_id = native_thread_id(&thread).ok_or_else(|| "Codex thread/start returned no thread id".to_string())?.to_string();
+        state.adopt_thread(&thread_id)?;
+        Ok(thread_id)
+    }).await.map_err(|error| format!("native Codex launch task join: {error}"))?;
+    let thread_id = match thread { Ok(value) => value, Err(error) => { let conn = db.0.lock().map_err(|lock| format!("DB lock error: {lock}"))?; fail_native_run(&conn, &run_id, &error)?; let _ = app.emit("automation-runs-changed", ()); return Err(error); } };
+    { let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?;
+      let owned = conn.execute("UPDATE automation_runs SET worktree_path = ?2, agent_transport = 'app-server', agent_provider = 'codex', agent_settings = ?3, agent_session_id = ?4 WHERE id = ?1 AND status = 'pending'", params![run_id, thread_path, settings_json, thread_id]).map_err(|error| format!("persist native Codex thread ownership: {error}"))?;
+      if owned != 1 {
+          fail_native_run(&conn, &run_id, "native Codex thread ownership lost before turn start")?;
+          let _ = app.emit("automation-runs-changed", ());
+          return Err("native Codex thread ownership lost before turn start".to_string());
+      }
+    }
+    let state = app_server.inner().clone();
+    let turn_thread_id = thread_id.clone();
+    let run_id_for_worker = run_id.clone();
+    let turn = tokio::task::spawn_blocking(move || {
+        let mut params = serde_json::json!({ "clientUserMessageId": format!("impala-automation-{run_id_for_worker}"), "input": [{ "type": "text", "text": prompt }] });
+        if let Some(model) = thread_settings.get("model") { params["model"] = model.clone(); }
+        if let Some(tier) = thread_settings.get("serviceTier") { params["serviceTier"] = tier.clone(); }
+        if let Some(effort) = thread_settings.get("effort") { params["effort"] = effort.clone(); }
+        state.turn_start(&turn_thread_id, params).and_then(|value| native_turn_id(&value).map(str::to_string).ok_or_else(|| "Codex turn/start returned no turn id".to_string()))
+    })
+        .await.map_err(|error| format!("native Codex turn task join: {error}"))?;
+    let turn_id = match turn { Ok(value) => value, Err(error) => { let conn = db.0.lock().map_err(|lock| format!("DB lock error: {lock}"))?; fail_native_run(&conn, &run_id, &error)?; let _ = app.emit("automation-runs-changed", ()); return Err(error); } };
+    {
+        let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?;
+        let owned = conn.execute("UPDATE automation_runs SET agent_turn_id = ?2, status = 'launched', error = NULL WHERE id = ?1 AND agent_transport = 'app-server' AND agent_session_id = ?3 AND status = 'pending'", params![run_id, turn_id, thread_id]).map_err(|error| format!("persist native Codex turn ownership: {error}"))?;
+        if owned != 1 {
+            fail_native_run(&conn, &run_id, "native Codex turn ownership lost after turn start")?;
+            let _ = app.emit("automation-runs-changed", ());
+            return Err("native Codex turn ownership lost after turn start".to_string());
+        }
+    }
+    // A short turn can complete between turn/start and the durable id write.
+    // Read once after persistence so that notification is never the only
+    // authority for this launch window.
+    let read_state = app_server.inner().clone();
+    let read_thread_id = thread_id.clone();
+    let read_turn_id = turn_id.clone();
+    if let Ok(Ok(read)) = tokio::task::spawn_blocking(move || read_state.thread_read(&read_thread_id)).await {
+        if let Some(turn) = read.get("thread").and_then(|thread| thread.get("turns")).or_else(|| read.get("turns")).and_then(serde_json::Value::as_array).and_then(|turns| turns.iter().find(|turn| turn.get("id").and_then(serde_json::Value::as_str) == Some(read_turn_id.as_str()))) {
+            let transition = {
+                let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?;
+                transition_native_turn(&conn, &thread_id, &turn_id, turn)?
+            };
+            publish_native_transition(&app, transition);
+        }
+    }
+    let _ = app.emit("automation-runs-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn interrupt_native_codex_automation(
+    app: AppHandle,
+    db: tauri::State<'_, crate::DbState>,
+    app_server: tauri::State<'_, crate::codex_app_server::CodexAppServerState>,
+    run_id: String,
+) -> Result<(), String> {
+    let (thread_id, turn_id): (String, String) = { let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?; conn.query_row("SELECT agent_session_id, agent_turn_id FROM automation_runs WHERE id = ?1 AND agent_transport = 'app-server' AND status IN ('pending', 'launched')", params![run_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).map_err(|_| "native automation run is not active".to_string())? };
+    let state = app_server.inner().clone();
+    let interrupt_thread_id = thread_id.clone();
+    let interrupt_turn_id = turn_id.clone();
+    tokio::task::spawn_blocking(move || state.turn_interrupt(&interrupt_thread_id, &interrupt_turn_id)).await.map_err(|error| format!("native Codex interrupt task join: {error}"))??;
+    let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?;
+    conn.execute("UPDATE automation_runs SET status = 'failed', error = 'Interrupted by user' WHERE id = ?1 AND agent_transport = 'app-server' AND agent_session_id = ?2 AND agent_turn_id = ?3 AND status IN ('pending', 'launched')", params![run_id, thread_id, turn_id]).map_err(|error| format!("persist native Codex interrupt: {error}"))?;
+    let _ = app.emit("automation-runs-changed", ());
+    Ok(())
+}
+
+/// Reattach only rows that Impala previously persisted as app-server owned.
+/// A missing identity is terminal: retrying it would create a second turn.
+pub(crate) fn recover_native_codex_runs(app: &AppHandle) -> Result<(), String> {
+    let rows = {
+        let db = app.state::<crate::DbState>();
+        let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?;
+        let mut stmt = conn.prepare("SELECT id, agent_session_id, agent_turn_id FROM automation_runs WHERE agent_transport = 'app-server' AND status IN ('pending', 'launched')").map_err(|error| format!("prepare native Codex recovery: {error}"))?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?)))
+            .map_err(|error| format!("query native Codex recovery: {error}"))?
+            .collect::<Result<Vec<_>, _>>().map_err(|error| format!("read native Codex recovery: {error}"))?;
+        rows
+    };
+    let state = app.state::<crate::codex_app_server::CodexAppServerState>();
+    for (run_id, thread_id, turn_id) in rows {
+        let outcome = (|| -> Result<(), String> {
+            let thread_id = thread_id.ok_or_else(|| "native Codex run has no persisted thread id".to_string())?;
+            let turn_id = turn_id.ok_or_else(|| "native Codex run has no persisted turn id".to_string())?;
+            state.adopt_thread(&thread_id)?;
+            state.thread_resume(&thread_id)?;
+            let read = state.thread_read(&thread_id)?;
+            let turns = read.get("thread").and_then(|thread| thread.get("turns")).or_else(|| read.get("turns")).and_then(serde_json::Value::as_array).ok_or_else(|| "Codex thread/read omitted turns".to_string())?;
+            let turn = turns.iter().find(|turn| turn.get("id").and_then(serde_json::Value::as_str) == Some(turn_id.as_str())).ok_or_else(|| "persisted Codex turn is missing".to_string())?;
+            let transition = { let db = app.state::<crate::DbState>(); let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?; transition_native_turn(&conn, &thread_id, &turn_id, turn)? };
+            publish_native_transition(app, transition);
+            Ok(())
+        })();
+        if let Err(error) = outcome {
+            let db = app.state::<crate::DbState>();
+            let conn = db.0.lock().map_err(|lock| format!("DB lock error: {lock}"))?;
+            fail_native_run(&conn, &run_id, &error)?;
+            let _ = app.emit("automation-runs-changed", ());
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ReconciledAutomationRun {
     pub run_id: String,
@@ -1258,6 +1511,7 @@ fn reconcile_completed_codex_runs_in(
              JOIN automations a ON a.id = r.automation_id
              WHERE r.status = 'launched'
                AND a.agent = 'codex'
+               AND r.agent_transport = 'cli'
                AND r.worktree_path IS NOT NULL",
         )
         .map_err(|e| format!("Failed to prepare Codex automation recovery: {}", e))?;
@@ -1330,6 +1584,35 @@ fn reconcile_completed_codex_runs_in(
         }
     }
     Ok(completed)
+}
+
+/// One-release observability only: JSONL remains non-authoritative for native
+/// rows, but an exact matching terminal transcript reveals missed protocol
+/// events without changing the durable app-server outcome.
+fn shadow_completed_native_codex_runs_in(
+    conn: &Connection,
+    canonical_home: Option<&Path>,
+) -> Result<Vec<ReconciledAutomationRun>, String> {
+    let mut stmt = conn.prepare(
+        "SELECT r.id, a.name, r.worktree_path, r.agent_session_id, r.agent_turn_id, r.scheduled_for
+         FROM automation_runs r JOIN automations a ON a.id = r.automation_id
+         WHERE r.status = 'launched' AND a.agent = 'codex' AND r.agent_transport = 'app-server'
+           AND r.worktree_path IS NOT NULL AND r.agent_session_id IS NOT NULL AND r.agent_turn_id IS NOT NULL",
+    ).map_err(|error| format!("Failed to prepare native Codex shadow check: {error}"))?;
+    let rows = stmt.query_map([], |row| Ok((
+        row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+        row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?,
+    ))).map_err(|error| format!("Failed to query native Codex shadow check: {error}"))?
+        .collect::<Result<Vec<_>, _>>().map_err(|error| format!("Failed to read native Codex shadow check: {error}"))?;
+    let mut mismatches = Vec::new();
+    for (run_id, automation_name, worktree_path, session_id, turn_id, scheduled_for) in rows {
+        let not_before = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(scheduled_for.max(0) as u64);
+        if codex_transcript_for_run_in(&worktree_path, Some(&session_id), not_before, canonical_home)
+            .is_some_and(|transcript| transcript.completed_turn_ids.contains(&turn_id)) {
+            mismatches.push(ReconciledAutomationRun { run_id, automation_name, worktree_path });
+        }
+    }
+    Ok(mismatches)
 }
 
 fn claude_transcript_path(projects_root: &Path, worktree_path: &str, session_id: &str) -> PathBuf {
@@ -1808,6 +2091,12 @@ pub fn start_completion_reconciler(
                 .map_err(|error| format!("Failed to open automation database: {}", error))
                 .and_then(|conn| {
                     let mut completed = reconcile_completed_codex_runs(&conn)?;
+                    for mismatch in shadow_completed_native_codex_runs_in(
+                        &conn,
+                        crate::agent_config::codex_home_path().as_deref(),
+                    )? {
+                        warn!(run_id = %mismatch.run_id, worktree_path = %mismatch.worktree_path, "native Codex automation JSONL shadow mismatch; app-server remains authoritative");
+                    }
                     completed.extend(reconcile_completed_claude_runs(&conn)?);
                     let cleanup_paths = if recover_completed_ptys {
                         finished_global_run_worktrees(&conn)?
@@ -2054,6 +2343,7 @@ fn active_global_run_worktree(conn: &Connection, run_id: &str) -> Result<String,
              JOIN automations a ON a.id = r.automation_id
              WHERE r.id = ?1
                AND a.repo_path = ''
+               AND r.agent_transport = 'cli'
                AND r.status IN ('pending', 'launched')
                AND r.worktree_path IS NOT NULL",
         params![run_id],
@@ -2096,7 +2386,7 @@ pub(crate) fn stop_completed_global_run_if_unclaimed(app: &AppHandle, worktree_p
                     SELECT 1
                     FROM automation_runs r
                     JOIN automations a ON a.id = r.automation_id
-                    WHERE r.worktree_path = ?1 AND a.repo_path = ''
+                    WHERE r.worktree_path = ?1 AND a.repo_path = '' AND r.agent_transport = 'cli'
                 )",
                     params![worktree_path],
                     |row| row.get::<_, bool>(0),
@@ -2177,6 +2467,7 @@ fn finished_global_run_worktrees(conn: &Connection) -> Result<Vec<String>, Strin
              JOIN automations a ON a.id = r.automation_id
              WHERE r.status IN ('completed', 'failed', 'aborted')
                AND a.repo_path = ''
+               AND r.agent_transport = 'cli'
                AND r.worktree_path IS NOT NULL",
         )
         .map_err(|error| format!("Failed to prepare finished global run cleanup: {error}"))?;
@@ -2848,6 +3139,54 @@ mod tests {
         let interrupted = get_run(&conn, &run.id).unwrap();
         assert_eq!(interrupted.status, "failed");
         assert_eq!(interrupted.error.as_deref(), Some("Interrupted by user"));
+    }
+
+    #[test]
+    fn native_turn_transition_requires_the_persisted_thread_and_turn_pair() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(&conn, new_automation("0 9 * * *"), now).unwrap();
+        let run = insert_run(&conn, &automation.id, now).unwrap().unwrap();
+        conn.execute(
+            "UPDATE automation_runs SET worktree_path = '/native', status = 'launched', agent_provider = 'codex', agent_transport = 'app-server', agent_settings = '{\"sandbox\":\"danger-full-access\"}', agent_session_id = 'thread-1', agent_turn_id = 'turn-1' WHERE id = ?1",
+            params![run.id],
+        ).unwrap();
+        let completed = serde_json::json!({ "id": "turn-1", "status": "completed" });
+        assert!(transition_native_turn(&conn, "thread-1", "other-turn", &completed).unwrap().is_none());
+        assert!(transition_native_turn(&conn, "other-thread", "turn-1", &completed).unwrap().is_none());
+        assert!(transition_native_turn(&conn, "thread-1", "turn-1", &completed).unwrap().is_some());
+        assert_eq!(get_run(&conn, &run.id).unwrap().status, "completed");
+    }
+
+    #[test]
+    fn native_rows_keep_the_cli_default_and_skip_jsonl_reconciliation() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(&conn, NewAutomation { agent: "codex".into(), ..new_automation("0 9 * * *") }, now).unwrap();
+        let run = insert_run(&conn, &automation.id, now).unwrap().unwrap();
+        assert_eq!(get_run(&conn, &run.id).unwrap().agent_transport, "cli");
+        conn.execute("UPDATE automation_runs SET status = 'launched', worktree_path = '/native', agent_transport = 'app-server' WHERE id = ?1", params![run.id]).unwrap();
+        assert!(reconcile_completed_codex_runs_in(&conn, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn native_jsonl_shadow_detects_a_terminal_turn_without_mutating_it() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(&conn, NewAutomation { agent: "codex".into(), ..new_automation("0 9 * * *") }, now).unwrap();
+        let run = insert_run(&conn, &automation.id, now).unwrap().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let worktree = workspace.path().to_string_lossy().to_string();
+        conn.execute("UPDATE automation_runs SET worktree_path = ?2, status = 'launched', agent_provider = 'codex', agent_transport = 'app-server', agent_session_id = 'native-session', agent_turn_id = 'native-turn' WHERE id = ?1", params![run.id, worktree]).unwrap();
+        let sessions = workspace.path().join(".impala/codex/sessions/2026/08/17");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(sessions.join("rollout-native-session.jsonl"), [
+            serde_json::json!({ "type": "session_meta", "payload": { "id": "native-session", "cwd": worktree } }).to_string(),
+            serde_json::json!({ "type": "event_msg", "payload": { "type": "task_complete", "turn_id": "native-turn" } }).to_string(),
+        ].join("\n")).unwrap();
+        let mismatches = shadow_completed_native_codex_runs_in(&conn, None).unwrap();
+        assert_eq!(mismatches.iter().map(|run| run.run_id.as_str()).collect::<Vec<_>>(), vec![run.id.as_str()]);
+        assert_eq!(get_run(&conn, &run.id).unwrap().status, "launched");
     }
 
     #[test]

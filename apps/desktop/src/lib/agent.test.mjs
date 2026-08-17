@@ -5,6 +5,7 @@ import {
   buildInteractiveShellArgs,
   buildLaunchCommand,
   usesImpalaCodexServer,
+  parseNativeCodexFlags,
 } from "./agent.ts";
 
 const CODEX_ENV = {
@@ -96,5 +97,20 @@ describe("global automation commands", () => {
     expect(buildInteractiveShellArgs(["--rcfile", "/tmp/rc", "-l"])).toEqual(
       ["--rcfile", "/tmp/rc", "-l", "-i"],
     );
+  });
+});
+
+describe("native Codex automation flags", () => {
+  test("maps the exact supported structured settings", () => {
+    expect(parseNativeCodexFlags("--yolo -m gpt-5.6-luna -c model_reasoning_effort=max --config=service_tier=fast")).toEqual({
+      model: "gpt-5.6-luna", effort: "max", serviceTier: "fast", approvalPolicy: "never", sandbox: "danger-full-access",
+    });
+    expect(parseNativeCodexFlags("-s workspace-write -a on-request")).toEqual({ sandbox: "workspace-write", approvalPolicy: "on-request" });
+    expect(parseNativeCodexFlags("")).toEqual({});
+  });
+  test("rejects shell text, positional input, conflicts, and unsupported flags", () => {
+    for (const flags of ["--remote unix:///x", "resume abc", "--model", "-m a -m b", "--add-dir /tmp", "-c foo=bar", "--yolo -a on-request", "-a never --yolo", "--yolo -s danger-full-access", "-s danger-full-access --yolo", "-a on-failure", "--model='x'"]) {
+      expect(parseNativeCodexFlags(flags)).toBeNull();
+    }
   });
 });

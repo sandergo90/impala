@@ -16,6 +16,87 @@ export interface CodexLaunchOptions {
   serviceTier?: "default" | "fast" | "standard";
 }
 
+export interface NativeCodexSettings {
+  model?: string;
+  effort?: CodexLaunchOptions["reasoningEffort"];
+  serviceTier?: CodexLaunchOptions["serviceTier"];
+  approvalPolicy?: "never" | "on-request" | "untrusted";
+  sandbox?: "danger-full-access" | "workspace-write" | "read-only";
+}
+
+const EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
+const TIERS = new Set(["default", "fast", "standard"]);
+const APPROVAL_POLICIES = new Set(["never", "on-request", "untrusted"]);
+const SANDBOXES = new Set(["danger-full-access", "workspace-write", "read-only"]);
+const UNSAFE_FLAG_TEXT = /["'`$;&|<>()[\]{}\\]/;
+
+/**
+ * Parse only the Codex CLI settings that have an exact app-server equivalent.
+ * This deliberately does not shell-parse: anything beyond the small allowlist
+ * returns null and follows the established CLI route unchanged.
+ */
+export function parseNativeCodexFlags(flags: string): NativeCodexSettings | null {
+  const text = flags.trim();
+  if (!text) return {};
+  if (UNSAFE_FLAG_TEXT.test(text)) return null;
+  const tokens = text.split(/\s+/);
+  const settings: NativeCodexSettings = {};
+  const seen = new Set<string>();
+  const take = (name: string, value: string | undefined): string | null => {
+    if (!value || seen.has(name) || value.startsWith("-")) return null;
+    seen.add(name);
+    return value;
+  };
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "--yolo" || token === "--dangerously-bypass-approvals-and-sandbox") {
+      if (seen.has("yolo") || seen.has("approval") || seen.has("sandbox")) return null;
+      seen.add("yolo");
+      settings.approvalPolicy = "never";
+      settings.sandbox = "danger-full-access";
+      continue;
+    }
+    const next = () => tokens[++index];
+    let value: string | null = null;
+    if (token === "-m" || token === "--model") value = take("model", next());
+    else if (token.startsWith("--model=")) value = take("model", token.slice(8));
+    if (value !== null) {
+      if (!/^[A-Za-z0-9._-]+$/.test(value)) return null;
+      settings.model = value;
+      continue;
+    }
+    if (token === "-s" || token === "--sandbox") value = take("sandbox", next());
+    else if (token.startsWith("--sandbox=")) value = take("sandbox", token.slice(10));
+    if (value !== null) {
+      if (seen.has("yolo")) return null;
+      if (!SANDBOXES.has(value) || (settings.sandbox && settings.sandbox !== value)) return null;
+      settings.sandbox = value as NativeCodexSettings["sandbox"];
+      continue;
+    }
+    if (token === "-a" || token === "--ask-for-approval") value = take("approval", next());
+    else if (token.startsWith("--ask-for-approval=")) value = take("approval", token.slice(19));
+    if (value !== null) {
+      if (seen.has("yolo")) return null;
+      if (!APPROVAL_POLICIES.has(value) || (settings.approvalPolicy && settings.approvalPolicy !== value)) return null;
+      settings.approvalPolicy = value as NativeCodexSettings["approvalPolicy"];
+      continue;
+    }
+    if (token === "-c") value = next() ?? null;
+    else if (token.startsWith("--config=")) value = token.slice(9) || null;
+    if (value !== null) {
+      const [key, configValue, ...rest] = value.split("=");
+      if (rest.length || !configValue || seen.has(key)) return null;
+      if (key === "model_reasoning_effort" && EFFORTS.has(configValue)) settings.effort = configValue as NativeCodexSettings["effort"];
+      else if (key === "service_tier" && TIERS.has(configValue)) settings.serviceTier = configValue as NativeCodexSettings["serviceTier"];
+      else return null;
+      seen.add(key);
+      continue;
+    }
+    return null;
+  }
+  return settings;
+}
+
 /**
  * Resolve the agent for a worktree. Agent is chosen at creation time and
  * stored at worktree scope; nothing else feeds the resolution. Worktrees
