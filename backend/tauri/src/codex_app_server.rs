@@ -1,13 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::Emitter;
 use tungstenite::{client, Message, WebSocket};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -18,35 +17,6 @@ const DIAGNOSTICS_MAX_PAGES: usize = 20;
 const MODEL_CATALOG_TTL: Duration = Duration::from_secs(5);
 const DAEMON_SOCKET: &str = "app-server-control/app-server-control.sock";
 static DAEMON_LAUNCH_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexAppServerSnapshot {
-    pub connection: CodexAppServerConnectionSnapshot,
-    pub threads: Vec<CodexAppServerThreadSnapshot>,
-    /// Raw protocol envelopes are intentionally retained for forwards compatibility.
-    pub recent_events: Vec<Value>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexAppServerConnectionSnapshot {
-    pub status: String,
-    pub version: Option<Value>,
-    pub last_error: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexAppServerThreadSnapshot {
-    pub thread_id: String,
-    pub status: Option<String>,
-    pub active_turn: Option<String>,
-    pub pending_server_requests: Vec<CodexAppServerServerRequest>,
-    pub event_sequence: u64,
-    pub last_error: Option<String>,
-    pub last_event: Option<Value>,
-}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,20 +131,10 @@ struct CachedModelCatalog {
     truncated: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexAppServerServerRequest {
-    pub request_id: Value,
-    pub method: String,
-    pub params: Value,
-    pub thread_id: Option<String>,
-}
-
 #[derive(Default)]
-struct AppServerSnapshotState {
+struct AppServerState {
     connection: ConnectionState,
-    threads: HashMap<String, ThreadState>,
-    recent_events: Vec<Value>,
+    owned_threads: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -184,105 +144,18 @@ struct ConnectionState {
     last_error: Option<String>,
 }
 
-#[derive(Default)]
-struct ThreadState {
-    status: Option<String>,
-    active_turn: Option<String>,
-    pending_server_requests: Vec<CodexAppServerServerRequest>,
-    event_sequence: u64,
-    last_error: Option<String>,
-    last_event: Option<Value>,
-}
-
-impl AppServerSnapshotState {
-    fn snapshot(&self) -> CodexAppServerSnapshot {
-        let mut threads = self
-            .threads
-            .iter()
-            .map(|(thread_id, state)| CodexAppServerThreadSnapshot {
-                thread_id: thread_id.clone(),
-                status: state.status.clone(),
-                active_turn: state.active_turn.clone(),
-                pending_server_requests: state.pending_server_requests.clone(),
-                event_sequence: state.event_sequence,
-                last_error: state.last_error.clone(),
-                last_event: state.last_event.clone(),
-            })
-            .collect::<Vec<_>>();
-        threads.sort_by(|left, right| left.thread_id.cmp(&right.thread_id));
-        CodexAppServerSnapshot {
-            connection: CodexAppServerConnectionSnapshot {
-                status: self.connection.status.clone(),
-                version: self.connection.version.clone(),
-                last_error: self.connection.last_error.clone(),
-            },
-            threads,
-            recent_events: self.recent_events.clone(),
-        }
-    }
-
-    fn record_event(&mut self, event: Value, thread_id: Option<&str>) {
-        // Bounded only in memory; persistent event history is a later-pane concern.
-        if self.recent_events.len() == 100 {
-            self.recent_events.remove(0);
-        }
-        self.recent_events.push(event.clone());
-        if let Some(thread_id) = thread_id.filter(|id| self.threads.contains_key(*id)) {
-            let thread = self.threads.get_mut(thread_id).expect("checked above");
-            thread.event_sequence += 1;
-            thread.last_event = Some(event);
-        }
-    }
-
-    fn apply_thread_value(
-        &mut self,
-        value: &Value,
-        fallback_thread_id: Option<&str>,
-        clear_missing_active_turn: bool,
-    ) {
-        let thread = value.get("thread").unwrap_or(value);
-        let thread_id = thread
-            .get("id")
-            .and_then(Value::as_str)
-            .or(fallback_thread_id);
-        let Some(thread_id) = thread_id.filter(|id| self.threads.contains_key(*id)) else {
-            return;
-        };
-        let state = self.threads.get_mut(thread_id).expect("checked above");
-        if let Some(status) = thread.get("status").and_then(Value::as_str) {
-            state.status = Some(status.to_string());
-        }
-        if let Some(turn_id) = thread
-            .get("activeTurn")
-            .and_then(|turn| turn.get("id").or(Some(turn)))
-            .and_then(Value::as_str)
-        {
-            state.active_turn = Some(turn_id.to_string());
-        } else if clear_missing_active_turn {
-            state.active_turn = None;
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct CodexAppServerState {
     sender: mpsc::Sender<WorkerCommand>,
-    snapshot: Arc<Mutex<AppServerSnapshotState>>,
+    state: Arc<Mutex<AppServerState>>,
     model_catalog: Arc<Mutex<Option<CachedModelCatalog>>>,
 }
 
-#[allow(dead_code)] // Phase 1 calls these typed dispatch paths.
 enum WorkerCommand {
     Request {
         method: String,
         params: Value,
         reply: mpsc::Sender<Result<Value, String>>,
-    },
-    RespondToServerRequest {
-        request_id: Value,
-        result: Option<Value>,
-        error: Option<Value>,
-        reply: mpsc::Sender<Result<(), String>>,
     },
 }
 
@@ -292,26 +165,29 @@ struct PendingCall {
     reply: mpsc::Sender<Result<Value, String>>,
 }
 
-#[allow(dead_code)] // Phase 1 calls these typed dispatch paths.
 impl CodexAppServerState {
     pub fn new(app: tauri::AppHandle) -> Self {
         let (sender, receiver) = mpsc::channel();
-        let snapshot = Arc::new(Mutex::new(AppServerSnapshotState {
+        let state = Arc::new(Mutex::new(AppServerState {
             connection: ConnectionState {
                 status: "offline".to_string(),
                 ..ConnectionState::default()
             },
-            ..AppServerSnapshotState::default()
+            ..AppServerState::default()
         }));
-        let worker_snapshot = snapshot.clone();
-        std::thread::spawn(move || app_server_worker(receiver, worker_snapshot, app));
-        Self { sender, snapshot, model_catalog: Arc::new(Mutex::new(None)) }
+        let worker_state = state.clone();
+        std::thread::spawn(move || app_server_worker(receiver, worker_state, app));
+        Self { sender, state, model_catalog: Arc::new(Mutex::new(None)) }
     }
 
-    pub fn snapshot(&self) -> Result<CodexAppServerSnapshot, String> {
-        self.snapshot
+    fn diagnostics_connection(&self) -> Result<CodexDiagnosticsConnection, String> {
+        self.state
             .lock()
-            .map(|state| state.snapshot())
+            .map(|state| CodexDiagnosticsConnection {
+                status: state.connection.status.clone(),
+                version: safe_version(state.connection.version.as_ref()),
+                error: state.connection.last_error.clone(),
+            })
             .map_err(|_| "Codex app-server state lock poisoned".to_string())
     }
 
@@ -321,16 +197,15 @@ impl CodexAppServerState {
         if thread_id.trim().is_empty() {
             return Err("Codex app-server thread id is empty".to_string());
         }
-        self.snapshot
+        self.state
             .lock()
             .map_err(|_| "Codex app-server state lock poisoned".to_string())?
-            .threads
-            .entry(thread_id.to_string())
-            .or_default();
+            .owned_threads
+            .insert(thread_id.to_string());
         Ok(())
     }
 
-    /// The generic protocol seam for later native-pane and automation phases.
+    /// The generic protocol seam for managed app-server operations.
     pub fn dispatch(&self, method: &str, params: Value) -> Result<Value, String> {
         let (reply_sender, reply_receiver) = mpsc::channel();
         self.sender
@@ -377,83 +252,6 @@ impl CodexAppServerState {
         )
     }
 
-    pub fn turn_steer(
-        &self,
-        thread_id: &str,
-        expected_turn_id: &str,
-        input: Value,
-    ) -> Result<Value, String> {
-        self.ensure_owned_thread(thread_id)?;
-        if expected_turn_id.trim().is_empty() {
-            return Err("Codex expected turn id is empty".to_string());
-        }
-        self.dispatch(
-            "turn/steer",
-            json!({ "threadId": thread_id, "expectedTurnId": expected_turn_id, "input": input }),
-        )
-    }
-
-    pub fn thread_fork(&self, thread_id: &str, params: Value) -> Result<Value, String> {
-        self.ensure_owned_thread(thread_id)?;
-        let mut params = params;
-        params["threadId"] = Value::String(thread_id.to_string());
-        self.dispatch("thread/fork", params)
-    }
-
-    pub fn thread_archive(&self, thread_id: &str) -> Result<Value, String> {
-        self.ensure_owned_thread(thread_id)?;
-        self.dispatch("thread/archive", json!({ "threadId": thread_id }))
-    }
-
-    pub fn thread_unarchive(&self, thread_id: &str) -> Result<Value, String> {
-        self.ensure_owned_thread(thread_id)?;
-        self.dispatch("thread/unarchive", json!({ "threadId": thread_id }))
-    }
-
-    pub fn review_start(&self, thread_id: &str, target: Value) -> Result<Value, String> {
-        self.ensure_owned_thread(thread_id)?;
-        self.dispatch(
-            "review/start",
-            json!({ "threadId": thread_id, "target": target, "delivery": "inline" }),
-        )
-    }
-
-    pub fn thread_unsubscribe(&self, thread_id: &str) -> Result<Value, String> {
-        self.ensure_owned_thread(thread_id)?;
-        self.dispatch("thread/unsubscribe", json!({ "threadId": thread_id }))
-    }
-
-    /// This is intentionally separate from unsubscribe so callers can make
-    /// their durable transport switch before giving up native recovery.
-    pub fn disown_thread_after_unsubscribe(&self, thread_id: &str) -> Result<(), String> {
-        self.disown_thread(thread_id)
-    }
-
-    pub fn respond_to_server_request(
-        &self,
-        request_id: Value,
-        result: Option<Value>,
-        error: Option<Value>,
-    ) -> Result<(), String> {
-        if result.is_some() == error.is_some() {
-            return Err(
-                "provide exactly one app-server server-request result or error".to_string(),
-            );
-        }
-        let (reply_sender, reply_receiver) = mpsc::channel();
-        self.sender
-            .send(WorkerCommand::RespondToServerRequest {
-                request_id,
-                result,
-                error,
-                reply: reply_sender,
-            })
-            .map_err(|_| "Codex app-server worker stopped".to_string())?;
-        reply_receiver
-            .recv_timeout(REQUEST_TIMEOUT)
-            .map_err(|_| "Codex app-server server-request response timed out".to_string())?
-    }
-
     pub fn native_settings_supported(&self, settings: &Value) -> Result<(), String> {
         let (catalog, truncated) = self.cached_or_model_catalog()?;
         if truncated {
@@ -492,11 +290,7 @@ impl CodexAppServerState {
             Err(error) => DiagnosticsSection::failure(error),
         };
 
-        let connection = self.snapshot().map(|snapshot| CodexDiagnosticsConnection {
-            status: snapshot.connection.status,
-            version: safe_version(snapshot.connection.version.as_ref()),
-            error: snapshot.connection.last_error,
-        }).unwrap_or_else(|error| CodexDiagnosticsConnection {
+        let connection = self.diagnostics_connection().unwrap_or_else(|error| CodexDiagnosticsConnection {
             status: "unknown".to_string(), version: None, error: Some(error),
         });
         CodexDiagnostics { connection, account, rate_limits, models, config, mcp }
@@ -559,11 +353,11 @@ impl CodexAppServerState {
             return Err("Codex app-server thread id is empty".to_string());
         }
         let owned = self
-            .snapshot
+            .state
             .lock()
             .map_err(|_| "Codex app-server state lock poisoned".to_string())?
-            .threads
-            .contains_key(thread_id);
+            .owned_threads
+            .contains(thread_id);
         if owned {
             Ok(())
         } else {
@@ -571,20 +365,6 @@ impl CodexAppServerState {
         }
     }
 
-    fn disown_thread(&self, thread_id: &str) -> Result<(), String> {
-        let removed = self
-            .snapshot
-            .lock()
-            .map_err(|_| "Codex app-server state lock poisoned".to_string())?
-            .threads
-            .remove(thread_id)
-            .is_some();
-        if removed {
-            Ok(())
-        } else {
-            Err(format!("Codex thread {thread_id} is not Impala-owned"))
-        }
-    }
 }
 
 fn diagnostics_page_limit_reached(page: usize) -> bool {
@@ -695,7 +475,7 @@ fn sanitize_mcp_server(value: Value) -> Option<DiagnosticsMcpServer> {
 
 fn app_server_worker(
     receiver: mpsc::Receiver<WorkerCommand>,
-    snapshot: Arc<Mutex<AppServerSnapshotState>>,
+    state: Arc<Mutex<AppServerState>>,
     app: tauri::AppHandle,
 ) {
     let mut socket = None;
@@ -709,7 +489,7 @@ fn app_server_worker(
                 &mut socket,
                 &mut pending,
                 &mut next_request_id,
-                &snapshot,
+                &state,
                 &app,
             );
         }
@@ -721,7 +501,7 @@ fn app_server_worker(
                     &mut socket,
                     &mut pending,
                     &mut next_request_id,
-                    &snapshot,
+                    &state,
                     &app,
                 ),
                 Err(_) => break,
@@ -732,19 +512,17 @@ fn app_server_worker(
         match active_socket.read() {
             Ok(Message::Text(text)) => match serde_json::from_str(text.as_str()) {
                 Ok(envelope) => {
-                    handle_envelope(envelope, active_socket, &mut pending, &snapshot, &app)
+                    handle_envelope(envelope, active_socket, &mut pending, &state, &app)
                 }
                 Err(error) => record_connection_error(
-                    &snapshot,
-                    &app,
+                    &state,
                     format!("parse Codex app-server message: {error}"),
                 ),
             },
             Ok(Message::Close(_)) => disconnect(
                 &mut socket,
                 &mut pending,
-                &snapshot,
-                &app,
+                &state,
                 "Codex app-server disconnected".to_string(),
             ),
             Ok(_) => {}
@@ -752,8 +530,7 @@ fn app_server_worker(
             Err(error) => disconnect(
                 &mut socket,
                 &mut pending,
-                &snapshot,
-                &app,
+                &state,
                 format!("read Codex app-server message: {error}"),
             ),
         }
@@ -765,7 +542,7 @@ fn handle_worker_command(
     socket: &mut Option<WebSocket<UnixStream>>,
     pending: &mut HashMap<String, PendingCall>,
     next_request_id: &mut u64,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
+    state: &Arc<Mutex<AppServerState>>,
     app: &tauri::AppHandle,
 ) {
     match command {
@@ -778,23 +555,17 @@ fn handle_worker_command(
                 method.as_str(),
                 "thread/resume"
                     | "thread/read"
-                    | "thread/fork"
-                    | "thread/archive"
-                    | "thread/unarchive"
-                    | "thread/unsubscribe"
                     | "turn/start"
-                    | "turn/steer"
                     | "turn/interrupt"
-                    | "review/start"
             ) {
                 let thread_id = params.get("threadId").and_then(Value::as_str);
-                if !thread_id.map(|id| is_owned(snapshot, id)).unwrap_or(false) {
+                if !thread_id.map(|id| is_owned(state, id)).unwrap_or(false) {
                     let _ = reply.send(Err("Codex thread is not Impala-owned".to_string()));
                     return;
                 }
             }
-            if let Err(error) = ensure_connection(socket, pending, snapshot, app, next_request_id) {
-                record_connection_error(snapshot, app, error.clone());
+            if let Err(error) = ensure_connection(socket, pending, state, app, next_request_id) {
+                record_connection_error(state, error.clone());
                 let _ = reply.send(Err(error));
                 return;
             }
@@ -812,7 +583,7 @@ fn handle_worker_command(
                     active_socket,
                     json!({ "id": id, "method": method, "params": params }),
                 ) {
-                    disconnect(socket, pending, snapshot, app, error.clone());
+                    disconnect(socket, pending, state, error.clone());
                     let _ = reply.send(Err(error));
                 } else {
                     pending.insert(
@@ -826,41 +597,13 @@ fn handle_worker_command(
                 }
             }
         }
-        WorkerCommand::RespondToServerRequest {
-            request_id,
-            result,
-            error,
-            reply,
-        } => {
-            let Some(request) = find_server_request(snapshot, &request_id) else {
-                let _ = reply.send(Err("unknown Codex app-server server request".to_string()));
-                return;
-            };
-            if let Err(error) = validate_server_request_response(&request, &result, &error) {
-                let _ = reply.send(Err(error));
-                return;
-            }
-            let outcome = match socket.as_mut() {
-                Some(active_socket) => {
-                    let mut response = json!({ "id": request_id });
-                    if let Some(result) = result {
-                        response["result"] = result;
-                    } else if let Some(error) = error {
-                        response["error"] = error;
-                    }
-                    send_json(active_socket, response)
-                }
-                None => Err("Codex app-server is disconnected".to_string()),
-            };
-            let _ = reply.send(consume_server_request_after_write(snapshot, &request_id, outcome));
-        }
     }
 }
 
 fn ensure_connection(
     socket: &mut Option<WebSocket<UnixStream>>,
     pending: &mut HashMap<String, PendingCall>,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
+    state: &Arc<Mutex<AppServerState>>,
     app: &tauri::AppHandle,
     next_request_id: &mut u64,
 ) -> Result<(), String> {
@@ -890,34 +633,32 @@ fn ensure_connection(
             },
         }),
     )?;
-    let initialized = wait_for_response(&mut connected, &initialize_id, pending, snapshot, app)?;
+    let initialized = wait_for_response(&mut connected, &initialize_id, pending, state, app)?;
     send_json(&mut connected, json!({ "method": "initialized" }))?;
     {
-        let mut state = snapshot
+        let mut managed_state = state
             .lock()
             .map_err(|_| "Codex app-server state lock poisoned".to_string())?;
-        state.connection.status = "connected".to_string();
-        state.connection.version = Some(initialized);
-        state.connection.last_error = None;
+        managed_state.connection.status = "connected".to_string();
+        managed_state.connection.version = Some(initialized);
+        managed_state.connection.last_error = None;
     }
-    let _ = app.emit("codex-app-server-event", json!({ "type": "connected" }));
     *socket = Some(connected);
-    reconnect_owned_threads(socket, pending, snapshot, app, next_request_id);
+    reconnect_owned_threads(socket, pending, state, app, next_request_id);
     Ok(())
 }
 
 fn reconnect_owned_threads(
     socket: &mut Option<WebSocket<UnixStream>>,
     pending: &mut HashMap<String, PendingCall>,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
+    state: &Arc<Mutex<AppServerState>>,
     app: &tauri::AppHandle,
     next_request_id: &mut u64,
 ) {
-    for (method, params) in reconnect_requests(owned_thread_ids(snapshot)) {
+    for (method, params) in reconnect_requests(owned_thread_ids(state)) {
         let Some(active_socket) = socket.as_mut() else {
             return;
         };
-        let thread_id = thread_id_from(&params).unwrap_or_default();
         let id = Value::from(*next_request_id);
         *next_request_id += 1;
         if send_json(
@@ -928,10 +669,7 @@ fn reconnect_owned_threads(
         {
             return;
         }
-        match wait_for_response(active_socket, &id, pending, snapshot, app) {
-            Ok(result) => apply_response(method, &params, &result, snapshot),
-            Err(error) => set_thread_error(snapshot, &thread_id, error),
-        }
+        let _ = wait_for_response(active_socket, &id, pending, state, app);
     }
 }
 
@@ -939,7 +677,7 @@ fn wait_for_response(
     socket: &mut WebSocket<UnixStream>,
     expected_id: &Value,
     pending: &mut HashMap<String, PendingCall>,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
+    state: &Arc<Mutex<AppServerState>>,
     app: &tauri::AppHandle,
 ) -> Result<Value, String> {
     loop {
@@ -950,7 +688,7 @@ fn wait_for_response(
                 if envelope.get("id") == Some(expected_id) && envelope.get("method").is_none() {
                     return response_result(&envelope);
                 }
-                handle_envelope(envelope, socket, pending, snapshot, app);
+                handle_envelope(envelope, socket, pending, state, app);
             }
             Ok(Message::Close(_)) => return Err("Codex app-server disconnected".to_string()),
             Ok(_) => {}
@@ -964,35 +702,33 @@ fn handle_envelope(
     envelope: Value,
     socket: &mut WebSocket<UnixStream>,
     pending: &mut HashMap<String, PendingCall>,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
+    state: &Arc<Mutex<AppServerState>>,
     app: &tauri::AppHandle,
 ) {
     if envelope.get("method").is_some() && envelope.get("id").is_some() {
-        handle_server_request(envelope, socket, snapshot, app);
+        handle_server_request(envelope, socket);
         return;
     }
     if envelope.get("method").is_some() {
-        handle_notification(envelope, snapshot, app);
+        handle_notification(envelope, app);
         return;
     }
     let Some(id) = envelope.get("id") else {
         record_connection_error(
-            snapshot,
-            app,
+            state,
             "Codex app-server message has no id or method".to_string(),
         );
         return;
     };
     let Ok(key) = request_id_key(id) else {
         record_connection_error(
-            snapshot,
-            app,
+            state,
             "Codex app-server response has unsupported id".to_string(),
         );
         return;
     };
-    if !handle_response_envelope(&envelope, &key, pending, snapshot) {
-        handle_notification(envelope, snapshot, app);
+    if !handle_response_envelope(&envelope, &key, pending, state) {
+        handle_notification(envelope, app);
     }
 }
 
@@ -1000,16 +736,12 @@ fn handle_response_envelope(
     envelope: &Value,
     key: &str,
     pending: &mut HashMap<String, PendingCall>,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
+    state: &Arc<Mutex<AppServerState>>,
 ) -> bool {
     if let Some(call) = pending.remove(key) {
         let result = response_result(&envelope);
         if let Ok(value) = &result {
-            apply_response(&call.method, &call.params, value, snapshot);
-        } else if let Err(error) = &result {
-            if let Some(thread_id) = thread_id_from(&call.params) {
-                set_thread_error(snapshot, &thread_id, error.clone());
-            }
+            apply_response(&call.method, &call.params, value, state);
         }
         let _ = call.reply.send(result);
         true
@@ -1020,138 +752,23 @@ fn handle_response_envelope(
 
 fn handle_notification(
     envelope: Value,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
     app: &tauri::AppHandle,
 ) {
-    apply_notification(&envelope, snapshot);
     crate::automations::apply_native_codex_notification(app, &envelope);
-    crate::codex_panes::apply_native_codex_notification(app, &envelope);
-    let _ = app.emit("codex-app-server-event", envelope);
-}
-
-fn apply_notification(envelope: &Value, snapshot: &Arc<Mutex<AppServerSnapshotState>>) {
-    let method = envelope
-        .get("method")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let params = envelope.get("params").unwrap_or(&Value::Null);
-    let thread_id = thread_id_from(params);
-    if let Ok(mut state) = snapshot.lock() {
-        state.record_event(envelope.clone(), thread_id.as_deref());
-        state.apply_thread_value(params, thread_id.as_deref(), false);
-        if let Some(thread_id) = thread_id
-            .as_deref()
-            .filter(|id| state.threads.contains_key(*id))
-        {
-            let thread = state.threads.get_mut(thread_id).expect("checked above");
-            if method.contains("turn/started") || method == "turn/started" {
-                apply_turn_snapshot(thread, params.get("turn"), false);
-            }
-            if method.contains("turn/completed")
-                || method.contains("turn/failed")
-                || method.contains("turn/interrupted")
-            {
-                apply_turn_snapshot(thread, params.get("turn"), true);
-            }
-        }
-    }
-}
-
-fn apply_turn_snapshot(thread: &mut ThreadState, turn: Option<&Value>, terminal: bool) {
-    let Some(turn) = turn else {
-        return;
-    };
-    if let Some(status) = turn.get("status").and_then(Value::as_str) {
-        thread.status = Some(status.to_string());
-    }
-    thread.last_error = turn_error(turn);
-    if terminal {
-        thread.active_turn = None;
-    } else {
-        thread.active_turn = turn.get("id").and_then(Value::as_str).map(str::to_string);
-    }
-}
-
-fn turn_error(turn: &Value) -> Option<String> {
-    let error = turn.get("error")?;
-    error
-        .get("message")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| error.as_str().map(str::to_string))
-        .or_else(|| serde_json::to_string(error).ok())
 }
 
 fn handle_server_request(
     envelope: Value,
     socket: &mut WebSocket<UnixStream>,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
-    app: &tauri::AppHandle,
 ) {
-    let method = envelope
-        .get("method")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let response = reject_server_request(&envelope);
+    let _ = send_json(socket, response);
+}
+
+fn reject_server_request(envelope: &Value) -> Value {
     let request_id = envelope.get("id").cloned().unwrap_or(Value::Null);
-    let params = envelope.get("params").cloned().unwrap_or(Value::Null);
-    let thread_id = thread_id_from(&params);
-    let supported = server_request_is_supported(method, thread_id.as_deref(), snapshot);
-    if supported {
-        let request = CodexAppServerServerRequest {
-            request_id,
-            method: method.to_string(),
-            params,
-            thread_id: thread_id.clone(),
-        };
-        if let Ok(mut state) = snapshot.lock() {
-            if let Some(thread) = thread_id
-                .as_deref()
-                .and_then(|id| state.threads.get_mut(id))
-            {
-                thread.pending_server_requests.push(request.clone());
-            }
-            state.record_event(envelope.clone(), thread_id.as_deref());
-        }
-        let _ = app.emit("codex-app-server-event", envelope);
-    } else {
-        // Acknowledge every unsupported request; dropping it can deadlock a turn.
-        let error = method_not_supported_error();
-        let _ = app.emit(
-            "codex-app-server-event",
-            json!({
-                "type": "unsupported-server-request",
-                "request": envelope,
-                "response": { "id": request_id, "error": error },
-            }),
-        );
-        let _ = send_json(socket, json!({ "id": request_id, "error": error }));
-        if let Ok(mut state) = snapshot.lock() {
-            state.record_event(
-                json!({ "id": request_id, "error": error }),
-                thread_id.as_deref(),
-            );
-        }
-    }
-}
-
-fn is_supported_server_request(method: &str) -> bool {
-    matches!(
-        method,
-        "item/commandExecution/requestApproval"
-            | "item/fileChange/requestApproval"
-            | "item/permissions/requestApproval"
-            | "item/tool/requestUserInput"
-            | "mcpServer/elicitation/request"
-    )
-}
-
-fn server_request_is_supported(
-    method: &str,
-    thread_id: Option<&str>,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
-) -> bool {
-    is_supported_server_request(method)
-        && thread_id.map(|id| is_owned(snapshot, id)).unwrap_or(false)
+    let error = method_not_supported_error();
+    json!({ "id": request_id, "error": error })
 }
 
 fn method_not_supported_error() -> Value {
@@ -1176,42 +793,14 @@ fn apply_response(
     method: &str,
     params: &Value,
     result: &Value,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
+    state: &Arc<Mutex<AppServerState>>,
 ) {
-    let thread_id = thread_id_from(result).or_else(|| thread_id_from(params));
-    if method == "thread/start" {
-        if let Some(thread_id) = thread_id.as_deref() {
-            if let Ok(mut state) = snapshot.lock() {
-                state.threads.entry(thread_id.to_string()).or_default();
-                state.apply_thread_value(result, Some(thread_id), false);
-                state.record_event(
-                    json!({ "method": method, "result": result }),
-                    Some(thread_id),
-                );
-            }
-        }
+    if method != "thread/start" {
         return;
     }
-    if let Ok(mut state) = snapshot.lock() {
-        state.apply_thread_value(result, thread_id.as_deref(), method == "thread/read");
-        if let Some(thread_id) = thread_id.as_deref() {
-            if let Some(thread) = state.threads.get_mut(thread_id) {
-                if method == "turn/start" || method == "turn/steer" {
-                    thread.active_turn = result
-                        .get("turn")
-                        .and_then(|turn| turn.get("id"))
-                        .or_else(|| result.get("turnId"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string);
-                }
-                if method == "turn/interrupt" {
-                    thread.active_turn = None;
-                }
-            }
-            state.record_event(
-                json!({ "method": method, "result": result }),
-                Some(thread_id),
-            );
+    if let Some(thread_id) = thread_id_from(result).or_else(|| thread_id_from(params)) {
+        if let Ok(mut managed_state) = state.lock() {
+            managed_state.owned_threads.insert(thread_id);
         }
     }
 }
@@ -1219,23 +808,15 @@ fn apply_response(
 fn disconnect(
     socket: &mut Option<WebSocket<UnixStream>>,
     pending: &mut HashMap<String, PendingCall>,
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
-    app: &tauri::AppHandle,
+    state: &Arc<Mutex<AppServerState>>,
     error: String,
 ) {
     *socket = None;
     fail_pending_calls(pending, &error);
-    if let Ok(mut state) = snapshot.lock() {
-        state.connection.status = "disconnected".to_string();
-        state.connection.last_error = Some(error.clone());
-        for thread in state.threads.values_mut() {
-            thread.last_error = Some(error.clone());
-        }
+    if let Ok(mut managed_state) = state.lock() {
+        managed_state.connection.status = "disconnected".to_string();
+        managed_state.connection.last_error = Some(error.clone());
     }
-    let _ = app.emit(
-        "codex-app-server-event",
-        json!({ "type": "disconnected", "error": error }),
-    );
 }
 
 fn fail_pending_calls(pending: &mut HashMap<String, PendingCall>, error: &str) {
@@ -1245,17 +826,12 @@ fn fail_pending_calls(pending: &mut HashMap<String, PendingCall>, error: &str) {
 }
 
 fn record_connection_error(
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
-    app: &tauri::AppHandle,
+    state: &Arc<Mutex<AppServerState>>,
     error: String,
 ) {
-    if let Ok(mut state) = snapshot.lock() {
-        state.connection.last_error = Some(error.clone());
+    if let Ok(mut managed_state) = state.lock() {
+        managed_state.connection.last_error = Some(error.clone());
     }
-    let _ = app.emit(
-        "codex-app-server-event",
-        json!({ "type": "error", "error": error }),
-    );
 }
 
 fn request_id_key(id: &Value) -> Result<String, String> {
@@ -1285,17 +861,17 @@ fn thread_id_from(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn is_owned(snapshot: &Arc<Mutex<AppServerSnapshotState>>, thread_id: &str) -> bool {
-    snapshot
+fn is_owned(state: &Arc<Mutex<AppServerState>>, thread_id: &str) -> bool {
+    state
         .lock()
-        .map(|state| state.threads.contains_key(thread_id))
+        .map(|state| state.owned_threads.contains(thread_id))
         .unwrap_or(false)
 }
 
-fn owned_thread_ids(snapshot: &Arc<Mutex<AppServerSnapshotState>>) -> Vec<String> {
-    snapshot
+fn owned_thread_ids(state: &Arc<Mutex<AppServerState>>) -> Vec<String> {
+    state
         .lock()
-        .map(|state| state.threads.keys().cloned().collect())
+        .map(|state| state.owned_threads.iter().cloned().collect())
         .unwrap_or_default()
 }
 
@@ -1312,186 +888,6 @@ fn reconnect_requests(thread_ids: Vec<String>) -> Vec<(&'static str, Value)> {
             ]
         })
         .collect()
-}
-
-fn set_thread_error(snapshot: &Arc<Mutex<AppServerSnapshotState>>, thread_id: &str, error: String) {
-    if let Ok(mut state) = snapshot.lock() {
-        if let Some(thread) = state.threads.get_mut(thread_id) {
-            thread.last_error = Some(error);
-        }
-    }
-}
-
-fn find_server_request(
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
-    request_id: &Value,
-) -> Option<CodexAppServerServerRequest> {
-    let key = request_id_key(request_id).ok()?;
-    let state = snapshot.lock().ok()?;
-    state.threads.values().flat_map(|thread| thread.pending_server_requests.iter())
-        .find(|request| request_id_key(&request.request_id).ok().as_deref() == Some(&key))
-        .cloned()
-}
-
-fn validate_server_request_response(
-    request: &CodexAppServerServerRequest,
-    result: &Option<Value>,
-    error: &Option<Value>,
-) -> Result<(), String> {
-    if result.is_some() == error.is_some() {
-        return Err("provide exactly one app-server server-request result or error".to_string());
-    }
-    if !matches!(
-        request.method.as_str(),
-        "item/commandExecution/requestApproval"
-            | "item/fileChange/requestApproval"
-            | "item/permissions/requestApproval"
-            | "item/tool/requestUserInput"
-            | "mcpServer/elicitation/request"
-    ) {
-        return Err("unsupported Codex app-server server request method".to_string());
-    }
-    if let Some(error) = error {
-        return validate_json_rpc_error(error);
-    }
-    let result = result.as_ref().expect("checked response result");
-    match request.method.as_str() {
-        "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
-            let result = exact_object(result, &["decision"])?;
-            match result.get("decision").and_then(Value::as_str) {
-                Some("accept" | "decline") => Ok(()),
-                _ => Err("native Codex approval decision must be accept or decline".to_string()),
-            }
-        }
-        "item/permissions/requestApproval" => Err(
-            "native Codex permission grants are not supported; return a JSON-RPC error".to_string(),
-        ),
-        "item/tool/requestUserInput" => validate_tool_user_input_response(&request.params, result),
-        "mcpServer/elicitation/request" => validate_mcp_elicitation_response(&request.params, result),
-        _ => unreachable!("supported methods checked above"),
-    }
-}
-
-fn exact_object<'a>(value: &'a Value, keys: &[&str]) -> Result<&'a serde_json::Map<String, Value>, String> {
-    let object = value.as_object().ok_or_else(|| "Codex server-request response must be an object".to_string())?;
-    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
-        return Err("Codex server-request response has an unsupported shape".to_string());
-    }
-    Ok(object)
-}
-
-fn validate_json_rpc_error(error: &Value) -> Result<(), String> {
-    let object = error.as_object().ok_or_else(|| "Codex server-request error must be an object".to_string())?;
-    if object.keys().any(|key| key != "code" && key != "message" && key != "data")
-        || !object.get("code").is_some_and(Value::is_number)
-        || !object.get("message").and_then(Value::as_str).is_some_and(|message| !message.trim().is_empty()) {
-        return Err("Codex server-request error must contain numeric code and message".to_string());
-    }
-    Ok(())
-}
-
-fn validate_tool_user_input_response(params: &Value, result: &Value) -> Result<(), String> {
-    let result = exact_object(result, &["answers"])?;
-    let answers = result.get("answers").and_then(Value::as_object)
-        .ok_or_else(|| "Codex tool input response answers must be an object".to_string())?;
-    let question_ids = params.get("questions").and_then(Value::as_array)
-        .ok_or_else(|| "stored Codex tool request has no questions".to_string())?
-        .iter()
-        .map(|question| question.get("id").and_then(Value::as_str))
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| "stored Codex tool request has invalid questions".to_string())?;
-    if answers.len() != question_ids.len() || question_ids.iter().any(|id| !answers.contains_key(*id)) {
-        return Err("Codex tool input response must answer exactly the requested questions".to_string());
-    }
-    for answer in answers.values() {
-        let answer = exact_object(answer, &["answers"])?;
-        if !answer.get("answers").and_then(Value::as_array).is_some_and(|values| values.iter().all(Value::is_string)) {
-            return Err("Codex tool input answers must be string arrays".to_string());
-        }
-    }
-    Ok(())
-}
-
-fn validate_mcp_elicitation_response(params: &Value, result: &Value) -> Result<(), String> {
-    let result = result.as_object().ok_or_else(|| "Codex MCP elicitation response must be an object".to_string())?;
-    let action = result.get("action").and_then(Value::as_str)
-        .ok_or_else(|| "Codex MCP elicitation response requires an action".to_string())?;
-    match action {
-        "accept" => {
-            if result.len() != 2 || !result.contains_key("content") || params.get("mode").and_then(Value::as_str) == Some("url") {
-                return Err("Codex MCP acceptance requires form content".to_string());
-            }
-            let content = result.get("content").and_then(Value::as_object)
-                .ok_or_else(|| "Codex MCP acceptance content must be an object".to_string())?;
-            validate_mcp_form_content(params, content)
-        }
-        "decline" | "cancel" if result.len() == 1 => Ok(()),
-        "decline" | "cancel" => Err("Codex MCP decline or cancel cannot include content".to_string()),
-        _ => Err("Codex MCP elicitation action is invalid".to_string()),
-    }
-}
-
-fn validate_mcp_form_content(
-    params: &Value,
-    content: &serde_json::Map<String, Value>,
-) -> Result<(), String> {
-    let schema = params.get("requestedSchema").and_then(Value::as_object);
-    let properties = schema.and_then(|schema| schema.get("properties")).and_then(Value::as_object)
-        .cloned().unwrap_or_default();
-    if content.keys().any(|key| !properties.contains_key(key)) {
-        return Err("Codex MCP acceptance contains an unknown form field".to_string());
-    }
-    let required = match schema.and_then(|schema| schema.get("required")).and_then(Value::as_array) {
-        Some(fields) => fields.iter().map(Value::as_str).collect::<Option<Vec<_>>>()
-            .ok_or_else(|| "Codex MCP requested schema has invalid required fields".to_string())?,
-        None => Vec::new(),
-    };
-    if required.iter().any(|field| !properties.contains_key(*field) || !content.contains_key(*field)) {
-        return Err("Codex MCP acceptance is missing a required form field".to_string());
-    }
-    for (key, value) in content {
-        let definition = properties.get(key).and_then(Value::as_object)
-            .ok_or_else(|| "Codex MCP requested schema has an invalid property".to_string())?;
-        match definition.get("type").and_then(Value::as_str).unwrap_or("string") {
-            "string" if value.is_string() => {}
-            "boolean" if value.is_boolean() => {}
-            "number" if value.is_number() => {}
-            "integer" if value.as_i64().is_some() || value.as_u64().is_some() => {}
-            "string" | "boolean" | "number" | "integer" => {
-                return Err(format!("Codex MCP form field {key} has the wrong type"));
-            }
-            _ => return Err(format!("Codex MCP form field {key} has an unsupported type")),
-        }
-        if let Some(options) = definition.get("enum").and_then(Value::as_array) {
-            if !options.iter().any(|option| option == value) {
-                return Err(format!("Codex MCP form field {key} must use an offered value"));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn take_server_request(
-    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
-    request_id: &Value,
-) -> Option<CodexAppServerServerRequest> {
-    let key = request_id_key(request_id).ok()?;
-    let mut state = snapshot.lock().ok()?;
-    for thread in state.threads.values_mut() {
-        if let Some(index) = thread
-            .pending_server_requests
-            .iter()
-            .position(|request| request_id_key(&request.request_id).ok().as_deref() == Some(&key))
-        {
-            return Some(thread.pending_server_requests.remove(index));
-        }
-    }
-    None
-}
-
-fn consume_server_request_after_write(snapshot: &Arc<Mutex<AppServerSnapshotState>>, request_id: &Value, outcome: Result<(), String>) -> Result<(), String> {
-    if outcome.is_ok() { let _ = take_server_request(snapshot, request_id); }
-    outcome
 }
 
 fn connect_with_poll_timeout(remote: &str) -> Result<WebSocket<UnixStream>, String> {
@@ -1901,19 +1297,17 @@ pub fn start_turn(
 mod tests {
     use super::*;
 
-    fn test_snapshot(owned_threads: &[&str]) -> Arc<Mutex<AppServerSnapshotState>> {
-        let mut state = AppServerSnapshotState {
+    fn test_state(owned_threads: &[&str]) -> Arc<Mutex<AppServerState>> {
+        let mut state = AppServerState {
             connection: ConnectionState {
                 status: "connected".to_string(),
                 version: Some(json!({ "serverInfo": { "version": "test" } })),
                 last_error: None,
             },
-            ..AppServerSnapshotState::default()
+            ..AppServerState::default()
         };
         for thread_id in owned_threads {
-            state
-                .threads
-                .insert((*thread_id).to_string(), ThreadState::default());
+            state.owned_threads.insert((*thread_id).to_string());
         }
         Arc::new(Mutex::new(state))
     }
@@ -1981,8 +1375,8 @@ mod tests {
     }
 
     #[test]
-    fn multiplexes_numeric_and_string_ids_around_notifications() {
-        let snapshot = test_snapshot(&["thread-1"]);
+    fn multiplexes_numeric_and_string_rpc_responses() {
+        let state = test_state(&["thread-1"]);
         let (numeric_sender, numeric_receiver) = mpsc::channel();
         let (string_sender, string_receiver) = mpsc::channel();
         let mut pending = HashMap::from([
@@ -2009,14 +1403,8 @@ mod tests {
             &string_response,
             &request_id_key(&string_response["id"]).unwrap(),
             &mut pending,
-            &snapshot,
+            &state,
         ));
-        let unknown_notification = json!({
-            "method": "future/notification",
-            "params": { "threadId": "thread-1", "newField": { "kept": true } },
-            "futureTopLevel": [1, 2, 3],
-        });
-        apply_notification(&unknown_notification, &snapshot);
         let numeric_response = json!({
             "id": 2,
             "result": { "thread": { "id": "thread-1", "status": "idle" } },
@@ -2025,7 +1413,7 @@ mod tests {
             &numeric_response,
             &request_id_key(&numeric_response["id"]).unwrap(),
             &mut pending,
-            &snapshot,
+            &state,
         ));
 
         assert_eq!(
@@ -2036,205 +1424,33 @@ mod tests {
             numeric_receiver.recv().unwrap().unwrap(),
             numeric_response["result"]
         );
-        let recovered = snapshot.lock().unwrap().snapshot();
-        assert_eq!(recovered.threads[0].active_turn, None);
-        assert!(recovered
-            .recent_events
-            .iter()
-            .any(|event| event == &unknown_notification));
         assert_eq!(request_id_key(&json!(2)).unwrap(), "n:2");
         assert_eq!(request_id_key(&json!("2")).unwrap(), "s:2");
     }
 
     #[test]
-    fn routes_known_server_requests_and_rejects_unknown_methods() {
-        let snapshot = test_snapshot(&["thread-1"]);
-        assert!(server_request_is_supported(
-            "item/commandExecution/requestApproval",
-            Some("thread-1"),
-            &snapshot,
-        ));
-        assert!(!server_request_is_supported(
-            "future/approval",
-            Some("thread-1"),
-            &snapshot,
-        ));
-        assert!(!server_request_is_supported(
-            "item/commandExecution/requestApproval",
-            Some("terminal-owned-thread"),
-            &snapshot,
-        ));
-        assert_eq!(method_not_supported_error()["code"], -32601);
-
-        snapshot
-            .lock()
-            .unwrap()
-            .threads
-            .get_mut("thread-1")
-            .unwrap()
-            .pending_server_requests
-            .push(CodexAppServerServerRequest {
-                request_id: json!(17),
-                method: "item/commandExecution/requestApproval".to_string(),
-                params: json!({ "threadId": "thread-1" }),
-                thread_id: Some("thread-1".to_string()),
-            });
-        assert_eq!(
-            take_server_request(&snapshot, &json!(17))
-                .unwrap()
-                .thread_id
-                .as_deref(),
-            Some("thread-1")
-        );
-    }
-
-    #[test]
-    fn validates_server_request_responses_against_the_stored_method() {
-        let request = |method: &str, params: Value| CodexAppServerServerRequest {
-            request_id: json!(1),
-            method: method.to_string(),
-            params,
-            thread_id: Some("thread-1".to_string()),
-        };
-        let command = request("item/commandExecution/requestApproval", json!({}));
-        assert!(validate_server_request_response(&command, &Some(json!({ "decision": "accept" })), &None).is_ok());
-        assert!(validate_server_request_response(&command, &Some(json!({ "decision": "acceptForSession" })), &None).is_err());
-        let file = request("item/fileChange/requestApproval", json!({}));
-        assert!(validate_server_request_response(&file, &Some(json!({ "decision": "decline" })), &None).is_ok());
-        let permissions = request("item/permissions/requestApproval", json!({}));
-        assert!(validate_server_request_response(&permissions, &None, &Some(json!({ "code": -32000, "message": "Permission declined" }))).is_ok());
-        assert!(validate_server_request_response(&permissions, &Some(json!({ "permissions": {} })), &None).is_err());
-        let tool = request("item/tool/requestUserInput", json!({ "questions": [{ "id": "choice" }] }));
-        assert!(validate_server_request_response(&tool, &Some(json!({ "answers": { "choice": { "answers": ["Read"] } } })), &None).is_ok());
-        assert!(validate_server_request_response(&tool, &Some(json!({ "answers": { "other": { "answers": ["Read"] } } })), &None).is_err());
-        let mcp = request("mcpServer/elicitation/request", json!({
-            "mode": "form",
-            "requestedSchema": {
-                "properties": { "count": { "type": "number" }, "enabled": { "type": "boolean" } },
-                "required": ["count", "enabled"]
-            }
-        }));
-        assert!(validate_server_request_response(&mcp, &Some(json!({ "action": "accept", "content": { "count": 2, "enabled": true } })), &None).is_ok());
-        assert!(validate_server_request_response(&mcp, &Some(json!({ "action": "accept" })), &None).is_err());
-        let mcp_url = request("mcpServer/elicitation/request", json!({ "mode": "url" }));
-        assert!(validate_server_request_response(&mcp_url, &Some(json!({ "action": "cancel" })), &None).is_ok());
-        assert!(validate_server_request_response(&mcp_url, &Some(json!({ "action": "accept", "content": {} })), &None).is_err());
-        let unknown = request("future/request", json!({}));
-        assert!(validate_server_request_response(&unknown, &Some(json!({})), &None).is_err());
-        assert!(validate_server_request_response(&unknown, &None, &Some(json!({ "code": -32000, "message": "no" }))).is_err());
-        assert!(validate_server_request_response(&command, &None, &Some(json!({ "code": "bad", "message": "no" }))).is_err());
-    }
-
-    #[test]
-    fn validates_mcp_form_content_against_the_requested_schema() {
-        let params = json!({
-            "mode": "form",
-            "requestedSchema": {
-                "properties": {
-                    "name": { "type": "string" },
-                    "count": { "type": "number" },
-                    "enabled": { "type": "boolean" },
-                    "action": { "type": "string", "enum": ["read"] }
-                },
-                "required": ["name", "count", "enabled", "action"]
-            }
+    fn owned_server_requests_are_rejected_immediately() {
+        let request = json!({
+            "id": 17,
+            "method": "item/commandExecution/requestApproval",
+            "params": { "threadId": "thread-1" },
         });
-        let response = |content| json!({ "action": "accept", "content": content });
-        assert!(validate_mcp_elicitation_response(&params, &response(json!({
-            "name": "Codex", "count": 2, "enabled": true, "action": "read"
-        }))).is_ok());
-        assert!(validate_mcp_elicitation_response(&params, &response(json!({
-            "name": "Codex", "count": 2, "enabled": true, "action": "read", "extra": "no"
-        }))).is_err());
-        assert!(validate_mcp_elicitation_response(&params, &response(json!({
-            "name": "Codex", "enabled": true, "action": "read"
-        }))).is_err());
-        assert!(validate_mcp_elicitation_response(&params, &response(json!({
-            "name": "Codex", "count": "2", "enabled": true, "action": "read"
-        }))).is_err());
-        assert!(validate_mcp_elicitation_response(&params, &response(json!({
-            "name": "Codex", "count": 2, "enabled": true, "action": "write"
-        }))).is_err());
-    }
 
-    #[test]
-    fn server_request_is_retained_until_a_response_is_written_once() {
-        let snapshot = test_snapshot(&["thread-1"]);
-        snapshot
-            .lock()
-            .unwrap()
-            .threads
-            .get_mut("thread-1")
-            .unwrap()
-            .pending_server_requests
-            .push(CodexAppServerServerRequest {
-                request_id: json!(19),
-                method: "item/tool/requestUserInput".to_string(),
-                params: json!({ "threadId": "thread-1" }),
-                thread_id: Some("thread-1".to_string()),
-            });
-        assert_eq!(consume_server_request_after_write(&snapshot, &json!(19), Err("write failed".to_string())).unwrap_err(), "write failed");
-        assert!(find_server_request(&snapshot, &json!(19)).is_some());
-        // A successful write consumes it exactly once.
-        consume_server_request_after_write(&snapshot, &json!(19), Ok(())).unwrap();
-        assert!(find_server_request(&snapshot, &json!(19)).is_none());
-        assert!(take_server_request(&snapshot, &json!(19)).is_none());
-    }
-
-    #[test]
-    fn reduces_thread_and_turn_notifications_without_losing_unknown_fields() {
-        let snapshot = test_snapshot(&["thread-1"]);
-        let started = json!({
-            "method": "turn/started",
-            "params": {
-                "threadId": "thread-1",
-                "turn": { "id": "turn-1", "status": "inProgress", "items": [], "extension": "kept" },
-            },
-        });
-        apply_notification(&started, &snapshot);
-        let started_snapshot = snapshot.lock().unwrap().snapshot();
         assert_eq!(
-            started_snapshot.threads[0].active_turn.as_deref(),
-            Some("turn-1")
-        );
-        assert_eq!(
-            started_snapshot.threads[0].status.as_deref(),
-            Some("inProgress")
-        );
-        apply_notification(
-            &json!({
-                "method": "turn/completed",
-                "params": {
-                    "threadId": "thread-1",
-                    "turn": {
-                        "id": "turn-1",
-                        "status": "failed",
-                        "error": { "message": "approval rejected", "kind": "approval" },
-                        "items": [],
-                        "future": { "v": 1 },
-                    },
+            reject_server_request(&request),
+            json!({
+                "id": 17,
+                "error": {
+                    "code": -32601,
+                    "message": "Impala does not support this Codex app-server request",
                 },
             }),
-            &snapshot,
-        );
-
-        let recovered = snapshot.lock().unwrap().snapshot();
-        assert_eq!(recovered.threads[0].active_turn, None);
-        assert_eq!(recovered.threads[0].status.as_deref(), Some("failed"));
-        assert_eq!(
-            recovered.threads[0].last_error.as_deref(),
-            Some("approval rejected")
-        );
-        assert_eq!(recovered.threads[0].event_sequence, 2);
-        assert_eq!(
-            recovered.threads[0].last_event.as_ref().unwrap()["params"]["turn"]["future"]["v"],
-            1
         );
     }
 
     #[test]
     fn disconnect_fails_pending_and_reconnect_selects_only_owned_threads() {
-        let snapshot = test_snapshot(&["thread-owned"]);
+        let state = test_state(&["thread-owned"]);
         let (sender, receiver) = mpsc::channel();
         let mut pending = HashMap::from([(
             "n:4".to_string(),
@@ -2248,40 +1464,20 @@ mod tests {
         assert_eq!(receiver.recv().unwrap().unwrap_err(), "disconnected");
         assert!(pending.is_empty());
 
-        let reconnect = reconnect_requests(owned_thread_ids(&snapshot));
+        let reconnect = reconnect_requests(owned_thread_ids(&state));
         assert_eq!(reconnect.len(), 2);
         assert!(reconnect
             .iter()
             .all(|(_, params)| params["threadId"] == "thread-owned"));
         assert_eq!(reconnect[0].0, "thread/resume");
         assert_eq!(reconnect[1].0, "thread/read");
-    }
-
-    #[test]
-    fn snapshots_recover_state_without_reconnecting() {
-        let snapshot = test_snapshot(&["thread-1"]);
-        snapshot
-            .lock()
-            .unwrap()
-            .threads
-            .get_mut("thread-1")
-            .unwrap()
-            .active_turn = Some("stale-turn".to_string());
         apply_response(
-            "thread/read",
-            &json!({ "threadId": "thread-1" }),
-            &json!({ "thread": { "id": "thread-1", "status": "idle" } }),
-            &snapshot,
+            "thread/start",
+            &json!({}),
+            &json!({ "thread": { "id": "thread-created" } }),
+            &state,
         );
-        let first = snapshot.lock().unwrap().snapshot();
-        let second = snapshot.lock().unwrap().snapshot();
-        assert_eq!(first.connection.status, "connected");
-        assert_eq!(first.threads[0].active_turn, None);
-        assert_eq!(first.threads[0].status, second.threads[0].status);
-        assert_eq!(
-            first.threads[0].event_sequence,
-            second.threads[0].event_sequence
-        );
+        assert!(is_owned(&state, "thread-created"));
     }
 
     #[test]

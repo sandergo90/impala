@@ -121,7 +121,7 @@ export function parseNativeCodexFlags(
   return settings;
 }
 
-/** Automations cannot answer app-server approval requests; panes can. */
+/** Native automations require a non-interactive approval policy. */
 export function canRunNativeCodexAutomation(
   settings: NativeCodexSettings | null,
 ): settings is NativeCodexSettings & { approvalPolicy: "never" } {

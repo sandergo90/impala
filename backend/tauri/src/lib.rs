@@ -4,7 +4,6 @@ mod automations;
 mod bitbucket;
 mod browser;
 mod codex_app_server;
-mod codex_panes;
 mod config;
 mod daemon_client;
 mod file_io;
@@ -893,17 +892,6 @@ async fn revoke_codex_remote_client(
     .map_err(|error| format!("task join: {error}"))?
 }
 
-/// Durable recovery source for native Codex surfaces after a webview reload.
-#[tauri::command]
-async fn get_codex_app_server_snapshot(
-    state: tauri::State<'_, codex_app_server::CodexAppServerState>,
-) -> Result<codex_app_server::CodexAppServerSnapshot, String> {
-    let state = state.inner().clone();
-    tokio::task::spawn_blocking(move || state.snapshot())
-        .await
-        .map_err(|error| format!("task join: {error}"))?
-}
-
 /// Read-only Codex account, model, effective-config, and MCP diagnostics.
 #[tauri::command]
 async fn get_codex_diagnostics(
@@ -932,20 +920,6 @@ async fn preflight_native_codex_settings(
         .await
         .map_err(|error| format!("task join: {error}"))?
         .is_ok())
-}
-
-/// Completes a pending approval/input request delivered by the managed app-server.
-#[tauri::command]
-async fn respond_to_codex_app_server_request(
-    state: tauri::State<'_, codex_app_server::CodexAppServerState>,
-    request_id: serde_json::Value,
-    result: Option<serde_json::Value>,
-    error: Option<serde_json::Value>,
-) -> Result<(), String> {
-    let state = state.inner().clone();
-    tokio::task::spawn_blocking(move || state.respond_to_server_request(request_id, result, error))
-        .await
-        .map_err(|error| format!("task join: {error}"))?
 }
 
 fn setup_claude_integration_sync() -> Result<String, String> {
@@ -1993,8 +1967,6 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize pr_status table: {}", e))?;
             automations::init_db(&conn)
                 .map_err(|e| format!("Failed to initialize automations tables: {}", e))?;
-            codex_panes::init_db(&conn)
-                .map_err(|e| format!("Failed to initialize native Codex panes table: {}", e))?;
 
             // The plan-review feature was removed. Drop its legacy tables so
             // they don't linger in existing databases.
@@ -2112,15 +2084,6 @@ pub fn run() {
                     }
                 });
             }
-            {
-                let app_handle = app.handle().clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    if let Err(error) = codex_panes::recover_native_codex_panes(&app_handle) {
-                        tracing::warn!(%error, "native Codex pane recovery failed");
-                    }
-                });
-            }
-
             // Bring up the detached PTY daemon in the background. Commands
             // arriving during initialization wait on DaemonState; a startup
             // failure wakes them with the underlying error.
@@ -2300,20 +2263,8 @@ pub fn run() {
             start_codex_remote_pairing,
             get_codex_remote_pairing_status,
             revoke_codex_remote_client,
-            get_codex_app_server_snapshot,
             get_codex_diagnostics,
             preflight_native_codex_settings,
-            respond_to_codex_app_server_request,
-            codex_panes::open_native_codex_pane,
-            codex_panes::get_native_codex_pane,
-            codex_panes::read_native_codex_pane,
-            codex_panes::send_native_codex_pane_input,
-            codex_panes::interrupt_native_codex_pane,
-            codex_panes::resume_native_codex_pane,
-            codex_panes::fork_native_codex_pane,
-            codex_panes::archive_native_codex_pane,
-            codex_panes::review_native_codex_pane,
-            codex_panes::handoff_native_codex_pane_to_terminal,
             get_project_issue_tracker,
             list_my_issues,
             search_issues,
