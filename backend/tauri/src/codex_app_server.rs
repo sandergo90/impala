@@ -825,8 +825,12 @@ fn handle_worker_command(
             error,
             reply,
         } => {
-            if !has_server_request(snapshot, &request_id) {
+            let Some(request) = find_server_request(snapshot, &request_id) else {
                 let _ = reply.send(Err("unknown Codex app-server server request".to_string()));
+                return;
+            };
+            if let Err(error) = validate_server_request_response(&request, &result, &error) {
+                let _ = reply.send(Err(error));
                 return;
             }
             let outcome = match socket.as_mut() {
@@ -1311,6 +1315,118 @@ fn set_thread_error(snapshot: &Arc<Mutex<AppServerSnapshotState>>, thread_id: &s
     }
 }
 
+fn find_server_request(
+    snapshot: &Arc<Mutex<AppServerSnapshotState>>,
+    request_id: &Value,
+) -> Option<CodexAppServerServerRequest> {
+    let key = request_id_key(request_id).ok()?;
+    let state = snapshot.lock().ok()?;
+    state.threads.values().flat_map(|thread| thread.pending_server_requests.iter())
+        .find(|request| request_id_key(&request.request_id).ok().as_deref() == Some(&key))
+        .cloned()
+}
+
+fn validate_server_request_response(
+    request: &CodexAppServerServerRequest,
+    result: &Option<Value>,
+    error: &Option<Value>,
+) -> Result<(), String> {
+    if result.is_some() == error.is_some() {
+        return Err("provide exactly one app-server server-request result or error".to_string());
+    }
+    if !matches!(
+        request.method.as_str(),
+        "item/commandExecution/requestApproval"
+            | "item/fileChange/requestApproval"
+            | "item/permissions/requestApproval"
+            | "item/tool/requestUserInput"
+            | "mcpServer/elicitation/request"
+    ) {
+        return Err("unsupported Codex app-server server request method".to_string());
+    }
+    if let Some(error) = error {
+        return validate_json_rpc_error(error);
+    }
+    let result = result.as_ref().expect("checked response result");
+    match request.method.as_str() {
+        "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+            let result = exact_object(result, &["decision"])?;
+            match result.get("decision").and_then(Value::as_str) {
+                Some("accept" | "decline") => Ok(()),
+                _ => Err("native Codex approval decision must be accept or decline".to_string()),
+            }
+        }
+        "item/permissions/requestApproval" => Err(
+            "native Codex permission grants are not supported; return a JSON-RPC error".to_string(),
+        ),
+        "item/tool/requestUserInput" => validate_tool_user_input_response(&request.params, result),
+        "mcpServer/elicitation/request" => validate_mcp_elicitation_response(&request.params, result),
+        _ => unreachable!("supported methods checked above"),
+    }
+}
+
+fn exact_object<'a>(value: &'a Value, keys: &[&str]) -> Result<&'a serde_json::Map<String, Value>, String> {
+    let object = value.as_object().ok_or_else(|| "Codex server-request response must be an object".to_string())?;
+    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
+        return Err("Codex server-request response has an unsupported shape".to_string());
+    }
+    Ok(object)
+}
+
+fn validate_json_rpc_error(error: &Value) -> Result<(), String> {
+    let object = error.as_object().ok_or_else(|| "Codex server-request error must be an object".to_string())?;
+    if object.keys().any(|key| key != "code" && key != "message" && key != "data")
+        || !object.get("code").is_some_and(Value::is_number)
+        || !object.get("message").and_then(Value::as_str).is_some_and(|message| !message.trim().is_empty()) {
+        return Err("Codex server-request error must contain numeric code and message".to_string());
+    }
+    Ok(())
+}
+
+fn validate_tool_user_input_response(params: &Value, result: &Value) -> Result<(), String> {
+    let result = exact_object(result, &["answers"])?;
+    let answers = result.get("answers").and_then(Value::as_object)
+        .ok_or_else(|| "Codex tool input response answers must be an object".to_string())?;
+    let question_ids = params.get("questions").and_then(Value::as_array)
+        .ok_or_else(|| "stored Codex tool request has no questions".to_string())?
+        .iter()
+        .map(|question| question.get("id").and_then(Value::as_str))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| "stored Codex tool request has invalid questions".to_string())?;
+    if answers.len() != question_ids.len() || question_ids.iter().any(|id| !answers.contains_key(*id)) {
+        return Err("Codex tool input response must answer exactly the requested questions".to_string());
+    }
+    for answer in answers.values() {
+        let answer = exact_object(answer, &["answers"])?;
+        if !answer.get("answers").and_then(Value::as_array).is_some_and(|values| values.iter().all(Value::is_string)) {
+            return Err("Codex tool input answers must be string arrays".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn validate_mcp_elicitation_response(params: &Value, result: &Value) -> Result<(), String> {
+    let result = result.as_object().ok_or_else(|| "Codex MCP elicitation response must be an object".to_string())?;
+    let action = result.get("action").and_then(Value::as_str)
+        .ok_or_else(|| "Codex MCP elicitation response requires an action".to_string())?;
+    match action {
+        "accept" => {
+            if result.len() != 2 || !result.contains_key("content") || params.get("mode").and_then(Value::as_str) == Some("url") {
+                return Err("Codex MCP acceptance requires form content".to_string());
+            }
+            let content = result.get("content").and_then(Value::as_object)
+                .ok_or_else(|| "Codex MCP acceptance content must be an object".to_string())?;
+            if content.values().any(|value| !value.is_string() && !value.is_number() && !value.is_boolean()) {
+                return Err("Codex MCP acceptance content must use primitive values".to_string());
+            }
+            Ok(())
+        }
+        "decline" | "cancel" if result.len() == 1 => Ok(()),
+        "decline" | "cancel" => Err("Codex MCP decline or cancel cannot include content".to_string()),
+        _ => Err("Codex MCP elicitation action is invalid".to_string()),
+    }
+}
+
 fn take_server_request(
     snapshot: &Arc<Mutex<AppServerSnapshotState>>,
     request_id: &Value,
@@ -1330,19 +1446,7 @@ fn take_server_request(
 }
 
 fn has_server_request(snapshot: &Arc<Mutex<AppServerSnapshotState>>, request_id: &Value) -> bool {
-    let Ok(key) = request_id_key(request_id) else {
-        return false;
-    };
-    snapshot
-        .lock()
-        .map(|state| {
-            state.threads.values().any(|thread| {
-                thread.pending_server_requests.iter().any(|request| {
-                    request_id_key(&request.request_id).ok().as_deref() == Some(&key)
-                })
-            })
-        })
-        .unwrap_or(false)
+    find_server_request(snapshot, request_id).is_some()
 }
 
 fn consume_server_request_after_write(snapshot: &Arc<Mutex<AppServerSnapshotState>>, request_id: &Value, outcome: Result<(), String>) -> Result<(), String> {
@@ -1942,6 +2046,37 @@ mod tests {
                 .as_deref(),
             Some("thread-1")
         );
+    }
+
+    #[test]
+    fn validates_server_request_responses_against_the_stored_method() {
+        let request = |method: &str, params: Value| CodexAppServerServerRequest {
+            request_id: json!(1),
+            method: method.to_string(),
+            params,
+            thread_id: Some("thread-1".to_string()),
+        };
+        let command = request("item/commandExecution/requestApproval", json!({}));
+        assert!(validate_server_request_response(&command, &Some(json!({ "decision": "accept" })), &None).is_ok());
+        assert!(validate_server_request_response(&command, &Some(json!({ "decision": "acceptForSession" })), &None).is_err());
+        let file = request("item/fileChange/requestApproval", json!({}));
+        assert!(validate_server_request_response(&file, &Some(json!({ "decision": "decline" })), &None).is_ok());
+        let permissions = request("item/permissions/requestApproval", json!({}));
+        assert!(validate_server_request_response(&permissions, &None, &Some(json!({ "code": -32000, "message": "Permission declined" }))).is_ok());
+        assert!(validate_server_request_response(&permissions, &Some(json!({ "permissions": {} })), &None).is_err());
+        let tool = request("item/tool/requestUserInput", json!({ "questions": [{ "id": "choice" }] }));
+        assert!(validate_server_request_response(&tool, &Some(json!({ "answers": { "choice": { "answers": ["Read"] } } })), &None).is_ok());
+        assert!(validate_server_request_response(&tool, &Some(json!({ "answers": { "other": { "answers": ["Read"] } } })), &None).is_err());
+        let mcp = request("mcpServer/elicitation/request", json!({ "mode": "form" }));
+        assert!(validate_server_request_response(&mcp, &Some(json!({ "action": "accept", "content": { "count": 2, "enabled": true } })), &None).is_ok());
+        assert!(validate_server_request_response(&mcp, &Some(json!({ "action": "accept" })), &None).is_err());
+        let mcp_url = request("mcpServer/elicitation/request", json!({ "mode": "url" }));
+        assert!(validate_server_request_response(&mcp_url, &Some(json!({ "action": "cancel" })), &None).is_ok());
+        assert!(validate_server_request_response(&mcp_url, &Some(json!({ "action": "accept", "content": {} })), &None).is_err());
+        let unknown = request("future/request", json!({}));
+        assert!(validate_server_request_response(&unknown, &Some(json!({})), &None).is_err());
+        assert!(validate_server_request_response(&unknown, &None, &Some(json!({ "code": -32000, "message": "no" }))).is_err());
+        assert!(validate_server_request_response(&command, &None, &Some(json!({ "code": "bad", "message": "no" }))).is_err());
     }
 
     #[test]

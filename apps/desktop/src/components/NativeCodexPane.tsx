@@ -13,6 +13,7 @@ import {
   mergeNativeCodexHydration,
   nativePaneDecision,
   reduceNativeCodexEvent,
+  seedNativeCodexPaneState,
   serverRequestOutcome,
   toolQuestions,
   type NativeCodexItem,
@@ -406,13 +407,16 @@ function NativeCodexPane({
       invoke<{
         threads: Array<{
           threadId: string;
+          activeTurn?: string | null;
+          status?: string | null;
           pendingServerRequests: PendingCodexRequest[];
         }>;
       }>("get_codex_app_server_snapshot"),
     ]);
-    const pending =
-      snapshot.threads.find((entry) => entry.threadId === opened.threadId)
-        ?.pendingServerRequests ?? [];
+    const threadSnapshot = snapshot.threads.find(
+      (entry) => entry.threadId === opened.threadId,
+    );
+    const pending = threadSnapshot?.pendingServerRequests ?? [];
 
     setState((current) => {
       const merged = mergeNativeCodexHydration(
@@ -430,7 +434,11 @@ function NativeCodexPane({
             : [...all, candidate],
         merged.requests,
       );
-      return { ...merged, requests };
+      return seedNativeCodexPaneState(
+        { ...merged, requests },
+        opened,
+        threadSnapshot,
+      );
     });
   }, [initialPrompt, paneId, settings, worktreePath]);
 

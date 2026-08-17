@@ -9,6 +9,7 @@ import {
   nativePaneDecision,
   pendingRequestFromEvent,
   reduceNativeCodexEvent,
+  seedNativeCodexPaneState,
   serverRequestOutcome,
   toolQuestions,
 } from "./native-codex-pane-state.ts";
@@ -60,6 +61,25 @@ test("durable transport ownership takes precedence over the creation setting", (
   expect(nativePaneDecision(null, false, true)).toBe("terminal");
   expect(nativePaneDecision(null, true, false)).toBe("terminal");
   expect(nativePaneDecision(null, true, true)).toBe("native");
+});
+
+test("seeds active turn controls from durable and authoritative reload state", () => {
+  expect(
+    seedNativeCodexPaneState(initialNativeCodexPaneState, {
+      currentTurnId: "durable-turn",
+      state: "working",
+    }),
+  ).toMatchObject({ activeTurnId: "durable-turn", status: "working" });
+  expect(
+    seedNativeCodexPaneState(
+      { ...initialNativeCodexPaneState, activeTurnId: "stale-turn" },
+      { currentTurnId: "durable-turn", state: "working" },
+      { activeTurn: "snapshot-turn", status: "waitingOnApproval" },
+    ),
+  ).toMatchObject({
+    activeTurnId: "snapshot-turn",
+    status: "waitingOnApproval",
+  });
 });
 
 test("uses stable delta notification fields without losing prior item kinds", () => {

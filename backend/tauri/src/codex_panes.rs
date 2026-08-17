@@ -93,6 +93,36 @@ fn validate_input(worktree_path: &str, pane_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_native_turn_input(input: &Value) -> Result<(), String> {
+    let items = input
+        .as_array()
+        .filter(|items| !items.is_empty())
+        .ok_or_else(|| "native Codex input is required".to_string())?;
+    for item in items {
+        let item = item
+            .as_object()
+            .ok_or_else(|| "native Codex input item must be an object".to_string())?;
+        match item.get("type").and_then(Value::as_str) {
+            Some("text") if item.len() == 2 => {
+                let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
+                if text.trim().is_empty() {
+                    return Err("native Codex text input cannot be blank".to_string());
+                }
+            }
+            Some("localImage") if item.len() == 2 => {
+                let path = item.get("path").and_then(Value::as_str)
+                    .ok_or_else(|| "native Codex local image path is required".to_string())?;
+                let path = std::path::Path::new(path);
+                if !path.is_absolute() || !path.is_file() {
+                    return Err("native Codex local image path must be an existing absolute file".to_string());
+                }
+            }
+            _ => return Err("native Codex input supports only text and local images".to_string()),
+        }
+    }
+    Ok(())
+}
+
 fn row_to_pane(row: &rusqlite::Row<'_>) -> rusqlite::Result<NativeCodexPane> {
     let settings_json: String = row.get(4)?;
     Ok(NativeCodexPane {
@@ -303,9 +333,7 @@ pub async fn send_native_codex_pane_input(
                 .map_err(|error| format!("DB lock error: {error}"))?;
         owned_pane(&conn, &worktree_path, &pane_id)?
     };
-    if !input.as_array().is_some_and(|items| !items.is_empty()) {
-        return Err("native Codex input is required".to_string());
-    }
+    validate_native_turn_input(&input)?;
     let state = app_server.inner().clone();
     let thread_id = pane.thread_id.clone();
     let expected_turn_id = pane.current_turn_id.clone();
@@ -630,5 +658,22 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(recovery_count, 0);
+    }
+    #[test]
+    fn native_turn_input_accepts_only_nonblank_text_and_existing_local_images() {
+        assert!(validate_native_turn_input(&json!([
+            { "type": "text", "text": "hello" },
+            { "type": "localImage", "path": concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml") },
+        ])).is_ok());
+        for input in [
+            json!([]),
+            json!([{ "type": "text", "text": "  " }]),
+            json!([{ "type": "image", "url": "https://example.test/image.png" }]),
+            json!([{ "type": "localImage", "path": "relative.png" }]),
+            json!([{ "type": "localImage", "path": "/missing.png" }]),
+            json!([{ "type": "text", "text": "ok", "extra": true }]),
+        ] {
+            assert!(validate_native_turn_input(&input).is_err(), "{input}");
+        }
     }
 }

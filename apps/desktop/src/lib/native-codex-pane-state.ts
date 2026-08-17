@@ -36,6 +36,23 @@ export const initialNativeCodexPaneState: NativeCodexPaneState = {
   unsupported: [],
 };
 
+export function seedNativeCodexPaneState(
+  state: NativeCodexPaneState,
+  pane: { currentTurnId?: string | null; state: string },
+  snapshot?: { activeTurn?: string | null; status?: string | null },
+): NativeCodexPaneState {
+  const activeTurnId = snapshot
+    ? (snapshot.activeTurn ?? null)
+    : (pane.currentTurnId ?? state.activeTurnId);
+  return {
+    ...state,
+    activeTurnId,
+    status:
+      snapshot?.status ??
+      (activeTurnId ? "working" : pane.state || state.status),
+  };
+}
+
 const supportedRequestMethods = new Set([
   "item/commandExecution/requestApproval",
   "item/fileChange/requestApproval",
