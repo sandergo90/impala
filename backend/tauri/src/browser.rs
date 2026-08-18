@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl};
-use tracing::{info, warn};
+use tracing::warn;
 
 /// Per-tab state for every live browser webview, keyed by tab id. Lets
 /// worktree-scoped callers (hook-server endpoints, MCP tools) find "the
@@ -385,7 +385,6 @@ pub async fn browser_open(
         });
 
     if let Ok(wv) = get_webview(&app, &id) {
-        info!(id = %id, x, y, width, height, "browser_open: reshow existing webview");
         #[cfg(target_os = "macos")]
         let visibility_generation = if underlay_ready() {
             Some(native::begin_browser_visibility(&id, true))
@@ -430,7 +429,6 @@ pub async fn browser_open(
         return Ok(());
     }
 
-    info!(id = %id, url = %url, x, y, width, height, "browser_open: creating webview");
     let parsed = Url::parse(&url).map_err(|e| e.to_string())?;
     let window = app.get_window("main").ok_or("main window not found")?;
     let nav_app = app.clone();
@@ -453,7 +451,6 @@ pub async fn browser_open(
         .initialization_script(CURSOR_JS)
         .on_navigation(move |url| {
             if let Some(action) = hotkey_action(url) {
-                info!(id = %nav_id, action, "browser hotkey");
                 if action == "focus-address" {
                     // DOM focus alone cannot take first responder from the
                     // native child webview; return key focus to the shell
@@ -470,11 +467,6 @@ pub async fn browser_open(
                 return false;
             }
             if let Some(target) = new_tab_target(url) {
-                info!(
-                    id = %nav_id,
-                    url = %target,
-                    "browser target=_blank request"
-                );
                 if let Err(error) = emit_new_browser_tab_request(&nav_app, &nav_id, &target) {
                     warn!(
                         id = %nav_id,
@@ -491,7 +483,6 @@ pub async fn browser_open(
             true
         })
         .on_new_window(move |url, _features| {
-            info!(id = %new_window_id, url = %url, "browser new window request");
             if let Err(error) = emit_new_browser_tab_request(&new_window_app, &new_window_id, &url)
             {
                 warn!(
@@ -633,7 +624,6 @@ pub async fn browser_set_visible(app: AppHandle, id: String, visible: bool) -> R
 
 #[tauri::command]
 pub fn browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
-    info!(id = %id, url = %url, "browser_navigate");
     let wv = get_webview(&app, &id).map_err(|e| {
         warn!(id = %id, error = %e, "browser_navigate: webview missing");
         e
@@ -839,7 +829,6 @@ pub fn click_selector(
     selector: &str,
 ) -> Result<serde_json::Value, String> {
     let target = resolve_selector(wv, selector)?;
-    info!(selector = %selector, x = target.x, y = target.y, "browser click");
     animate_cursor(app, wv, target.x, target.y);
     native::post_mouse_click(wv, target.x, target.y)?;
     cursor_ripple(wv);
@@ -856,7 +845,6 @@ pub fn click_at(
     x: f64,
     y: f64,
 ) -> Result<serde_json::Value, String> {
-    info!(x, y, "browser click_at");
     animate_cursor(app, wv, x, y);
     native::post_mouse_click(wv, x, y)?;
     cursor_ripple(wv);
@@ -871,7 +859,6 @@ pub fn scroll(
     dx: f64,
     dy: f64,
 ) -> Result<serde_json::Value, String> {
-    info!(dx, dy, "browser scroll");
     if let Ok(raw) = native::eval_js(
         wv,
         "JSON.stringify({w:innerWidth,h:innerHeight})",
@@ -952,7 +939,6 @@ pub fn type_into_selector(
     text: &str,
 ) -> Result<serde_json::Value, String> {
     let target = resolve_selector(wv, selector)?;
-    info!(selector = %selector, chars = text.len(), "browser type");
     animate_cursor(app, wv, target.x, target.y);
     native::post_mouse_click(wv, target.x, target.y)?;
     cursor_ripple(wv);
@@ -1018,12 +1004,10 @@ pub fn navigate_worktree(
     let parsed = Url::parse(url).map_err(|e| e.to_string())?;
     match webview_for_worktree(app, worktree_path) {
         Ok(wv) => {
-            info!(worktree_path = %worktree_path, url = %url, "browser navigate (worktree)");
             wv.navigate(parsed).map_err(|e| e.to_string())?;
             Ok(serde_json::json!({ "created": false }))
         }
         Err(_) => {
-            info!(worktree_path = %worktree_path, url = %url, "browser navigate: requesting new tab");
             let _ = app.emit_to(
                 "main",
                 "browser-request-open",
