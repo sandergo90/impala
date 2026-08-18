@@ -9,6 +9,7 @@ import {
   getAdjacentLeafId,
   findLeaf,
   updateRatio,
+  updateGroup,
   updateLeafContent,
   updateGroupTab,
   normalizeLegacySplitTree,
@@ -1665,8 +1666,17 @@ export function getEffectiveAgentTabSplitTree(
   splitTree: SplitNode | undefined,
 ): SplitNode {
   const agentContent = { kind: "terminal", launch: "agent" } as const;
-  if (splitTree) return normalizeLegacySplitTree(splitTree, agentContent);
-  return singleGroup(AGENT_PANE_ID, agentContent, "Agent");
+  if (!splitTree) return singleGroup(AGENT_PANE_ID, agentContent, "Agent");
+  const tree = normalizeLegacySplitTree(splitTree, agentContent);
+  if (findGroupTab(tree, AGENT_PANE_ID)) return tree;
+  // The primary Agent is a system tab, and the workspace renders through it.
+  // A persisted tree that lost it (closed by an earlier build) would render
+  // nothing, so put it back into the first pane — without taking over that
+  // pane's active tab.
+  return updateGroup(tree, getLeaves(tree)[0].id, (group) => ({
+    ...group,
+    tabs: [createGroupTab(AGENT_PANE_ID, agentContent, "Agent"), ...group.tabs],
+  }));
 }
 
 export function getEffectiveAgentTabFocusedPaneId(
@@ -1712,8 +1722,8 @@ export function updateAgentTabRatio(
   });
 }
 
-// Removes the focused pane; the Agent tab itself is never closed (system tab),
-// so a single-leaf tree is a no-op.
+// Removes the focused pane. The primary Agent tab is a system tab and is never
+// closed, so closing it (Cmd+W or its own X) is a no-op.
 export function closeAgentTabFocusedPane(worktreePath: string): void {
   const uiState = useUIStore.getState();
   const nav = uiState.getWorktreeNavState(worktreePath);
@@ -1725,27 +1735,7 @@ export function closeAgentTabFocusedPane(worktreePath: string): void {
   const focusedGroup = findLeaf(tree, focusedId);
   if (!focusedGroup) return;
   const activeGroupTab = getActiveGroupTab(focusedGroup);
-  const totalTabs = getLeaves(tree).reduce(
-    (total, group) => total + group.tabs.length,
-    0,
-  );
-
-  // The system tab itself survives its last inner tab. If its primary Agent
-  // was closed earlier, closing the final remaining tab restores that Agent.
-  if (totalTabs === 1) {
-    if (activeGroupTab.id === AGENT_PANE_ID) return;
-    if (!confirmGroupTabClose(worktreePath, activeGroupTab)) return;
-    disposeGroupTab(worktreePath, activeGroupTab);
-    uiState.updateWorktreeNavState(worktreePath, {
-      agentTabSplitTree: singleGroup(
-        AGENT_PANE_ID,
-        { kind: "terminal", launch: "agent" },
-        "Agent",
-      ),
-      agentTabFocusedPaneId: AGENT_PANE_ID,
-    });
-    return;
-  }
+  if (activeGroupTab.id === AGENT_PANE_ID) return;
 
   if (focusedGroup.tabs.length > 1) {
     if (!confirmGroupTabClose(worktreePath, activeGroupTab)) return;

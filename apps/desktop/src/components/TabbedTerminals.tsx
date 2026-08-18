@@ -1505,8 +1505,10 @@ function PaneTabGroup({
             >
             {group.tabs.map((tab, index) => {
             const selected = tab.id === activeTab.id;
+            // The primary Agent tab is a system tab: no X, and Cmd+W skips it.
             const canClose =
-              topTabId !== AGENT_PANE_ID || isSplitLayout || group.tabs.length > 1;
+              tab.id !== AGENT_PANE_ID &&
+              (topTabId !== AGENT_PANE_ID || isSplitLayout || group.tabs.length > 1);
             const isAgent =
               agentPaneStatuses[tab.id] !== undefined ||
               (tab.content.kind === "terminal" &&
