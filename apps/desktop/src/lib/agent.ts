@@ -233,9 +233,23 @@ export function buildAutomationResumeCommand(
 export function buildCodexResumeCommand(
   flags: string,
   threadId: string,
+  initialPrompt?: string,
   env?: Record<string, string>,
+  codexOptions?: CodexLaunchOptions,
 ): string {
-  return buildAgentCommand("codex", flags, ["resume", threadId], env);
+  const args: string[] = [];
+  if (codexOptions?.model) args.push("-m", codexOptions.model);
+  if (codexOptions?.reasoningEffort)
+    args.push("-c", `model_reasoning_effort=${codexOptions.reasoningEffort}`);
+  if (codexOptions?.serviceTier) args.push("-c", `service_tier=${codexOptions.serviceTier}`);
+  args.push("resume", threadId);
+  if (initialPrompt) args.push(initialPrompt);
+  return buildAgentCommand(
+    "codex",
+    flags,
+    args,
+    env,
+  );
 }
 
 /** Direct commands still need shell setup for tools such as mise. */

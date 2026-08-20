@@ -243,13 +243,31 @@ impl CodexAppServerState {
             return Err("Codex app-server thread id is empty".to_string());
         }
         let (reply_sender, reply_receiver) = mpsc::channel();
-        self.sender.send(WorkerCommand::ReadPersistedThread {
-            thread_id: thread_id.to_string(),
-            reply: reply_sender,
-        }).map_err(|_| "Codex app-server worker stopped".to_string())?;
+        self.sender
+            .send(WorkerCommand::ReadPersistedThread {
+                thread_id: thread_id.to_string(),
+                reply: reply_sender,
+            })
+            .map_err(|_| "Codex app-server worker stopped".to_string())?;
         reply_receiver
             .recv_timeout(REQUEST_TIMEOUT + REQUEST_TIMEOUT)
             .map_err(|_| "Codex app-server request timed out".to_string())?
+    }
+
+    /// Prove a thread is readable from Impala's managed server without
+    /// subscribing to it or adding it to the reconnect-owned set.
+    pub(crate) fn validate_persisted_managed_thread(
+        &self,
+        thread_id: &str,
+        cwd: &str,
+    ) -> Result<String, String> {
+        let thread = self.thread_read_persisted(thread_id)?;
+        if !persisted_thread_matches(&thread, thread_id, cwd) {
+            return Err("Codex thread/read does not match the MCP source".to_string());
+        }
+        let codex_home =
+            crate::agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+        Ok(managed_remote(&codex_home))
     }
 
     pub fn thread_resume(&self, thread_id: &str) -> Result<Value, String> {
@@ -384,7 +402,15 @@ impl CodexAppServerState {
             Err(format!("Codex thread {thread_id} is not Impala-owned"))
         }
     }
+}
 
+fn persisted_thread_matches(thread: &Value, thread_id: &str, cwd: &str) -> bool {
+    thread_id_from(thread).as_deref() == Some(thread_id)
+        && thread
+            .get("thread")
+            .and_then(|thread| thread.get("cwd"))
+            .and_then(Value::as_str)
+            == Some(cwd)
 }
 
 fn diagnostics_page_limit_reached(page: usize) -> bool {
@@ -1202,6 +1228,24 @@ fn managed_remote(codex_home: &Path) -> String {
     format!("unix://{}", codex_home.join(DAEMON_SOCKET).display())
 }
 
+/// Creates a thread through a short-lived managed connection. The visible
+/// terminal is the sole long-lived subscriber and resumes this exact thread.
+pub(crate) fn start_managed_thread(cwd: &str) -> Result<(String, String), String> {
+    if cwd.trim().is_empty() {
+        return Err("Codex thread cwd is empty".to_string());
+    }
+    let codex_home =
+        crate::agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+    launch_environment(&codex_home)?;
+    let remote = managed_remote(&codex_home);
+    let mut socket = initialize_client(&remote)?;
+    let result = request(&mut socket, 2, "thread/start", json!({ "cwd": cwd }));
+    let _ = socket.close(None);
+    let thread_id = thread_id_from(&result?)
+        .ok_or_else(|| "Codex thread/start returned no thread id".to_string())?;
+    Ok((thread_id, remote))
+}
+
 pub fn remote_snapshot(codex_home: &Path) -> Result<RemoteControlSnapshot, String> {
     let remote = managed_remote(codex_home);
     if !socket_path(&remote)?.exists() {
@@ -1578,6 +1622,14 @@ mod tests {
         let (method, params) = persisted_thread_read_request("thread-history");
         assert_eq!(method, "thread/read");
         assert_eq!(params, json!({ "threadId": "thread-history", "includeTurns": true }));
+    }
+
+    #[test]
+    fn persisted_thread_validation_requires_the_exact_thread_and_cwd() {
+        let thread = json!({ "thread": { "id": "thread-parent", "cwd": "/worktree" } });
+        assert!(persisted_thread_matches(&thread, "thread-parent", "/worktree"));
+        assert!(!persisted_thread_matches(&thread, "thread-other", "/worktree"));
+        assert!(!persisted_thread_matches(&thread, "thread-parent", "/other"));
     }
 
     #[test]

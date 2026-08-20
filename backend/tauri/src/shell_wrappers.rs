@@ -65,13 +65,6 @@ if [ -z "$remote" ]; then
   exec "$real_codex" "$@"
 fi
 
-for arg in "$@"; do
-  case "$arg" in
-    --) break ;;
-    --remote|--remote=*) exec "$real_codex" "$@" ;;
-  esac
-done
-
 # In --remote mode Codex only honors the terminal's directory when it is
 # passed explicitly via --cd; otherwise the thread lands in the app server's
 # own cwd. Inject --cd "$PWD" unless the user already chose a directory.
@@ -91,7 +84,7 @@ for arg in "$@"; do
   fi
   case "$arg" in
     --) break ;;
-    -c|--config|--enable|--disable|--remote-auth-token-env|-i|--image|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
+    -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
       expect_value=true
       ;;
     exec|e|review|login|logout|mcp|plugin|mcp-server|app-server|remote-control|app|completion|update|doctor|sandbox|debug|execpolicy|apply|a|archive|delete|migrate-rollouts|unarchive|cloud|cloud-tasks|responses-api-proxy|stdio-to-uds|exec-server|features|help)
@@ -101,6 +94,18 @@ for arg in "$@"; do
     *) break ;;
   esac
 done
+
+has_explicit_remote=false
+for arg in "$@"; do
+  case "$arg" in
+    --) break ;;
+    --remote|--remote=*) has_explicit_remote=true ;;
+  esac
+done
+
+if [ "$has_explicit_remote" = true ]; then
+  exec "$real_codex" "$@"
+fi
 
 # This list follows Codex's current command surface. A future subcommand is
 # treated as a prompt until it is added above; replace this shim when Codex

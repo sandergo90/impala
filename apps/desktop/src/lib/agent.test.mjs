@@ -4,6 +4,7 @@ import {
   buildDirectLaunchCommand,
   buildInteractiveShellArgs,
   buildLaunchCommand,
+  buildCodexResumeCommand,
   agentForTerminalLaunch,
   usesImpalaCodexServer,
   parseNativeCodexFlags,
@@ -74,6 +75,20 @@ describe("global automation commands", () => {
     );
     expect(buildAutomationResumeCommand("claude", "", "session-2")).toBe(
       "claude '--resume' 'session-2'",
+    );
+  });
+
+  test("resumes a pre-created Codex thread with its delegated prompt", () => {
+    expect(
+      buildCodexResumeCommand(
+        "--yolo",
+        "thread-1",
+        "Read the ticket fully.\n\nImplement it.",
+        CODEX_ENV,
+        { model: "gpt-5.6-luna", reasoningEffort: "max", serviceTier: "fast" },
+      ),
+    ).toBe(
+      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' '-c' 'service_tier=fast' 'resume' 'thread-1' 'Read the ticket fully.\n\nImplement it.'",
     );
   });
 

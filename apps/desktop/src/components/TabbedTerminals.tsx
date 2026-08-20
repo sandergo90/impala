@@ -949,14 +949,32 @@ const TabBody = memo(function TabBody({
         shell_args: string[];
         env: Record<string, string>;
       }>("prepare_shell_launch");
+      const delegatedCodexThreadId =
+        delegatedLaunch?.delegationId &&
+        agent === "codex" &&
+        usesImpalaCodexServer(agent, flags)
+          ? await invoke<string>("prepare_managed_codex_delegation", {
+              delegationId: delegatedLaunch.delegationId,
+              worktreePath,
+              paneId,
+            })
+          : undefined;
       const delegatedCommand = delegatedLaunch
-        ? buildDirectLaunchCommand(
-            agent,
-            flags,
-            delegatedLaunch.prompt,
-            extraEnv,
-            delegatedLaunch.codexOptions,
-          )
+        ? delegatedCodexThreadId
+          ? buildCodexResumeCommand(
+              flags,
+              delegatedCodexThreadId,
+              delegatedLaunch.prompt,
+              extraEnv,
+              delegatedLaunch.codexOptions,
+            )
+          : buildDirectLaunchCommand(
+              agent,
+              flags,
+              delegatedLaunch.prompt,
+              extraEnv,
+              delegatedLaunch.codexOptions,
+            )
         : null;
       return invoke<boolean>("pty_spawn", {
         sessionId: ptyId,
@@ -1021,7 +1039,7 @@ const TabBody = memo(function TabBody({
                 : undefined;
 
             const cmd = codexResumeThreadId
-              ? `${buildCodexResumeCommand(flags, codexResumeThreadId, extraEnv)}\n`
+              ? `${buildCodexResumeCommand(flags, codexResumeThreadId, undefined, extraEnv)}\n`
               : buildLaunchCommand(agent, flags, initialPrompt, extraEnv);
             const encoded = encodePtyInput(cmd);
 

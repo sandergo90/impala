@@ -1171,6 +1171,31 @@ fn register_agent_delegation(
 }
 
 #[tauri::command]
+async fn prepare_managed_codex_delegation(
+    delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
+    delegation_id: String,
+    worktree_path: String,
+    pane_id: String,
+) -> Result<String, String> {
+    let (thread_id, app_server) = tokio::task::spawn_blocking({
+        let worktree_path = worktree_path.clone();
+        move || codex_app_server::start_managed_thread(&worktree_path)
+    })
+    .await
+    .map_err(|error| format!("task join: {error}"))??;
+    if !delegations.register_managed_codex_target(
+        &delegation_id,
+        &worktree_path,
+        &pane_id,
+        &thread_id,
+        &app_server,
+    ) {
+        return Err("could not register managed Codex delegation target".to_string());
+    }
+    Ok(thread_id)
+}
+
+#[tauri::command]
 fn fail_agent_delegation(
     delegations: tauri::State<'_, Arc<hook_server::AgentDelegations>>,
     delegation_id: String,
@@ -2303,6 +2328,7 @@ pub fn run() {
             get_agent_run_change_summary,
             get_agent_run_changes,
             register_agent_delegation,
+            prepare_managed_codex_delegation,
             fail_agent_delegation,
             clear_agent_pane_status,
             clear_agent_worktree_status,

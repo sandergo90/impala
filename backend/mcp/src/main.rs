@@ -433,7 +433,7 @@ fn tool_browser_scroll(args: &Value) -> Result<Value, String> {
     .map(strip_ok)
 }
 
-fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
+fn tool_open_agent_tab(args: &Value, source_thread_id: Option<&str>) -> Result<Value, String> {
     let wt = param_or_cwd(args, "worktree_path")?;
     let prompt = args
         .get("prompt")
@@ -473,25 +473,22 @@ fn tool_open_agent_tab(args: &Value) -> Result<Value, String> {
     if let Some(service_tier) = service_tier {
         params.push(("service_tier", service_tier));
     }
-    let source_pane_id = std::env::var("IMPALA_PANE_ID")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
-    if let Some(source_pane_id) = source_pane_id.as_deref() {
-        params.push(("source_pane_id", source_pane_id));
-    }
-    let source_app_server = std::env::var("IMPALA_CODEX_APP_SERVER")
-        .ok()
-        .filter(|value| value.starts_with("unix:///"));
-    let source_thread_id = codex_source_thread_id(
-        source_app_server.as_deref(),
-        std::env::var("CODEX_THREAD_ID").ok().as_deref(),
-    );
-    if let Some(source_thread_id) = source_thread_id.as_deref() {
+    let source_worktree_path = source_thread_id
+        .and_then(|_| std::env::current_dir().ok())
+        .and_then(|path| path.into_os_string().into_string().ok());
+    if let Some(source_thread_id) = source_thread_id.filter(|value| !value.trim().is_empty()) {
         params.push(("source_thread_id", source_thread_id));
-        params.push(("source_app_server", source_app_server.as_deref().unwrap()));
+        if let Some(source_worktree_path) = source_worktree_path.as_deref() {
+            params.push(("source_worktree_path", source_worktree_path));
+        }
     }
     params.push(("placement", placement));
     browser_get("/agents/open", &params).map(strip_ok)
+}
+
+fn mcp_source_thread_id(params: &Value) -> Option<&str> {
+    params.get("_meta").and_then(|meta| meta.get("threadId")).and_then(Value::as_str)
+        .filter(|thread_id| !thread_id.trim().is_empty())
 }
 
 fn agent_open_codex_options(args: &Value) -> Result<(Option<&str>, Option<&str>, Option<&str>, Option<&str>), String> {
@@ -511,16 +508,6 @@ fn agent_open_codex_options(args: &Value) -> Result<(Option<&str>, Option<&str>,
         return Err("model, reasoning_effort, and service_tier require agent='codex'".to_string());
     }
     Ok((agent, model, reasoning_effort, service_tier))
-}
-
-fn codex_source_thread_id(remote: Option<&str>, thread_id: Option<&str>) -> Option<String> {
-    if !remote.is_some_and(|value| value.starts_with("unix:///")) {
-        return None;
-    }
-    thread_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
 }
 
 fn tool_follow_up_agent_tab(args: &Value) -> Result<Value, String> {
@@ -1169,7 +1156,7 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_click_at" => tool_browser_click_at(&tool_args),
                 "browser_scroll" => tool_browser_scroll(&tool_args),
                 "browser_type" => tool_browser_type(&tool_args),
-                "open_agent_tab" => tool_open_agent_tab(&tool_args),
+                "open_agent_tab" => tool_open_agent_tab(&tool_args, mcp_source_thread_id(&params)),
                 "follow_up_agent_tab" => tool_follow_up_agent_tab(&tool_args),
                 "steer_agent_tab" => tool_steer_agent_tab(&tool_args),
                 "list_automations" => tool_list_automations(&tool_args),
@@ -1300,22 +1287,6 @@ mod tests {
     }
 
     #[test]
-    fn only_forwards_threads_connected_to_impalas_codex_server() {
-        assert_eq!(
-            codex_source_thread_id(Some("unix:///tmp/impala.sock"), Some("thread-1")),
-            Some("thread-1".to_string())
-        );
-        assert_eq!(
-            codex_source_thread_id(Some("ws://127.0.0.1:4222"), Some("thread-1")),
-            None
-        );
-        assert_eq!(
-            codex_source_thread_id(Some("unix:///tmp/impala.sock"), Some(" ")),
-            None
-        );
-    }
-
-    #[test]
     fn sidecar_forwards_future_codex_capability_identifiers() {
         let args = json!({
             "agent": "codex",
@@ -1330,5 +1301,15 @@ mod tests {
                 && tool["inputSchema"]["properties"]["reasoning_effort"].get("enum").is_none()
                 && tool["inputSchema"]["properties"]["service_tier"].get("enum").is_none()
         }));
+    }
+
+    #[test]
+    fn open_agent_tab_uses_only_the_mcp_thread_metadata_for_its_source() {
+        assert_eq!(mcp_source_thread_id(&json!({
+            "_meta": { "threadId": "thread-parent" },
+            "arguments": { "thread_id": "untrusted" },
+        })), Some("thread-parent"));
+        assert_eq!(mcp_source_thread_id(&json!({ "_meta": {} })), None);
+        assert_eq!(mcp_source_thread_id(&json!({})), None);
     }
 }
