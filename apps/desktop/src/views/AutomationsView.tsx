@@ -29,6 +29,10 @@ import {
 import { launchAutomationResume } from "../lib/agent-launch";
 import { cleanupWorktreeForDeletion } from "../lib/worktree-cleanup";
 import { createDeferredCleanupScheduler } from "../lib/deferred-cleanup";
+import {
+  parseNativeAutomationTranscript,
+  type NativeAutomationTranscriptEntry,
+} from "../lib/native-automation-transcript";
 import { AUTOMATIONS_PROJECT } from "../lib/automations-project";
 import { acknowledgeAutomationRun } from "../lib/automation-run-acknowledgement";
 import { selectWorktree } from "../hooks/useWorktreeActions";
@@ -930,7 +934,7 @@ function AutomationWorktreePane({
 
       <div className="min-h-0 flex-1">
         {run?.agent_transport === "app-server" ? (
-          <NativeAutomationStatus run={run} />
+          <NativeAutomationTranscript key={run.id} run={run} />
         ) : automation?.repo_path === "" && run ? (
           <GlobalAutomationTerminal
             key={`${run.id}:${claimed ? "claimed" : (run.agent_session_id ?? "")}`}
@@ -964,9 +968,69 @@ function AutomationWorktreePane({
   );
 }
 
-function NativeAutomationStatus({ run }: { run: AutomationRun }) {
+function NativeAutomationTranscript({ run }: { run: AutomationRun }) {
   const running = run.status === "pending" || run.status === "launched";
   const [stopping, setStopping] = useState(false);
+  const [transcript, setTranscript] = useState<
+    | { status: "loading" }
+    | { status: "ready"; entries: NativeAutomationTranscriptEntry[] }
+    | { status: "error"; message: string }
+  >({ status: "loading" });
+
+  useMountEffect(() => {
+    let disposed = false;
+    let refreshTimer: number | undefined;
+    let reading = false;
+    let queued = false;
+    function scheduleRefresh() {
+      if (disposed) return;
+      if (reading) {
+        queued = true;
+        return;
+      }
+      if (refreshTimer) return;
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = undefined;
+        refresh();
+      }, 250);
+    }
+    async function refresh() {
+      if (reading) {
+        queued = true;
+        return;
+      }
+      reading = true;
+      try {
+        const thread = await invoke<unknown>("read_native_codex_automation_transcript", {
+          runId: run.id,
+        });
+        if (!disposed) {
+          setTranscript({ status: "ready", entries: parseNativeAutomationTranscript(thread) });
+        }
+      } catch (error) {
+        if (!disposed) setTranscript({ status: "error", message: String(error) });
+      } finally {
+        reading = false;
+        if (!disposed && queued) {
+          queued = false;
+          scheduleRefresh();
+        }
+      }
+    }
+    refresh();
+    const unlisten = listen<{ runId: string }>(
+      "native-automation-transcript-changed",
+      ({ payload }) => {
+        if (payload.runId === run.id) scheduleRefresh();
+      },
+    );
+    return () => {
+      disposed = true;
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+      unlisten.then((fn) => fn());
+    };
+  });
+
   const stop = async () => {
     setStopping(true);
     try {
@@ -977,22 +1041,41 @@ function NativeAutomationStatus({ run }: { run: AutomationRun }) {
     }
   };
   return (
-    <div className="flex h-full items-center justify-center px-8 text-center">
-      <div className="max-w-sm">
-        <p className="text-sm font-medium">
-          {running ? "Codex is running in the background" : "This Codex run is ready to review"}
-        </p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {running
-            ? "Impala will make the worktree reviewable when the turn completes."
-            : "Review the worktree and its diff without opening a second Codex subscriber."}
-        </p>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+        <div>
+          <p className="text-sm font-medium">Codex transcript</p>
+          <p className="text-xs text-muted-foreground">
+            {running ? "Live from the existing Impala connection" : "Read-only run transcript"}
+          </p>
+        </div>
         {running && (
-          <button type="button" onClick={stop} disabled={stopping} className="mt-4 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50">
+          <button type="button" onClick={stop} disabled={stopping} className="rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50">
             {stopping ? "Stopping…" : "Stop"}
           </button>
         )}
-        {run.error && <p className="mt-3 text-sm text-danger">{run.error}</p>}
+      </div>
+      {run.error && <p className="shrink-0 px-4 py-2 text-sm text-danger">{run.error}</p>}
+      <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
+        {transcript.status === "loading" && (
+          <p className="text-sm text-muted-foreground">Loading transcript…</p>
+        )}
+        {transcript.status === "error" && (
+          <p className="text-sm text-danger">Could not read this Codex transcript: {transcript.message}</p>
+        )}
+        {transcript.status === "ready" && transcript.entries.length === 0 && (
+          <p className="text-sm text-muted-foreground">This Codex run has not produced transcript items yet.</p>
+        )}
+        {transcript.status === "ready" && transcript.entries.length > 0 && (
+          <div className="space-y-3">
+            {transcript.entries.map((entry, index) => (
+              <div key={`${index}:${entry.kind}`} className="rounded-md border border-border px-3 py-2">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{entry.kind}</p>
+                <pre className="whitespace-pre-wrap break-words font-sans text-sm">{entry.text}</pre>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

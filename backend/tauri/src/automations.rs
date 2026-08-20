@@ -1102,9 +1102,14 @@ fn transition_native_turn(
 /// required because a thread can have later turns after a recovery boundary.
 pub(crate) fn apply_native_codex_notification(app: &AppHandle, envelope: &serde_json::Value) {
     let Some(method) = envelope.get("method").and_then(serde_json::Value::as_str) else { return };
-    if method != "turn/completed" && method != "turn/failed" && method != "turn/interrupted" { return; }
     let params = envelope.get("params").unwrap_or(&serde_json::Value::Null);
     let Some(thread_id) = params.get("threadId").and_then(serde_json::Value::as_str) else { return };
+    if let Ok(conn) = app.state::<crate::DbState>().0.lock() {
+        if let Ok(run_id) = native_automation_transcript_run(&conn, thread_id) {
+            let _ = app.emit("native-automation-transcript-changed", serde_json::json!({ "runId": run_id }));
+        }
+    }
+    if method != "turn/completed" && method != "turn/failed" && method != "turn/interrupted" { return; }
     let Some(turn) = params.get("turn") else { return };
     let Some(turn_id) = turn.get("id").and_then(serde_json::Value::as_str) else { return };
     let mut turn = turn.clone();
@@ -1146,8 +1151,49 @@ pub(crate) fn validate_native_codex_settings(settings: &serde_json::Value) -> Re
     Ok(())
 }
 
+/// Resolve only a thread that an automation run durably identifies as native
+/// Codex. The app-server state separately verifies that this process adopted it.
+fn native_automation_transcript_thread(conn: &Connection, run_id: &str) -> Result<String, String> {
+    conn.query_row(
+        "SELECT agent_session_id FROM automation_runs
+         WHERE id = ?1
+           AND agent_transport = 'app-server'
+           AND agent_provider = 'codex'
+           AND agent_session_id IS NOT NULL",
+        params![run_id],
+        |row| row.get(0),
+    ).map_err(|_| "native automation run has no owned Codex thread".to_string())
+}
+
+fn native_automation_transcript_run(conn: &Connection, thread_id: &str) -> Result<String, String> {
+    conn.query_row(
+        "SELECT id FROM automation_runs
+         WHERE agent_transport = 'app-server'
+           AND agent_provider = 'codex'
+           AND agent_session_id = ?1",
+        params![thread_id],
+        |row| row.get(0),
+    ).map_err(|_| "Codex thread is not an Impala native automation".to_string())
+}
+
 fn native_codex_identifier(value: &str) -> bool {
     !value.is_empty() && value.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+}
+
+#[tauri::command]
+pub async fn read_native_codex_automation_transcript(
+    db: tauri::State<'_, crate::DbState>,
+    app_server: tauri::State<'_, crate::codex_app_server::CodexAppServerState>,
+    run_id: String,
+) -> Result<serde_json::Value, String> {
+    let thread_id = {
+        let conn = db.0.lock().map_err(|error| format!("DB lock error: {error}"))?;
+        native_automation_transcript_thread(&conn, &run_id)?
+    };
+    let state = app_server.inner().clone();
+    tokio::task::spawn_blocking(move || state.thread_read_persisted(&thread_id))
+        .await
+        .map_err(|error| format!("native Codex transcript task join: {error}"))?
 }
 
 #[tauri::command]
@@ -3163,6 +3209,28 @@ mod tests {
         assert!(transition_native_turn(&conn, "other-thread", "turn-1", &completed).unwrap().is_none());
         assert!(transition_native_turn(&conn, "thread-1", "turn-1", &completed).unwrap().is_some());
         assert_eq!(get_run(&conn, &run.id).unwrap().status, "completed");
+    }
+
+    #[test]
+    fn native_transcript_thread_rejects_cli_and_unidentified_runs() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp();
+        let automation = create_automation_row(&conn, new_automation("0 9 * * *"), now).unwrap();
+        let run = insert_run(&conn, &automation.id, now).unwrap().unwrap();
+
+        assert!(native_automation_transcript_thread(&conn, &run.id).is_err());
+        conn.execute(
+            "UPDATE automation_runs SET agent_transport = 'app-server', agent_provider = 'codex' WHERE id = ?1",
+            params![run.id],
+        ).unwrap();
+        assert!(native_automation_transcript_thread(&conn, &run.id).is_err());
+        conn.execute(
+            "UPDATE automation_runs SET agent_session_id = 'thread-1' WHERE id = ?1",
+            params![run.id],
+        ).unwrap();
+        assert_eq!(native_automation_transcript_thread(&conn, &run.id).unwrap(), "thread-1");
+        assert_eq!(native_automation_transcript_run(&conn, "thread-1").unwrap(), run.id);
+        assert!(native_automation_transcript_run(&conn, "other-thread").is_err());
     }
 
     #[test]

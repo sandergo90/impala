@@ -2236,6 +2236,7 @@ pub fn run() {
             automations::list_pending_automation_runs,
             automations::report_automation_run,
             automations::start_native_codex_automation,
+            automations::read_native_codex_automation_transcript,
             automations::interrupt_native_codex_automation,
             automations::finalize_automation_run_instructions,
             automations::cron_next_occurrences,

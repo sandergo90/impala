@@ -157,6 +157,10 @@ enum WorkerCommand {
         params: Value,
         reply: mpsc::Sender<Result<Value, String>>,
     },
+    ReadPersistedThread {
+        thread_id: String,
+        reply: mpsc::Sender<Result<Value, String>>,
+    },
 }
 
 struct PendingCall {
@@ -230,6 +234,22 @@ impl CodexAppServerState {
             "thread/read",
             json!({ "threadId": thread_id, "includeTurns": true }),
         )
+    }
+
+    /// Read a DB-authorized historical automation thread without adding it to
+    /// active ownership, so reconnect will never resume it.
+    pub(crate) fn thread_read_persisted(&self, thread_id: &str) -> Result<Value, String> {
+        if thread_id.trim().is_empty() {
+            return Err("Codex app-server thread id is empty".to_string());
+        }
+        let (reply_sender, reply_receiver) = mpsc::channel();
+        self.sender.send(WorkerCommand::ReadPersistedThread {
+            thread_id: thread_id.to_string(),
+            reply: reply_sender,
+        }).map_err(|_| "Codex app-server worker stopped".to_string())?;
+        reply_receiver
+            .recv_timeout(REQUEST_TIMEOUT + REQUEST_TIMEOUT)
+            .map_err(|_| "Codex app-server request timed out".to_string())?
     }
 
     pub fn thread_resume(&self, thread_id: &str) -> Result<Value, String> {
@@ -570,38 +590,45 @@ fn handle_worker_command(
                     return;
                 }
             }
-            if let Err(error) = ensure_connection(socket, pending, state, app, next_request_id) {
-                record_connection_error(state, error.clone());
-                let _ = reply.send(Err(error));
-                return;
-            }
-            let id = Value::from(*next_request_id);
-            *next_request_id += 1;
-            let key = match request_id_key(&id) {
-                Ok(key) => key,
-                Err(error) => {
-                    let _ = reply.send(Err(error));
-                    return;
-                }
-            };
-            if let Some(active_socket) = socket.as_mut() {
-                if let Err(error) = send_json(
-                    active_socket,
-                    json!({ "id": id, "method": method, "params": params }),
-                ) {
-                    disconnect(socket, pending, state, error.clone());
-                    let _ = reply.send(Err(error));
-                } else {
-                    pending.insert(
-                        key,
-                        PendingCall {
-                            method,
-                            params,
-                            reply,
-                        },
-                    );
-                }
-            }
+            send_worker_request(method, params, reply, socket, pending, next_request_id, state, app);
+        }
+        WorkerCommand::ReadPersistedThread { thread_id, reply } => {
+            let (method, params) = persisted_thread_read_request(&thread_id);
+            send_worker_request(method.to_string(), params, reply, socket, pending, next_request_id, state, app);
+        }
+    }
+}
+
+fn send_worker_request(
+    method: String,
+    params: Value,
+    reply: mpsc::Sender<Result<Value, String>>,
+    socket: &mut Option<WebSocket<UnixStream>>,
+    pending: &mut HashMap<String, PendingCall>,
+    next_request_id: &mut u64,
+    state: &Arc<Mutex<AppServerState>>,
+    app: &tauri::AppHandle,
+) {
+    if let Err(error) = ensure_connection(socket, pending, state, app, next_request_id) {
+        record_connection_error(state, error.clone());
+        let _ = reply.send(Err(error));
+        return;
+    }
+    let id = Value::from(*next_request_id);
+    *next_request_id += 1;
+    let key = match request_id_key(&id) {
+        Ok(key) => key,
+        Err(error) => {
+            let _ = reply.send(Err(error));
+            return;
+        }
+    };
+    if let Some(active_socket) = socket.as_mut() {
+        if let Err(error) = send_json(active_socket, json!({ "id": id, "method": method, "params": params })) {
+            disconnect(socket, pending, state, error.clone());
+            let _ = reply.send(Err(error));
+        } else {
+            pending.insert(key, PendingCall { method, params, reply });
         }
     }
 }
@@ -879,6 +906,13 @@ fn owned_thread_ids(state: &Arc<Mutex<AppServerState>>) -> Vec<String> {
         .lock()
         .map(|state| state.owned_threads.iter().cloned().collect())
         .unwrap_or_default()
+}
+
+fn persisted_thread_read_request(thread_id: &str) -> (&'static str, Value) {
+    (
+        "thread/read",
+        json!({ "threadId": thread_id, "includeTurns": true }),
+    )
 }
 
 fn reconnect_requests(thread_ids: Vec<String>) -> Vec<(&'static str, Value)> {
@@ -1535,6 +1569,15 @@ mod tests {
             &state,
         );
         assert!(is_owned(&state, "thread-created"));
+    }
+
+    #[test]
+    fn cold_persisted_thread_read_does_not_resume_the_historical_thread() {
+        let state = test_state(&[]);
+        assert!(reconnect_requests(owned_thread_ids(&state)).is_empty());
+        let (method, params) = persisted_thread_read_request("thread-history");
+        assert_eq!(method, "thread/read");
+        assert_eq!(params, json!({ "threadId": "thread-history", "includeTurns": true }));
     }
 
     #[test]
