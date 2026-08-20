@@ -1,9 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { listen } from "@tauri-apps/api/event";
-import { ArrowLeft, Bot, PanelRightOpen, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Bot,
+  FileCode2,
+  PanelRightOpen,
+  Terminal,
+  Wrench,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
+import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { invoke } from "@/lib/invoke";
+import { Button } from "../components/ui/button";
+import { Bubble, BubbleContent } from "../components/ui/bubble";
+import {
+  Marker,
+  MarkerContent,
+  MarkerIcon,
+} from "../components/ui/marker";
+import {
+  Message,
+  MessageContent,
+  MessageFooter,
+} from "../components/ui/message";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "../components/ui/message-scroller";
+import { markdownComponents } from "../components/markdownComponents";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1050,34 +1080,140 @@ function NativeAutomationTranscript({ run }: { run: AutomationRun }) {
           </p>
         </div>
         {running && (
-          <button type="button" onClick={stop} disabled={stopping} className="rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50">
+          <Button type="button" variant="outline" onClick={stop} disabled={stopping}>
             {stopping ? "Stopping…" : "Stop"}
-          </button>
+          </Button>
         )}
       </div>
       {run.error && <p className="shrink-0 px-4 py-2 text-sm text-danger">{run.error}</p>}
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
+      <div className="min-h-0 flex-1">
         {transcript.status === "loading" && (
-          <p className="text-sm text-muted-foreground">Loading transcript…</p>
+          <p className="px-4 py-3 text-sm text-muted-foreground">Loading transcript…</p>
         )}
         {transcript.status === "error" && (
-          <p className="text-sm text-danger">Could not read this Codex transcript: {transcript.message}</p>
+          <p className="px-4 py-3 text-sm text-danger">Could not read this Codex transcript: {transcript.message}</p>
         )}
         {transcript.status === "ready" && transcript.entries.length === 0 && (
-          <p className="text-sm text-muted-foreground">This Codex run has not produced transcript items yet.</p>
+          <p className="px-4 py-3 text-sm text-muted-foreground">This Codex run has not produced transcript items yet.</p>
         )}
         {transcript.status === "ready" && transcript.entries.length > 0 && (
-          <div className="space-y-3">
-            {transcript.entries.map((entry, index) => (
-              <div key={`${index}:${entry.kind}`} className="rounded-md border border-border px-3 py-2">
-                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{entry.kind}</p>
-                <pre className="whitespace-pre-wrap break-words font-sans text-sm">{entry.text}</pre>
-              </div>
-            ))}
-          </div>
+          <TranscriptConversation entries={transcript.entries} running={running} />
         )}
       </div>
     </div>
+  );
+}
+
+function TranscriptConversation({
+  entries,
+  running,
+}: {
+  entries: NativeAutomationTranscriptEntry[];
+  running: boolean;
+}) {
+  return (
+    <MessageScrollerProvider autoScroll={running}>
+      <MessageScroller>
+        <MessageScrollerViewport>
+          <MessageScrollerContent className="gap-4 px-4 py-4">
+            {entries.map((entry) => (
+              <MessageScrollerItem
+                key={entry.id}
+                messageId={entry.id}
+                scrollAnchor={entry.kind === "user"}
+              >
+                <TranscriptEntry entry={entry} />
+              </MessageScrollerItem>
+            ))}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+    </MessageScrollerProvider>
+  );
+}
+
+function TranscriptEntry({ entry }: { entry: NativeAutomationTranscriptEntry }) {
+  if (entry.kind === "tool") return <TranscriptToolActivity entry={entry} />;
+  if (entry.kind === "status") {
+    return (
+      <Marker variant="separator">
+        <MarkerContent>{entry.text}</MarkerContent>
+      </Marker>
+    );
+  }
+  const align = entry.kind === "user" ? "end" : "start";
+  const variant = entry.kind === "user"
+    ? "secondary"
+    : entry.isTurnResult
+      ? "tinted"
+      : "ghost";
+  return (
+    <Message align={align}>
+      <MessageContent>
+        <Bubble align={align} variant={variant}>
+          <BubbleContent>
+            <TranscriptMarkdown content={entry.text} />
+          </BubbleContent>
+        </Bubble>
+        {entry.isTurnResult && <MessageFooter>Result</MessageFooter>}
+      </MessageContent>
+    </Message>
+  );
+}
+
+function TranscriptMarkdown({ content }: { content: string }) {
+  return (
+    <Streamdown
+      mode="static"
+      components={markdownComponents}
+      rehypePlugins={[
+        defaultRehypePlugins.sanitize,
+        defaultRehypePlugins.harden,
+      ]}
+    >
+      {content}
+    </Streamdown>
+  );
+}
+
+function TranscriptToolActivity({
+  entry,
+}: {
+  entry: Extract<NativeAutomationTranscriptEntry, { kind: "tool" }>;
+}) {
+  const Icon = entry.activity === "command"
+    ? Terminal
+    : entry.activity === "file"
+      ? FileCode2
+      : Wrench;
+  const metadata = [
+    entry.status,
+    entry.exitCode === undefined ? undefined : `exit ${entry.exitCode}`,
+  ].filter(Boolean).join(" · ");
+  const summary = (
+    <span className="flex min-w-0 flex-1 items-center gap-2">
+      <span className="truncate">{entry.summary}</span>
+      {metadata && <span className="shrink-0 text-xs text-muted-foreground">{metadata}</span>}
+    </span>
+  );
+  return (
+    <Marker variant="border" className="px-1 py-2">
+      <MarkerIcon>
+        <Icon />
+      </MarkerIcon>
+      {entry.details ? (
+        <details className="min-w-0 flex-1">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm [&::-webkit-details-marker]:hidden">
+            {summary}
+            <span className="shrink-0 text-xs text-muted-foreground">Details</span>
+          </summary>
+          <pre className="mt-2 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-foreground">
+            {entry.details}
+          </pre>
+        </details>
+      ) : summary}
+    </Marker>
   );
 }
 
