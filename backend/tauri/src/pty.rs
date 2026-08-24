@@ -16,6 +16,7 @@ fn unwrap_or_err<T>(
 #[tauri::command]
 pub async fn pty_spawn(
     state: tauri::State<'_, DaemonState>,
+    pane_registry: tauri::State<'_, std::sync::Arc<crate::hook_server::PaneRegistry>>,
     session_id: String,
     cwd: String,
     command: Option<Vec<String>>,
@@ -23,7 +24,24 @@ pub async fn pty_spawn(
     shell_args: Option<Vec<String>>,
     env_vars: Option<HashMap<String, String>>,
 ) -> Result<bool, String> {
-    let env: Vec<(String, String)> = env_vars.unwrap_or_default().into_iter().collect();
+    let env_vars = env_vars.unwrap_or_default();
+    // The hook server recovers daemon-side Codex hooks (which carry no pane
+    // env) through this registry, so record every pane's identity at spawn.
+    if let (Some(worktree), Some(pane)) = (
+        env_vars.get("IMPALA_WORKTREE_PATH"),
+        env_vars.get("IMPALA_PANE_ID"),
+    ) {
+        pane_registry.record(
+            &session_id,
+            worktree,
+            pane,
+            env_vars
+                .get("IMPALA_AGENT_PROVIDER")
+                .map(String::as_str)
+                .unwrap_or(""),
+        );
+    }
+    let env: Vec<(String, String)> = env_vars.into_iter().collect();
     let resp = state
         .client()
         .await?

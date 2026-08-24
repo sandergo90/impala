@@ -2088,11 +2088,13 @@ pub fn run() {
                 Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
             let interrupted_turns = Arc::new(hook_server::InterruptedAgentTurns::load_persisted());
             let subagent_registry = Arc::new(subagents::SubagentRegistry::default());
+            let pane_registry = Arc::new(hook_server::PaneRegistry::default());
             let hook_port = hook_server::start(
                 app.handle().clone(),
                 agent_statuses.clone(),
                 agent_pane_statuses.clone(),
                 agent_delegations.clone(),
+                pane_registry.clone(),
                 last_turn_snapshots.clone(),
                 interrupted_turns.clone(),
                 subagent_registry.clone(),
@@ -2118,6 +2120,7 @@ pub fn run() {
             app.manage(agent_statuses.clone());
             app.manage(agent_pane_statuses.clone());
             app.manage(agent_delegations);
+            app.manage(pane_registry);
             app.manage(last_turn_snapshots);
             app.manage(interrupted_turns);
             app.manage(subagent_registry);

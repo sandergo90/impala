@@ -1567,8 +1567,70 @@ fn hook_command(event_type: &str) -> String {
     )
 }
 
+/// Pane identities recorded at PTY spawn, keyed by PTY session id. Codex
+/// app-server sessions execute hooks daemon-side, where the per-pane env vars
+/// never exist — this registry lets the hook server recover (worktree, pane)
+/// for such hooks from the payload's cwd. Entries are never evicted: PTY
+/// session ids are deterministic per pane, so a respawn overwrites its entry,
+/// and the map stays bounded by the panes opened during one app run.
+#[derive(Default)]
+pub struct PaneRegistry(Mutex<HashMap<String, PaneIdentity>>);
+
+struct PaneIdentity {
+    worktree_path: String,
+    pane_id: String,
+    provider: String,
+}
+
+impl PaneRegistry {
+    pub fn record(
+        &self,
+        pty_session_id: &str,
+        worktree_path: &str,
+        pane_id: &str,
+        provider: &str,
+    ) {
+        if worktree_path.is_empty() || pane_id.is_empty() {
+            return;
+        }
+        if let Ok(mut panes) = self.0.lock() {
+            panes.insert(
+                pty_session_id.to_owned(),
+                PaneIdentity {
+                    worktree_path: worktree_path.to_owned(),
+                    pane_id: pane_id.to_owned(),
+                    provider: provider.to_owned(),
+                },
+            );
+        }
+    }
+
+    /// The Codex pane an unattributed hook with this cwd belongs to. Prefers
+    /// the primary agent pane when several Codex panes share the worktree;
+    /// bails on ambiguity rather than guess.
+    fn codex_pane_for_cwd(&self, cwd: &str) -> Option<(String, String)> {
+        let panes = self.0.lock().ok()?;
+        let mut only: Option<&PaneIdentity> = None;
+        for pane in panes
+            .values()
+            .filter(|pane| pane.provider == "codex" && pane.worktree_path == cwd)
+        {
+            if pane.pane_id == "tab-agent" {
+                return Some((pane.worktree_path.clone(), pane.pane_id.clone()));
+            }
+            if only.is_some() {
+                only = None;
+                break;
+            }
+            only = Some(pane);
+        }
+        only.map(|pane| (pane.worktree_path.clone(), pane.pane_id.clone()))
+    }
+}
+
 fn hook_target_for_identity(
     delegations: &AgentDelegations,
+    pane_registry: &PaneRegistry,
     params: &HashMap<String, String>,
     hook_identity: Option<&serde_json::Value>,
 ) -> ((String, String), String) {
@@ -1579,11 +1641,20 @@ fn hook_target_for_identity(
             return (target, "codex".to_string());
         }
     }
+    let worktree_path = params.get("worktree_path").cloned().unwrap_or_default();
+    let pane_id = params.get("pane_id").cloned().unwrap_or_default();
+    // Empty identity params mean the hook ran outside a pane shell — for
+    // Codex app-server sessions that's the daemon, whose env has no pane
+    // vars. Recover the pane from the payload's cwd via the spawn registry.
+    if worktree_path.is_empty() && pane_id.is_empty() {
+        if let Some(cwd) = cwd {
+            if let Some(target) = pane_registry.codex_pane_for_cwd(cwd) {
+                return (target, "codex".to_string());
+            }
+        }
+    }
     (
-        (
-            params.get("worktree_path").cloned().unwrap_or_default(),
-            params.get("pane_id").cloned().unwrap_or_default(),
-        ),
+        (worktree_path, pane_id),
         params.get("agent_provider").cloned().unwrap_or_default(),
     )
 }
@@ -1716,10 +1787,12 @@ Impala (the desktop app this worktree is open in) has a built-in browser pane ne
 Before calling any `mcp__impala__browser_*` tool, run:
 
 ```sh
-test -n "${IMPALA_WORKTREE_PATH:-}" && test -n "${IMPALA_PANE_ID:-}"
+test -f ~/.impala/hook-port
 ```
 
-If the command fails, stop using this skill and do not call any Impala browser tools. Tell the user that the Impala browser is available only from an agent session running inside the Impala app. Do not substitute another browser unless the user asks.
+If the command fails, stop using this skill and do not call any Impala browser tools. Tell the user that the Impala browser is available only while the Impala app is running. Do not substitute another browser unless the user asks.
+
+(The check is a file, not an env var: Codex app-server sessions run commands daemon-side without Impala's per-pane environment; `~/.impala/hook-port` exists whenever the app is running and is the same fallback the MCP server uses.)
 
 ## The loop
 
@@ -2329,6 +2402,7 @@ pub fn start(
     statuses: Arc<AgentStatuses>,
     pane_statuses: Arc<AgentPaneStatuses>,
     delegations: Arc<AgentDelegations>,
+    pane_registry: Arc<PaneRegistry>,
     snapshots: Arc<LastTurnSnapshots>,
     interrupted_turns: Arc<InterruptedAgentTurns>,
     subagents: Arc<crate::subagents::SubagentRegistry>,
@@ -2400,8 +2474,12 @@ pub fn start(
             let mut hook_payload = String::new();
             let _ = request.as_reader().read_to_string(&mut hook_payload);
             let hook_identity = serde_json::from_str::<serde_json::Value>(&hook_payload).ok();
-            let ((worktree_path, pane_id), provider) =
-                hook_target_for_identity(&delegations, &params, hook_identity.as_ref());
+            let ((worktree_path, pane_id), provider) = hook_target_for_identity(
+                &delegations,
+                &pane_registry,
+                &params,
+                hook_identity.as_ref(),
+            );
 
             // Persist the provider session and the first turn identity on the
             // automation run. The completion reconciler can then recover an
@@ -2578,7 +2656,7 @@ mod tests {
         agent_follow_up_write_request, agent_open_codex_settings, hook_command,
         hook_target_for_identity, pane_status_for_hook_event, publish_hook_port, AgentDelegations,
         AgentFollowUpTarget, AgentPaneStatuses, AgentSteerTarget, AutomationCompletionTracker,
-        InterruptedAgentTurns, wake_target_is_gone, IMPALA_BROWSER_SKILL,
+        InterruptedAgentTurns, wake_target_is_gone, PaneRegistry, IMPALA_BROWSER_SKILL,
     };
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use impala_daemon_shared::wire::Request;
@@ -2956,12 +3034,78 @@ mod tests {
         assert_eq!(
             hook_target_for_identity(
                 &delegations,
+                &PaneRegistry::default(),
                 &params,
                 Some(&serde_json::json!({ "session_id": "alternate-thread", "cwd": "/worktree" })),
             ),
             (
                 ("/worktree".to_string(), "alternate-pane".to_string()),
                 "codex".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn unattributed_codex_hook_recovers_pane_from_spawn_registry() {
+        let delegations = AgentDelegations::default();
+        let registry = PaneRegistry::default();
+        let empty_params = HashMap::new();
+        let identity =
+            serde_json::json!({ "session_id": "thread-1", "cwd": "/worktree" });
+
+        // No registration → stays unattributed.
+        assert_eq!(
+            hook_target_for_identity(&delegations, &registry, &empty_params, Some(&identity)),
+            ((String::new(), String::new()), String::new())
+        );
+
+        // A Claude pane in the worktree never matches.
+        registry.record("pty-tab-agent-/worktree", "/worktree", "tab-agent", "claude");
+        assert_eq!(
+            hook_target_for_identity(&delegations, &registry, &empty_params, Some(&identity)),
+            ((String::new(), String::new()), String::new())
+        );
+
+        // A respawn with provider codex overwrites and matches.
+        registry.record("pty-tab-agent-/worktree", "/worktree", "tab-agent", "codex");
+        assert_eq!(
+            hook_target_for_identity(&delegations, &registry, &empty_params, Some(&identity)),
+            (
+                ("/worktree".to_string(), "tab-agent".to_string()),
+                "codex".to_string()
+            )
+        );
+
+        // Several codex panes: the agent pane wins.
+        registry.record("pty-terminal-1-/worktree", "/worktree", "terminal-1", "codex");
+        assert_eq!(
+            hook_target_for_identity(&delegations, &registry, &empty_params, Some(&identity)),
+            (
+                ("/worktree".to_string(), "tab-agent".to_string()),
+                "codex".to_string()
+            )
+        );
+
+        // Ambiguous without an agent pane: bail instead of guessing.
+        let other = serde_json::json!({ "session_id": "thread-2", "cwd": "/other" });
+        registry.record("pty-terminal-1-/other", "/other", "terminal-1", "codex");
+        registry.record("pty-terminal-2-/other", "/other", "terminal-2", "codex");
+        assert_eq!(
+            hook_target_for_identity(&delegations, &registry, &empty_params, Some(&other)),
+            ((String::new(), String::new()), String::new())
+        );
+
+        // Explicit env-derived params always win over the registry.
+        let params = HashMap::from([
+            ("worktree_path".to_string(), "/worktree".to_string()),
+            ("pane_id".to_string(), "pane-x".to_string()),
+            ("agent_provider".to_string(), "claude".to_string()),
+        ]);
+        assert_eq!(
+            hook_target_for_identity(&delegations, &registry, &params, Some(&identity)),
+            (
+                ("/worktree".to_string(), "pane-x".to_string()),
+                "claude".to_string()
             )
         );
     }
@@ -3341,8 +3485,10 @@ mod tests {
 
     #[test]
     fn browser_skill_requires_impala_runtime_context() {
-        assert!(IMPALA_BROWSER_SKILL
-            .contains(r#"test -n "${IMPALA_WORKTREE_PATH:-}" && test -n "${IMPALA_PANE_ID:-}""#));
+        // Guard must not key on per-pane env vars: Codex app-server sessions
+        // run commands daemon-side, where those vars never exist.
+        assert!(IMPALA_BROWSER_SKILL.contains("test -f ~/.impala/hook-port"));
+        assert!(!IMPALA_BROWSER_SKILL.contains("IMPALA_WORKTREE_PATH"));
         assert!(IMPALA_BROWSER_SKILL.contains("If the command fails, stop using this skill"));
     }
 
