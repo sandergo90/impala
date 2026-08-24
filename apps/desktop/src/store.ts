@@ -106,6 +106,8 @@ interface UIState {
   setSidebarWidth: (width: number | null) => void;
   rightSidebarWidth: number | null;
   setRightSidebarWidth: (width: number | null) => void;
+  rightSidebarOpen: boolean;
+  setRightSidebarOpen: (open: boolean) => void;
   fontSize: number;
   setFontSize: (size: number) => void;
   editorFontFamily: string | null;
@@ -268,6 +270,8 @@ export const useUIStore = create<UIState>()(
       setSidebarWidth: (width) => set({ sidebarWidth: width }),
       rightSidebarWidth: null,
       setRightSidebarWidth: (width) => set({ rightSidebarWidth: width }),
+      rightSidebarOpen: true,
+      setRightSidebarOpen: (open) => set({ rightSidebarOpen: open }),
       fontSize: 14,
       setFontSize: (size) => {
         set({ fontSize: size });

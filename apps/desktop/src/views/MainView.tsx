@@ -39,7 +39,8 @@ import { Popover } from "@base-ui/react/popover";
 let cachedHomeDir: string | null = null;
 
 export function MainView() {
-  const [showSidebar, setShowSidebar] = useState(true);
+  const showSidebar = useUIStore((s) => s.rightSidebarOpen);
+  const setShowSidebar = useUIStore((s) => s.setRightSidebarOpen);
   const [rightSidebarTab, setRightSidebarTab] = useState<RightSidebarTab>("changes");
   const [changesPopoverOpen, setChangesPopoverOpen] = useState(false);
   const changesButtonRef = useRef<HTMLButtonElement>(null);
@@ -124,7 +125,8 @@ export function MainView() {
 
   const toggleRightSidebar = useCallback(() => {
     setChangesPopoverOpen(false);
-    setShowSidebar((prev) => !prev);
+    const s = useUIStore.getState();
+    s.setRightSidebarOpen(!s.rightSidebarOpen);
   }, []);
 
   useAppHotkey("SWITCH_TAB_TERMINAL", openWorkspace);
