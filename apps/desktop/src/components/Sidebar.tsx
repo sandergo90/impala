@@ -250,7 +250,7 @@ export function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const projectIcons = useDataStore((s) => s.projectIcons);
   const worktrees = useFilteredWorktrees();
   const projectWorktrees = useDataStore((s) => s.worktrees);
-  const runInfo = useWorktreeRunInfo();
+  const { info: runInfo } = useWorktreeRunInfo();
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
   const agentStatuses = useDataStore(
@@ -438,13 +438,27 @@ export function Sidebar() {
   const setWorktrees = useDataStore((s) => s.setWorktrees);
   const selectedWorktree = useUIStore((s) => s.selectedWorktree);
   const generalTerminalActive = useUIStore((s) => s.generalTerminalActive);
-  const runInfo = useWorktreeRunInfo();
+  const { info: runInfo, loaded: runInfoLoaded } = useWorktreeRunInfo();
   // Which population the worktree section shows. Automation-spawned
   // worktrees live behind the Automations tab so they never crowd the
   // branch list; the tab badge carries unreviewed-run attention.
   const [sideTab, setSideTab] = useState<"branches" | "automations">(
     "branches",
   );
+  // Follow the selection across populations: opening an automation run — the
+  // Automations view's Review button, a command-palette jump — must show the
+  // run's group, not leave Branches active with nothing highlighted. Keyed on
+  // the change so a manual tab click still sticks while the selection holds.
+  // Starts null so a selection restored at startup is classified too, and
+  // waits for `loaded` — an empty run map would read as "manual".
+  const [tabbedSelection, setTabbedSelection] = useState<string | null>(null);
+  const selectedWorktreePath = selectedWorktree?.path ?? null;
+  if (runInfoLoaded && selectedWorktreePath !== tabbedSelection) {
+    setTabbedSelection(selectedWorktreePath);
+    if (selectedWorktreePath) {
+      setSideTab(runInfo[selectedWorktreePath] ? "automations" : "branches");
+    }
+  }
 
   usePrStatusSync(worktrees);
 

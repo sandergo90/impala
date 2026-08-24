@@ -23,9 +23,9 @@ describe("global automation commands", () => {
         CODEX_HOME: "/tmp/codex home",
       }),
     ).toBe(
-      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' CODEX_HOME='/tmp/codex home' codex --remote 'unix:///tmp/impala-codex.sock' --yolo 'do today'\\''s work'\n",
+      "codex --yolo 'do today'\\''s work'\n",
     );
-    expect(buildLaunchCommand("claude", "", "daily brief")).toBe(
+    expect(buildLaunchCommand("claude", "", "daily brief", CODEX_ENV)).toBe(
       "claude 'daily brief'\n",
     );
   });
@@ -38,14 +38,14 @@ describe("global automation commands", () => {
         serviceTier: "fast",
       }),
     ).toBe(
-      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' '-c' 'service_tier=fast' '$implement the ticket'\n",
+      "codex --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' '-c' 'service_tier=fast' '$implement the ticket'\n",
     );
     expect(
       buildLaunchCommand("codex", "--yolo", "prompt", CODEX_ENV, {
         model: "model'; echo unsafe",
       }),
     ).toBe(
-      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'model'\\''; echo unsafe' 'prompt'\n",
+      "codex --yolo '-m' 'model'\\''; echo unsafe' 'prompt'\n",
     );
   });
 
@@ -53,6 +53,15 @@ describe("global automation commands", () => {
     const command = buildLaunchCommand("codex", "--yolo", "prompt", CODEX_ENV);
     expect(command).not.toContain("CODEX_HOME=");
     expect(command).not.toContain(".impala/codex");
+  });
+
+  test("leaves managed app-server routing to Impala's codex shim", () => {
+    // An explicit --remote short-circuits the shim, and the shim is what
+    // injects --cd "$PWD" — without it the thread starts in the app server's
+    // own directory instead of the worktree.
+    const command = buildLaunchCommand("codex", "--yolo", "prompt", CODEX_ENV);
+    expect(command).not.toContain("--remote");
+    expect(command).not.toContain("--cd");
   });
 
   test("builds delegated multiline prompts as a direct PTY command", () => {
@@ -65,30 +74,30 @@ describe("global automation commands", () => {
         { model: "gpt-5.6-luna", reasoningEffort: "max" },
       ),
     ).toBe(
-      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' 'Read the ticket fully.\n\nImplement it.'",
+      "codex --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' 'Read the ticket fully.\n\nImplement it.'",
     );
   });
 
   test("builds direct resume commands without an echoed shell exit", () => {
     expect(buildAutomationResumeCommand("codex", "--yolo", "session-1", CODEX_ENV)).toBe(
-      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo 'resume' 'session-1'",
+      "codex --yolo 'resume' 'session-1'",
     );
     expect(buildAutomationResumeCommand("claude", "", "session-2")).toBe(
       "claude '--resume' 'session-2'",
     );
   });
 
-  test("resumes a pre-created Codex thread with its delegated prompt", () => {
+  test("resumes an app-server-started Codex turn without submitting its prompt twice", () => {
     expect(
       buildCodexResumeCommand(
         "--yolo",
         "thread-1",
-        "Read the ticket fully.\n\nImplement it.",
+        undefined,
         CODEX_ENV,
         { model: "gpt-5.6-luna", reasoningEffort: "max", serviceTier: "fast" },
       ),
     ).toBe(
-      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' codex --remote 'unix:///tmp/impala-codex.sock' --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' '-c' 'service_tier=fast' 'resume' 'thread-1' 'Read the ticket fully.\n\nImplement it.'",
+      "codex --yolo '-m' 'gpt-5.6-luna' '-c' 'model_reasoning_effort=max' '-c' 'service_tier=fast' 'resume' 'thread-1'",
     );
   });
 
@@ -106,7 +115,7 @@ describe("global automation commands", () => {
         CODEX_ENV,
       ),
     ).toBe(
-      "IMPALA_CODEX_APP_SERVER='unix:///tmp/impala-codex.sock' IMPALA_CODEX_APP_SERVER='' codex --remote ws://127.0.0.1:4222 'prompt'\n",
+      "IMPALA_CODEX_APP_SERVER='' codex --remote ws://127.0.0.1:4222 'prompt'\n",
     );
     expect(usesImpalaCodexServer("codex", "--remote ws://127.0.0.1:4222")).toBe(false);
     expect(usesImpalaCodexServer("codex", "--remote=ws://127.0.0.1:4222")).toBe(false);

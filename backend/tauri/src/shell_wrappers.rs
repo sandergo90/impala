@@ -337,7 +337,15 @@ mod tests {
         );
         assert_eq!(
             run_codex_wrapper(&["resume", "session-1"], Some(remote)),
-            ["codex", "--remote", remote, "--cd", "/", "resume", "session-1"]
+            [
+                "codex",
+                "--remote",
+                remote,
+                "--cd",
+                "/",
+                "resume",
+                "session-1"
+            ]
         );
         assert_eq!(
             run_codex_wrapper(&["fork", "--last"], Some(remote)),
@@ -351,7 +359,14 @@ mod tests {
         let remote = "unix:///tmp/impala-codex.sock";
         assert_eq!(
             run_codex_wrapper_in(&["--yolo"], Some(remote), Path::new("/private/tmp")),
-            ["codex", "--remote", remote, "--cd", "/private/tmp", "--yolo"]
+            [
+                "codex",
+                "--remote",
+                remote,
+                "--cd",
+                "/private/tmp",
+                "--yolo"
+            ]
         );
         assert_eq!(
             run_codex_wrapper(&["--cd", "/elsewhere", "--yolo"], Some(remote)),

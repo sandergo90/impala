@@ -50,6 +50,8 @@ pub struct AgentCompletionNotification {
     thread_id: String,
     app_server: String,
     prompt: String,
+    target_worktree_path: String,
+    target_pane_id: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -102,6 +104,26 @@ struct AgentSteerTarget {
     thread_id: String,
     app_server: String,
     turn_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDelegationStatus {
+    pub delegation_id: String,
+    pub name: Option<String>,
+    pub worktree_path: String,
+    pub pane_id: Option<String>,
+    pub created_at: i64,
+    pub status: String,
+    pub pane_status: String,
+    pub error: Option<String>,
+    pub callback_registered: bool,
+    pub transport: String,
+    pub thread_id: Option<String>,
+    pub app_server_progress: Option<crate::codex_app_server::ManagedThreadProgress>,
+    pub progress_error: Option<String>,
+    pub can_steer: bool,
+    pub can_follow_up: bool,
 }
 
 fn runtime_state_path(file_name: &str) -> Option<PathBuf> {
@@ -468,6 +490,8 @@ impl AgentDelegations {
                 "Impala agent tab \"{label}\" {outcome}. Delegation id: {}. Inspect its changes and continue the delegated workflow.",
                 entry.delegation_id
             ),
+            target_worktree_path: entry.worktree_path.clone(),
+            target_pane_id: entry.pane_id.clone(),
         })
     }
 
@@ -511,6 +535,113 @@ impl AgentDelegations {
             self.persist(&entries);
         }
         notifications
+    }
+
+    fn claim_managed_completions_with<F>(
+        &self,
+        pane_statuses: &AgentPaneStatuses,
+        mut read_progress: F,
+    ) -> Vec<AgentCompletionNotification>
+    where
+        F: FnMut(&str, &str) -> Result<crate::codex_app_server::ManagedThreadProgress, String>,
+    {
+        let candidates: Vec<_> = {
+            let Ok(entries) = self.entries.lock() else {
+                return Vec::new();
+            };
+            entries
+                .values()
+                .filter(|entry| {
+                    entry.error.is_none()
+                        && !entry.completion_notified
+                        && !entry.completion_notification_in_flight
+                        && entry.source_thread_id.is_some()
+                        && entry.source_app_server.is_some()
+                })
+                .filter_map(|entry| {
+                    let app_server = entry.target_app_server.as_deref()?;
+                    crate::codex_app_server::is_managed_remote(app_server).then_some((
+                        entry.delegation_id.clone(),
+                        entry.target_thread_id.clone()?,
+                        entry.target_turn_id.clone()?,
+                        app_server.to_owned(),
+                    ))
+                })
+                .collect()
+        };
+
+        let terminal: Vec<_> = candidates
+            .into_iter()
+            .filter_map(|(delegation_id, thread_id, turn_id, app_server)| {
+                let progress = read_progress(&app_server, &thread_id).ok()?;
+                if progress.turn_id.as_deref() != Some(turn_id.as_str()) {
+                    return None;
+                }
+                let error = match progress.turn_status.as_deref() {
+                    Some("completed") => None,
+                    Some("failed") | Some("interrupted") => {
+                        Some(progress.turn_error.unwrap_or_else(|| {
+                            format!(
+                                "managed Codex turn {}",
+                                progress.turn_status.unwrap_or_default()
+                            )
+                        }))
+                    }
+                    _ if progress.thread_status == "systemError" => {
+                        Some(progress.turn_error.unwrap_or_else(|| {
+                            "managed Codex thread entered a system error".to_string()
+                        }))
+                    }
+                    _ => return None,
+                };
+                Some((delegation_id, thread_id, turn_id, app_server, error))
+            })
+            .collect();
+
+        if terminal.is_empty() {
+            return Vec::new();
+        }
+        let Ok(mut entries) = self.entries.lock() else {
+            return Vec::new();
+        };
+        let mut notifications = Vec::new();
+        for (delegation_id, thread_id, turn_id, app_server, error) in terminal {
+            let Some(entry) = entries.get_mut(&delegation_id) else {
+                continue;
+            };
+            if entry.target_thread_id.as_deref() != Some(thread_id.as_str())
+                || entry.target_turn_id.as_deref() != Some(turn_id.as_str())
+                || entry.target_app_server.as_deref() != Some(app_server.as_str())
+            {
+                continue;
+            }
+            if let Some(error) = error {
+                entry.error = Some(error);
+            }
+            if let Some(notification) = Self::claim_completion(entry) {
+                notifications.push(notification);
+            }
+        }
+        if !notifications.is_empty() {
+            self.persist(&entries);
+        }
+        drop(entries);
+        for notification in &notifications {
+            if let Some(pane_id) = notification.target_pane_id.as_deref() {
+                pane_statuses.observe(&notification.target_worktree_path, pane_id, "idle");
+            }
+        }
+        notifications
+    }
+
+    pub fn claim_managed_completions(
+        &self,
+        pane_statuses: &AgentPaneStatuses,
+    ) -> Vec<AgentCompletionNotification> {
+        self.claim_managed_completions_with(
+            pane_statuses,
+            crate::codex_app_server::read_managed_thread_progress,
+        )
     }
 
     fn finish_completion_notification(&self, delegation_id: &str, delivered: bool) {
@@ -707,6 +838,103 @@ impl AgentDelegations {
         }
     }
 
+    pub fn status(
+        &self,
+        delegation_id: &str,
+        pane_statuses: &AgentPaneStatuses,
+    ) -> Result<AgentDelegationStatus, String> {
+        if delegation_id.trim().is_empty() {
+            return Err("missing delegation_id".to_string());
+        }
+        let entry = self
+            .entries
+            .lock()
+            .map_err(|_| "delegation registry is unavailable".to_string())?
+            .get(delegation_id)
+            .cloned()
+            .ok_or_else(|| format!("delegation not found: {delegation_id}"))?;
+        let pane_status = Self::status_for(&entry, pane_statuses).to_string();
+        let managed_target = match (
+            entry.target_thread_id.as_deref(),
+            entry.target_app_server.as_deref(),
+        ) {
+            (Some(thread_id), Some(app_server))
+                if crate::codex_app_server::is_managed_remote(app_server) =>
+            {
+                Some((thread_id.to_string(), app_server.to_string()))
+            }
+            _ => None,
+        };
+        let (app_server_progress, progress_error) = match managed_target.as_ref() {
+            Some((thread_id, app_server)) => {
+                match crate::codex_app_server::read_managed_thread_progress(app_server, thread_id) {
+                    Ok(progress) => (Some(progress), None),
+                    Err(error) => (None, Some(error)),
+                }
+            }
+            None => (None, None),
+        };
+        let status = if entry.error.is_some() {
+            "failed"
+        } else {
+            match app_server_progress
+                .as_ref()
+                .and_then(|progress| progress.turn_status.as_deref())
+            {
+                Some("inProgress") if pane_status == "waiting" => "waiting",
+                Some("inProgress") => "running",
+                Some("completed") => "completed",
+                Some("failed") => "failed",
+                Some("interrupted") => "interrupted",
+                _ if app_server_progress
+                    .as_ref()
+                    .is_some_and(|progress| progress.thread_status == "systemError") =>
+                {
+                    "failed"
+                }
+                _ => pane_status.as_str(),
+            }
+        }
+        .to_string();
+        let transport = if managed_target.is_some() {
+            "app-server"
+        } else {
+            "pty"
+        }
+        .to_string();
+        let can_steer = transport == "app-server"
+            && status == "running"
+            && pane_status == "running"
+            && (entry
+                .target_turn_id
+                .as_deref()
+                .is_some_and(|id| !id.is_empty())
+                || app_server_progress
+                    .as_ref()
+                    .and_then(|progress| progress.turn_id.as_deref())
+                    .is_some_and(|id| !id.is_empty()));
+        let can_follow_up =
+            pane_status == "idle" && entry.pane_id.as_deref().is_some_and(|id| !id.is_empty());
+        Ok(AgentDelegationStatus {
+            delegation_id: entry.delegation_id,
+            name: entry.name,
+            worktree_path: entry.worktree_path,
+            pane_id: entry.pane_id,
+            created_at: entry.created_at,
+            status,
+            pane_status,
+            error: entry.error,
+            callback_registered: entry.source_thread_id.is_some()
+                && entry.source_app_server.is_some(),
+            transport,
+            thread_id: entry.target_thread_id,
+            app_server_progress,
+            progress_error,
+            can_steer,
+            can_follow_up,
+        })
+    }
+
     #[cfg(test)]
     fn test_status(
         &self,
@@ -824,46 +1052,61 @@ impl AgentDelegations {
         delegation_id: &str,
         pane_statuses: &AgentPaneStatuses,
     ) -> Result<AgentSteerTarget, String> {
-        let entries = self
-            .entries
-            .lock()
-            .map_err(|_| "delegation registry is unavailable".to_string())?;
-        let entry = entries
-            .get(delegation_id)
-            .ok_or_else(|| format!("delegation not found: {delegation_id}"))?;
-        let status = Self::status_for(entry, pane_statuses);
-        if status != "running" {
-            return Err(format!(
-                "delegation is {}; steering requires a running managed Codex tab",
-                status
-            ));
-        }
-        let thread_id = entry
-            .target_thread_id
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "delegation has no managed Codex target thread".to_string())?;
-        let app_server = entry
-            .target_app_server
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "delegation has no managed Codex target app-server".to_string())?;
-        if !crate::codex_app_server::is_managed_remote(app_server) {
+        let (thread_id, app_server, recorded_turn_id) = {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| "delegation registry is unavailable".to_string())?;
+            let entry = entries
+                .get(delegation_id)
+                .ok_or_else(|| format!("delegation not found: {delegation_id}"))?;
+            let status = Self::status_for(entry, pane_statuses);
+            if status != "running" {
+                return Err(format!(
+                    "delegation is {}; steering requires a running managed Codex tab",
+                    status
+                ));
+            }
+            let thread_id = entry
+                .target_thread_id
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "delegation has no managed Codex target thread".to_string())?;
+            let app_server = entry
+                .target_app_server
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "delegation has no managed Codex target app-server".to_string())?;
+            (
+                thread_id.to_owned(),
+                app_server.to_owned(),
+                entry.target_turn_id.clone(),
+            )
+        };
+        if !crate::codex_app_server::is_managed_remote(&app_server) {
             return Err("delegation target app-server is not Impala-managed".to_string());
         }
-        let turn_id = entry
-            .target_turn_id
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "delegation has no active managed Codex turn".to_string())?;
+        let turn_id = match recorded_turn_id.filter(|turn_id| !turn_id.trim().is_empty()) {
+            Some(turn_id) => turn_id,
+            None => {
+                let progress =
+                    crate::codex_app_server::read_managed_thread_progress(&app_server, &thread_id)?;
+                if progress.turn_status.as_deref() != Some("inProgress") {
+                    return Err("delegation has no active managed Codex turn".to_string());
+                }
+                progress
+                    .turn_id
+                    .ok_or_else(|| "delegation has no active managed Codex turn".to_string())?
+            }
+        };
         Ok(AgentSteerTarget {
-            thread_id: thread_id.to_owned(),
-            app_server: app_server.to_owned(),
-            turn_id: turn_id.to_owned(),
+            thread_id,
+            app_server,
+            turn_id,
         })
     }
 
-    fn record_managed_follow_up_turn(
+    pub fn record_managed_turn(
         &self,
         delegation_id: &str,
         thread_id: &str,
@@ -950,6 +1193,62 @@ pub fn dispatch_completion(
             notification.delegation_id,
             last_error.as_deref().unwrap_or("unknown app-server error")
         );
+    });
+}
+
+pub fn start_managed_completion_reconciler(
+    app: AppHandle,
+    statuses: Arc<AgentStatuses>,
+    pane_statuses: Arc<AgentPaneStatuses>,
+    delegations: Arc<AgentDelegations>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            interval.tick().await;
+            let pending = tokio::task::spawn_blocking({
+                let pane_statuses = pane_statuses.clone();
+                let delegations = delegations.clone();
+                move || delegations.claim_managed_completions(&pane_statuses)
+            })
+            .await;
+            let Ok(notifications) = pending else {
+                continue;
+            };
+            for notification in notifications {
+                let Some(target_pane_id) = notification.target_pane_id.as_deref() else {
+                    dispatch_completion(delegations.clone(), notification);
+                    continue;
+                };
+                match delegations.finish(&notification.target_worktree_path, target_pane_id) {
+                    Ok(Some(summary)) if summary.files > 0 => {
+                        let _ = app.emit("agent-run-changes-completed", summary);
+                    }
+                    Ok(_) => {}
+                    Err(error) => eprintln!(
+                        "[impala] delegated agent completion snapshot failed for {}: {}",
+                        notification.target_worktree_path, error
+                    ),
+                }
+                publish_agent_pane_event(
+                    &app,
+                    &notification.target_worktree_path,
+                    target_pane_id,
+                    "idle",
+                );
+                let aggregate_status = pane_statuses
+                    .aggregate_snapshot()
+                    .remove(&notification.target_worktree_path)
+                    .unwrap_or_else(|| "idle".to_string());
+                publish_agent_status(
+                    &app,
+                    &statuses,
+                    &notification.target_worktree_path,
+                    &aggregate_status,
+                );
+                dispatch_completion(delegations.clone(), notification);
+            }
+        }
     });
 }
 
@@ -1744,6 +2043,14 @@ fn handle_agent_request(
     pane_statuses: &AgentPaneStatuses,
 ) -> serde_json::Value {
     let result = (|| -> Result<serde_json::Value, String> {
+        if path == "/agents/status" {
+            let delegation_id = params
+                .get("delegation_id")
+                .filter(|value| !value.trim().is_empty())
+                .ok_or("missing delegation_id")?;
+            return serde_json::to_value(delegations.status(delegation_id, pane_statuses)?)
+                .map_err(|error| format!("serialize delegation status: {error}"));
+        }
         if path == "/agents/follow_up" {
             let delegation_id = params
                 .get("delegation_id")
@@ -1772,11 +2079,7 @@ fn handle_agent_request(
                             .or_else(|| started.get("turnId"))
                             .and_then(serde_json::Value::as_str)
                             .ok_or_else(|| "Codex turn/start returned no turn id".to_string())?;
-                        delegations.record_managed_follow_up_turn(
-                            delegation_id,
-                            &thread_id,
-                            turn_id,
-                        )?;
+                        delegations.record_managed_turn(delegation_id, &thread_id, turn_id)?;
                         serde_json::json!({ "followed_up": true, "delegation_id": delegation_id, "transport": "app-server" })
                     }
                     AgentFollowUpTarget::Pty {
@@ -1879,9 +2182,9 @@ fn handle_agent_request(
                     .validate_persisted_managed_thread(source_thread_id, source_worktree_path);
                 match source {
                     Ok(source_app_server) => delegations.open_from_managed_source(
-                delegation_id,
-                worktree_path,
-                name.map(String::as_str),
+                        delegation_id,
+                        worktree_path,
+                        name.map(String::as_str),
                         source_thread_id,
                         &source_app_server,
                     ),
@@ -1905,7 +2208,7 @@ fn handle_agent_request(
                     None,
                     None,
                 );
-            false
+                false
             }
             _ => false,
         };
@@ -2354,6 +2657,34 @@ mod tests {
     }
 
     #[test]
+    fn delegation_status_snapshot_keeps_pty_fallback_read_only() {
+        let delegations = AgentDelegations::default();
+        let panes = AgentPaneStatuses::default();
+        delegations.open(
+            "delegation-1",
+            "/worktree",
+            Some("Claude review"),
+            Some("thread-parent"),
+            Some("unix:///tmp/source.sock"),
+        );
+        assert!(delegations.register("delegation-1", "pane-1"));
+        delegations.observe_hook("/worktree", "pane-1", &panes, "working");
+
+        let status = delegations.status("delegation-1", &panes).unwrap();
+        assert_eq!(status.status, "running");
+        assert_eq!(status.transport, "pty");
+        assert!(status.callback_registered);
+        assert!(status.app_server_progress.is_none());
+        assert!(status.progress_error.is_none());
+        assert!(!status.can_steer);
+        assert!(!status.can_follow_up);
+        assert_eq!(
+            delegations.status("missing", &panes).unwrap_err(),
+            "delegation not found: missing"
+        );
+    }
+
+    #[test]
     fn delegation_completion_claims_one_codex_callback_until_delivery_finishes() {
         let delegations = AgentDelegations::default();
         delegations.open(
@@ -2382,6 +2713,106 @@ mod tests {
         assert!(delegations
             .claim_completion_for_delegation("delegation-1")
             .is_none());
+    }
+
+    #[test]
+    fn managed_completion_reconciles_when_the_pane_hook_stays_working() {
+        let delegations = AgentDelegations::default();
+        let panes = AgentPaneStatuses::default();
+        let remote = format!(
+            "unix://{}",
+            crate::agent_config::codex_home_path()
+                .unwrap()
+                .join("app-server-control/app-server-control.sock")
+                .display()
+        );
+        delegations.open(
+            "delegation-1",
+            "/worktree",
+            Some("Ticket 01"),
+            Some("parent-thread"),
+            Some(&remote),
+        );
+        assert!(delegations.register_managed_codex_target(
+            "delegation-1",
+            "/worktree",
+            "pane-1",
+            "worker-thread",
+            &remote,
+        ));
+        delegations
+            .record_managed_turn("delegation-1", "worker-thread", "worker-turn")
+            .unwrap();
+        delegations.observe_hook("/worktree", "pane-1", &panes, "working");
+
+        let notifications =
+            delegations.claim_managed_completions_with(&panes, |app_server, thread_id| {
+                assert_eq!(app_server, remote);
+                assert_eq!(thread_id, "worker-thread");
+                Ok(crate::codex_app_server::ManagedThreadProgress {
+                    thread_status: "idle".to_string(),
+                    updated_at: Some(123),
+                    turn_id: Some("worker-turn".to_string()),
+                    turn_status: Some("completed".to_string()),
+                    turn_error: None,
+                    latest_activity: None,
+                })
+            });
+
+        assert_eq!(notifications.len(), 1);
+        assert!(notifications[0].prompt.contains("Ticket 01"));
+        assert_eq!(panes.status("/worktree", "pane-1"), None);
+        assert!(delegations
+            .claim_managed_completions_with(&panes, |_, _| unreachable!())
+            .is_empty());
+    }
+
+    #[test]
+    fn managed_completion_requires_the_exact_registered_terminal_turn() {
+        let delegations = AgentDelegations::default();
+        let panes = AgentPaneStatuses::default();
+        let remote = format!(
+            "unix://{}",
+            crate::agent_config::codex_home_path()
+                .unwrap()
+                .join("app-server-control/app-server-control.sock")
+                .display()
+        );
+        delegations.open(
+            "delegation-1",
+            "/worktree",
+            None,
+            Some("parent-thread"),
+            Some(&remote),
+        );
+        assert!(delegations.register_managed_codex_target(
+            "delegation-1",
+            "/worktree",
+            "pane-1",
+            "worker-thread",
+            &remote,
+        ));
+        delegations
+            .record_managed_turn("delegation-1", "worker-thread", "expected-turn")
+            .unwrap();
+        delegations.observe_hook("/worktree", "pane-1", &panes, "working");
+
+        let notifications = delegations.claim_managed_completions_with(&panes, |_, _| {
+            Ok(crate::codex_app_server::ManagedThreadProgress {
+                thread_status: "idle".to_string(),
+                updated_at: Some(123),
+                turn_id: Some("later-turn".to_string()),
+                turn_status: Some("completed".to_string()),
+                turn_error: None,
+                latest_activity: None,
+            })
+        });
+
+        assert!(notifications.is_empty());
+        assert_eq!(
+            panes.status("/worktree", "pane-1").as_deref(),
+            Some("working")
+        );
     }
 
     #[test]
@@ -2451,7 +2882,7 @@ mod tests {
                 pane_id,
                 thread_id,
                 &remote,
-        ));
+            ));
         }
         assert_eq!(
             delegations.managed_codex_target_for_hook("thread-2", "/worktree"),
@@ -2645,7 +3076,7 @@ mod tests {
             &remote,
         ));
         delegations
-            .record_managed_follow_up_turn("delegation-1", "thread-1", "turn-1")
+            .record_managed_turn("delegation-1", "thread-1", "turn-1")
             .unwrap();
         let persisted = delegations.entries.lock().unwrap()["delegation-1"].clone();
         let restored: super::AgentDelegation =
@@ -2693,7 +3124,7 @@ mod tests {
             &remote,
         ));
         delegations
-            .record_managed_follow_up_turn("delegation-1", "thread-1", "turn-1")
+            .record_managed_turn("delegation-1", "thread-1", "turn-1")
             .unwrap();
         assert_eq!(
             delegations.begin_steer("delegation-1", &panes),
@@ -2731,7 +3162,7 @@ mod tests {
             &remote,
         ));
         delegations
-            .record_managed_follow_up_turn("delegation-1", "thread-1", "turn-old")
+            .record_managed_turn("delegation-1", "thread-1", "turn-old")
             .unwrap();
         delegations.observe_hook("/worktree", "pane-1", &panes, "idle");
 
@@ -2740,7 +3171,7 @@ mod tests {
             Ok(AgentFollowUpTarget::ManagedCodex { .. })
         ));
         delegations
-            .record_managed_follow_up_turn("delegation-1", "thread-1", "turn-new")
+            .record_managed_turn("delegation-1", "thread-1", "turn-new")
             .unwrap();
         delegations.observe_hook("/worktree", "pane-1", &panes, "working");
 

@@ -145,7 +145,8 @@ export async function resolveAgent(worktreePath: string): Promise<Agent> {
  * Build the shell command string written to the PTY to launch the agent.
  * `initialPrompt`, when provided, is shell-quoted and passed as the agent's
  * positional `[prompt]` argument so it becomes the first user message.
- * `env` entries are prefixed as command-line assignments (`KEY='v' agent`).
+ * `env` is the same map the caller passes to pty_spawn; it is never echoed
+ * into the command line — the codex shim reads it from the shell environment.
  * Impala does not add CODEX_HOME here: an inherited custom value stays in
  * effect, and Codex uses its normal ~/.codex default when none is supplied.
  */
@@ -194,21 +195,18 @@ function buildAgentCommand(
   env?: Record<string, string>,
 ): string {
   const parts: string[] = [];
-  const impalaCodexServer = usesImpalaCodexServer(agent, flags);
-  const configuredRemote = agent === "codex" && !impalaCodexServer;
+  const configuredRemote =
+    agent === "codex" && !usesImpalaCodexServer(agent, flags);
   const appServer = env?.IMPALA_CODEX_APP_SERVER;
-  const usesManagedServer =
-    impalaCodexServer && appServer?.startsWith("unix:///");
-  for (const [key, value] of Object.entries(env ?? {})) {
-    parts.push(`${key}=${shellQuote(value)}`);
-  }
-  if (agent === "codex" && configuredRemote && appServer) {
+  // `env` is read, not echoed: every caller also passes it to pty_spawn, so
+  // the PTY's shell already exports it, and Impala's codex shim turns
+  // IMPALA_CODEX_APP_SERVER into `--remote <socket> --cd $PWD`. Passing
+  // --remote here instead would skip the shim's --cd, and the thread would
+  // start in the app server's own directory rather than the worktree.
+  if (configuredRemote && appServer) {
     parts.push("IMPALA_CODEX_APP_SERVER=''");
   }
   parts.push(agent);
-  if (usesManagedServer) {
-    parts.push("--remote", shellQuote(appServer!));
-  }
   if (flags.trim()) parts.push(flags.trim());
   parts.push(...args.map(shellQuote));
   return parts.join(" ");

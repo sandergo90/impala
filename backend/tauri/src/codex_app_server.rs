@@ -39,11 +39,19 @@ pub struct DiagnosticsSection<T> {
 
 impl<T> DiagnosticsSection<T> {
     fn success(data: T, truncated: bool) -> Self {
-        Self { data: Some(data), error: None, truncated }
+        Self {
+            data: Some(data),
+            error: None,
+            truncated,
+        }
     }
 
     fn failure(error: String) -> Self {
-        Self { data: None, error: Some(error), truncated: false }
+        Self {
+            data: None,
+            error: Some(error),
+            truncated: false,
+        }
     }
 }
 
@@ -115,6 +123,25 @@ pub struct DiagnosticsMcpServer {
     pub tool_count: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedThreadActivity {
+    pub kind: String,
+    pub summary: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedThreadProgress {
+    pub thread_status: String,
+    pub updated_at: Option<i64>,
+    pub turn_id: Option<String>,
+    pub turn_status: Option<String>,
+    pub turn_error: Option<String>,
+    pub latest_activity: Option<ManagedThreadActivity>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ModelCatalogEntry {
     pub id: String,
@@ -181,7 +208,11 @@ impl CodexAppServerState {
         }));
         let worker_state = state.clone();
         std::thread::spawn(move || app_server_worker(receiver, worker_state, app));
-        Self { sender, state, model_catalog: Arc::new(Mutex::new(None)) }
+        Self {
+            sender,
+            state,
+            model_catalog: Arc::new(Mutex::new(None)),
+        }
     }
 
     fn diagnostics_connection(&self) -> Result<CodexDiagnosticsConnection, String> {
@@ -293,7 +324,10 @@ impl CodexAppServerState {
     pub fn native_settings_supported(&self, settings: &Value) -> Result<(), String> {
         let (catalog, truncated) = self.cached_or_model_catalog()?;
         if truncated {
-            return Err("Codex model catalog exceeded Impala's safe page limit; use the terminal fallback".to_string());
+            return Err(
+                "Codex model catalog exceeded Impala's safe page limit; use the terminal fallback"
+                    .to_string(),
+            );
         }
         validate_native_settings_catalog(settings, &catalog)
     }
@@ -310,67 +344,130 @@ impl CodexAppServerState {
         let models = match self.model_catalog() {
             Ok((catalog, truncated)) => DiagnosticsSection::success(
                 DiagnosticsModels {
-                    default_model: catalog.iter().find(|model| model.is_default).map(|model| model.id.clone()),
-                    models: catalog.into_iter().map(|model| DiagnosticsModel {
-                        id: model.id, efforts: model.efforts, tiers: model.tiers, modalities: model.modalities,
-                    }).collect(),
+                    default_model: catalog
+                        .iter()
+                        .find(|model| model.is_default)
+                        .map(|model| model.id.clone()),
+                    models: catalog
+                        .into_iter()
+                        .map(|model| DiagnosticsModel {
+                            id: model.id,
+                            efforts: model.efforts,
+                            tiers: model.tiers,
+                            modalities: model.modalities,
+                        })
+                        .collect(),
                 },
                 truncated,
             ),
             Err(error) => DiagnosticsSection::failure(error),
         };
-        let config = match self.dispatch("config/read", json!({ "cwd": cwd, "includeLayers": false })) {
-            Ok(value) => DiagnosticsSection::success(sanitize_config(&value), false),
-            Err(error) => DiagnosticsSection::failure(error),
-        };
+        let config =
+            match self.dispatch("config/read", json!({ "cwd": cwd, "includeLayers": false })) {
+                Ok(value) => DiagnosticsSection::success(sanitize_config(&value), false),
+                Err(error) => DiagnosticsSection::failure(error),
+            };
         let mcp = match self.mcp_status() {
             Ok((data, truncated)) => DiagnosticsSection::success(data, truncated),
             Err(error) => DiagnosticsSection::failure(error),
         };
 
-        let connection = self.diagnostics_connection().unwrap_or_else(|error| CodexDiagnosticsConnection {
-            status: "unknown".to_string(), version: None, error: Some(error),
-        });
-        CodexDiagnostics { connection, account, rate_limits, models, config, mcp }
+        let connection =
+            self.diagnostics_connection()
+                .unwrap_or_else(|error| CodexDiagnosticsConnection {
+                    status: "unknown".to_string(),
+                    version: None,
+                    error: Some(error),
+                });
+        CodexDiagnostics {
+            connection,
+            account,
+            rate_limits,
+            models,
+            config,
+            mcp,
+        }
     }
 
     fn model_catalog(&self) -> Result<(Vec<ModelCatalogEntry>, bool), String> {
-        let (items, truncated) = self.all_pages("model/list", json!({ "includeHidden": false }), |value| {
-            value.get("data").and_then(Value::as_array).cloned().ok_or_else(|| "Codex model/list returned no data array".to_string())
-        })?;
+        let (items, truncated) =
+            self.all_pages("model/list", json!({ "includeHidden": false }), |value| {
+                value
+                    .get("data")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .ok_or_else(|| "Codex model/list returned no data array".to_string())
+            })?;
         let catalog: Vec<ModelCatalogEntry> =
             items.into_iter().filter_map(model_catalog_entry).collect();
-        self.model_catalog.lock().map_err(|_| "Codex model catalog lock poisoned".to_string())?
-            .replace(CachedModelCatalog { fetched_at: Instant::now(), catalog: catalog.clone(), truncated });
+        self.model_catalog
+            .lock()
+            .map_err(|_| "Codex model catalog lock poisoned".to_string())?
+            .replace(CachedModelCatalog {
+                fetched_at: Instant::now(),
+                catalog: catalog.clone(),
+                truncated,
+            });
         Ok((catalog, truncated))
     }
 
     fn cached_or_model_catalog(&self) -> Result<(Vec<ModelCatalogEntry>, bool), String> {
-        if let Some(cached) = self.model_catalog.lock().map_err(|_| "Codex model catalog lock poisoned".to_string())?.as_ref()
-            .filter(|cached| catalog_is_fresh(cached, Instant::now())) {
+        if let Some(cached) = self
+            .model_catalog
+            .lock()
+            .map_err(|_| "Codex model catalog lock poisoned".to_string())?
+            .as_ref()
+            .filter(|cached| catalog_is_fresh(cached, Instant::now()))
+        {
             return Ok((cached.catalog.clone(), cached.truncated));
         }
         self.model_catalog()
     }
 
     fn mcp_status(&self) -> Result<(DiagnosticsMcp, bool), String> {
-        let (items, truncated) = self.all_pages("mcpServerStatus/list", json!({ "detail": "toolsAndAuthOnly" }), |value| {
-            value.get("data").and_then(Value::as_array).cloned().ok_or_else(|| "Codex mcpServerStatus/list returned no data array".to_string())
-        })?;
-        let servers = items.into_iter().filter_map(sanitize_mcp_server).collect::<Vec<_>>();
+        let (items, truncated) = self.all_pages(
+            "mcpServerStatus/list",
+            json!({ "detail": "toolsAndAuthOnly" }),
+            |value| {
+                value
+                    .get("data")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .ok_or_else(|| "Codex mcpServerStatus/list returned no data array".to_string())
+            },
+        )?;
+        let servers = items
+            .into_iter()
+            .filter_map(sanitize_mcp_server)
+            .collect::<Vec<_>>();
         let impala = find_configured_mcp_server(&servers);
         let impala_mcp_unhealthy_reason = match impala {
             None => Some("impala-mcp is not configured or did not report a status".to_string()),
             Some(server) => match server.auth_status.as_deref() {
-                Some("notLoggedIn") | Some("unknown") => Some(format!("authentication status: {}", server.auth_status.as_deref().unwrap_or_default())),
+                Some("notLoggedIn") | Some("unknown") => Some(format!(
+                    "authentication status: {}",
+                    server.auth_status.as_deref().unwrap_or_default()
+                )),
                 _ if server.tool_count == 0 => Some("no tools were reported".to_string()),
                 _ => None,
             },
         };
-        Ok((DiagnosticsMcp { impala_mcp_present: impala.is_some(), impala_mcp_unhealthy_reason, servers }, truncated))
+        Ok((
+            DiagnosticsMcp {
+                impala_mcp_present: impala.is_some(),
+                impala_mcp_unhealthy_reason,
+                servers,
+            },
+            truncated,
+        ))
     }
 
-    fn all_pages<F>(&self, method: &str, mut params: Value, items: F) -> Result<(Vec<Value>, bool), String>
+    fn all_pages<F>(
+        &self,
+        method: &str,
+        mut params: Value,
+        items: F,
+    ) -> Result<(Vec<Value>, bool), String>
     where
         F: Fn(&Value) -> Result<Vec<Value>, String>,
     {
@@ -378,9 +475,16 @@ impl CodexAppServerState {
         for page in 0..DIAGNOSTICS_MAX_PAGES {
             let result = self.dispatch(method, params.clone())?;
             all.extend(items(&result)?);
-            let next = result.get("nextCursor").and_then(Value::as_str).filter(|cursor| !cursor.is_empty());
-            let Some(cursor) = next else { return Ok((all, false)); };
-            if diagnostics_page_limit_reached(page) { return Ok((all, true)); }
+            let next = result
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .filter(|cursor| !cursor.is_empty());
+            let Some(cursor) = next else {
+                return Ok((all, false));
+            };
+            if diagnostics_page_limit_reached(page) {
+                return Ok((all, true));
+            }
             params["cursor"] = Value::String(cursor.to_string());
         }
         Ok((all, true))
@@ -423,7 +527,8 @@ fn catalog_is_fresh(cached: &CachedModelCatalog, now: Instant) -> bool {
 
 fn safe_version(value: Option<&Value>) -> Option<String> {
     value.and_then(|value| {
-        value.pointer("/serverInfo/version")
+        value
+            .pointer("/serverInfo/version")
             .or_else(|| value.get("version"))
             .and_then(Value::as_str)
             .map(str::to_string)
@@ -431,47 +536,90 @@ fn safe_version(value: Option<&Value>) -> Option<String> {
 }
 
 fn strings(value: Option<&Value>) -> Vec<String> {
-    value.and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
 }
 
 fn model_catalog_entry(value: Value) -> Option<ModelCatalogEntry> {
     // `model` is the request identifier; `id` is display/catalog identity.
-    let id = value.get("model").or_else(|| value.get("id"))?.as_str()?.to_string();
-    let efforts = value.get("supportedReasoningEfforts").and_then(Value::as_array).into_iter().flatten().filter_map(|effort| effort.get("reasoningEffort").and_then(Value::as_str)).map(str::to_string).collect();
-    let mut tiers = value.get("serviceTiers").and_then(Value::as_array).into_iter().flatten().filter_map(|tier| tier.get("id").and_then(Value::as_str)).map(str::to_string).collect::<Vec<_>>();
+    let id = value
+        .get("model")
+        .or_else(|| value.get("id"))?
+        .as_str()?
+        .to_string();
+    let efforts = value
+        .get("supportedReasoningEfforts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|effort| effort.get("reasoningEffort").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    let mut tiers = value
+        .get("serviceTiers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tier| tier.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     if let Some(tier) = value.get("defaultServiceTier").and_then(Value::as_str) {
-        if !tiers.iter().any(|candidate| candidate == tier) { tiers.push(tier.to_string()); }
+        if !tiers.iter().any(|candidate| candidate == tier) {
+            tiers.push(tier.to_string());
+        }
     }
     for tier in strings(value.get("additionalSpeedTiers")) {
-        if !tiers.iter().any(|candidate| candidate == &tier) { tiers.push(tier); }
+        if !tiers.iter().any(|candidate| candidate == &tier) {
+            tiers.push(tier);
+        }
     }
     Some(ModelCatalogEntry {
         id,
-        is_default: value.get("isDefault").and_then(Value::as_bool).unwrap_or(false),
+        is_default: value
+            .get("isDefault")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         efforts,
         tiers,
         modalities: strings(value.get("inputModalities")),
     })
 }
 
-pub(crate) fn validate_native_settings_catalog(settings: &Value, catalog: &[ModelCatalogEntry]) -> Result<(), String> {
-    let settings = settings.as_object().ok_or_else(|| "native Codex settings must be an object".to_string())?;
+pub(crate) fn validate_native_settings_catalog(
+    settings: &Value,
+    catalog: &[ModelCatalogEntry],
+) -> Result<(), String> {
+    let settings = settings
+        .as_object()
+        .ok_or_else(|| "native Codex settings must be an object".to_string())?;
     let requested_model = settings.get("model").and_then(Value::as_str);
     let model = match requested_model {
         Some(id) => catalog.iter().find(|model| model.id == id),
         None => catalog.iter().find(|model| model.is_default),
-    }.ok_or_else(|| match requested_model {
+    }
+    .ok_or_else(|| match requested_model {
         Some(id) => format!("Codex model {id} is unavailable"),
         None => "Codex model catalog has no default model".to_string(),
     })?;
     if let Some(effort) = settings.get("effort").and_then(Value::as_str) {
         if !model.efforts.iter().any(|candidate| candidate == effort) {
-            return Err(format!("Codex model {} does not support reasoning effort {effort}", model.id));
+            return Err(format!(
+                "Codex model {} does not support reasoning effort {effort}",
+                model.id
+            ));
         }
     }
     if let Some(tier) = settings.get("serviceTier").and_then(Value::as_str) {
         if !model.tiers.iter().any(|candidate| candidate == tier) {
-            return Err(format!("Codex model {} does not support service tier {tier}", model.id));
+            return Err(format!(
+                "Codex model {} does not support service tier {tier}",
+                model.id
+            ));
         }
     }
     Ok(())
@@ -480,10 +628,22 @@ pub(crate) fn validate_native_settings_catalog(settings: &Value, catalog: &[Mode
 fn sanitize_account(value: &Value) -> DiagnosticsAccount {
     let account = value.get("account");
     DiagnosticsAccount {
-        account_type: account.and_then(|account| account.get("type")).and_then(Value::as_str).map(str::to_string),
-        email: account.and_then(|account| account.get("email")).and_then(Value::as_str).map(str::to_string),
-        plan: account.and_then(|account| account.get("planType")).and_then(Value::as_str).map(str::to_string),
-        requires_openai_auth: value.get("requiresOpenaiAuth").and_then(Value::as_bool).unwrap_or(false),
+        account_type: account
+            .and_then(|account| account.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        email: account
+            .and_then(|account| account.get("email"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        plan: account
+            .and_then(|account| account.get("planType"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        requires_openai_auth: value
+            .get("requiresOpenaiAuth")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -492,21 +652,50 @@ fn sanitize_rate_limits(value: &Value) -> DiagnosticsRateLimits {
     let primary = limits.get("primary");
     let secondary = limits.get("secondary");
     DiagnosticsRateLimits {
-        primary_used_percent: primary.and_then(|window| window.get("usedPercent")).and_then(Value::as_i64),
-        secondary_used_percent: secondary.and_then(|window| window.get("usedPercent")).and_then(Value::as_i64),
-        resets_at: primary.and_then(|window| window.get("resetsAt")).and_then(Value::as_i64).or_else(|| secondary.and_then(|window| window.get("resetsAt")).and_then(Value::as_i64)),
-        reached: limits.get("rateLimitReachedType").and_then(Value::as_str).map(str::to_string),
+        primary_used_percent: primary
+            .and_then(|window| window.get("usedPercent"))
+            .and_then(Value::as_i64),
+        secondary_used_percent: secondary
+            .and_then(|window| window.get("usedPercent"))
+            .and_then(Value::as_i64),
+        resets_at: primary
+            .and_then(|window| window.get("resetsAt"))
+            .and_then(Value::as_i64)
+            .or_else(|| {
+                secondary
+                    .and_then(|window| window.get("resetsAt"))
+                    .and_then(Value::as_i64)
+            }),
+        reached: limits
+            .get("rateLimitReachedType")
+            .and_then(Value::as_str)
+            .map(str::to_string),
     }
 }
 
 fn sanitize_config(value: &Value) -> DiagnosticsConfig {
     let config = value.get("config").unwrap_or(value);
     DiagnosticsConfig {
-        model: config.get("model").and_then(Value::as_str).map(str::to_string),
-        effort: config.get("model_reasoning_effort").and_then(Value::as_str).map(str::to_string),
-        service_tier: config.get("service_tier").and_then(Value::as_str).map(str::to_string),
-        approval_policy: config.get("approval_policy").and_then(Value::as_str).map(str::to_string),
-        sandbox: config.get("sandbox_mode").and_then(Value::as_str).map(str::to_string),
+        model: config
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        effort: config
+            .get("model_reasoning_effort")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        service_tier: config
+            .get("service_tier")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        approval_policy: config
+            .get("approval_policy")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        sandbox: config
+            .get("sandbox_mode")
+            .and_then(Value::as_str)
+            .map(str::to_string),
     }
 }
 
@@ -514,8 +703,14 @@ fn sanitize_mcp_server(value: Value) -> Option<DiagnosticsMcpServer> {
     let name = value.get("name")?.as_str()?.to_string();
     Some(DiagnosticsMcpServer {
         name,
-        auth_status: value.get("authStatus").and_then(Value::as_str).map(str::to_string),
-        tool_count: value.get("tools").and_then(Value::as_object).map_or(0, |tools| tools.len()),
+        auth_status: value
+            .get("authStatus")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        tool_count: value
+            .get("tools")
+            .and_then(Value::as_object)
+            .map_or(0, |tools| tools.len()),
     })
 }
 
@@ -605,10 +800,7 @@ fn handle_worker_command(
         } => {
             if matches!(
                 method.as_str(),
-                "thread/resume"
-                    | "thread/read"
-                    | "turn/start"
-                    | "turn/interrupt"
+                "thread/resume" | "thread/read" | "turn/start" | "turn/interrupt"
             ) {
                 let thread_id = params.get("threadId").and_then(Value::as_str);
                 if !thread_id.map(|id| is_owned(state, id)).unwrap_or(false) {
@@ -616,11 +808,29 @@ fn handle_worker_command(
                     return;
                 }
             }
-            send_worker_request(method, params, reply, socket, pending, next_request_id, state, app);
+            send_worker_request(
+                method,
+                params,
+                reply,
+                socket,
+                pending,
+                next_request_id,
+                state,
+                app,
+            );
         }
         WorkerCommand::ReadPersistedThread { thread_id, reply } => {
             let (method, params) = persisted_thread_read_request(&thread_id);
-            send_worker_request(method.to_string(), params, reply, socket, pending, next_request_id, state, app);
+            send_worker_request(
+                method.to_string(),
+                params,
+                reply,
+                socket,
+                pending,
+                next_request_id,
+                state,
+                app,
+            );
         }
     }
 }
@@ -650,11 +860,21 @@ fn send_worker_request(
         }
     };
     if let Some(active_socket) = socket.as_mut() {
-        if let Err(error) = send_json(active_socket, json!({ "id": id, "method": method, "params": params })) {
+        if let Err(error) = send_json(
+            active_socket,
+            json!({ "id": id, "method": method, "params": params }),
+        ) {
             disconnect(socket, pending, state, error.clone());
             let _ = reply.send(Err(error));
         } else {
-            pending.insert(key, PendingCall { method, params, reply });
+            pending.insert(
+                key,
+                PendingCall {
+                    method,
+                    params,
+                    reply,
+                },
+            );
         }
     }
 }
@@ -809,17 +1029,11 @@ fn handle_response_envelope(
     }
 }
 
-fn handle_notification(
-    envelope: Value,
-    app: &tauri::AppHandle,
-) {
+fn handle_notification(envelope: Value, app: &tauri::AppHandle) {
     crate::automations::apply_native_codex_notification(app, &envelope);
 }
 
-fn handle_server_request(
-    envelope: Value,
-    socket: &mut WebSocket<UnixStream>,
-) {
+fn handle_server_request(envelope: Value, socket: &mut WebSocket<UnixStream>) {
     let response = reject_server_request(&envelope);
     let _ = send_json(socket, response);
 }
@@ -884,10 +1098,7 @@ fn fail_pending_calls(pending: &mut HashMap<String, PendingCall>, error: &str) {
     }
 }
 
-fn record_connection_error(
-    state: &Arc<Mutex<AppServerState>>,
-    error: String,
-) {
+fn record_connection_error(state: &Arc<Mutex<AppServerState>>, error: String) {
     if let Ok(mut managed_state) = state.lock() {
         managed_state.connection.last_error = Some(error.clone());
     }
@@ -1228,9 +1439,34 @@ fn managed_remote(codex_home: &Path) -> String {
     format!("unix://{}", codex_home.join(DAEMON_SOCKET).display())
 }
 
-/// Creates a thread through a short-lived managed connection. The visible
-/// terminal is the sole long-lived subscriber and resumes this exact thread.
-pub(crate) fn start_managed_thread(cwd: &str) -> Result<(String, String), String> {
+fn copy_managed_settings(
+    params: &mut Value,
+    settings: &Value,
+    keys: &[&str],
+) -> Result<(), String> {
+    let settings = settings
+        .as_object()
+        .ok_or_else(|| "managed Codex settings must be an object".to_string())?;
+    for key in keys {
+        let Some(value) = settings.get(*key) else {
+            continue;
+        };
+        if value.as_str().is_none_or(str::is_empty) {
+            return Err(format!(
+                "managed Codex setting {key} must be a non-empty string"
+            ));
+        }
+        params[*key] = value.clone();
+    }
+    Ok(())
+}
+
+/// Creates a thread through a short-lived managed connection. Its initial
+/// turn is started only after Impala has registered the exact target identity.
+pub(crate) fn start_managed_thread(
+    cwd: &str,
+    settings: &Value,
+) -> Result<(String, String), String> {
     if cwd.trim().is_empty() {
         return Err("Codex thread cwd is empty".to_string());
     }
@@ -1239,11 +1475,82 @@ pub(crate) fn start_managed_thread(cwd: &str) -> Result<(String, String), String
     launch_environment(&codex_home)?;
     let remote = managed_remote(&codex_home);
     let mut socket = initialize_client(&remote)?;
-    let result = request(&mut socket, 2, "thread/start", json!({ "cwd": cwd }));
+    let mut params = json!({ "cwd": cwd });
+    copy_managed_settings(
+        &mut params,
+        settings,
+        &["approvalPolicy", "sandbox", "model", "serviceTier"],
+    )?;
+    let result = request(&mut socket, 2, "thread/start", params);
     let _ = socket.close(None);
     let thread_id = thread_id_from(&result?)
         .ok_or_else(|| "Codex thread/start returned no thread id".to_string())?;
     Ok((thread_id, remote))
+}
+
+pub(crate) fn start_managed_initial_turn(
+    remote: &str,
+    thread_id: &str,
+    delegation_id: &str,
+    prompt: &str,
+    settings: &Value,
+) -> Result<String, String> {
+    if thread_id.trim().is_empty() || delegation_id.trim().is_empty() || prompt.trim().is_empty() {
+        return Err("managed Codex turn identity and prompt are required".to_string());
+    }
+    let mut params = json!({
+        "threadId": thread_id,
+        "clientUserMessageId": format!("impala-delegation-{delegation_id}"),
+        "input": [{ "type": "text", "text": prompt }],
+    });
+    copy_managed_settings(&mut params, settings, &["model", "serviceTier", "effort"])?;
+    let mut socket = initialize_client(remote)?;
+    let result = request(&mut socket, 2, "turn/start", params);
+    let _ = socket.close(None);
+    let _ = socket.get_ref().shutdown(Shutdown::Both);
+    let result = result?;
+    let turn_id = result
+        .get("turn")
+        .and_then(|turn| turn.get("id"))
+        .or_else(|| result.get("turnId"))
+        .and_then(Value::as_str)
+        .filter(|turn_id| !turn_id.trim().is_empty())
+        .ok_or_else(|| "Codex turn/start returned no turn id".to_string())?
+        .to_string();
+    wait_for_persisted_thread(remote, thread_id)?;
+    Ok(turn_id)
+}
+
+fn wait_for_persisted_thread(remote: &str, thread_id: &str) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut request_id = 2;
+    let mut socket = initialize_client(remote)?;
+    loop {
+        match request(
+            &mut socket,
+            request_id,
+            "thread/read",
+            json!({ "threadId": thread_id, "includeTurns": false }),
+        ) {
+            Ok(_) => {
+                let _ = socket.close(None);
+                return Ok(());
+            }
+            Err(error) if Instant::now() < deadline => {
+                request_id += 1;
+                std::thread::sleep(Duration::from_millis(25));
+                if error.contains("no rollout found") || error.contains("rollout") {
+                    continue;
+                }
+                let _ = socket.close(None);
+                return Err(error);
+            }
+            Err(error) => {
+                let _ = socket.close(None);
+                return Err(format!("managed Codex rollout was not ready: {error}"));
+            }
+        }
+    }
 }
 
 pub fn remote_snapshot(codex_home: &Path) -> Result<RemoteControlSnapshot, String> {
@@ -1347,6 +1654,134 @@ pub fn revoke_client(
     Ok(())
 }
 
+fn truncate_progress_summary(value: &str) -> String {
+    const LIMIT: usize = 500;
+    let mut summary = value.trim().chars().take(LIMIT).collect::<String>();
+    if value.trim().chars().count() > LIMIT {
+        summary.push('…');
+    }
+    summary
+}
+
+fn activity_summary(item: &Value) -> Option<String> {
+    match item.get("type").and_then(Value::as_str)? {
+        "agentMessage" | "plan" => item.get("text").and_then(Value::as_str),
+        "reasoning" => item
+            .get("summary")
+            .and_then(Value::as_array)
+            .and_then(|summary| summary.last())
+            .and_then(Value::as_str),
+        "commandExecution" => item.get("command").and_then(Value::as_str),
+        "fileChange" => {
+            return Some(format!(
+                "{} file change(s)",
+                item.get("changes")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len)
+            ))
+        }
+        "mcpToolCall" => {
+            return Some(format!(
+                "{}.{}",
+                item.get("server").and_then(Value::as_str).unwrap_or("mcp"),
+                item.get("tool").and_then(Value::as_str).unwrap_or("tool")
+            ))
+        }
+        "dynamicToolCall" | "collabAgentToolCall" => {
+            return item.get("tool").and_then(Value::as_str).map(str::to_string)
+        }
+        "webSearch" => item.get("query").and_then(Value::as_str),
+        "imageView" => item.get("path").and_then(Value::as_str),
+        "sleep" => {
+            return item
+                .get("durationMs")
+                .and_then(Value::as_u64)
+                .map(|duration| format!("sleeping for {duration} ms"))
+        }
+        "userMessage" => return Some("Prompt submitted".to_string()),
+        _ => None,
+    }
+    .map(truncate_progress_summary)
+}
+
+fn managed_thread_progress(
+    value: &Value,
+    expected_thread_id: &str,
+) -> Result<ManagedThreadProgress, String> {
+    let thread = value
+        .get("thread")
+        .ok_or_else(|| "Codex thread/read returned no thread".to_string())?;
+    if thread.get("id").and_then(Value::as_str) != Some(expected_thread_id) {
+        return Err("Codex thread/read returned a different thread".to_string());
+    }
+    let thread_status = thread
+        .pointer("/status/type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let turn = thread
+        .get("turns")
+        .and_then(Value::as_array)
+        .and_then(|turns| turns.last());
+    let latest_activity = turn
+        .and_then(|turn| turn.get("items"))
+        .and_then(Value::as_array)
+        .and_then(|items| items.last())
+        .and_then(|item| {
+            let kind = item.get("type").and_then(Value::as_str)?.to_string();
+            Some(ManagedThreadActivity {
+                kind,
+                summary: activity_summary(item),
+                status: item
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            })
+        });
+    Ok(ManagedThreadProgress {
+        thread_status,
+        updated_at: thread.get("updatedAt").and_then(Value::as_i64),
+        turn_id: turn
+            .and_then(|turn| turn.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        turn_status: turn
+            .and_then(|turn| turn.get("status"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        turn_error: turn
+            .and_then(|turn| turn.pointer("/error/message").or_else(|| turn.get("error")))
+            .and_then(Value::as_str)
+            .map(truncate_progress_summary),
+        latest_activity,
+    })
+}
+
+/// Reads a managed thread through a short-lived client. `thread/read` does not
+/// resume or subscribe to the target, so the visible Codex tab remains the
+/// only long-lived subscriber and approval owner.
+pub fn read_managed_thread_progress(
+    remote: &str,
+    thread_id: &str,
+) -> Result<ManagedThreadProgress, String> {
+    if !is_managed_remote(remote) {
+        return Err("delegation target app-server is not Impala-managed".to_string());
+    }
+    if thread_id.trim().is_empty() {
+        return Err("Codex thread id is empty".to_string());
+    }
+    let mut socket = initialize_client(remote)?;
+    let result = request(
+        &mut socket,
+        2,
+        "thread/read",
+        json!({ "threadId": thread_id, "includeTurns": true }),
+    );
+    let _ = socket.close(None);
+    let _ = socket.get_ref().shutdown(Shutdown::Both);
+    managed_thread_progress(&result?, thread_id)
+}
+
 pub fn start_turn(
     remote: &str,
     thread_id: &str,
@@ -1440,13 +1875,27 @@ mod tests {
             tiers: vec!["default".to_string(), "priority".to_string()],
             modalities: vec!["text".to_string(), "image".to_string()],
         }];
-        assert!(validate_native_settings_catalog(&json!({
-            "model": "gpt-5.6", "effort": "high", "serviceTier": "priority"
-        }), &catalog).is_ok());
+        assert!(validate_native_settings_catalog(
+            &json!({
+                "model": "gpt-5.6", "effort": "high", "serviceTier": "priority"
+            }),
+            &catalog
+        )
+        .is_ok());
         assert!(validate_native_settings_catalog(&json!({ "effort": "high" }), &catalog).is_ok());
-        assert_eq!(validate_native_settings_catalog(&json!({ "model": "missing" }), &catalog).unwrap_err(), "Codex model missing is unavailable");
-        assert_eq!(validate_native_settings_catalog(&json!({ "effort": "max" }), &catalog).unwrap_err(), "Codex model gpt-5.6 does not support reasoning effort max");
-        assert_eq!(validate_native_settings_catalog(&json!({ "serviceTier": "fast" }), &catalog).unwrap_err(), "Codex model gpt-5.6 does not support service tier fast");
+        assert_eq!(
+            validate_native_settings_catalog(&json!({ "model": "missing" }), &catalog).unwrap_err(),
+            "Codex model missing is unavailable"
+        );
+        assert_eq!(
+            validate_native_settings_catalog(&json!({ "effort": "max" }), &catalog).unwrap_err(),
+            "Codex model gpt-5.6 does not support reasoning effort max"
+        );
+        assert_eq!(
+            validate_native_settings_catalog(&json!({ "serviceTier": "fast" }), &catalog)
+                .unwrap_err(),
+            "Codex model gpt-5.6 does not support service tier fast"
+        );
 
         let exact_fixture = model_catalog_entry(json!({
             "id": "catalog-id", "model": "gpt-5.6", "isDefault": true,
@@ -1454,16 +1903,28 @@ mod tests {
             "serviceTiers": [{ "id": "priority" }],
             "defaultServiceTier": "default", "additionalSpeedTiers": ["fast", "priority"],
             "inputModalities": ["text", "image"],
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(exact_fixture.tiers, vec!["priority", "default", "fast"]);
-        assert!(validate_native_settings_catalog(&json!({ "model": "gpt-5.6", "serviceTier": "default" }), &[exact_fixture]).is_ok());
+        assert!(validate_native_settings_catalog(
+            &json!({ "model": "gpt-5.6", "serviceTier": "default" }),
+            &[exact_fixture]
+        )
+        .is_ok());
     }
 
     #[test]
     fn native_catalog_cache_is_short_lived() {
         let now = Instant::now();
-        let catalog = CachedModelCatalog { fetched_at: now, catalog: Vec::new(), truncated: false };
-        assert!(catalog_is_fresh(&catalog, now + MODEL_CATALOG_TTL - Duration::from_millis(1)));
+        let catalog = CachedModelCatalog {
+            fetched_at: now,
+            catalog: Vec::new(),
+            truncated: false,
+        };
+        assert!(catalog_is_fresh(
+            &catalog,
+            now + MODEL_CATALOG_TTL - Duration::from_millis(1)
+        ));
         assert!(!catalog_is_fresh(&catalog, now + MODEL_CATALOG_TTL));
     }
 
@@ -1482,7 +1943,8 @@ mod tests {
         }}));
         assert_eq!(config.model.as_deref(), Some("gpt-5.6"));
         assert!(!serde_json::to_string(&config).unwrap().contains("secret"));
-        let failed: DiagnosticsSection<DiagnosticsConfig> = DiagnosticsSection::failure("offline".to_string());
+        let failed: DiagnosticsSection<DiagnosticsConfig> =
+            DiagnosticsSection::failure("offline".to_string());
         assert_eq!(failed.error.as_deref(), Some("offline"));
         assert!(failed.data.is_none());
     }
@@ -1621,15 +2083,104 @@ mod tests {
         assert!(reconnect_requests(owned_thread_ids(&state)).is_empty());
         let (method, params) = persisted_thread_read_request("thread-history");
         assert_eq!(method, "thread/read");
-        assert_eq!(params, json!({ "threadId": "thread-history", "includeTurns": true }));
+        assert_eq!(
+            params,
+            json!({ "threadId": "thread-history", "includeTurns": true })
+        );
     }
 
     #[test]
     fn persisted_thread_validation_requires_the_exact_thread_and_cwd() {
         let thread = json!({ "thread": { "id": "thread-parent", "cwd": "/worktree" } });
-        assert!(persisted_thread_matches(&thread, "thread-parent", "/worktree"));
-        assert!(!persisted_thread_matches(&thread, "thread-other", "/worktree"));
-        assert!(!persisted_thread_matches(&thread, "thread-parent", "/other"));
+        assert!(persisted_thread_matches(
+            &thread,
+            "thread-parent",
+            "/worktree"
+        ));
+        assert!(!persisted_thread_matches(
+            &thread,
+            "thread-other",
+            "/worktree"
+        ));
+        assert!(!persisted_thread_matches(
+            &thread,
+            "thread-parent",
+            "/other"
+        ));
+    }
+
+    #[test]
+    fn managed_delegation_settings_are_split_between_thread_and_turn() {
+        let settings = json!({
+            "approvalPolicy": "never",
+            "sandbox": "danger-full-access",
+            "model": "gpt-5.6-terra",
+            "serviceTier": "fast",
+            "effort": "high",
+        });
+        let mut thread = json!({ "cwd": "/worktree" });
+        copy_managed_settings(
+            &mut thread,
+            &settings,
+            &["approvalPolicy", "sandbox", "model", "serviceTier"],
+        )
+        .unwrap();
+        assert_eq!(thread["approvalPolicy"], "never");
+        assert_eq!(thread["sandbox"], "danger-full-access");
+        assert_eq!(thread["model"], "gpt-5.6-terra");
+        assert_eq!(thread["serviceTier"], "fast");
+        assert!(thread.get("effort").is_none());
+
+        let mut turn = json!({ "threadId": "thread-1" });
+        copy_managed_settings(&mut turn, &settings, &["model", "serviceTier", "effort"]).unwrap();
+        assert_eq!(turn["effort"], "high");
+        assert!(turn.get("approvalPolicy").is_none());
+    }
+
+    #[test]
+    fn managed_thread_progress_reports_the_latest_turn_and_bounded_activity() {
+        let long_command = "x".repeat(600);
+        let progress = managed_thread_progress(
+            &json!({
+                "thread": {
+                    "id": "thread-1",
+                    "status": { "type": "active", "activeFlags": [] },
+                    "updatedAt": 42,
+                    "turns": [{
+                        "id": "turn-1",
+                        "status": "inProgress",
+                        "items": [{
+                            "id": "item-1",
+                            "type": "commandExecution",
+                            "command": long_command,
+                            "status": "inProgress"
+                        }]
+                    }]
+                }
+            }),
+            "thread-1",
+        )
+        .unwrap();
+
+        assert_eq!(progress.thread_status, "active");
+        assert_eq!(progress.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(progress.turn_status.as_deref(), Some("inProgress"));
+        let activity = progress.latest_activity.unwrap();
+        assert_eq!(activity.kind, "commandExecution");
+        assert_eq!(activity.status.as_deref(), Some("inProgress"));
+        assert_eq!(activity.summary.unwrap().chars().count(), 501);
+    }
+
+    #[test]
+    fn managed_thread_progress_rejects_a_mismatched_thread() {
+        assert_eq!(
+            managed_thread_progress(
+                &json!({ "thread": { "id": "other", "status": { "type": "idle" }, "turns": [] } }),
+                "thread-1",
+            )
+            .unwrap_err(),
+            "Codex thread/read returned a different thread"
+        );
     }
 
     #[test]
@@ -1684,7 +2235,14 @@ mod tests {
             "Codex callback prompt is empty"
         );
         assert_eq!(
-            steer_turn("unix:///tmp/codex.sock", "thread-1", "", "steer-1", "continue").unwrap_err(),
+            steer_turn(
+                "unix:///tmp/codex.sock",
+                "thread-1",
+                "",
+                "steer-1",
+                "continue"
+            )
+            .unwrap_err(),
             "Codex expected turn id is empty"
         );
     }
@@ -1716,7 +2274,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires a running Impala Codex app-server"]
-    fn addresses_a_thread_through_a_live_server() {
+    fn starts_a_persisted_turn_before_resuming_through_a_live_server() {
         let remote = std::env::var("IMPALA_TEST_CODEX_APP_SERVER").unwrap();
         let mut creator = connect(&remote).unwrap();
         request(
@@ -1743,14 +2301,24 @@ mod tests {
         let thread_id = created["thread"]["id"].as_str().unwrap().to_string();
         creator.close(None).unwrap();
 
+        start_managed_initial_turn(
+            &remote,
+            &thread_id,
+            "live-test",
+            "Reply with OK.",
+            &json!({}),
+        )
+        .unwrap();
+
         let mut socket = initialize_client(&remote).unwrap();
-        request(
+        let thread = request(
             &mut socket,
             2,
             "thread/read",
-            json!({ "threadId": thread_id, "includeTurns": false }),
+            json!({ "threadId": thread_id, "includeTurns": true }),
         )
         .unwrap();
+        assert!(!thread["thread"]["turns"].as_array().unwrap().is_empty());
         socket.close(None).unwrap();
     }
 }

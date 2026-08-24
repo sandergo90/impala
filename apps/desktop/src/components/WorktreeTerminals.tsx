@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { TabbedTerminals } from "./TabbedTerminals";
+import { useWorktreeRunInfo } from "../hooks/useWorktreeRunInfo";
 
 /**
  * Keeps all visited worktree terminals mounted (hidden when inactive) to avoid remounting
@@ -11,6 +12,7 @@ export function WorktreeTerminals({
   activeWorktreePath: string | null;
 }) {
   const [visitedPaths, setVisitedPaths] = useState<Set<string>>(new Set());
+  const { info: runInfo, loaded: runInfoLoaded } = useWorktreeRunInfo();
 
   useEffect(() => {
     if (activeWorktreePath) {
@@ -23,25 +25,28 @@ export function WorktreeTerminals({
 
   return (
     <div className="relative h-full">
-      {[...visitedPaths].map((path) => {
-        const isActive = path === activeWorktreePath;
-        return (
-          <div
-            key={path}
-            className="absolute inset-0"
-            style={{
-              visibility: isActive ? "visible" : "hidden",
-              zIndex: isActive ? 1 : 0,
-              pointerEvents: isActive ? "auto" : "none",
-            }}
-          >
-            <TabbedTerminals
-              worktreePath={path}
-              isActive={isActive}
-            />
-          </div>
-        );
-      })}
+      {runInfoLoaded
+        ? [...visitedPaths].map((path) => {
+            const isActive = path === activeWorktreePath;
+            return (
+              <div
+                key={path}
+                className="absolute inset-0"
+                style={{
+                  visibility: isActive ? "visible" : "hidden",
+                  zIndex: isActive ? 1 : 0,
+                  pointerEvents: isActive ? "auto" : "none",
+                }}
+              >
+                <TabbedTerminals
+                  worktreePath={path}
+                  isActive={isActive}
+                  codexResumeThreadId={runInfo[path]?.codexResumeThreadId}
+                />
+              </div>
+            );
+          })
+        : null}
     </div>
   );
 }

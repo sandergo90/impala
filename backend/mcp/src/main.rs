@@ -510,6 +510,15 @@ fn agent_open_codex_options(args: &Value) -> Result<(Option<&str>, Option<&str>,
     Ok((agent, model, reasoning_effort, service_tier))
 }
 
+fn tool_get_agent_tab_status(args: &Value) -> Result<Value, String> {
+    let delegation_id = args
+        .get("delegation_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("missing required parameter: delegation_id")?;
+    browser_get("/agents/status", &[("delegation_id", delegation_id)]).map(strip_ok)
+}
+
 fn tool_follow_up_agent_tab(args: &Value) -> Result<Value, String> {
     let delegation_id = args
         .get("delegation_id")
@@ -881,6 +890,20 @@ fn tool_definitions() -> Value {
                 }
             },
             {
+                "name": "get_agent_tab_status",
+                "description": "Get a read-only status snapshot for an Impala Agent tab opened by open_agent_tab. Managed Codex tabs are enriched through app-server thread/read without resuming or subscribing to the thread. Returns the current turn state, latest activity, callback availability, and whether steer or follow-up is currently valid. Completion callbacks remain the default; use this when the user asks for current progress.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "delegation_id": {
+                            "type": "string",
+                            "description": "Stable delegation id returned by open_agent_tab"
+                        }
+                    },
+                    "required": ["delegation_id"]
+                }
+            },
+            {
                 "name": "follow_up_agent_tab",
                 "description": "Send a follow-up prompt to the existing idle Impala Agent tab opened by open_agent_tab. Reuses the same delegation_id, starts a new turn on managed Codex tabs through Impala's app-server (or uses the legacy PTY path for Claude and legacy tabs), and re-arms its completion callback. Yield after this call until Impala starts the next turn in the orchestrator thread.",
                 "inputSchema": {
@@ -1157,6 +1180,7 @@ fn handle_request(conn: &Connection, request: &Value) -> Option<Value> {
                 "browser_scroll" => tool_browser_scroll(&tool_args),
                 "browser_type" => tool_browser_type(&tool_args),
                 "open_agent_tab" => tool_open_agent_tab(&tool_args, mcp_source_thread_id(&params)),
+                "get_agent_tab_status" => tool_get_agent_tab_status(&tool_args),
                 "follow_up_agent_tab" => tool_follow_up_agent_tab(&tool_args),
                 "steer_agent_tab" => tool_steer_agent_tab(&tool_args),
                 "list_automations" => tool_list_automations(&tool_args),
@@ -1259,16 +1283,25 @@ mod tests {
             follow_up["inputSchema"]["required"],
             json!(["delegation_id", "prompt"])
         );
+        let status = tools
+            .iter()
+            .find(|tool| tool["name"] == "get_agent_tab_status")
+            .expect("get_agent_tab_status tool");
+        assert_eq!(
+            status["inputSchema"]["required"],
+            json!(["delegation_id"])
+        );
         let steer = tools.iter().find(|tool| tool["name"] == "steer_agent_tab").expect("steer_agent_tab tool");
         assert_eq!(steer["inputSchema"]["required"], json!(["delegation_id", "prompt"]));
-        assert!(!tools.iter().any(|tool| matches!(
-            tool["name"].as_str(),
-            Some("get_agent_tab_status" | "wait_agent_tab")
-        )));
+        assert!(!tools.iter().any(|tool| tool["name"] == "wait_agent_tab"));
     }
 
     #[test]
     fn follow_up_agent_tab_rejects_blank_inputs() {
+        assert_eq!(
+            tool_get_agent_tab_status(&json!({ "delegation_id": " " })),
+            Err("missing required parameter: delegation_id".to_string())
+        );
         assert_eq!(
             tool_follow_up_agent_tab(&json!({})),
             Err("missing required parameter: delegation_id".to_string())

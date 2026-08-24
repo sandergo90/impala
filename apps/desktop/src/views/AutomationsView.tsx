@@ -409,7 +409,16 @@ export function AutomationsView() {
           repo === ""
             ? await invoke<Worktree[]>("list_automation_run_worktrees")
             : await invoke<Worktree[]>("list_worktrees", { repoPath: repo });
-        const found = worktrees.find((w) => w.path === worktree.path);
+        // `list_worktrees` is `git worktree list`, so a run dir git no longer
+        // registers (pruned registration, deleted branch) is missing from the
+        // project population while the review queue still lists it. Fall back
+        // to the queue — which the backend filters by existence — so the
+        // handoff only refuses a run whose directory is really gone.
+        const found =
+          worktrees.find((w) => w.path === worktree.path) ??
+          (
+            await invoke<Worktree[]>("list_recent_automation_worktrees")
+          ).find((w) => w.path === worktree.path);
         if (!found) {
           toast.error("The run's worktree no longer exists");
           return;
@@ -419,7 +428,13 @@ export function AutomationsView() {
         );
         if (run) acknowledgeRun(run);
         useUIStore.getState().setSelectedProject(target);
-        useDataStore.getState().setWorktrees(worktrees);
+        useDataStore
+          .getState()
+          .setWorktrees(
+            worktrees.some((w) => w.path === found.path)
+              ? worktrees
+              : [...worktrees, found],
+          );
         useUIStore.getState().setGeneralTerminalActive(false);
         await selectWorktree(found);
       } catch (e) {

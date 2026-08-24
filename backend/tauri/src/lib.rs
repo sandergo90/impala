@@ -902,7 +902,9 @@ async fn get_codex_diagnostics(
     let cwd = cwd
         .filter(|cwd| !cwd.trim().is_empty())
         .map(PathBuf::from)
-        .unwrap_or(std::env::current_dir().map_err(|error| format!("resolve diagnostics cwd: {error}"))?);
+        .unwrap_or(
+            std::env::current_dir().map_err(|error| format!("resolve diagnostics cwd: {error}"))?,
+        );
     tokio::task::spawn_blocking(move || Ok::<_, String>(state.diagnostics(&cwd)))
         .await
         .map_err(|error| format!("task join: {error}"))?
@@ -916,10 +918,12 @@ async fn preflight_native_codex_settings(
 ) -> Result<bool, String> {
     automations::validate_native_codex_settings(&settings)?;
     let state = state.inner().clone();
-    Ok(tokio::task::spawn_blocking(move || state.native_settings_supported(&settings))
-        .await
-        .map_err(|error| format!("task join: {error}"))?
-        .is_ok())
+    Ok(
+        tokio::task::spawn_blocking(move || state.native_settings_supported(&settings))
+            .await
+            .map_err(|error| format!("task join: {error}"))?
+            .is_ok(),
+    )
 }
 
 fn setup_claude_integration_sync() -> Result<String, String> {
@@ -1176,10 +1180,13 @@ async fn prepare_managed_codex_delegation(
     delegation_id: String,
     worktree_path: String,
     pane_id: String,
+    prompt: String,
+    settings: serde_json::Value,
 ) -> Result<String, String> {
     let (thread_id, app_server) = tokio::task::spawn_blocking({
         let worktree_path = worktree_path.clone();
-        move || codex_app_server::start_managed_thread(&worktree_path)
+        let settings = settings.clone();
+        move || codex_app_server::start_managed_thread(&worktree_path, &settings)
     })
     .await
     .map_err(|error| format!("task join: {error}"))??;
@@ -1192,6 +1199,23 @@ async fn prepare_managed_codex_delegation(
     ) {
         return Err("could not register managed Codex delegation target".to_string());
     }
+    let turn_id = tokio::task::spawn_blocking({
+        let app_server = app_server.clone();
+        let thread_id = thread_id.clone();
+        let delegation_id = delegation_id.clone();
+        move || {
+            codex_app_server::start_managed_initial_turn(
+                &app_server,
+                &thread_id,
+                &delegation_id,
+                &prompt,
+                &settings,
+            )
+        }
+    })
+    .await
+    .map_err(|error| format!("task join: {error}"))??;
+    delegations.record_managed_turn(&delegation_id, &thread_id, &turn_id)?;
     Ok(thread_id)
 }
 
@@ -2073,11 +2097,15 @@ pub fn run() {
                 interrupted_turns.clone(),
                 subagent_registry.clone(),
             );
-            for notification in
-                agent_delegations.claim_pending_completions(&agent_pane_statuses)
-            {
+            for notification in agent_delegations.claim_pending_completions(&agent_pane_statuses) {
                 hook_server::dispatch_completion(agent_delegations.clone(), notification);
             }
+            hook_server::start_managed_completion_reconciler(
+                app.handle().clone(),
+                agent_statuses.clone(),
+                agent_pane_statuses.clone(),
+                agent_delegations.clone(),
+            );
             for (worktree_path, status) in restored_agent_statuses {
                 hook_server::publish_agent_status(
                     app.handle(),

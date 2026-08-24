@@ -52,6 +52,7 @@ import {
   buildLaunchCommand,
   buildCodexResumeCommand,
   agentForTerminalLaunch,
+  parseNativeCodexFlags,
   usesImpalaCodexServer,
 } from "../lib/agent";
 import { awaitShellReady, markShellReady } from "../lib/pty-ready";
@@ -120,6 +121,7 @@ interface PrimaryTerminalOverride {
   paneId: string;
   launch: TerminalLaunchProfile;
   isPrimaryAgent: boolean;
+  codexResumeThreadId?: string;
 }
 
 function presentationKind(content: PaneContent): TabKind {
@@ -201,9 +203,11 @@ const SPLIT_CONTENT_OPTIONS = [
 export const TabbedTerminals = memo(function TabbedTerminals({
   worktreePath,
   isActive,
+  codexResumeThreadId,
 }: {
   worktreePath: string;
   isActive: boolean;
+  codexResumeThreadId?: string;
 }) {
   const activeTerminalsTab = useUIStore(
     (s) => s.worktreeNavStates[worktreePath]?.activeTerminalsTab ?? AGENT_PANE_ID,
@@ -846,7 +850,14 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                           launch: "shell",
                           isPrimaryAgent: false,
                         }
-                      : undefined
+                      : codexResumeThreadId
+                        ? {
+                            paneId: AGENT_PANE_ID,
+                            launch: "agent",
+                            isPrimaryAgent: true,
+                            codexResumeThreadId,
+                          }
+                        : undefined
                   }
                 />
               )}
@@ -949,22 +960,42 @@ const TabBody = memo(function TabBody({
         shell_args: string[];
         env: Record<string, string>;
       }>("prepare_shell_launch");
-      const delegatedCodexThreadId =
-        delegatedLaunch?.delegationId &&
+      const usesManagedCodexDelegation =
+        Boolean(delegatedLaunch?.delegationId) &&
         agent === "codex" &&
-        usesImpalaCodexServer(agent, flags)
-          ? await invoke<string>("prepare_managed_codex_delegation", {
-              delegationId: delegatedLaunch.delegationId,
-              worktreePath,
-              paneId,
-            })
-          : undefined;
+        usesImpalaCodexServer(agent, flags);
+      const managedCodexSettings = usesManagedCodexDelegation
+        ? parseNativeCodexFlags(flags)
+        : undefined;
+      if (usesManagedCodexDelegation && !managedCodexSettings) {
+        throw new Error("Managed Codex delegation does not support these Codex flags");
+      }
+      const delegatedCodexThreadId = usesManagedCodexDelegation
+        ? await invoke<string>("prepare_managed_codex_delegation", {
+            delegationId: delegatedLaunch!.delegationId,
+            worktreePath,
+            paneId,
+            prompt: delegatedLaunch!.prompt,
+            settings: {
+              ...managedCodexSettings,
+              ...(delegatedLaunch!.codexOptions?.model
+                ? { model: delegatedLaunch!.codexOptions.model }
+                : {}),
+              ...(delegatedLaunch!.codexOptions?.reasoningEffort
+                ? { effort: delegatedLaunch!.codexOptions.reasoningEffort }
+                : {}),
+              ...(delegatedLaunch!.codexOptions?.serviceTier
+                ? { serviceTier: delegatedLaunch!.codexOptions.serviceTier }
+                : {}),
+            },
+          })
+        : undefined;
       const delegatedCommand = delegatedLaunch
         ? delegatedCodexThreadId
           ? buildCodexResumeCommand(
               flags,
               delegatedCodexThreadId,
-              delegatedLaunch.prompt,
+              undefined,
               extraEnv,
               delegatedLaunch.codexOptions,
             )
@@ -1025,7 +1056,7 @@ const TabBody = memo(function TabBody({
             // the session (crash / reboot / version upgrade); leave the shell
             // bare rather than relaunching. The agent is auto-launched exactly
             // once per worktree — on first open.
-            if (isPrimaryAgent && nav.agentLaunched) return;
+            if (isPrimaryAgent && nav.agentLaunched && !codexResumeThreadId) return;
 
             // On first launch with a linked issue, point the agent at the
             // issue context file via its initial prompt so it reads the issue
@@ -1465,6 +1496,7 @@ function PaneTabGroup({
         worktreePath={worktreePath}
         sessionId={paneSessions[primaryTerminalOverride.paneId] ?? null}
         isActive={isActive && isFocused}
+        codexResumeThreadId={primaryTerminalOverride.codexResumeThreadId}
       />
     );
   } else if (content.kind === "file") {

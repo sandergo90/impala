@@ -1038,7 +1038,8 @@ pub fn get_run_diff_stat(worktree_path: &str) -> Result<DiffStat, String> {
     for line in status.lines().filter(|l| l.starts_with("??")) {
         let rel = &line[3..];
         stat.files += 1;
-        if let Ok(content) = std::fs::read_to_string(std::path::Path::new(worktree_path).join(rel)) {
+        if let Ok(content) = std::fs::read_to_string(std::path::Path::new(worktree_path).join(rel))
+        {
             stat.additions += content.lines().count() as u32;
         }
     }
@@ -1088,7 +1089,19 @@ mod tests {
         // Committed on the branch.
         std::fs::write(wt.join("a.txt"), "one\ntwo\nthree\n").unwrap();
         git(&wt, &["add", "."]);
-        git(&wt, &["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-q", "-m", "add"]);
+        git(
+            &wt,
+            &[
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-q",
+                "-m",
+                "add",
+            ],
+        );
         // Uncommitted on top.
         std::fs::write(wt.join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
         // Untracked — never reported by `git diff`.
@@ -1096,7 +1109,10 @@ mod tests {
 
         let stat = get_run_diff_stat(wt.to_str().unwrap()).unwrap();
         assert_eq!(stat.files, 2, "one modified file plus one untracked");
-        assert_eq!(stat.additions, 4, "2 committed+uncommitted lines, 2 new file lines");
+        assert_eq!(
+            stat.additions, 4,
+            "2 committed+uncommitted lines, 2 new file lines"
+        );
         assert_eq!(stat.deletions, 0);
     }
 
@@ -1110,7 +1126,16 @@ mod tests {
         git(&dir, &["init", "-q", "-b", "main"]);
         git(&dir, &["config", "user.email", "t@example.com"]);
         git(&dir, &["config", "user.name", "Tester"]);
-        git(&dir, &["commit", "-q", "--allow-empty", "-m", "Automation run start"]);
+        git(
+            &dir,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "Automation run start",
+            ],
+        );
 
         std::fs::write(dir.join("digest.md"), "a\nb\nc\n").unwrap();
 

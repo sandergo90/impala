@@ -206,9 +206,7 @@ fn new_tab_target(url: &Url) -> Option<Url> {
 }
 
 fn is_hotkey_sentinel(url: &Url) -> bool {
-    url.scheme() == "https"
-        && url.host_str() == Some("impala.invalid")
-        && url.path() == "/hotkey"
+    url.scheme() == "https" && url.host_str() == Some("impala.invalid") && url.path() == "/hotkey"
 }
 
 fn hotkey_action(url: &Url) -> Option<&'static str> {
