@@ -644,7 +644,9 @@ impl AgentDelegations {
         )
     }
 
-    fn finish_completion_notification(&self, delegation_id: &str, delivered: bool) {
+    /// `settled` means the wake needs no further attempt — delivered, or
+    /// refused for good. Anything else stays claimable by the reconciler.
+    fn finish_completion_notification(&self, delegation_id: &str, settled: bool) {
         let Ok(mut entries) = self.entries.lock() else {
             return;
         };
@@ -652,7 +654,7 @@ impl AgentDelegations {
             return;
         };
         entry.completion_notification_in_flight = false;
-        entry.completion_notified |= delivered;
+        entry.completion_notified |= settled;
         self.persist(&entries);
     }
 
@@ -1164,6 +1166,13 @@ impl Default for AgentPaneStatuses {
     }
 }
 
+/// The app server has no record of the thread to wake. Unlike a busy turn,
+/// waiting can't fix it — and the reconciler re-claims an unsettled
+/// notification every 2s, so retrying one is a loop with no exit.
+fn wake_target_is_gone(error: &str) -> bool {
+    error.contains("thread not found")
+}
+
 pub fn dispatch_completion(
     delegations: Arc<AgentDelegations>,
     notification: AgentCompletionNotification,
@@ -1181,6 +1190,16 @@ pub fn dispatch_completion(
             ) {
                 Ok(_) => {
                     delegations.finish_completion_notification(&notification.delegation_id, true);
+                    return;
+                }
+                Err(error) if wake_target_is_gone(&error) => {
+                    // Settle it: nobody is left to notify, so stop rather
+                    // than burn a 5-minute retry per reconciler tick.
+                    delegations.finish_completion_notification(&notification.delegation_id, true);
+                    eprintln!(
+                        "[impala] dropped Codex wake for delegation {}: {}",
+                        notification.delegation_id, error
+                    );
                     return;
                 }
                 Err(error) => last_error = Some(error),
@@ -2498,7 +2517,13 @@ pub fn start(
             // Snapshot the worktree at the start of every turn so the "Last
             // turn" diff view has a baseline. Done synchronously so the
             // snapshot is captured before the agent starts modifying files.
-            if event_type == "UserPromptSubmit" && !worktree_path.is_empty() {
+            // A session outlives its worktree (deleted while its agent kept
+            // running), and every prompt it submits would otherwise log a
+            // git failure for a directory that is gone. Nothing to baseline.
+            if event_type == "UserPromptSubmit"
+                && !worktree_path.is_empty()
+                && std::path::Path::new(&worktree_path).is_dir()
+            {
                 match crate::git::snapshot_worktree(&worktree_path) {
                     Ok(tree) => {
                         if let Ok(mut map) = snapshots.0.lock() {
@@ -2553,7 +2578,7 @@ mod tests {
         agent_follow_up_write_request, agent_open_codex_settings, hook_command,
         hook_target_for_identity, pane_status_for_hook_event, publish_hook_port, AgentDelegations,
         AgentFollowUpTarget, AgentPaneStatuses, AgentSteerTarget, AutomationCompletionTracker,
-        InterruptedAgentTurns, IMPALA_BROWSER_SKILL,
+        InterruptedAgentTurns, wake_target_is_gone, IMPALA_BROWSER_SKILL,
     };
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use impala_daemon_shared::wire::Request;
@@ -3667,5 +3692,18 @@ cat >/dev/null
             pane_status_for_hook_event("PostToolUse", true, false, true),
             "idle"
         );
+    }
+
+    #[test]
+    fn a_vanished_wake_target_is_settled_instead_of_retried() {
+        // Verbatim app-server message for a thread it no longer knows.
+        assert!(wake_target_is_gone(
+            "thread not found: 01a01f50-762e-7130-aca8-d2df719c9622"
+        ));
+        // A busy or still-starting turn is exactly what the retry is for.
+        assert!(!wake_target_is_gone("turn already in progress"));
+        assert!(!wake_target_is_gone(
+            "connect Codex app-server: No such file or directory"
+        ));
     }
 }
