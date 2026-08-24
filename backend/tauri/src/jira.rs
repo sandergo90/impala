@@ -5,39 +5,28 @@
 //! its provider's API. See docs/adr/0007 for why Jira uses a stored token
 //! rather than a CLI like `bkt`.
 //!
-//! Two Jira-specific wrinkles vs Linear:
-//! - **Search** uses the Enhanced JQL endpoint `/rest/api/3/search/jql`; the
-//!   legacy `/rest/api/3/search` was removed by Atlassian in late 2025.
-//! - **Rich text** (descriptions, comments) comes back as ADF, not markdown,
-//!   so [`adf`] walks the node tree into a markdown subset.
+//! One Jira-specific wrinkle vs Linear: **search** uses the Enhanced JQL
+//! endpoint `/rest/api/3/search/jql`; the legacy `/rest/api/3/search` was
+//! removed by Atlassian in late 2025.
 
-use crate::issue_tracker::{Issue, IssueComment, IssueDetail, IssueTracker};
+use crate::issue_tracker::{Issue, IssueDetail, IssueTracker};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 static CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(reqwest::blocking::Client::new);
-static CLOUD_IDS: LazyLock<Mutex<HashMap<String, String>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-const FORMS_API_BASE: &str = "https://api.atlassian.com/jira/forms/cloud";
 
 /// Jira-backed `IssueTracker`. `base_url` is a clean `https://...` origin;
 /// `email`/`token` form the Basic auth credential.
 pub struct JiraTracker {
     base_url: String,
-    forms_api_base: String,
     auth: String,
 }
 
 impl JiraTracker {
     pub fn new(base_url: String, email: String, token: String) -> Self {
         let auth = format!("Basic {}", STANDARD.encode(format!("{}:{}", email, token)));
-        Self {
-            base_url,
-            forms_api_base: FORMS_API_BASE.to_string(),
-            auth,
-        }
+        Self { base_url, auth }
     }
 
     fn browse_url(&self, key: &str) -> String {
@@ -45,18 +34,10 @@ impl JiraTracker {
     }
 
     fn get(&self, path: &str) -> Result<Value, String> {
-        self.get_url(&format!("{}{}", self.base_url, path), true, false)
-    }
-
-    fn get_url(&self, url: &str, authenticated: bool, experimental: bool) -> Result<Value, String> {
-        let mut request = CLIENT.get(url).header("Accept", "application/json");
-        if authenticated {
-            request = request.header("Authorization", &self.auth);
-        }
-        if experimental {
-            request = request.header("X-ExperimentalApi", "opt-in");
-        }
-        let resp = request
+        let resp = CLIENT
+            .get(format!("{}{}", self.base_url, path))
+            .header("Accept", "application/json")
+            .header("Authorization", &self.auth)
             .send()
             .map_err(|e| format!("Jira request failed: {}", e))?;
         let status = resp.status();
@@ -71,70 +52,6 @@ impl JiraTracker {
             ));
         }
         serde_json::from_str(&text).map_err(|e| format!("Failed to parse Jira response: {}", e))
-    }
-
-    fn cloud_id(&self) -> Result<String, String> {
-        if let Some(cloud_id) = CLOUD_IDS
-            .lock()
-            .map_err(|_| "Jira cloud ID cache lock poisoned".to_string())?
-            .get(&self.base_url)
-            .cloned()
-        {
-            return Ok(cloud_id);
-        }
-
-        let data = self.get_url(
-            &format!("{}/_edge/tenant_info", self.base_url),
-            false,
-            false,
-        )?;
-        let cloud_id = data
-            .get("cloudId")
-            .and_then(Value::as_str)
-            .filter(|id| !id.is_empty())
-            .ok_or_else(|| "Jira tenant info did not contain a cloudId".to_string())?
-            .to_string();
-        CLOUD_IDS
-            .lock()
-            .map_err(|_| "Jira cloud ID cache lock poisoned".to_string())?
-            .insert(self.base_url.clone(), cloud_id.clone());
-        Ok(cloud_id)
-    }
-
-    fn forms_markdown(&self, issue_key: &str) -> Result<String, String> {
-        let cloud_id = self.cloud_id()?;
-        let forms_url = format!(
-            "{}/{}/issue/{}/form",
-            self.forms_api_base, cloud_id, issue_key
-        );
-        let data = self.get_url(&forms_url, true, true)?;
-        let forms = data
-            .as_array()
-            .or_else(|| data.get("forms").and_then(Value::as_array))
-            .ok_or_else(|| "Jira Forms response was not a form list".to_string())?;
-        let mut markdown = String::new();
-
-        for form in forms {
-            let Some(id) = form.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let name = form
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("Untitled");
-            let answers_url = format!("{}/{}/format/answers", forms_url, id);
-            match self.get_url(&answers_url, true, true) {
-                Ok(answers) => markdown.push_str(&format_form(name, &answers)),
-                Err(error) => tracing::warn!(
-                    issue_key,
-                    form_id = id,
-                    error = %error,
-                    "failed to fetch Jira form answers"
-                ),
-            }
-        }
-
-        Ok(markdown)
     }
 
     fn post(&self, path: &str, body: &Value) -> Result<(), String> {
@@ -241,78 +158,10 @@ impl IssueTracker for JiraTracker {
         self.search_jql(&jql, "summary,status", 20)
     }
 
-    fn issue_detail(&self, issue_id: &str) -> Result<IssueDetail, String> {
-        let data = self.get(&format!(
-            "/rest/api/3/issue/{}?fields=summary,description,comment,status",
-            issue_id
-        ))?;
-        let key = data.get("key").and_then(|v| v.as_str()).unwrap_or(issue_id);
-        let fields = data.get("fields");
-
-        let title = fields
-            .and_then(|f| f.get("summary"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let status = fields
-            .and_then(|f| f.get("status"))
-            .and_then(|s| s.get("name"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let mut description = fields
-            .and_then(|f| f.get("description"))
-            .filter(|d| !d.is_null())
-            .map(adf::to_markdown)
-            .filter(|s| !s.trim().is_empty());
-
-        match self.forms_markdown(key) {
-            Ok(forms) if !forms.is_empty() => {
-                description = Some(match description {
-                    Some(description) => format!("{}\n\n{}", description, forms.trim_end()),
-                    None => forms.trim_end().to_string(),
-                });
-            }
-            Ok(_) => {}
-            Err(error) => tracing::warn!(
-                issue_key = key,
-                error = %error,
-                "failed to fetch Jira forms"
-            ),
-        }
-
-        let comments = fields
-            .and_then(|f| f.get("comment"))
-            .and_then(|c| c.get("comments"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .map(|c| IssueComment {
-                        author: c
-                            .get("author")
-                            .and_then(|a| a.get("displayName"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Unknown")
-                            .to_string(),
-                        body: c.get("body").map(adf::to_markdown).unwrap_or_default(),
-                        created_at: c
-                            .get("created")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        Ok(IssueDetail {
-            identifier: key.to_string(),
-            title,
-            description,
-            url: self.browse_url(key),
-            status,
-            comments,
-        })
+    fn issue_detail(&self, _issue_id: &str) -> Result<IssueDetail, String> {
+        // Jira tickets are not fetched into a context file; the agent reads
+        // the ticket itself (e.g. via a Jira skill). Linear keeps using this.
+        Err("Jira issue detail fetching is not supported".to_string())
     }
 
     fn start(&self, issue_id: &str) -> Result<(), String> {
@@ -374,35 +223,6 @@ impl IssueTracker for JiraTracker {
     }
 }
 
-fn format_form(name: &str, answers: &Value) -> String {
-    let Some(answers) = answers.as_array() else {
-        return String::new();
-    };
-    let mut body = String::new();
-    for answer in answers {
-        let label = answer
-            .get("label")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim();
-        let value = answer
-            .get("answer")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim();
-        if label.is_empty() || value.is_empty() {
-            continue;
-        }
-        body.push_str(&format!("**{}**\n{}\n\n", label, value));
-    }
-    if body.is_empty() {
-        return body;
-    }
-    format!("## Form: {}\n\n{}", name, body.trim_end_matches('\n')) + "\n"
-}
-
-/// Pull the first message out of a Jira `{ "errorMessages": [...], "errors": {...} }`
-/// body so failures surface something readable rather than raw JSON.
 fn first_error(body: &str) -> String {
     let Ok(v) = serde_json::from_str::<Value>(body) else {
         return body.chars().take(200).collect();
@@ -479,198 +299,6 @@ pub fn derive_branch_name(key: &str, title: &str) -> String {
     }
 }
 
-/// ADF (Atlassian Document Format) → markdown. A pragmatic subset: the node
-/// types that show up in real issue descriptions. Unknown nodes degrade by
-/// recursing into their children so text is never lost. Media/attachments are
-/// intentionally not rendered (deferred — see docs/adr/0007).
-mod adf {
-    use serde_json::Value;
-
-    pub fn to_markdown(doc: &Value) -> String {
-        let mut out = String::new();
-        render(doc, &mut out);
-        // Collapse runs of 3+ newlines the block emitters can produce.
-        let mut collapsed = String::with_capacity(out.len());
-        let mut newlines = 0;
-        for ch in out.chars() {
-            if ch == '\n' {
-                newlines += 1;
-                if newlines <= 2 {
-                    collapsed.push(ch);
-                }
-            } else {
-                newlines = 0;
-                collapsed.push(ch);
-            }
-        }
-        collapsed.trim().to_string()
-    }
-
-    fn children<'a>(node: &'a Value) -> &'a [Value] {
-        node.get("content")
-            .and_then(|c| c.as_array())
-            .map(|a| a.as_slice())
-            .unwrap_or(&[])
-    }
-
-    fn node_type(node: &Value) -> &str {
-        node.get("type").and_then(|t| t.as_str()).unwrap_or("")
-    }
-
-    fn render_children(node: &Value, out: &mut String) {
-        for child in children(node) {
-            render(child, out);
-        }
-    }
-
-    fn render(node: &Value, out: &mut String) {
-        match node_type(node) {
-            "doc" => render_children(node, out),
-            "paragraph" => {
-                let mut line = String::new();
-                render_children(node, &mut line);
-                out.push_str(line.trim_end());
-                out.push_str("\n\n");
-            }
-            "heading" => {
-                let level = node
-                    .get("attrs")
-                    .and_then(|a| a.get("level"))
-                    .and_then(|l| l.as_u64())
-                    .unwrap_or(1)
-                    .clamp(1, 6);
-                for _ in 0..level {
-                    out.push('#');
-                }
-                out.push(' ');
-                render_children(node, out);
-                out.push_str("\n\n");
-            }
-            "bulletList" => {
-                render_list(node, None, out);
-                out.push('\n');
-            }
-            "orderedList" => {
-                render_list(node, Some(1), out);
-                out.push('\n');
-            }
-            "codeBlock" => {
-                let lang = node
-                    .get("attrs")
-                    .and_then(|a| a.get("language"))
-                    .and_then(|l| l.as_str())
-                    .unwrap_or("");
-                out.push_str("```");
-                out.push_str(lang);
-                out.push('\n');
-                let mut body = String::new();
-                render_children(node, &mut body);
-                out.push_str(body.trim_end());
-                out.push_str("\n```\n\n");
-            }
-            "blockquote" => {
-                let mut inner = String::new();
-                render_children(node, &mut inner);
-                for line in inner.trim_end().lines() {
-                    out.push_str("> ");
-                    out.push_str(line);
-                    out.push('\n');
-                }
-                out.push('\n');
-            }
-            "rule" => out.push_str("---\n\n"),
-            "text" => render_text(node, out),
-            "hardBreak" => out.push('\n'),
-            "mention" => out.push_str(
-                node.get("attrs")
-                    .and_then(|a| a.get("text"))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("@unknown"),
-            ),
-            "emoji" => out.push_str(
-                node.get("attrs")
-                    .and_then(|a| a.get("text").or_else(|| a.get("shortName")))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or(""),
-            ),
-            "inlineCard" | "blockCard" => {
-                if let Some(url) = node
-                    .get("attrs")
-                    .and_then(|a| a.get("url"))
-                    .and_then(|u| u.as_str())
-                {
-                    out.push_str(url);
-                }
-            }
-            // Tables degrade to their cell text on separate lines — enough for
-            // an agent to read, without a full markdown-table layout.
-            "table" | "tableRow" | "tableCell" | "tableHeader" => {
-                render_children(node, out);
-            }
-            "mediaSingle" | "mediaGroup" | "media" => out.push_str("[attachment]"),
-            // Unknown node: keep its text by recursing.
-            _ => render_children(node, out),
-        }
-    }
-
-    fn render_list(node: &Value, ordered_start: Option<usize>, out: &mut String) {
-        let mut index = ordered_start.unwrap_or(0);
-        for item in children(node) {
-            if node_type(item) != "listItem" {
-                continue;
-            }
-            let mut item_text = String::new();
-            render_children(item, &mut item_text);
-            let item_text = item_text.trim();
-            if item_text.is_empty() {
-                continue;
-            }
-            let prefix = match ordered_start {
-                Some(_) => {
-                    let p = format!("{}. ", index);
-                    index += 1;
-                    p
-                }
-                None => "- ".to_string(),
-            };
-            for (i, line) in item_text.lines().enumerate() {
-                if i == 0 {
-                    out.push_str(&prefix);
-                } else {
-                    out.push_str("  ");
-                }
-                out.push_str(line);
-                out.push('\n');
-            }
-        }
-    }
-
-    fn render_text(node: &Value, out: &mut String) {
-        let text = node.get("text").and_then(|t| t.as_str()).unwrap_or("");
-        let mut s = text.to_string();
-        if let Some(marks) = node.get("marks").and_then(|m| m.as_array()) {
-            for mark in marks {
-                match mark.get("type").and_then(|t| t.as_str()).unwrap_or("") {
-                    "strong" => s = format!("**{}**", s),
-                    "em" => s = format!("_{}_", s),
-                    "code" => s = format!("`{}`", s),
-                    "strike" => s = format!("~~{}~~", s),
-                    "link" => {
-                        let href = mark
-                            .get("attrs")
-                            .and_then(|a| a.get("href"))
-                            .and_then(|h| h.as_str())
-                            .unwrap_or("");
-                        s = format!("[{}]({})", s, href);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        out.push_str(&s);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -700,110 +328,5 @@ mod tests {
         assert!(!looks_like_issue_key("SBSTR"));
         assert!(!looks_like_issue_key("7-SBSTR"));
         assert!(!looks_like_issue_key("SBSTR-7a"));
-    }
-
-    #[test]
-    fn adf_renders_common_nodes() {
-        let doc = serde_json::json!({
-            "type": "doc",
-            "content": [
-                { "type": "heading", "attrs": { "level": 2 },
-                  "content": [{ "type": "text", "text": "Title" }] },
-                { "type": "paragraph", "content": [
-                    { "type": "text", "text": "Hello " },
-                    { "type": "text", "text": "world", "marks": [{ "type": "strong" }] }
-                ]},
-                { "type": "bulletList", "content": [
-                    { "type": "listItem", "content": [
-                        { "type": "paragraph", "content": [{ "type": "text", "text": "one" }] }]},
-                    { "type": "listItem", "content": [
-                        { "type": "paragraph", "content": [{ "type": "text", "text": "two" }] }]}
-                ]}
-            ]
-        });
-        let md = adf::to_markdown(&doc);
-        assert!(md.contains("## Title"));
-        assert!(md.contains("Hello **world**"));
-        assert!(md.contains("- one"));
-        assert!(md.contains("- two"));
-    }
-
-    #[test]
-    fn adf_link_and_code_marks() {
-        let doc = serde_json::json!({
-            "type": "doc",
-            "content": [{ "type": "paragraph", "content": [
-                { "type": "text", "text": "site", "marks": [
-                    { "type": "link", "attrs": { "href": "https://x.com" } }]},
-                { "type": "text", "text": " and " },
-                { "type": "text", "text": "code", "marks": [{ "type": "code" }] }
-            ]}]
-        });
-        let md = adf::to_markdown(&doc);
-        assert_eq!(md, "[site](https://x.com) and `code`");
-    }
-
-    #[test]
-    fn issue_detail_includes_forms_and_ignores_one_failed_form() {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let address = server.server_addr().to_ip().unwrap();
-        let base_url = format!("http://{}", address);
-        let handle = std::thread::spawn(move || {
-            for _ in 0..5 {
-                let request = server.recv().unwrap();
-                let url = request.url();
-                let forms_request = url.starts_with("/jira/forms/");
-                let (status, body) = match url {
-                    "/rest/api/3/issue/SQST-9?fields=summary,description,comment,status" => (
-                        200,
-                        r#"{"key":"SQST-9","fields":{"summary":"Site security","description":null,"status":{"name":"Open"},"comment":{"comments":[]}}}"#,
-                    ),
-                    "/_edge/tenant_info" => (200, r#"{"cloudId":"cloud-1"}"#),
-                    "/jira/forms/cloud/cloud-1/issue/SQST-9/form" => (
-                        200,
-                        r#"[{"id":"form-1","name":"Feedback"},{"id":"form-2","name":"Broken"}]"#,
-                    ),
-                    "/jira/forms/cloud/cloud-1/issue/SQST-9/form/form-1/format/answers" => (
-                        200,
-                        r#"[{"label":"Requirements","answer":"Access control\nCameras"},{"label":"Attachments","answer":""}]"#,
-                    ),
-                    "/jira/forms/cloud/cloud-1/issue/SQST-9/form/form-2/format/answers" => {
-                        (500, "unavailable")
-                    }
-                    unexpected => panic!("unexpected Jira request: {unexpected}"),
-                };
-                let has_header = |name| {
-                    request
-                        .headers()
-                        .iter()
-                        .any(|header| header.field.equiv(name))
-                };
-                assert_eq!(has_header("Authorization"), url != "/_edge/tenant_info");
-                assert_eq!(
-                    request.headers().iter().any(|header| {
-                        header.field.equiv("X-ExperimentalApi") && header.value.as_str() == "opt-in"
-                    }),
-                    forms_request
-                );
-                request
-                    .respond(
-                        tiny_http::Response::from_string(body)
-                            .with_status_code(tiny_http::StatusCode(status)),
-                    )
-                    .unwrap();
-            }
-        });
-
-        let mut tracker =
-            JiraTracker::new(base_url.clone(), "me@example.com".into(), "token".into());
-        tracker.forms_api_base = format!("{}/jira/forms/cloud", base_url);
-        let detail = tracker.issue_detail("SQST-9").unwrap();
-
-        assert_eq!(
-            detail.description.as_deref(),
-            Some("## Form: Feedback\n\n**Requirements**\nAccess control\nCameras")
-        );
-        assert_eq!(tracker.cloud_id().unwrap(), "cloud-1");
-        handle.join().unwrap();
     }
 }

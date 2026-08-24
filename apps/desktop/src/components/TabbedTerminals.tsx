@@ -920,11 +920,14 @@ const TabBody = memo(function TabBody({
     // Kick off the issue context refresh in parallel. 5-min rate-limited
     // backend-side, so usually a no-op. We await it later before building
     // the launch command so the file is current when the agent reads it.
+    // Jira is excluded: no context file is written — the agent fetches the
+    // ticket itself (e.g. via a Jira skill), so launch never blocks on the
+    // slow multi-request Jira fetch.
     const refreshPromise: Promise<void> = (async () => {
       if (launch !== "agent" || !isPrimaryAgent) return;
       const projectPath = useUIStore.getState().selectedProject?.path ?? worktreePath;
       const issue = await issuePromise;
-      if (!issue) return;
+      if (!issue || issue.provider === "jira") return;
       await invoke("write_issue_context", {
         projectPath,
         issueId: issue.issue_id,
@@ -1061,13 +1064,15 @@ const TabBody = memo(function TabBody({
             // On first launch with a linked issue, point the agent at the
             // issue context file via its initial prompt so it reads the issue
             // body on demand instead of relying on autoloaded
-            // CLAUDE.local.md / AGENTS.md.
+            // CLAUDE.local.md / AGENTS.md. Jira has no context file — the
+            // prompt names the issue so the agent fetches it itself.
             await refreshPromise;
             const issue = await issuePromise;
-            const initialPrompt =
-              issue
-                ? `Read the ${issue.provider} issue from @docs/issues/${issue.identifier}.md`
-                : undefined;
+            const initialPrompt = issue
+              ? issue.provider === "jira"
+                ? `Read the jira issue ${issue.identifier}`
+                : `Read the ${issue.provider} issue from @docs/issues/${issue.identifier}.md`
+              : undefined;
 
             const cmd = codexResumeThreadId
               ? `${buildCodexResumeCommand(flags, codexResumeThreadId, undefined, extraEnv)}\n`

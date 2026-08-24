@@ -247,12 +247,15 @@ export function NewWorktreeDialog({
           projectPath: repoPath,
           issueId: selectedIssue.id,
         }).catch(() => {});
-        invoke("write_issue_context", {
-          projectPath: repoPath,
-          issueId: selectedIssue.id,
-          worktreePath: worktree.path,
-          force: true,
-        }).catch(() => {});
+        // Jira gets no context file — the agent fetches the ticket itself.
+        if (tracker !== "jira") {
+          invoke("write_issue_context", {
+            projectPath: repoPath,
+            issueId: selectedIssue.id,
+            worktreePath: worktree.path,
+            force: true,
+          }).catch(() => {});
+        }
       }
       onCreated(worktree);
     } catch (e) {
