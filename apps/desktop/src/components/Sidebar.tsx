@@ -517,9 +517,13 @@ export function Sidebar() {
 
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [worktreeToDelete, setWorktreeToDelete] = useState<Worktree | null>(
-    null,
-  );
+  // One dialog serves both the single-worktree delete and the whole-group
+  // delete; groupName is only set for the latter.
+  const [deleteTarget, setDeleteTarget] = useState<{
+    wts: Worktree[];
+    groupName?: string;
+  } | null>(null);
+  const deleteActionRef = useRef<HTMLButtonElement>(null);
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   // Explicit expand/collapse choices per automation group; groups without an
@@ -577,49 +581,56 @@ export function Sidebar() {
     setEditingPath(null);
   };
 
-  const deleteWorktree = (wt: Worktree) => {
+  const deleteWorktrees = (wts: Worktree[]) => {
     if (!selectedProject) return;
 
     // Optimistic update: close dialog, remove from list, clear selection immediately
-    setWorktreeToDelete(null);
+    setDeleteTarget(null);
+    const paths = new Set(wts.map((w) => w.path));
     setWorktrees(
-      useDataStore.getState().worktrees.filter((w) => w.path !== wt.path),
+      useDataStore.getState().worktrees.filter((w) => !paths.has(w.path)),
     );
-    if (selectedWorktree?.path === wt.path) {
+    if (selectedWorktree && paths.has(selectedWorktree.path)) {
       useUIStore.getState().setSelectedWorktree(null);
     }
 
     // Run actual deletion in background
     (async () => {
-      try {
-        await cleanupWorktreeForDeletion(wt.path);
+      let failed = false;
+      for (const wt of wts) {
+        try {
+          await cleanupWorktreeForDeletion(wt.path);
 
-        if (isAutomationsProject(selectedProject)) {
-          // Scratch repo of a global automation run — standalone, no
-          // teardown script, removed wholesale (aborts an in-flight run).
-          await invoke("delete_automation_run_dir", {
-            worktreePath: wt.path,
-          });
-        } else {
-          // Run the project's teardown script (if any) while the worktree
-          // still exists. Best-effort: a failure is surfaced but never
-          // blocks deletion.
-          await invoke("run_teardown_script", {
-            repoPath: selectedProject.path,
-            worktreePath: wt.path,
-          }).catch((e) => {
-            toast.error(`Teardown script failed: ${e}`);
-          });
+          if (isAutomationsProject(selectedProject)) {
+            // Scratch repo of a global automation run — standalone, no
+            // teardown script, removed wholesale (aborts an in-flight run).
+            await invoke("delete_automation_run_dir", {
+              worktreePath: wt.path,
+            });
+          } else {
+            // Run the project's teardown script (if any) while the worktree
+            // still exists. Best-effort: a failure is surfaced but never
+            // blocks deletion.
+            await invoke("run_teardown_script", {
+              repoPath: selectedProject.path,
+              worktreePath: wt.path,
+            }).catch((e) => {
+              toast.error(`Teardown script failed: ${e}`);
+            });
 
-          await invoke("delete_worktree", {
-            repoPath: selectedProject.path,
-            worktreePath: wt.path,
-            force: true,
-          });
+            await invoke("delete_worktree", {
+              repoPath: selectedProject.path,
+              worktreePath: wt.path,
+              force: true,
+            });
+          }
+        } catch (e) {
+          failed = true;
+          toast.error(`Failed to remove worktree: ${e}`);
         }
-      } catch (e) {
+      }
+      if (failed) {
         // Rollback: re-fetch the real worktree list
-        toast.error(`Failed to remove worktree: ${e}`);
         const updated = isAutomationsProject(selectedProject)
           ? await invoke<Worktree[]>("list_automation_run_worktrees")
           : await invoke<Worktree[]>("list_worktrees", {
@@ -642,7 +653,7 @@ export function Sidebar() {
     const branch = selectedWorktree.branch;
     if (branch === "main" || branch === "master" || branch === "develop")
       return;
-    setWorktreeToDelete(selectedWorktree);
+    setDeleteTarget({ wts: [selectedWorktree] });
   });
 
   const persistProjects = async (projectList: Project[]) => {
@@ -889,7 +900,7 @@ export function Sidebar() {
             }))
           }
           aria-expanded={entry.open}
-          className="mx-2 mt-0.5 flex w-[calc(100%-1rem)] items-center gap-1.5 rounded-[5px] px-2 py-1.5 text-left transition-colors hover:bg-accent"
+          className="group/ag mx-2 mt-0.5 flex w-[calc(100%-1rem)] items-center gap-1.5 rounded-[5px] px-2 py-1.5 text-left transition-colors hover:bg-accent"
         >
           {entry.open ? (
             <ChevronDown
@@ -919,8 +930,24 @@ export function Sidebar() {
               {entry.unseenCount}
             </span>
           )}
-          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-            {entry.count}
+          <span className="relative shrink-0">
+            {/* Count — replaced by the delete-all cross on hover */}
+            <span className="text-xs text-muted-foreground tabular-nums group-hover/ag:invisible">
+              {entry.count}
+            </span>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                const wts = worktrees.filter(
+                  (w) => runInfo[w.path]?.automationId === entry.id,
+                );
+                setDeleteTarget({ wts, groupName: entry.name });
+              }}
+              title="Delete all worktrees in this group"
+              className="absolute -inset-x-1.5 inset-y-0 hidden group-hover/ag:flex items-center justify-center text-muted-foreground hover:!text-destructive text-sm transition-colors"
+            >
+              ×
+            </span>
           </span>
         </button>
       );
@@ -956,7 +983,7 @@ export function Sidebar() {
         : []),
       {
         label: "Delete worktree",
-        onSelect: () => setWorktreeToDelete(wt),
+        onSelect: () => setDeleteTarget({ wts: [wt] }),
       },
     ];
 
@@ -1054,7 +1081,7 @@ export function Sidebar() {
                   <span
                     onClick={(e) => {
                       e.stopPropagation();
-                      setWorktreeToDelete(wt);
+                      setDeleteTarget({ wts: [wt] });
                     }}
                     className="absolute right-0 top-1/2 -translate-y-1/2 size-6 hidden group-hover:flex items-center justify-center text-muted-foreground hover:!text-destructive text-sm transition-colors"
                   >
@@ -1414,29 +1441,45 @@ export function Sidebar() {
 
       {/* Delete Worktree Dialog */}
       <AlertDialog
-        open={!!worktreeToDelete}
+        open={!!deleteTarget}
         onOpenChange={(open) => {
-          if (!open) setWorktreeToDelete(null);
+          if (!open) setDeleteTarget(null);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent initialFocus={deleteActionRef}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete worktree</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleteTarget && deleteTarget.wts.length > 1
+                ? `Delete ${deleteTarget.wts.length} worktrees`
+                : "Delete worktree"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove the worktree for{" "}
-              <span className="font-medium text-foreground">
-                {worktreeToDelete?.branch}
-              </span>{" "}
-              and delete its working directory. Any uncommitted changes will be
-              lost.
+              {deleteTarget && deleteTarget.wts.length > 1 ? (
+                <>
+                  This will remove all {deleteTarget.wts.length} worktrees of{" "}
+                  <span className="font-medium text-foreground">
+                    {deleteTarget.groupName}
+                  </span>{" "}
+                  and delete their working directories. Any uncommitted changes
+                  will be lost.
+                </>
+              ) : (
+                <>
+                  This will remove the worktree for{" "}
+                  <span className="font-medium text-foreground">
+                    {deleteTarget?.wts[0]?.branch}
+                  </span>{" "}
+                  and delete its working directory. Any uncommitted changes
+                  will be lost.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() =>
-                worktreeToDelete && deleteWorktree(worktreeToDelete)
-              }
+              ref={deleteActionRef}
+              onClick={() => deleteTarget && deleteWorktrees(deleteTarget.wts)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
