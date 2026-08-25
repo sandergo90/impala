@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -39,6 +39,28 @@ impl ShellHitRegion {
 }
 
 static BROWSER_UNDERLAY_READY: AtomicBool = AtomicBool::new(false);
+
+/// WKWebView's default UA lacks the "Version/… Safari/…" suffix, so
+/// UA-sniffing sites (Google among them) serve their legacy fallback pages.
+/// Present as current macOS Safari.
+const BROWSER_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
+     (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+
+static POPUP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// window.close() in a scripted popup reaches WKUIDelegate's webViewDidClose:,
+/// which wry doesn't implement — the page blanks but the popup window stays
+/// open. Reroute close() to a sentinel navigation that Rust maps to closing
+/// the popup window (OAuth popups close themselves after the redirect).
+const POPUP_CLOSE_SHIM: &str = r#"
+(function () {
+  if (window.__IMPALA_POPUP_CLOSE__) return;
+  window.__IMPALA_POPUP_CLOSE__ = true;
+  window.close = function () {
+    location.assign("https://impala.invalid/close-popup");
+  };
+})();
+"#;
 
 /// Console capture: shims console.*, window.onerror, and unhandledrejection
 /// into a capped window.__IMPALA_LOGS__ ring buffer. Runs per navigation
@@ -436,13 +458,7 @@ pub async fn browser_open(
     let new_window_app = app.clone();
     let new_window_id = id.clone();
     let builder = WebviewBuilder::new(label_for(&id), WebviewUrl::External(parsed))
-        // WKWebView's default UA lacks the "Version/… Safari/…" suffix, so
-        // UA-sniffing sites (Google among them) serve their legacy fallback
-        // pages. Present as current macOS Safari.
-        .user_agent(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
-             (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
-        )
+        .user_agent(BROWSER_UA)
         .initialization_script(CONSOLE_SHIM)
         .initialization_script(TARGET_BLANK_SHIM)
         .initialization_script(HOTKEY_SHIM)
@@ -480,7 +496,53 @@ pub async fn browser_open(
             }
             true
         })
-        .on_new_window(move |url, _features| {
+        .on_new_window(move |url, features| {
+            // Sized window.open() calls are dialog-style popups (OAuth flows:
+            // Google GSI, Apple, GitHub). Those need the window.opener channel
+            // to post the credential back, so a detached managed tab would
+            // hang them — create a real related popup window instead.
+            // window_features() carries the opener's WKWebViewConfiguration,
+            // which is what preserves the opener relationship.
+            if features.size().is_some() {
+                let label = format!(
+                    "browser-popup-{}",
+                    POPUP_COUNTER.fetch_add(1, Ordering::Relaxed)
+                );
+                let close_app = new_window_app.clone();
+                let close_label = label.clone();
+                let built = tauri::WebviewWindowBuilder::new(
+                    &new_window_app,
+                    &label,
+                    WebviewUrl::External("about:blank".parse().expect("static url")),
+                )
+                .window_features(features)
+                .user_agent(BROWSER_UA)
+                .initialization_script(POPUP_CLOSE_SHIM)
+                .on_navigation(move |url| {
+                    if url.host_str() == Some("impala.invalid") {
+                        if url.path() == "/close-popup" {
+                            if let Some(window) = close_app.get_webview_window(&close_label) {
+                                let _ = window.close();
+                            }
+                        }
+                        return false;
+                    }
+                    true
+                })
+                .title(url.host_str().unwrap_or("Popup"))
+                .build();
+                match built {
+                    Ok(window) => return NewWindowResponse::Create { window },
+                    Err(error) => {
+                        warn!(
+                            id = %new_window_id,
+                            url = %url,
+                            error = %error,
+                            "browser popup window failed; falling back to tab"
+                        );
+                    }
+                }
+            }
             if let Err(error) = emit_new_browser_tab_request(&new_window_app, &new_window_id, &url)
             {
                 warn!(
@@ -490,8 +552,8 @@ pub async fn browser_open(
                     "browser new window request failed"
                 );
             }
-            // The frontend event creates a managed Impala browser tab. Never
-            // let WebKit create an unmanaged popup outside the pane tree.
+            // The frontend event creates a managed Impala browser tab. Keep
+            // plain (unsized) opens inside the pane tree.
             NewWindowResponse::Deny
         })
         .on_page_load(move |_wv, payload| {
