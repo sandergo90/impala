@@ -25,22 +25,20 @@ pub async fn pty_spawn(
     env_vars: Option<HashMap<String, String>>,
 ) -> Result<bool, String> {
     let env_vars = env_vars.unwrap_or_default();
-    // The hook server recovers daemon-side Codex hooks (which carry no pane
-    // env) through this registry, so record every pane's identity at spawn.
-    if let (Some(worktree), Some(pane)) = (
-        env_vars.get("IMPALA_WORKTREE_PATH"),
-        env_vars.get("IMPALA_PANE_ID"),
-    ) {
-        pane_registry.record(
-            &session_id,
-            worktree,
-            pane,
-            env_vars
-                .get("IMPALA_AGENT_PROVIDER")
-                .map(String::as_str)
-                .unwrap_or(""),
-        );
-    }
+    let pane_identity = env_vars
+        .get("IMPALA_WORKTREE_PATH")
+        .zip(env_vars.get("IMPALA_PANE_ID"))
+        .map(|(worktree, pane)| {
+            (
+                worktree.clone(),
+                pane.clone(),
+                env_vars
+                    .get("IMPALA_AGENT_PROVIDER")
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+        });
+    let pty_session_id = session_id.clone();
     let env: Vec<(String, String)> = env_vars.into_iter().collect();
     let resp = state
         .client()
@@ -59,7 +57,20 @@ pub async fn pty_spawn(
     unwrap_or_err(resp, |r| match r {
         Response::Spawned {
             already_existed, ..
-        } => Some(!already_existed),
+        } => {
+            // Reattaching must not replace the provider of the process that is
+            // already running inside the PTY with the UI's current default.
+            if let Some((worktree, pane, provider)) = pane_identity {
+                pane_registry.record_spawn(
+                    &pty_session_id,
+                    &worktree,
+                    &pane,
+                    &provider,
+                    already_existed,
+                );
+            }
+            Some(!already_existed)
+        }
         _ => None,
     })
 }

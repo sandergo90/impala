@@ -2105,7 +2105,7 @@ pub fn run() {
                 Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
             let interrupted_turns = Arc::new(hook_server::InterruptedAgentTurns::load_persisted());
             let subagent_registry = Arc::new(subagents::SubagentRegistry::load_persisted());
-            let pane_registry = Arc::new(hook_server::PaneRegistry::default());
+            let pane_registry = Arc::new(hook_server::PaneRegistry::load_persisted());
             let hook_port = hook_server::start(
                 app.handle().clone(),
                 agent_statuses.clone(),

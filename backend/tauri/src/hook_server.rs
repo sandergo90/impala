@@ -1593,20 +1593,74 @@ struct PaneIdentity {
     provider: String,
 }
 
+#[derive(Deserialize)]
+struct PersistedCodexPane {
+    worktree_path: String,
+    pane_id: String,
+    provider: String,
+}
+
 impl PaneRegistry {
-    pub fn record(&self, pty_session_id: &str, worktree_path: &str, pane_id: &str, provider: &str) {
+    pub fn load_persisted() -> Self {
+        Self::from_persisted(read_runtime_state("subagent-sessions.json").unwrap_or_default())
+    }
+
+    fn from_persisted(entries: Vec<PersistedCodexPane>) -> Self {
+        let panes = entries
+            .into_iter()
+            .filter(|entry| {
+                entry.provider == "codex"
+                    && !entry.worktree_path.is_empty()
+                    && !entry.pane_id.is_empty()
+                    && Path::new(&entry.worktree_path).is_dir()
+            })
+            .map(|entry| {
+                (
+                    format!("pty-{}-{}", entry.pane_id, entry.worktree_path),
+                    PaneIdentity {
+                        worktree_path: entry.worktree_path,
+                        pane_id: entry.pane_id,
+                        provider: entry.provider,
+                    },
+                )
+            })
+            .collect();
+        Self(Mutex::new(PaneRegistryState {
+            panes,
+            ..PaneRegistryState::default()
+        }))
+    }
+
+    #[cfg(test)]
+    fn record(&self, pty_session_id: &str, worktree_path: &str, pane_id: &str, provider: &str) {
+        self.record_spawn(pty_session_id, worktree_path, pane_id, provider, false);
+    }
+
+    pub fn record_spawn(
+        &self,
+        pty_session_id: &str,
+        worktree_path: &str,
+        pane_id: &str,
+        provider: &str,
+        reattached: bool,
+    ) {
         if worktree_path.is_empty() || pane_id.is_empty() {
             return;
         }
         if let Ok(mut state) = self.0.lock() {
-            state.panes.insert(
-                pty_session_id.to_owned(),
-                PaneIdentity {
-                    worktree_path: worktree_path.to_owned(),
-                    pane_id: pane_id.to_owned(),
-                    provider: provider.to_owned(),
-                },
-            );
+            let identity = PaneIdentity {
+                worktree_path: worktree_path.to_owned(),
+                pane_id: pane_id.to_owned(),
+                provider: provider.to_owned(),
+            };
+            if reattached {
+                state
+                    .panes
+                    .entry(pty_session_id.to_owned())
+                    .or_insert(identity);
+            } else {
+                state.panes.insert(pty_session_id.to_owned(), identity);
+            }
         }
     }
 
@@ -2762,7 +2816,7 @@ mod tests {
         hook_target_for_identity, pane_status_for_hook_event, publish_hook_port,
         wake_target_is_gone, AgentDelegations, AgentFollowUpTarget, AgentPaneStatuses,
         AgentSteerTarget, AutomationCompletionTracker, InterruptedAgentTurns, PaneRegistry,
-        IMPALA_BROWSER_SKILL,
+        PersistedCodexPane, IMPALA_BROWSER_SKILL,
     };
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use impala_daemon_shared::wire::Request;
@@ -3285,6 +3339,25 @@ mod tests {
                 ("/worktree".to_string(), "pane-x".to_string()),
                 "claude".to_string()
             )
+        );
+    }
+
+    #[test]
+    fn reattaching_a_persisted_codex_pty_does_not_downgrade_its_provider() {
+        let worktree = std::env::temp_dir();
+        let worktree = worktree.to_str().unwrap();
+        let pty_session_id = format!("pty-tab-agent-{worktree}");
+        let registry = PaneRegistry::from_persisted(vec![PersistedCodexPane {
+            worktree_path: worktree.to_string(),
+            pane_id: "tab-agent".to_string(),
+            provider: "codex".to_string(),
+        }]);
+
+        registry.record_spawn(&pty_session_id, worktree, "tab-agent", "claude", true);
+
+        assert_eq!(
+            registry.codex_pane_for_hook(worktree, Some("resumed-thread")),
+            Some((worktree.to_string(), "tab-agent".to_string()))
         );
     }
 
