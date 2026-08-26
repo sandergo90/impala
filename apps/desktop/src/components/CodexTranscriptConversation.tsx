@@ -1,6 +1,10 @@
-import { FileCode2, Terminal, Wrench } from "lucide-react";
+import { ChevronRight, FileCode2, Terminal, Wrench } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
-import type { NativeAutomationTranscriptEntry } from "../lib/native-automation-transcript";
+import {
+  groupNativeAutomationTranscript,
+  type NativeAutomationTranscriptBlock,
+  type NativeAutomationTranscriptEntry,
+} from "../lib/native-automation-transcript";
 import { markdownComponents } from "./markdownComponents";
 import { Bubble, BubbleContent } from "./ui/bubble";
 import {
@@ -31,18 +35,19 @@ export function CodexTranscriptConversation({
   running: boolean;
   contentClassName?: string;
 }) {
+  const blocks = groupNativeAutomationTranscript(entries);
   return (
     <MessageScrollerProvider autoScroll={running}>
       <MessageScroller>
         <MessageScrollerViewport>
           <MessageScrollerContent className={contentClassName}>
-            {entries.map((entry) => (
+            {blocks.map((block) => (
               <MessageScrollerItem
-                key={entry.id}
-                messageId={entry.id}
-                scrollAnchor={entry.kind === "user"}
+                key={block.id}
+                messageId={block.id}
+                scrollAnchor={block.kind === "user"}
               >
-                <TranscriptEntry entry={entry} />
+                <TranscriptBlock block={block} />
               </MessageScrollerItem>
             ))}
           </MessageScrollerContent>
@@ -53,19 +58,26 @@ export function CodexTranscriptConversation({
   );
 }
 
-function TranscriptEntry({ entry }: { entry: NativeAutomationTranscriptEntry }) {
-  if (entry.kind === "tool") return <TranscriptToolActivity entry={entry} />;
-  if (entry.kind === "status") {
+function TranscriptBlock({ block }: { block: NativeAutomationTranscriptBlock }) {
+  if (block.kind === "activity") return <TranscriptActivity block={block} />;
+  if (block.kind === "reasoning") {
+    return (
+      <div className="text-sm text-muted-foreground">
+        <TranscriptMarkdown content={block.text} />
+      </div>
+    );
+  }
+  if (block.kind === "status") {
     return (
       <Marker variant="separator">
-        <MarkerContent>{entry.text}</MarkerContent>
+        <MarkerContent>{block.text}</MarkerContent>
       </Marker>
     );
   }
-  const align = entry.kind === "user" ? "end" : "start";
-  const variant = entry.kind === "user"
+  const align = block.kind === "user" ? "end" : "start";
+  const variant = block.kind === "user"
     ? "secondary"
-    : entry.isTurnResult
+    : block.isTurnResult
       ? "tinted"
       : "ghost";
   return (
@@ -73,12 +85,57 @@ function TranscriptEntry({ entry }: { entry: NativeAutomationTranscriptEntry }) 
       <MessageContent>
         <Bubble align={align} variant={variant}>
           <BubbleContent className="text-base">
-            <TranscriptMarkdown content={entry.text} />
+            <TranscriptMarkdown content={block.text} />
           </BubbleContent>
         </Bubble>
-        {entry.isTurnResult && <MessageFooter>Result</MessageFooter>}
+        {block.isTurnResult ? <MessageFooter>Result</MessageFooter> : null}
       </MessageContent>
     </Message>
+  );
+}
+
+function TranscriptActivity({
+  block,
+}: {
+  block: Extract<NativeAutomationTranscriptBlock, { kind: "activity" }>;
+}) {
+  const failed = block.tools.filter((tool) =>
+    (tool.exitCode !== undefined && tool.exitCode !== 0) || tool.status === "failed"
+  ).length;
+  const active = block.tools.some((tool) =>
+    tool.status === "inProgress" || tool.status === "running"
+  );
+  const commandsOnly = block.tools.every((tool) => tool.activity === "command");
+  const noun = commandsOnly ? "command" : "tool";
+  const label = `Ran ${block.tools.length} ${noun}${block.tools.length === 1 ? "" : "s"}`;
+  const status = active ? "running" : failed > 0 ? `${failed} failed` : "completed";
+  return (
+    <div className="flex flex-col gap-2">
+      {block.title ? (
+        <div className="text-sm text-foreground">
+          <TranscriptMarkdown content={block.title} />
+        </div>
+      ) : null}
+      <details className="group/activity" open={active || failed > 0}>
+        <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+          <Marker className="py-1">
+            <MarkerIcon>
+              {commandsOnly ? <Terminal /> : <Wrench />}
+            </MarkerIcon>
+            <MarkerContent className="flex min-w-0 flex-1 items-center gap-2">
+              <span>{label}</span>
+              <span className="text-xs text-muted-foreground">{status}</span>
+            </MarkerContent>
+            <ChevronRight className="shrink-0 transition-transform group-open/activity:rotate-90" />
+          </Marker>
+        </summary>
+        <div className="mt-1 flex flex-col gap-2 pl-6">
+          {block.tools.map((tool) => (
+            <TranscriptToolActivity key={tool.id} entry={tool} />
+          ))}
+        </div>
+      </details>
+    </div>
   );
 }
 

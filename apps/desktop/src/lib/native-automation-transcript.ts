@@ -1,6 +1,6 @@
 type NativeAutomationTranscriptEntryBase = {
   id: string;
-  kind: "user" | "agent" | "tool" | "status";
+  kind: "user" | "agent" | "reasoning" | "tool" | "status";
 };
 
 type NativeAutomationTranscriptMessage = NativeAutomationTranscriptEntryBase & {
@@ -18,6 +18,11 @@ type NativeAutomationTranscriptTool = NativeAutomationTranscriptEntryBase & {
   details?: string;
 };
 
+type NativeAutomationTranscriptReasoning = NativeAutomationTranscriptEntryBase & {
+  kind: "reasoning";
+  text: string;
+};
+
 type NativeAutomationTranscriptStatus = NativeAutomationTranscriptEntryBase & {
   kind: "status";
   text: string;
@@ -25,8 +30,18 @@ type NativeAutomationTranscriptStatus = NativeAutomationTranscriptEntryBase & {
 
 export type NativeAutomationTranscriptEntry =
   | NativeAutomationTranscriptMessage
+  | NativeAutomationTranscriptReasoning
   | NativeAutomationTranscriptTool
   | NativeAutomationTranscriptStatus;
+
+export type NativeAutomationTranscriptBlock =
+  | Exclude<NativeAutomationTranscriptEntry, { kind: "tool" }>
+  | {
+    id: string;
+    kind: "activity";
+    title?: string;
+    tools: NativeAutomationTranscriptTool[];
+  };
 
 type JsonRecord = Record<string, unknown>;
 
@@ -76,6 +91,12 @@ function itemEntry(
   }
   if (type === "agentMessage" || type === "agent_message") {
     return content ? { id, kind: "agent", text: content } : null;
+  }
+  if (type === "reasoning") {
+    const summaries = Array.isArray(item.summary) ? item.summary : [item.summary];
+    const summaryTexts = summaries.map(text).filter(Boolean);
+    const summary = summaryTexts[summaryTexts.length - 1] ?? "";
+    return summary ? { id, kind: "reasoning", text: summary } : null;
   }
   if (type === "commandExecution" || type === "command_execution") {
     const command = typeof item.command === "string" ? `$ ${item.command}` : "Command";
@@ -173,4 +194,40 @@ export function parseNativeAutomationTranscript(value: unknown): NativeAutomatio
     }
   }
   return entries;
+}
+
+export function groupNativeAutomationTranscript(
+  entries: NativeAutomationTranscriptEntry[],
+): NativeAutomationTranscriptBlock[] {
+  const blocks: NativeAutomationTranscriptBlock[] = [];
+  for (let index = 0; index < entries.length;) {
+    const entry = entries[index];
+    if (entry.kind !== "reasoning" && entry.kind !== "tool") {
+      blocks.push(entry);
+      index += 1;
+      continue;
+    }
+
+    const reasoning = entry.kind === "reasoning" ? entry : undefined;
+    if (reasoning) index += 1;
+    const tools: NativeAutomationTranscriptTool[] = [];
+    while (index < entries.length) {
+      const tool = entries[index];
+      if (tool.kind !== "tool") break;
+      tools.push(tool);
+      index += 1;
+    }
+
+    if (tools.length > 0) {
+      blocks.push({
+        id: `activity:${reasoning?.id ?? tools[0].id}`,
+        kind: "activity",
+        title: reasoning?.text,
+        tools,
+      });
+    } else if (reasoning) {
+      blocks.push(reasoning);
+    }
+  }
+  return blocks;
 }

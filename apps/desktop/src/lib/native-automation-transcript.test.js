@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { parseNativeAutomationTranscript } from "./native-automation-transcript.ts";
+import {
+  groupNativeAutomationTranscript,
+  parseNativeAutomationTranscript,
+} from "./native-automation-transcript.ts";
 
-describe("parseNativeAutomationTranscript", () => {
+describe("native automation transcript", () => {
   test("keeps structured user, agent, tool, and turn status information", () => {
     expect(parseNativeAutomationTranscript({
       thread: {
@@ -46,6 +49,34 @@ describe("parseNativeAutomationTranscript", () => {
       { id: "turn:0:item:2", kind: "tool", activity: "command", summary: "$ bun test", details: "pass" },
       { id: "turn:0:item:3", kind: "tool", activity: "mcp", summary: "impala/read" },
       { id: "turn:0:item:4", kind: "tool", activity: "file", summary: "Files changed", details: "create notes.md" },
+    ]);
+  });
+
+  test("groups a reasoning summary with its following tool burst", () => {
+    const entries = parseNativeAutomationTranscript({
+      thread: {
+        turns: [{
+          items: [
+            { id: "reason-1", type: "reasoning", summary: ["Preparing", "**Planning app integration**"] },
+            { id: "command-1", type: "commandExecution", command: "bun test", status: "completed" },
+            { id: "command-2", type: "commandExecution", command: "bun run typecheck", status: "completed" },
+            { id: "agent-1", type: "agentMessage", text: "The contract is clear." },
+          ],
+        }],
+      },
+    });
+
+    expect(groupNativeAutomationTranscript(entries)).toEqual([
+      {
+        id: "activity:item:reason-1",
+        kind: "activity",
+        title: "**Planning app integration**",
+        tools: [
+          { id: "item:command-1", kind: "tool", activity: "command", summary: "$ bun test", status: "completed" },
+          { id: "item:command-2", kind: "tool", activity: "command", summary: "$ bun run typecheck", status: "completed" },
+        ],
+      },
+      { id: "item:agent-1", kind: "agent", text: "The contract is clear.", isTurnResult: true },
     ]);
   });
 });
