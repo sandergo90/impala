@@ -216,10 +216,14 @@ if [[ -o interactive ]]; then
 fi
 {hook}
 export PATH={bin_dir}:$PATH
+codex() {{
+  {codex_wrapper} "$@"
+}}
 ZDOTDIR={zsh_dir}
 "#,
         hook = ZSH_133_HOOK,
         bin_dir = quote_for_shell(bin_dir.to_str().unwrap_or("")),
+        codex_wrapper = quote_for_shell(bin_dir.join("codex").to_str().unwrap_or("")),
         zsh_dir = quote_for_shell(zsh_dir.to_str().unwrap_or("")),
     );
     write_if_changed(&zsh_dir.join(".zlogin"), &zlogin)?;
@@ -443,6 +447,60 @@ mod tests {
         assert!(request.contains(&format!("worktree_path={}", worktree.display())));
         assert!(request.contains("pane_id=terminal-1"));
         assert!(request.contains("session_id=session-1"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_keeps_the_codex_wrapper_after_path_reordering() {
+        let tmp = TempDir::new().unwrap();
+        let paths = ensure_wrappers(tmp.path()).unwrap();
+        let tools = tmp.path().join("tools");
+        let invocation_log = tmp.path().join("invocation.log");
+        let curl_log = tmp.path().join("curl.log");
+        fs::create_dir_all(&tools).unwrap();
+
+        let real_codex = tmp.path().join("real-codex");
+        write_executable_if_changed(
+            &real_codex,
+            "#!/bin/sh\nprintf 'wrapped %s\\n' \"$*\" > \"$IMPALA_INVOCATION_LOG\"\n",
+        )
+        .unwrap();
+        write_executable_if_changed(
+            &tools.join("codex"),
+            "#!/bin/sh\nprintf 'bypassed %s\\n' \"$*\" > \"$IMPALA_INVOCATION_LOG\"\n",
+        )
+        .unwrap();
+        write_executable_if_changed(
+            &tools.join("curl"),
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$IMPALA_CURL_LOG\"\n",
+        )
+        .unwrap();
+
+        let output = Command::new("/bin/zsh")
+            .args([
+                "-lic",
+                "export PATH=\"$IMPALA_TEST_TOOLS:$PATH\"; codex --yolo",
+            ])
+            .env("HOME", tmp.path())
+            .env("ZDOTDIR", &paths.zsh_dir)
+            .env("IMPALA_ORIG_ZDOTDIR", tmp.path())
+            .env("IMPALA_TEST_TOOLS", &tools)
+            .env("IMPALA_CODEX_BIN", &real_codex)
+            .env("IMPALA_CODEX_APP_SERVER", "unix:///tmp/impala-codex.sock")
+            .env("IMPALA_HOOK_PORT", "60158")
+            .env("IMPALA_WORKTREE_PATH", "/worktree")
+            .env("IMPALA_PANE_ID", "terminal-1")
+            .env("IMPALA_INVOCATION_LOG", &invocation_log)
+            .env("IMPALA_CURL_LOG", &curl_log)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output);
+
+        let invocation = fs::read_to_string(invocation_log).unwrap();
+        assert!(invocation.starts_with("wrapped --remote "), "{invocation}");
+        assert!(fs::read_to_string(curl_log)
+            .unwrap()
+            .contains("pane_id=terminal-1"));
     }
 
     #[cfg(unix)]
