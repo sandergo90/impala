@@ -2192,7 +2192,7 @@ fn handle_automation_request(
                                 .ok()
                                 .flatten()
                         })
-                        .unwrap_or_else(|| "claude".to_string()),
+                        .unwrap_or_else(|| "codex".to_string()),
                 };
                 let created = crate::automations::create_automation_row(
                     &conn,
@@ -2577,14 +2577,26 @@ pub fn start(
                 .collect();
 
             if path == "/codex/launch" {
-                let accepted = pane_registry.record_codex_launch(
-                    params
-                        .get("worktree_path")
-                        .map(String::as_str)
-                        .unwrap_or(""),
-                    params.get("pane_id").map(String::as_str).unwrap_or(""),
-                    params.get("session_id").map(String::as_str),
-                );
+                let worktree_path = params
+                    .get("worktree_path")
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let pane_id = params.get("pane_id").map(String::as_str).unwrap_or("");
+                let session_id = params.get("session_id").map(String::as_str);
+                let accepted =
+                    pane_registry.record_codex_launch(worktree_path, pane_id, session_id);
+                if let Some(session_id) =
+                    session_id.filter(|session_id| accepted && !session_id.is_empty())
+                {
+                    subagents.resume_codex_session(worktree_path, pane_id, session_id);
+                    let _ = app_handle.emit(
+                        "subagents-changed",
+                        serde_json::json!({
+                            "worktreePath": worktree_path,
+                            "paneId": pane_id,
+                        }),
+                    );
+                }
                 let response = Response::from_string(if accepted {
                     r#"{"ok":true}"#
                 } else {

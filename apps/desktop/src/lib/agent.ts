@@ -131,14 +131,14 @@ export function canRunNativeCodexAutomation(
 /**
  * Resolve the agent for a worktree. Agent is chosen at creation time and
  * stored at worktree scope; nothing else feeds the resolution. Worktrees
- * created before this design fall back to "claude".
+ * without a stored choice (including primary worktrees) default to Codex.
  */
 export async function resolveAgent(worktreePath: string): Promise<Agent> {
   const value = await invoke<string | null>("get_setting", {
     key: "selectedAgent",
     scope: worktreePath,
   });
-  return value === "codex" ? "codex" : "claude";
+  return value === "claude" ? "claude" : "codex";
 }
 
 /**

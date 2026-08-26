@@ -265,6 +265,33 @@ impl SubagentRegistry {
         }
     }
 
+    pub fn resume_codex_session(
+        &self,
+        worktree_path: &str,
+        pane_id: &str,
+        session_id: &str,
+    ) -> bool {
+        if worktree_path.is_empty() || pane_id.is_empty() || session_id.is_empty() {
+            return false;
+        }
+        let Ok(mut sessions) = self.0.lock() else {
+            return false;
+        };
+        let session = sessions
+            .entry(pane_key(worktree_path, pane_id))
+            .or_default();
+        if session.provider == "codex" && session.session_id == session_id {
+            return false;
+        }
+        *session = PaneSession {
+            session_id: session_id.to_string(),
+            provider: "codex".to_string(),
+            ..PaneSession::default()
+        };
+        self.persist(&sessions);
+        true
+    }
+
     pub fn owns_codex_subagent(&self, worktree_path: &str, pane_id: &str, thread_id: &str) -> bool {
         self.0
             .lock()
@@ -1220,6 +1247,42 @@ mod tests {
             workspace.to_str().unwrap(),
         ));
         assert_eq!(session.agents["child-session"].summary.name, "reviewer");
+
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn explicit_resume_registers_existing_codex_subagents_for_the_new_pane() {
+        let workspace = temp_workspace("explicit-resume-subagents");
+        let sessions = workspace.join(".impala/codex/sessions/2026/08/26");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(
+            sessions.join("rollout-parent-session.jsonl"),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "sub_agent_activity",
+                    "kind": "started",
+                    "agent_thread_id": "child-session",
+                    "agent_path": "/root/reviewer",
+                    "occurred_at_ms": 42
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(sessions.join("rollout-child-session.jsonl"), "").unwrap();
+
+        let registry = SubagentRegistry::default();
+        assert!(registry.resume_codex_session(
+            workspace.to_str().unwrap(),
+            "agent-pane",
+            "parent-session",
+        ));
+
+        let snapshot = registry.snapshot(workspace.to_str().unwrap(), "agent-pane");
+        assert_eq!(snapshot.active_count, 1);
+        assert_eq!(snapshot.agents[0].id, "child-session");
 
         fs::remove_dir_all(workspace).unwrap();
     }
