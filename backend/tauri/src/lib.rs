@@ -1338,6 +1338,23 @@ fn get_subagents(
 }
 
 #[tauri::command]
+async fn read_subagent_transcript(
+    registry: tauri::State<'_, Arc<subagents::SubagentRegistry>>,
+    app_server: tauri::State<'_, codex_app_server::CodexAppServerState>,
+    worktree_path: String,
+    pane_id: String,
+    thread_id: String,
+) -> Result<serde_json::Value, String> {
+    if !registry.owns_codex_subagent(&worktree_path, &pane_id, &thread_id) {
+        return Err("Codex subagent does not belong to this pane".to_string());
+    }
+    let state = app_server.inner().clone();
+    tokio::task::spawn_blocking(move || state.thread_read_persisted(&thread_id))
+        .await
+        .map_err(|error| format!("subagent transcript task join: {error}"))?
+}
+
+#[tauri::command]
 async fn check_generated_files(
     worktree_path: String,
     files: Vec<String>,
@@ -2087,7 +2104,7 @@ pub fn run() {
             let last_turn_snapshots =
                 Arc::new(hook_server::LastTurnSnapshots(Mutex::new(HashMap::new())));
             let interrupted_turns = Arc::new(hook_server::InterruptedAgentTurns::load_persisted());
-            let subagent_registry = Arc::new(subagents::SubagentRegistry::default());
+            let subagent_registry = Arc::new(subagents::SubagentRegistry::load_persisted());
             let pane_registry = Arc::new(hook_server::PaneRegistry::default());
             let hook_port = hook_server::start(
                 app.handle().clone(),
@@ -2365,6 +2382,7 @@ pub fn run() {
             clear_agent_worktree_status,
             interrupt_agent_turn,
             get_subagents,
+            read_subagent_transcript,
             watcher::watch_worktree,
             watcher::unwatch_worktree,
             file_io::read_file_with_revision,

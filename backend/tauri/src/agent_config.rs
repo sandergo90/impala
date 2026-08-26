@@ -92,7 +92,7 @@ fn write_claude_settings(worktree_path: &Path) -> Result<(), String> {
         ("PermissionRequest", false),
     ];
     for (event_name, needs_matcher) in events {
-        let cmd = crate::hook_server::hook_command_public(event_name);
+        let cmd = crate::hook_server::hook_command_for_provider_public(event_name, "claude");
         let event_defs = hooks
             .as_object_mut()
             .ok_or_else(|| "hooks is not an object".to_string())?
@@ -189,6 +189,8 @@ fn codex_hook_event_key_label(event_name: &str) -> Result<&'static str, String> 
         "PreCompact" => Ok("pre_compact"),
         "PostCompact" => Ok("post_compact"),
         "SessionStart" => Ok("session_start"),
+        "SubagentStart" => Ok("subagent_start"),
+        "SubagentStop" => Ok("subagent_stop"),
         "UserPromptSubmit" => Ok("user_prompt_submit"),
         "Stop" => Ok("stop"),
         other => Err(format!("unknown Codex hook event: {}", other)),
@@ -458,11 +460,13 @@ fn ensure_codex_hooks_in(codex_dir: &Path) -> Result<Vec<CodexHookRegistration>,
         "UserPromptSubmit",
         "PreToolUse",
         "Stop",
+        "SubagentStart",
+        "SubagentStop",
         "PostToolUse",
         "PostToolUseFailure",
         "PermissionRequest",
     ] {
-        let cmd = crate::hook_server::hook_command_public(event_name);
+        let cmd = crate::hook_server::hook_command_for_provider_public(event_name, "codex");
         let groups = hooks
             .entry(event_name.to_string())
             .or_insert_with(|| serde_json::json!([]));
@@ -623,12 +627,42 @@ mod tests {
             "UserPromptSubmit",
             "PreToolUse",
             "Stop",
+            "SubagentStart",
+            "SubagentStop",
             "PostToolUse",
             "PostToolUseFailure",
             "PermissionRequest",
         ] {
             codex_hook_event_key_label(event_name).unwrap();
         }
+    }
+
+    #[test]
+    fn codex_hooks_register_subagent_lifecycle() {
+        let codex_home = tempfile::tempdir().unwrap();
+        ensure_codex_hooks_in(codex_home.path()).unwrap();
+        let hooks: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(codex_home.path().join("hooks.json")).unwrap(),
+        )
+        .unwrap();
+
+        for event_name in ["SubagentStart", "SubagentStop"] {
+            assert!(hooks["hooks"][event_name]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|group| group["hooks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|hook| hook["command"]
+                        .as_str()
+                        .is_some_and(|command| command.contains("IMPALA_HOOK_PORT")))));
+        }
+        assert!(hooks["hooks"]["SubagentStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .contains("agent_provider=codex"));
     }
 
     #[test]

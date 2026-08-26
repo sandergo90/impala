@@ -1,6 +1,10 @@
 import { invoke } from "@/lib/invoke";
 import { useUIStore, useDataStore } from "../store";
-import { AGENT_PANE_ID, RUN_PANE_ID, userTabPaneId } from "./pane-ids";
+import {
+  AGENT_PANE_ID,
+  RUN_PANE_ID,
+  userTabPaneId,
+} from "./pane-ids";
 import { releaseCachedTerminal } from "../components/XtermTerminal";
 import {
   splitNode,
@@ -51,6 +55,19 @@ function contentForTab(tab: UserTab): PaneContent {
       return { kind: "file", path: tab.path ?? "" };
     case "browser":
       return { kind: "browser", url: tab.url };
+    case "subagents":
+      return {
+        kind: "subagents",
+        sourcePaneId: tab.subagentSourcePaneId ?? AGENT_PANE_ID,
+      };
+    case "subagent-transcript":
+      return {
+        kind: "subagent-transcript",
+        threadId: tab.subagentThreadId ?? "",
+        sourcePaneId: tab.subagentSourcePaneId ?? "",
+        name: tab.label,
+        running: tab.subagentRunning === true,
+      };
     default:
       return { kind: "terminal", launch: tab.terminalLaunch ?? "shell" };
   }
@@ -264,6 +281,90 @@ export function createBrowserTabFromRequest(
   }
 
   return createBrowserTab(worktreePath, url).id;
+}
+
+export function openSubagentsPane(
+  worktreePath: string,
+  sourcePaneId: string,
+): string | null {
+  const uiState = useUIStore.getState();
+  const nav = uiState.getWorktreeNavState(worktreePath);
+  const content: PaneContent = {
+    kind: "subagents",
+    sourcePaneId,
+  };
+
+  const openInTree = (
+    tree: SplitNode,
+  ): { tree: SplitNode; groupId: string; tabId: string } | null => {
+    const source = findGroupTab(tree, sourcePaneId);
+    if (!source) return null;
+
+    let nextTree = setActiveGroupTab(tree, source.group.id, sourcePaneId);
+    for (const group of getLeaves(nextTree)) {
+      const existing = group.tabs.find(
+        (tab) => tab.content.kind === "subagents",
+      );
+      if (!existing) continue;
+      nextTree = updateGroupTab(nextTree, existing.id, (tab) => ({
+        ...tab,
+        content,
+      }));
+      return {
+        tree: setActiveGroupTab(nextTree, group.id, existing.id),
+        groupId: group.id,
+        tabId: existing.id,
+      };
+    }
+
+    const targetGroupId =
+      getHorizontalNeighborGroupId(nextTree, source.group.id, "right") ??
+      getHorizontalNeighborGroupId(nextTree, source.group.id, "left");
+    if (targetGroupId) {
+      const created = createGroup(content).tabs[0];
+      nextTree = addTabToGroup(nextTree, targetGroupId, created);
+      return { tree: nextTree, groupId: targetGroupId, tabId: created.id };
+    }
+
+    const result = splitNode(nextTree, source.group.id, "vertical", content);
+    if (!result) return null;
+    const created = getActiveGroupTab(findLeaf(result.tree, result.newLeafId)!);
+    return { tree: result.tree, groupId: result.newLeafId, tabId: created.id };
+  };
+
+  const agentResult = openInTree(
+    getEffectiveAgentTabSplitTree(nav.agentTabSplitTree),
+  );
+  if (agentResult) {
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTab: "terminal",
+      activeTerminalsTab: AGENT_PANE_ID,
+      agentTabSplitTree: agentResult.tree,
+      agentTabFocusedPaneId: agentResult.groupId,
+    });
+    return agentResult.tabId;
+  }
+
+  for (const topTab of nav.userTabs) {
+    const result = openInTree(getEffectiveUserTabSplitTree(topTab));
+    if (!result) continue;
+    uiState.updateWorktreeNavState(worktreePath, {
+      activeTab: "terminal",
+      activeTerminalsTab: topTab.id,
+      userTabs: nav.userTabs.map((candidate) =>
+        candidate.id === topTab.id
+          ? {
+              ...candidate,
+              splitTree: result.tree,
+              focusedPaneId: result.groupId,
+            }
+          : candidate,
+      ),
+    });
+    return result.tabId;
+  }
+
+  return null;
 }
 
 function browserUrlMatches(
@@ -864,9 +965,8 @@ export function moveWorkspaceTab(
   return true;
 }
 
-// Mirrors the tab order rendered by TabbedTerminals: Run (if present), then
-// Agent, then user tabs left-to-right. Keep in sync so Cmd+Left/Right cycle
-// matches the visible tab strip.
+// Mirrors the tab order rendered by TabbedTerminals. Keep in sync so
+// Cmd+Left/Right cycle matches the visible tab strip.
 export function getTabOrder(userTabs: UserTab[], hasRunTab: boolean): string[] {
   const order: string[] = [];
   if (hasRunTab) order.push(RUN_PANE_ID);
@@ -1415,6 +1515,10 @@ function withPrimaryContent(tab: UserTab, tree: SplitNode): UserTab {
     path: _path,
     url: _url,
     pinned: _pinned,
+    terminalLaunch: _terminalLaunch,
+    subagentThreadId: _subagentThreadId,
+    subagentSourcePaneId: _subagentSourcePaneId,
+    subagentRunning: _subagentRunning,
     ...rest
   } = tab;
   return {
@@ -1426,6 +1530,16 @@ function withPrimaryContent(tab: UserTab, tree: SplitNode): UserTab {
       ? { path: primary.path, ...(primaryTab.pinned ? { pinned: true } : {}) }
       : {}),
     ...(primary.kind === "browser" ? { url: primary.url } : {}),
+    ...(primary.kind === "subagents"
+      ? { subagentSourcePaneId: primary.sourcePaneId }
+      : {}),
+    ...(primary.kind === "subagent-transcript"
+      ? {
+          subagentThreadId: primary.threadId,
+          subagentSourcePaneId: primary.sourcePaneId,
+          subagentRunning: primary.running,
+        }
+      : {}),
     splitTree: tree,
   };
 }

@@ -25,7 +25,15 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Bot, FileText, Globe2, GripVertical, Terminal, X } from "lucide-react";
+import {
+  Bot,
+  FileText,
+  Globe2,
+  GripVertical,
+  Terminal,
+  Users,
+  X,
+} from "lucide-react";
 import { XtermTerminal, releaseCachedTerminal } from "./XtermTerminal";
 import { FileViewer } from "./FileViewer";
 import { BrowserPane } from "./BrowserPane";
@@ -101,11 +109,22 @@ import {
   getWorkspaceRendererKey,
 } from "../lib/workspace-renderer-key";
 import { browserPaneNeedsHandoffCover } from "../lib/browser-underlay";
-import { SubagentMenu } from "./SubagentMenu";
+import { canShowSubagentMenu } from "../lib/subagent-menu-state";
+import {
+  SubagentMenu,
+  SubagentTranscriptPane,
+  SubagentWorkspacePane,
+} from "./SubagentMenu";
 import { AgentRunChangesBadge } from "./AgentRunChangesBadge";
 import { useMountEffect } from "../hooks/useMountEffect";
 
-type TabKind = "terminal" | "agent" | "file" | "browser";
+type TabKind =
+  | "terminal"
+  | "agent"
+  | "file"
+  | "browser"
+  | "subagents"
+  | "subagent-transcript";
 
 function groupTabDisplayLabel(
   tab: SplitGroup["tabs"][number],
@@ -196,7 +215,7 @@ const SPLIT_CONTENT_OPTIONS = [
 /**
  * Tabbed terminals view for a single worktree.
  *
- * System tabs: Agent (always) and Run (when config.setup is set or any actions exist).
+ * System tabs: Agent (always) and Run (when configured).
  * The primary Agent group's tabs share this strip with Run and any promoted
  * workspace tabs. Tabs created from the strip stay in that primary group.
  */
@@ -551,11 +570,15 @@ export const TabbedTerminals = memo(function TabbedTerminals({
     const TabIcon =
       t.kind === "agent"
         ? Bot
-        : t.kind === "file"
-          ? FileText
-          : t.kind === "browser"
-            ? Globe2
-            : Terminal;
+        : t.kind === "subagents"
+          ? Users
+          : t.kind === "subagent-transcript"
+            ? Bot
+            : t.kind === "file"
+              ? FileText
+              : t.kind === "browser"
+                ? Globe2
+                : Terminal;
 
     return (
       <>
@@ -625,17 +648,14 @@ export const TabbedTerminals = memo(function TabbedTerminals({
         </button>
       )}
       {t.kind === "agent" ? (
-        <>
-          <AgentRunChangesBadge
-            worktreePath={worktreePath}
-            paneId={t.paneId}
-            label={t.label}
-          />
-          <SubagentMenu
-            worktreePath={worktreePath}
-            paneId={t.paneId}
-          />
-        </>
+        <AgentRunChangesBadge
+          worktreePath={worktreePath}
+          paneId={t.paneId}
+          label={t.label}
+        />
+      ) : null}
+      {t.paneId !== RUN_PANE_ID && canShowSubagentMenu(t.kind) ? (
+        <SubagentMenu worktreePath={worktreePath} paneId={t.paneId} />
       ) : null}
       {!t.isSystem && (
         <button
@@ -835,8 +855,8 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                   primaryTabList={topLevelTabList}
                 />
               ) : (
-                // Run and Agent are two primary contents of the same left pane.
-                // Both render through the Agent split tree so secondary panes
+                // Run and Agent are primary contents of the same left pane.
+                // They render through the Agent split tree so secondary panes
                 // stay visible when the selected primary tab changes.
                 <AgentTabSplitRenderer
                   worktreePath={worktreePath}
@@ -850,7 +870,7 @@ export const TabbedTerminals = memo(function TabbedTerminals({
                           launch: "shell",
                           isPrimaryAgent: false,
                         }
-                      : codexResumeThreadId
+                      : t.id === AGENT_PANE_ID && codexResumeThreadId
                         ? {
                             paneId: AGENT_PANE_ID,
                             launch: "agent",
@@ -1518,6 +1538,23 @@ function PaneTabGroup({
         onNativeSettled={markBrowserNativeSettled}
       />
     );
+  } else if (content.kind === "subagents") {
+    body = (
+      <SubagentWorkspacePane
+        worktreePath={worktreePath}
+        paneId={content.sourcePaneId}
+      />
+    );
+  } else if (content.kind === "subagent-transcript") {
+    body = (
+      <SubagentTranscriptPane
+        key={`${content.threadId}:${content.running}`}
+        threadId={content.threadId}
+        running={content.running}
+        worktreePath={worktreePath}
+        sourcePaneId={content.sourcePaneId}
+      />
+    );
   } else {
     body = (
       <TabBody
@@ -1572,6 +1609,10 @@ function PaneTabGroup({
             const TabIcon =
               isAgent
                 ? Bot
+                : tab.content.kind === "subagents"
+                  ? Users
+                : tab.content.kind === "subagent-transcript"
+                  ? Bot
                 : tab.content.kind === "file"
                   ? FileText
                   : tab.content.kind === "browser"
@@ -1678,17 +1719,14 @@ function PaneTabGroup({
                   </button>
                 )}
                 {isAgent ? (
-                  <>
-                    <AgentRunChangesBadge
-                      worktreePath={worktreePath}
-                      paneId={tab.id}
-                      label={displayLabel}
-                    />
-                    <SubagentMenu
-                      worktreePath={worktreePath}
-                      paneId={tab.id}
-                    />
-                  </>
+                  <AgentRunChangesBadge
+                    worktreePath={worktreePath}
+                    paneId={tab.id}
+                    label={displayLabel}
+                  />
+                ) : null}
+                {tab.content.kind === "terminal" ? (
+                  <SubagentMenu worktreePath={worktreePath} paneId={tab.id} />
                 ) : null}
                 {canClose && (
                   <button
@@ -2092,11 +2130,15 @@ function WorkspaceTabDragPreview({
   const Icon =
     kind === "agent"
       ? Bot
-      : kind === "file"
-        ? FileText
-        : kind === "browser"
-          ? Globe2
-          : Terminal;
+      : kind === "subagents"
+        ? Users
+      : kind === "subagent-transcript"
+        ? Bot
+        : kind === "file"
+          ? FileText
+          : kind === "browser"
+            ? Globe2
+            : Terminal;
   return (
     <div className="flex h-9 max-w-[280px] items-center gap-2.5 rounded-md border border-border bg-accent px-3 text-sm font-medium text-foreground shadow-lg">
       <Icon aria-hidden="true" className="size-4 shrink-0 opacity-90" />

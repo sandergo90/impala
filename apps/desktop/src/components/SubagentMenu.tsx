@@ -1,16 +1,22 @@
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import { listen } from "@tauri-apps/api/event";
 import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Circle,
-  Search,
+  ArrowLeft,
+  Users,
 } from "lucide-react";
+import impalaMark from "../assets/impala-mark.png";
+import { CodexTranscriptConversation } from "./CodexTranscriptConversation";
 import { invoke } from "../lib/invoke";
-import { getSubagentTriggerState } from "../lib/subagent-menu-state";
-import { cn } from "../lib/utils";
+import {
+  parseNativeAutomationTranscript,
+  type NativeAutomationTranscriptEntry,
+} from "../lib/native-automation-transcript";
+import {
+  formatSubagentAge,
+  formatSubagentName,
+  getSubagentTriggerState,
+} from "../lib/subagent-menu-state";
+import { openSubagentsPane } from "../lib/tab-actions";
 import { useMountEffect } from "../hooks/useMountEffect";
 
 export interface SubagentSummary {
@@ -25,26 +31,64 @@ interface SubagentSnapshot {
   agents: SubagentSummary[];
   previousAgents: SubagentSummary[];
   activeCount: number;
+  transcriptAvailable: boolean;
 }
 
 const EMPTY_SNAPSHOT: SubagentSnapshot = {
   agents: [],
   previousAgents: [],
   activeCount: 0,
+  transcriptAvailable: false,
 };
 
-export function SubagentMenu({
-  worktreePath,
-  paneId,
-}: {
+interface SubagentMenuProps {
   worktreePath: string;
   paneId: string;
-}) {
+}
+
+export function SubagentMenu(props: SubagentMenuProps) {
+  return (
+    <SubagentMenuForPane
+      key={`${props.worktreePath}\0${props.paneId}`}
+      {...props}
+    />
+  );
+}
+
+function SubagentMenuForPane({
+  worktreePath,
+  paneId,
+}: SubagentMenuProps) {
+  const snapshot = useSubagentSnapshot(worktreePath, paneId);
+  const triggerState = getSubagentTriggerState(
+    snapshot.agents.length,
+    snapshot.previousAgents.length,
+  );
+
+  if (!triggerState.visible) return null;
+
+  return (
+    <button
+      type="button"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        openSubagentsPane(worktreePath, paneId);
+      }}
+      className="mx-1.5 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none hover:bg-background/70 hover:text-foreground"
+      aria-label={`Open ${triggerState.count} subagents in side pane`}
+      title={`${triggerState.count} subagents · ${snapshot.activeCount} active`}
+    >
+      <Users
+        aria-hidden="true"
+        className={snapshot.activeCount > 0 ? "size-3.5 text-primary" : "size-3.5"}
+      />
+    </button>
+  );
+}
+
+function useSubagentSnapshot(worktreePath: string, paneId: string) {
   const [snapshot, setSnapshot] = useState<SubagentSnapshot>(EMPTY_SNAPSHOT);
-  const [open, setOpen] = useState(false);
-  const [showPrevious, setShowPrevious] = useState(false);
-  const [query, setQuery] = useState("");
-  const [position, setPosition] = useState({ top: 0, left: 0 });
 
   useMountEffect(() => {
     let cancelled = false;
@@ -81,175 +125,287 @@ export function SubagentMenu({
       unlisten.then((fn) => fn());
     };
   });
-
-  const triggerState = getSubagentTriggerState(snapshot.agents.length);
-
-  if (!triggerState.visible) return null;
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const visibleAgents = normalizedQuery
-    ? snapshot.agents.filter((agent) =>
-        agent.name.toLowerCase().includes(normalizedQuery),
-      )
-    : snapshot.agents;
-  const visiblePreviousAgents = normalizedQuery
-    ? snapshot.previousAgents.filter((agent) =>
-        agent.name.toLowerCase().includes(normalizedQuery),
-      )
-    : snapshot.previousAgents;
-  const previousExpanded = showPrevious || normalizedQuery.length > 0;
-
-  return (
-    <>
-      <button
-        type="button"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          const rect = event.currentTarget.getBoundingClientRect();
-          setPosition({
-            top: rect.bottom + 6,
-            left: Math.max(8, Math.min(rect.left, window.innerWidth - 328)),
-          });
-          setOpen((value) => !value);
-        }}
-        className="mx-1.5 flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground outline-none hover:bg-background/70 hover:text-foreground"
-        aria-label={`${triggerState.count} subagents, ${snapshot.activeCount} active. Open subagent menu`}
-        aria-expanded={open}
-        title={`${triggerState.count} subagents · ${snapshot.activeCount} active`}
-      >
-        <Circle
-          aria-hidden="true"
-          className={cn(
-            "size-2",
-            snapshot.activeCount > 0
-              ? "fill-primary text-primary"
-              : "fill-muted-foreground/60 text-muted-foreground/60",
-          )}
-        />
-        <span className="tabular-nums">{triggerState.count}</span>
-        <ChevronDown aria-hidden="true" className="size-3" />
-      </button>
-      {open
-        ? createPortal(
-            <>
-              <MenuDismiss onDismiss={() => setOpen(false)} />
-              <div
-                className="fixed z-40 w-80 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
-                style={{ top: position.top, left: position.left }}
-                role="dialog"
-                aria-label="Subagents"
-              >
-                <div className="border-b border-border p-2">
-                  <label className="flex h-8 items-center gap-2 rounded-md border border-border bg-background px-2 text-muted-foreground">
-                    <Search aria-hidden="true" className="size-3.5" />
-                    <span className="sr-only">Filter subagents</span>
-                    <input
-                      autoFocus
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={`Filter ${snapshot.agents.length + snapshot.previousAgents.length} subagents`}
-                      className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
-                    />
-                  </label>
-                </div>
-                <div
-                  className="max-h-80 overflow-y-auto p-1.5 [content-visibility:auto]"
-                  role="list"
-                  aria-label="Subagent status"
-                >
-                  {visibleAgents.map((agent) => (
-                    <AgentMenuRow
-                      key={agent.id}
-                      name={agent.name}
-                      status={agent.status}
-                      depth={agent.depth}
-                    />
-                  ))}
-                  {snapshot.previousAgents.length > 0 ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setShowPrevious((value) => !value)}
-                        className="mt-1 flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground outline-none hover:bg-accent"
-                        aria-expanded={previousExpanded}
-                      >
-                        {previousExpanded ? (
-                          <ChevronDown aria-hidden="true" className="size-3" />
-                        ) : (
-                          <ChevronRight aria-hidden="true" className="size-3" />
-                        )}
-                        Previous runs
-                        <span className="ml-auto tabular-nums">
-                          {snapshot.previousAgents.length}
-                        </span>
-                      </button>
-                      {previousExpanded
-                        ? visiblePreviousAgents.map((agent) => (
-                            <AgentMenuRow
-                              key={agent.id}
-                              name={agent.name}
-                              status={agent.status}
-                              depth={agent.depth}
-                            />
-                          ))
-                        : null}
-                    </>
-                  ) : null}
-                </div>
-                <div className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
-                  {`${snapshot.activeCount} running · ${snapshot.agents.length} this turn`}
-                </div>
-              </div>
-            </>,
-            document.body,
-          )
-        : null}
-    </>
-  );
+  return snapshot;
 }
 
-function MenuDismiss({ onDismiss }: { onDismiss: () => void }) {
-  useMountEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onDismiss();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  });
-
+export function SubagentWorkspacePane(props: SubagentMenuProps) {
   return (
-    <div
-      aria-hidden="true"
-      data-browser-native-occlusion
-      className="fixed inset-0 z-30"
-      onMouseDown={onDismiss}
+    <SubagentWorkspacePaneForSource
+      key={`${props.worktreePath}\0${props.paneId}`}
+      {...props}
     />
   );
 }
 
-function AgentMenuRow({
-  name,
-  status,
-  depth,
+function SubagentWorkspacePaneForSource({
+  worktreePath,
+  paneId,
+}: SubagentMenuProps) {
+  const snapshot = useSubagentSnapshot(worktreePath, paneId);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const agents = [...snapshot.agents, ...snapshot.previousAgents];
+  const accentById = new Map(agents.map((agent, index) => [agent.id, index]));
+  const activeAgents = agents.filter((agent) => agent.status !== "done");
+  const doneAgents = agents.filter((agent) => agent.status === "done");
+  const selected = agents.find((agent) => agent.id === selectedId);
+
+  if (selectedId) {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border/70 px-4">
+          <button
+            type="button"
+            onClick={() => setSelectedId(null)}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-accent hover:text-foreground"
+            aria-label="Back to subagents"
+            title="Back to subagents"
+          >
+            <ArrowLeft aria-hidden="true" className="size-4" />
+          </button>
+          {selected ? (
+            <>
+              <SubagentIcon
+                accentIndex={accentById.get(selected.id) ?? 0}
+                className="h-5 w-3"
+              />
+              <span className="truncate text-base font-medium">
+                {formatSubagentName(selected.name)}
+              </span>
+            </>
+          ) : null}
+        </div>
+        <div className="min-h-0 flex-1">
+          {selected ? (
+            <SubagentTranscriptPane
+              key={`${selected.id}:${selected.status}`}
+              threadId={selected.id}
+              running={selected.status !== "done"}
+              worktreePath={worktreePath}
+              sourcePaneId={paneId}
+            />
+          ) : (
+            <p className="px-4 py-3 text-sm text-muted-foreground">
+              This subagent is no longer available.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full min-h-0 overflow-y-auto bg-background px-8 py-8 [content-visibility:auto]">
+      <div className="mx-auto max-w-3xl space-y-8">
+        <section aria-labelledby="active-subagents-heading">
+          <h2
+            id="active-subagents-heading"
+            className="mb-3 text-sm font-medium text-muted-foreground"
+          >
+            Active · {activeAgents.length}
+          </h2>
+          {activeAgents.length > 0 ? (
+            activeAgents.map((agent) => (
+              <AgentMenuRow
+                key={agent.id}
+                agent={agent}
+                accentIndex={accentById.get(agent.id) ?? 0}
+                onClick={
+                  snapshot.transcriptAvailable
+                    ? () => setSelectedId(agent.id)
+                    : undefined
+                }
+              />
+            ))
+          ) : (
+            <p className="py-1 text-sm text-muted-foreground">
+              No active subagents
+            </p>
+          )}
+        </section>
+
+        <section aria-labelledby="done-subagents-heading">
+          <h2
+            id="done-subagents-heading"
+            className="mb-3 text-sm font-medium text-muted-foreground"
+          >
+            Done · {doneAgents.length}
+          </h2>
+          {doneAgents.map((agent) => (
+            <AgentMenuRow
+              key={agent.id}
+              agent={agent}
+              accentIndex={accentById.get(agent.id) ?? 0}
+              onClick={
+                snapshot.transcriptAvailable
+                  ? () => setSelectedId(agent.id)
+                  : undefined
+              }
+            />
+          ))}
+        </section>
+
+        {!snapshot.transcriptAvailable && agents.length > 0 ? (
+          <p className="text-xs text-muted-foreground/70">
+            Transcript viewing is available for Codex subagents.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function SubagentTranscriptPane({
+  threadId,
+  running,
+  worktreePath,
+  sourcePaneId,
 }: {
-  name: string;
-  status: SubagentSummary["status"];
-  depth: number;
+  threadId: string;
+  running: boolean;
+  worktreePath: string;
+  sourcePaneId: string;
+}) {
+  const [transcript, setTranscript] = useState<
+    | { status: "loading" }
+    | { status: "ready"; entries: NativeAutomationTranscriptEntry[] }
+    | { status: "error"; message: string }
+  >({ status: "loading" });
+
+  useMountEffect(() => {
+    let disposed = false;
+    let reading = false;
+    async function refresh() {
+      if (reading) return;
+      reading = true;
+      try {
+        const thread = await invoke<unknown>("read_subagent_transcript", {
+          worktreePath,
+          paneId: sourcePaneId,
+          threadId,
+        });
+        if (!disposed) {
+          setTranscript({
+            status: "ready",
+            entries: parseNativeAutomationTranscript(thread),
+          });
+        }
+      } catch (error) {
+        if (!disposed) setTranscript({ status: "error", message: String(error) });
+      } finally {
+        reading = false;
+      }
+    }
+    refresh();
+    const timer = running ? window.setInterval(refresh, 1_000) : undefined;
+    return () => {
+      disposed = true;
+      if (timer) window.clearInterval(timer);
+    };
+  });
+
+  if (transcript.status === "loading") {
+    return <div className="h-full" aria-busy="true" aria-label="Loading transcript" />;
+  }
+  if (transcript.status === "error") {
+    return (
+      <p className="px-4 py-3 text-sm text-danger">
+        Could not read this Codex transcript: {transcript.message}
+      </p>
+    );
+  }
+  if (transcript.entries.length === 0) {
+    return (
+      <p className="px-4 py-3 text-sm text-muted-foreground">
+        This subagent has not produced transcript items yet.
+      </p>
+    );
+  }
+  return (
+    <div className="h-full min-h-0">
+      <CodexTranscriptConversation
+        entries={transcript.entries}
+        running={running}
+        contentClassName="mx-auto w-full max-w-3xl gap-4 px-6 py-8"
+      />
+    </div>
+  );
+}
+
+const SUBAGENT_ACCENTS = [
+  "text-emerald-400",
+  "text-cyan-400",
+  "text-violet-400",
+  "text-lime-400",
+  "text-amber-400",
+] as const;
+
+const IMPALA_MASK_STYLE = {
+  WebkitMask: `url(${impalaMark}) center / contain no-repeat`,
+  mask: `url(${impalaMark}) center / contain no-repeat`,
+};
+
+function subagentAccent(index: number) {
+  return SUBAGENT_ACCENTS[index % SUBAGENT_ACCENTS.length];
+}
+
+function SubagentIcon({
+  accentIndex,
+  active = false,
+  className = "h-7 w-4 -translate-y-px",
+  indent = 0,
+}: {
+  accentIndex: number;
+  active?: boolean;
+  className?: string;
+  indent?: number;
 }) {
   return (
-    <div
-      role="listitem"
-      className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground"
+    <span
+      aria-hidden="true"
+      style={{ marginLeft: indent }}
+      className={`${className} relative shrink-0 ${subagentAccent(accentIndex)} ${active ? "animate-pulse" : ""}`}
     >
-      <span aria-hidden="true" style={{ width: `${Math.min(depth, 5) * 8}px` }} />
-      {status === "done" ? (
-        <Check aria-hidden="true" className="size-3.5 shrink-0" />
-      ) : (
-        <Circle aria-hidden="true" className="size-2.5 shrink-0 fill-primary text-primary" />
-      )}
-      <span className="min-w-0 flex-1 truncate">{name}</span>
-      <span className="text-[10px] capitalize">{status}</span>
+      <span className="absolute left-1/2 top-1/2 aspect-square h-[85%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current opacity-20 blur-[6px]" />
+      <span style={IMPALA_MASK_STYLE} className="absolute inset-0 bg-current" />
+    </span>
+  );
+}
+
+function AgentMenuRow({
+  agent,
+  accentIndex,
+  onClick,
+}: {
+  agent: SubagentSummary;
+  accentIndex: number;
+  onClick?: () => void;
+}) {
+  const content = (
+    <>
+      <SubagentIcon
+        accentIndex={accentIndex}
+        active={agent.status !== "done"}
+        indent={Math.max(0, Math.min(agent.depth - 1, 4)) * 10}
+      />
+      <span className="min-w-0 flex-1 truncate text-foreground">
+        {formatSubagentName(agent.name)}
+      </span>
+      <time className="text-xs text-muted-foreground">
+        {formatSubagentAge(agent.updatedAt)}
+      </time>
+    </>
+  );
+  return onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      className="-mx-3 flex h-12 w-[calc(100%+1.5rem)] items-center gap-3 rounded-md px-3 text-left text-base outline-none hover:bg-accent/70"
+    >
+      {content}
+    </button>
+  ) : (
+    <div className="-mx-3 flex h-12 w-[calc(100%+1.5rem)] items-center gap-3 rounded-md px-3 text-left text-base">
+      {content}
     </div>
   );
 }

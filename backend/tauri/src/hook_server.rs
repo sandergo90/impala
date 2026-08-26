@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use impala_daemon_shared::wire::{Request, Response as DaemonResponse};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -130,13 +130,13 @@ fn runtime_state_path(file_name: &str) -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".impala").join(file_name))
 }
 
-fn read_runtime_state<T: DeserializeOwned>(file_name: &str) -> Option<T> {
+pub(crate) fn read_runtime_state<T: DeserializeOwned>(file_name: &str) -> Option<T> {
     let path = runtime_state_path(file_name)?;
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
-fn write_runtime_state<T: Serialize>(file_name: &str, value: &T) {
+pub(crate) fn write_runtime_state<T: Serialize>(file_name: &str, value: &T) {
     let Some(path) = runtime_state_path(file_name) else {
         return;
     };
@@ -1546,8 +1546,8 @@ pub struct LastTurnSnapshotEvent {
     pub worktree_path: String,
 }
 
-pub fn hook_command_public(event_type: &str) -> String {
-    hook_command(event_type)
+pub fn hook_command_for_provider_public(event_type: &str, provider: &str) -> String {
+    hook_command(event_type).replace("${IMPALA_AGENT_PROVIDER:-}", provider)
 }
 
 /// The hook command for a specific event type. The app-server hook process
@@ -1570,11 +1570,22 @@ fn hook_command(event_type: &str) -> String {
 /// Pane identities recorded at PTY spawn, keyed by PTY session id. Codex
 /// app-server sessions execute hooks daemon-side, where the per-pane env vars
 /// never exist — this registry lets the hook server recover (worktree, pane)
-/// for such hooks from the payload's cwd. Entries are never evicted: PTY
-/// session ids are deterministic per pane, so a respawn overwrites its entry,
-/// and the map stays bounded by the panes opened during one app run.
+/// for such hooks from the payload's cwd. PTY session ids are deterministic,
+/// and all launch/session attribution is scoped to the current app run.
 #[derive(Default)]
-pub struct PaneRegistry(Mutex<HashMap<String, PaneIdentity>>);
+pub struct PaneRegistry(Mutex<PaneRegistryState>);
+
+#[derive(Default)]
+struct PaneRegistryState {
+    panes: HashMap<String, PaneIdentity>,
+    pending_codex_launches: HashMap<String, VecDeque<PendingCodexLaunch>>,
+    codex_sessions: HashMap<(String, String), String>,
+}
+
+struct PendingCodexLaunch {
+    pane_id: String,
+    recorded_at: i64,
+}
 
 struct PaneIdentity {
     worktree_path: String,
@@ -1583,18 +1594,12 @@ struct PaneIdentity {
 }
 
 impl PaneRegistry {
-    pub fn record(
-        &self,
-        pty_session_id: &str,
-        worktree_path: &str,
-        pane_id: &str,
-        provider: &str,
-    ) {
+    pub fn record(&self, pty_session_id: &str, worktree_path: &str, pane_id: &str, provider: &str) {
         if worktree_path.is_empty() || pane_id.is_empty() {
             return;
         }
-        if let Ok(mut panes) = self.0.lock() {
-            panes.insert(
+        if let Ok(mut state) = self.0.lock() {
+            state.panes.insert(
                 pty_session_id.to_owned(),
                 PaneIdentity {
                     worktree_path: worktree_path.to_owned(),
@@ -1605,18 +1610,89 @@ impl PaneRegistry {
         }
     }
 
-    /// The Codex pane an unattributed hook with this cwd belongs to. Prefers
-    /// the primary agent pane when several Codex panes share the worktree;
-    /// bails on ambiguity rather than guess.
-    fn codex_pane_for_cwd(&self, cwd: &str) -> Option<(String, String)> {
-        let panes = self.0.lock().ok()?;
+    fn record_codex_launch(
+        &self,
+        worktree_path: &str,
+        pane_id: &str,
+        session_id: Option<&str>,
+    ) -> bool {
+        if worktree_path.is_empty() || pane_id.is_empty() {
+            return false;
+        }
+        let Ok(mut state) = self.0.lock() else {
+            return false;
+        };
+        if let Some(session_id) = session_id.filter(|id| !id.is_empty()) {
+            state.codex_sessions.insert(
+                (worktree_path.to_owned(), session_id.to_owned()),
+                pane_id.to_owned(),
+            );
+            return true;
+        }
+        let now = chrono::Utc::now().timestamp_millis();
+        let queue = state
+            .pending_codex_launches
+            .entry(worktree_path.to_owned())
+            .or_default();
+        queue.retain(|launch| now - launch.recorded_at <= 30_000);
+        if !queue.is_empty() {
+            return false;
+        }
+        queue.push_back(PendingCodexLaunch {
+            pane_id: pane_id.to_owned(),
+            recorded_at: now,
+        });
+        true
+    }
+
+    /// The Codex pane an unattributed app-server hook belongs to. A wrapper
+    /// announcement binds the new session first; legacy sessions retain the
+    /// primary-pane fallback when the cwd alone is ambiguous.
+    fn codex_pane_for_hook(&self, cwd: &str, session_id: Option<&str>) -> Option<(String, String)> {
+        let mut state = self.0.lock().ok()?;
+        if let Some(session_id) = session_id {
+            if let Some(pane_id) = state
+                .codex_sessions
+                .get(&(cwd.to_owned(), session_id.to_owned()))
+            {
+                return Some((cwd.to_owned(), pane_id.clone()));
+            }
+        }
+
+        let now = chrono::Utc::now().timestamp_millis();
+        let pending = state.pending_codex_launches.get_mut(cwd).and_then(|queue| {
+            while queue
+                .front()
+                .is_some_and(|launch| now - launch.recorded_at > 30_000)
+            {
+                queue.pop_front();
+            }
+            queue.pop_front()
+        });
+        if let Some(pending) = pending {
+            if let Some(session_id) = session_id {
+                state.codex_sessions.insert(
+                    (cwd.to_owned(), session_id.to_owned()),
+                    pending.pane_id.clone(),
+                );
+            }
+            return Some((cwd.to_owned(), pending.pane_id));
+        }
+
         let mut only: Option<&PaneIdentity> = None;
-        for pane in panes
+        for pane in state
+            .panes
             .values()
             .filter(|pane| pane.provider == "codex" && pane.worktree_path == cwd)
         {
             if pane.pane_id == "tab-agent" {
-                return Some((pane.worktree_path.clone(), pane.pane_id.clone()));
+                let target = (pane.worktree_path.clone(), pane.pane_id.clone());
+                if let Some(session_id) = session_id {
+                    state
+                        .codex_sessions
+                        .insert((cwd.to_owned(), session_id.to_owned()), target.1.clone());
+                }
+                return Some(target);
             }
             if only.is_some() {
                 only = None;
@@ -1624,7 +1700,13 @@ impl PaneRegistry {
             }
             only = Some(pane);
         }
-        only.map(|pane| (pane.worktree_path.clone(), pane.pane_id.clone()))
+        let target = only.map(|pane| (pane.worktree_path.clone(), pane.pane_id.clone()));
+        if let (Some((_, pane_id)), Some(session_id)) = (&target, session_id) {
+            state
+                .codex_sessions
+                .insert((cwd.to_owned(), session_id.to_owned()), pane_id.clone());
+        }
+        target
     }
 }
 
@@ -1648,7 +1730,7 @@ fn hook_target_for_identity(
     // vars. Recover the pane from the payload's cwd via the spawn registry.
     if worktree_path.is_empty() && pane_id.is_empty() {
         if let Some(cwd) = cwd {
-            if let Some(target) = pane_registry.codex_pane_for_cwd(cwd) {
+            if let Some(target) = pane_registry.codex_pane_for_hook(cwd, session_id) {
                 return (target, "codex".to_string());
             }
         }
@@ -2440,6 +2522,29 @@ pub fn start(
                 })
                 .collect();
 
+            if path == "/codex/launch" {
+                let accepted = pane_registry.record_codex_launch(
+                    params
+                        .get("worktree_path")
+                        .map(String::as_str)
+                        .unwrap_or(""),
+                    params.get("pane_id").map(String::as_str).unwrap_or(""),
+                    params.get("session_id").map(String::as_str),
+                );
+                let response = Response::from_string(if accepted {
+                    r#"{"ok":true}"#
+                } else {
+                    r#"{"ok":false}"#
+                })
+                .with_status_code(if accepted { 200 } else { 409 })
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .expect("static header"),
+                );
+                let _ = request.respond(response);
+                continue;
+            }
+
             // Browser agent-hook endpoints (impala-mcp). Screenshots/eval can
             // take seconds — handle on their own thread so /hook (agent
             // status, latency-critical) never queues behind them.
@@ -2654,9 +2759,10 @@ fn publish_hook_port(home: &Path, port: u16) -> std::io::Result<()> {
 mod tests {
     use super::{
         agent_follow_up_write_request, agent_open_codex_settings, hook_command,
-        hook_target_for_identity, pane_status_for_hook_event, publish_hook_port, AgentDelegations,
-        AgentFollowUpTarget, AgentPaneStatuses, AgentSteerTarget, AutomationCompletionTracker,
-        InterruptedAgentTurns, wake_target_is_gone, PaneRegistry, IMPALA_BROWSER_SKILL,
+        hook_target_for_identity, pane_status_for_hook_event, publish_hook_port,
+        wake_target_is_gone, AgentDelegations, AgentFollowUpTarget, AgentPaneStatuses,
+        AgentSteerTarget, AutomationCompletionTracker, InterruptedAgentTurns, PaneRegistry,
+        IMPALA_BROWSER_SKILL,
     };
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use impala_daemon_shared::wire::Request;
@@ -3050,8 +3156,7 @@ mod tests {
         let delegations = AgentDelegations::default();
         let registry = PaneRegistry::default();
         let empty_params = HashMap::new();
-        let identity =
-            serde_json::json!({ "session_id": "thread-1", "cwd": "/worktree" });
+        let identity = serde_json::json!({ "session_id": "thread-1", "cwd": "/worktree" });
 
         // No registration → stays unattributed.
         assert_eq!(
@@ -3060,7 +3165,12 @@ mod tests {
         );
 
         // A Claude pane in the worktree never matches.
-        registry.record("pty-tab-agent-/worktree", "/worktree", "tab-agent", "claude");
+        registry.record(
+            "pty-tab-agent-/worktree",
+            "/worktree",
+            "tab-agent",
+            "claude",
+        );
         assert_eq!(
             hook_target_for_identity(&delegations, &registry, &empty_params, Some(&identity)),
             ((String::new(), String::new()), String::new())
@@ -3077,11 +3187,79 @@ mod tests {
         );
 
         // Several codex panes: the agent pane wins.
-        registry.record("pty-terminal-1-/worktree", "/worktree", "terminal-1", "codex");
+        registry.record(
+            "pty-terminal-1-/worktree",
+            "/worktree",
+            "terminal-1",
+            "codex",
+        );
         assert_eq!(
             hook_target_for_identity(&delegations, &registry, &empty_params, Some(&identity)),
             (
                 ("/worktree".to_string(), "tab-agent".to_string()),
+                "codex".to_string()
+            )
+        );
+
+        // The managed app-server drops the terminal environment, so the
+        // wrapper announces which pane is about to create the next thread.
+        assert!(registry.record_codex_launch("/worktree", "terminal-1", None));
+        assert!(!registry.record_codex_launch("/worktree", "terminal-2", None));
+        let terminal_identity =
+            serde_json::json!({ "session_id": "thread-terminal", "cwd": "/worktree" });
+        assert_eq!(
+            hook_target_for_identity(
+                &delegations,
+                &registry,
+                &empty_params,
+                Some(&terminal_identity),
+            ),
+            (
+                ("/worktree".to_string(), "terminal-1".to_string()),
+                "codex".to_string()
+            )
+        );
+        assert!(registry.record_codex_launch("/worktree", "terminal-2", None));
+        let second_terminal_identity =
+            serde_json::json!({ "session_id": "thread-terminal-2", "cwd": "/worktree" });
+        assert_eq!(
+            hook_target_for_identity(
+                &delegations,
+                &registry,
+                &empty_params,
+                Some(&second_terminal_identity),
+            ),
+            (
+                ("/worktree".to_string(), "terminal-2".to_string()),
+                "codex".to_string()
+            )
+        );
+        // Later hooks for that thread keep their pane without another launch.
+        assert_eq!(
+            hook_target_for_identity(
+                &delegations,
+                &registry,
+                &empty_params,
+                Some(&terminal_identity),
+            ),
+            (
+                ("/worktree".to_string(), "terminal-1".to_string()),
+                "codex".to_string()
+            )
+        );
+
+        // Resuming that durable thread in another pane must move future
+        // hooks to the pane that issued the resume.
+        assert!(registry.record_codex_launch("/worktree", "terminal-2", Some("thread-terminal")));
+        assert_eq!(
+            hook_target_for_identity(
+                &delegations,
+                &registry,
+                &empty_params,
+                Some(&terminal_identity),
+            ),
+            (
+                ("/worktree".to_string(), "terminal-2".to_string()),
                 "codex".to_string()
             )
         );

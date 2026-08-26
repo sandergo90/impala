@@ -1,7 +1,8 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
@@ -22,6 +23,7 @@ pub struct SubagentSnapshot {
     pub agents: Vec<SubagentSummary>,
     pub previous_agents: Vec<SubagentSummary>,
     pub active_count: usize,
+    pub transcript_available: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -38,14 +40,76 @@ struct PaneSession {
     agents: HashMap<String, SubagentRecord>,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+struct PersistedPaneSession {
+    worktree_path: String,
+    pane_id: String,
+    session_id: String,
+    provider: String,
+}
+
 #[derive(Default)]
-pub struct SubagentRegistry(Mutex<HashMap<String, PaneSession>>);
+pub struct SubagentRegistry(Mutex<HashMap<String, PaneSession>>, bool);
 
 fn pane_key(worktree_path: &str, pane_id: &str) -> String {
     format!("{worktree_path}\0{pane_id}")
 }
 
 impl SubagentRegistry {
+    pub fn load_persisted() -> Self {
+        Self::from_persisted(
+            crate::hook_server::read_runtime_state("subagent-sessions.json").unwrap_or_default(),
+            true,
+        )
+    }
+
+    fn from_persisted(entries: Vec<PersistedPaneSession>, persist: bool) -> Self {
+        Self(
+            Mutex::new(
+                entries
+                    .into_iter()
+                    .filter(|entry| {
+                        entry.provider == "codex"
+                            && !entry.pane_id.is_empty()
+                            && !entry.session_id.is_empty()
+                            && Path::new(&entry.worktree_path).is_dir()
+                    })
+                    .map(|entry| {
+                        (
+                            pane_key(&entry.worktree_path, &entry.pane_id),
+                            PaneSession {
+                                session_id: entry.session_id,
+                                provider: entry.provider,
+                                ..PaneSession::default()
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
+            persist,
+        )
+    }
+
+    fn persist(&self, sessions: &HashMap<String, PaneSession>) {
+        if !self.1 {
+            return;
+        }
+        let entries = sessions
+            .iter()
+            .filter(|(_, session)| session.provider == "codex")
+            .filter_map(|(key, session)| {
+                let (worktree_path, pane_id) = key.split_once('\0')?;
+                Some(PersistedPaneSession {
+                    worktree_path: worktree_path.to_string(),
+                    pane_id: pane_id.to_string(),
+                    session_id: session.session_id.clone(),
+                    provider: session.provider.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        crate::hook_server::write_runtime_state("subagent-sessions.json", &entries);
+    }
+
     pub fn ingest_hook(
         &self,
         app: &AppHandle,
@@ -68,34 +132,68 @@ impl SubagentRegistry {
         if session_id.is_empty() {
             return;
         }
-        let session_files = codex_session_files(worktree_path, session_id);
+        let mut session_files = codex_session_files(worktree_path, session_id);
         let runtime_provider = detect_runtime_provider(
             provider,
             &value,
             find_session_file_for_worktree(&session_files, session_id, worktree_path, None)
                 .is_some(),
         );
+        let codex_child_event = runtime_provider == "codex"
+            && value
+                .get("agent_id")
+                .and_then(Value::as_str)
+                .is_some_and(|agent_id| !agent_id.is_empty());
 
         let key = pane_key(worktree_path, pane_id);
         let mut changed = false;
+        let mut mapping_changed = false;
         if let Ok(mut sessions) = self.0.lock() {
             let session = sessions.entry(key).or_default();
-            if session.session_id != session_id || session.provider != runtime_provider {
+            let keep_codex_root = if session.provider == "codex"
+                && runtime_provider == "codex"
+                && session.session_id != session_id
+            {
+                let root_files = codex_session_files(worktree_path, &session.session_id);
+                let keep = codex_child_event
+                    || codex_session_descends_from(
+                        &root_files,
+                        session_id,
+                        &session.session_id,
+                        worktree_path,
+                    );
+                if keep {
+                    session_files = root_files;
+                }
+                keep
+            } else {
+                false
+            };
+            if !keep_codex_root
+                && (session.session_id != session_id || session.provider != runtime_provider)
+            {
                 session.session_id = session_id.to_string();
                 session.provider = runtime_provider.to_string();
                 session.current_turn_started_at = 0;
                 session.agents.clear();
                 changed = true;
+                mapping_changed = true;
             }
 
-            if event_type == "UserPromptSubmit" {
+            if event_type == "UserPromptSubmit" && !keep_codex_root {
                 changed |= begin_main_turn(session, chrono::Utc::now().timestamp_millis());
             }
 
             if runtime_provider == "claude" {
-                changed |= ingest_claude_event(session, event_type, &value);
+                changed |= ingest_subagent_lifecycle_event(session, event_type, &value);
             } else if runtime_provider == "codex" {
                 changed |= refresh_codex_session_from_files(session, &session_files, worktree_path);
+                if codex_child_event {
+                    changed |= ingest_subagent_lifecycle_event(session, event_type, &value);
+                }
+            }
+            if mapping_changed {
+                self.persist(&sessions);
             }
         }
 
@@ -112,28 +210,27 @@ impl SubagentRegistry {
 
     pub fn snapshot(&self, worktree_path: &str, pane_id: &str) -> SubagentSnapshot {
         let key = pane_key(worktree_path, pane_id);
-        let (mut current, mut previous) = self
-            .0
-            .lock()
-            .ok()
-            .and_then(|mut sessions| {
-                let session = sessions.get_mut(&key)?;
-                if session.provider == "codex" {
-                    let session_files = codex_session_files(worktree_path, &session.session_id);
-                    refresh_codex_session_from_files(session, &session_files, worktree_path);
-                }
-                Some(
-                    session
+        let (mut current, mut previous, transcript_available) =
+            self.0
+                .lock()
+                .ok()
+                .and_then(|mut sessions| {
+                    let session = sessions.get_mut(&key)?;
+                    if session.provider == "codex" {
+                        let session_files = codex_session_files(worktree_path, &session.session_id);
+                        refresh_codex_session_from_files(session, &session_files, worktree_path);
+                    }
+                    let (current, previous) = session
                         .agents
                         .values()
                         .cloned()
                         .partition::<Vec<_>, _>(|record| {
                             record.summary.status == "running"
                                 || record.started_at >= session.current_turn_started_at
-                        }),
-                )
-            })
-            .unwrap_or_default();
+                        });
+                    Some((current, previous, session.provider == "codex"))
+                })
+                .unwrap_or_default();
         current.sort_by(|left, right| {
             left.started_at
                 .cmp(&right.started_at)
@@ -164,7 +261,22 @@ impl SubagentRegistry {
             agents,
             previous_agents,
             active_count,
+            transcript_available,
         }
+    }
+
+    pub fn owns_codex_subagent(&self, worktree_path: &str, pane_id: &str, thread_id: &str) -> bool {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|sessions| {
+                sessions
+                    .get(&pane_key(worktree_path, pane_id))
+                    .map(|session| {
+                        session.provider == "codex" && session.agents.contains_key(thread_id)
+                    })
+            })
+            .unwrap_or(false)
     }
 }
 
@@ -181,7 +293,7 @@ fn detect_runtime_provider<'a>(
     payload: &Value,
     codex_session_found: bool,
 ) -> &'a str {
-    if codex_session_found {
+    if configured_provider == "codex" || codex_session_found {
         "codex"
     } else if payload.get("agent_id").is_some()
         || payload.get("transcript_path").is_some()
@@ -193,7 +305,11 @@ fn detect_runtime_provider<'a>(
     }
 }
 
-fn ingest_claude_event(session: &mut PaneSession, event_type: &str, value: &Value) -> bool {
+fn ingest_subagent_lifecycle_event(
+    session: &mut PaneSession,
+    event_type: &str,
+    value: &Value,
+) -> bool {
     let Some(agent_id) = value.get("agent_id").and_then(Value::as_str) else {
         return false;
     };
@@ -273,16 +389,13 @@ fn refresh_codex_session_from_files(
             }
             continue;
         }
-        if value["type"] != "event_msg" || payload["type"] != "sub_agent_activity" {
-            continue;
-        }
-        if payload["kind"] != "started" {
-            continue;
-        }
-        let Some(thread_id) = payload["agent_thread_id"].as_str() else {
+        let Some((activity, started_at)) = codex_subagent_start(&value) else {
             continue;
         };
-        let Some(agent_path) = payload["agent_path"].as_str() else {
+        let Some(thread_id) = activity["agent_thread_id"].as_str() else {
+            continue;
+        };
+        let Some(agent_path) = activity["agent_path"].as_str() else {
             continue;
         };
         if agent_path == "/root" {
@@ -311,15 +424,102 @@ fn refresh_codex_session_from_files(
                     name: name.to_string(),
                     status: if completed { "done" } else { "running" }.to_string(),
                     depth,
-                    updated_at: payload["occurred_at_ms"].as_i64().unwrap_or_default(),
+                    updated_at: started_at,
                 },
-                started_at: payload["occurred_at_ms"].as_i64().unwrap_or_default(),
+                started_at,
             },
         );
+    }
+    let child_sessions = session_files
+        .iter()
+        .filter_map(|path| codex_session_metadata(path).map(|payload| (path, payload)))
+        .collect::<Vec<_>>();
+    loop {
+        let mut discovered = false;
+        for (path, payload) in &child_sessions {
+            let (Some(thread_id), Some(parent_thread_id), Some(agent_path)) = (
+                payload["id"]
+                    .as_str()
+                    .or_else(|| payload["session_id"].as_str()),
+                payload["parent_thread_id"].as_str(),
+                payload["agent_path"].as_str(),
+            ) else {
+                continue;
+            };
+            if payload["cwd"].as_str() != Some(worktree_path)
+                || agent_path == "/root"
+                || next.contains_key(thread_id)
+                || (parent_thread_id != session.session_id && !next.contains_key(parent_thread_id))
+            {
+                continue;
+            }
+            let started_at = payload["timestamp"]
+                .as_str()
+                .and_then(|timestamp| chrono::DateTime::parse_from_rfc3339(timestamp).ok())
+                .map(|timestamp| timestamp.timestamp_millis())
+                .unwrap_or_default();
+            let name = agent_path.rsplit('/').next().unwrap_or("Subagent");
+            let depth = agent_path
+                .split('/')
+                .filter(|part| !part.is_empty())
+                .count()
+                .saturating_sub(1);
+            next.insert(
+                thread_id.to_string(),
+                SubagentRecord {
+                    summary: SubagentSummary {
+                        id: thread_id.to_string(),
+                        name: name.to_string(),
+                        status: if codex_session_is_complete(path) {
+                            "done"
+                        } else {
+                            "running"
+                        }
+                        .to_string(),
+                        depth,
+                        updated_at: started_at,
+                    },
+                    started_at,
+                },
+            );
+            discovered = true;
+        }
+        if !discovered {
+            break;
+        }
+    }
+    let now = chrono::Utc::now().timestamp_millis();
+    for (id, record) in &session.agents {
+        if record.summary.status == "done"
+            || now.saturating_sub(record.summary.updated_at) <= 60_000
+        {
+            next.entry(id.clone()).or_insert_with(|| record.clone());
+        }
     }
     let changed = !same_agent_state(&session.agents, &next);
     session.agents = next;
     changed
+}
+
+fn codex_subagent_start(value: &Value) -> Option<(&Value, i64)> {
+    if value["type"] != "event_msg" {
+        return None;
+    }
+    let payload = &value["payload"];
+    let activity = match payload["type"].as_str()? {
+        "sub_agent_activity" => payload,
+        "item_completed" if payload["item"]["type"] == "SubAgentActivity" => &payload["item"],
+        _ => return None,
+    };
+    (activity["kind"] == "started").then(|| {
+        (
+            activity,
+            activity["occurred_at_ms"]
+                .as_i64()
+                .or_else(|| payload["started_at_ms"].as_i64())
+                .unwrap_or_default(),
+        )
+    })
 }
 
 fn codex_session_files(worktree_path: &str, session_id: &str) -> Vec<PathBuf> {
@@ -437,23 +637,19 @@ fn codex_session_files_in(
         return Vec::new();
     };
     let mut files = vec![parent.clone()];
-    let Ok(contents) = fs::read_to_string(parent) else {
+    let Ok(contents) = fs::read_to_string(&parent) else {
         return files;
     };
     for line in contents.lines() {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        let payload = &value["payload"];
-        if value["type"] != "event_msg"
-            || payload["type"] != "sub_agent_activity"
-            || payload["kind"] != "started"
-        {
+        let Some((activity, _)) = codex_subagent_start(&value) else {
             continue;
-        }
+        };
         let (Some(thread_id), Some(agent_path)) = (
-            payload["agent_thread_id"].as_str(),
-            payload["agent_path"].as_str(),
+            activity["agent_thread_id"].as_str(),
+            activity["agent_path"].as_str(),
         ) else {
             continue;
         };
@@ -463,7 +659,74 @@ fn codex_session_files_in(
             files.push(path);
         }
     }
+    let today = chrono::Utc::now().format("%Y/%m/%d").to_string();
+    let mut directories = parent
+        .parent()
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect::<Vec<_>>();
+    for root in &roots {
+        let directory = root.join(&today);
+        if !directories.contains(&directory) {
+            directories.push(directory);
+        }
+    }
+    for path in directories
+        .into_iter()
+        .filter_map(|directory| fs::read_dir(directory).ok())
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("jsonl"))
+    {
+        if !files.contains(&path) {
+            files.push(path);
+        }
+    }
     files
+}
+
+fn codex_session_metadata(path: &Path) -> Option<Value> {
+    // Codex writes session_meta at rollout start. Keep legacy files without
+    // metadata from turning the live subagent poll into a full transcript scan.
+    for line in BufReader::new(fs::File::open(path).ok()?).lines().take(16) {
+        let Ok(value) = serde_json::from_str::<Value>(&line.ok()?) else {
+            continue;
+        };
+        if value["type"] == "session_meta" {
+            return Some(value["payload"].clone());
+        }
+    }
+    None
+}
+
+fn codex_session_descends_from(
+    files: &[PathBuf],
+    session_id: &str,
+    root_session_id: &str,
+    worktree_path: &str,
+) -> bool {
+    let mut current = session_id.to_string();
+    for _ in 0..files.len() {
+        let Some(payload) = files.iter().find_map(|path| {
+            let payload = codex_session_metadata(path)?;
+            let id = payload["id"]
+                .as_str()
+                .or_else(|| payload["session_id"].as_str());
+            (id == Some(current.as_str()) && payload["cwd"].as_str() == Some(worktree_path))
+                .then_some(payload)
+        }) else {
+            return false;
+        };
+        let Some(parent) = payload["parent_thread_id"].as_str() else {
+            return false;
+        };
+        if parent == root_session_id {
+            return true;
+        }
+        current = parent.to_string();
+    }
+    false
 }
 
 fn same_agent_state(
@@ -606,39 +869,38 @@ fn codex_session_metadata_identity_matches(
     worktree_path: &str,
     expected_agent_path: Option<&str>,
 ) -> Option<bool> {
-    let contents = fs::read_to_string(path).ok()?;
-    for line in contents.lines() {
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        if value["type"] != "session_meta" {
-            continue;
-        }
-        let payload = &value["payload"];
-        let file_session_id = payload["id"]
-            .as_str()
-            .or_else(|| payload["session_id"].as_str());
-        if file_session_id != Some(session_id) || payload["cwd"].as_str() != Some(worktree_path) {
+    let payload = codex_session_metadata(path)?;
+    let file_session_id = payload["id"]
+        .as_str()
+        .or_else(|| payload["session_id"].as_str());
+    if file_session_id != Some(session_id) || payload["cwd"].as_str() != Some(worktree_path) {
+        return Some(false);
+    }
+    if let Some(agent_path) = payload["agent_path"].as_str() {
+        let expected = expected_agent_path.unwrap_or("/root");
+        if agent_path != expected {
             return Some(false);
         }
-        if let Some(agent_path) = payload["agent_path"].as_str() {
-            let expected = expected_agent_path.unwrap_or("/root");
-            if agent_path != expected {
-                return Some(false);
-            }
-        }
-        return Some(true);
     }
-    None
+    Some(true)
 }
 
 fn codex_session_is_complete(path: &Path) -> bool {
     fs::read_to_string(path).is_ok_and(|contents| {
-        contents.lines().rev().any(|line| {
-            serde_json::from_str::<Value>(line).is_ok_and(|value| {
-                value["type"] == "event_msg" && value["payload"]["type"] == "task_complete"
+        contents
+            .lines()
+            .rev()
+            .find_map(|line| {
+                let value = serde_json::from_str::<Value>(line).ok()?;
+                (value["type"] == "event_msg")
+                    .then(|| match value["payload"]["type"].as_str() {
+                        Some("task_complete") => Some(true),
+                        Some("task_started") => Some(false),
+                        _ => None,
+                    })
+                    .flatten()
             })
-        })
+            .unwrap_or(false)
     })
 }
 
@@ -652,6 +914,45 @@ mod tests {
             std::process::id(),
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
         ))
+    }
+
+    #[test]
+    fn resumed_codex_session_uses_its_latest_task_state() {
+        let workspace = temp_workspace("resumed-task-state");
+        fs::create_dir_all(&workspace).unwrap();
+        let rollout = workspace.join("rollout.jsonl");
+        let event = |kind| {
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": kind }
+            })
+            .to_string()
+        };
+        fs::write(
+            &rollout,
+            [
+                event("task_started"),
+                event("task_complete"),
+                event("task_started"),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        assert!(!codex_session_is_complete(&rollout));
+
+        fs::write(
+            &rollout,
+            [
+                event("task_started"),
+                event("task_complete"),
+                event("task_started"),
+                event("task_complete"),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        assert!(codex_session_is_complete(&rollout));
+        fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
@@ -717,7 +1018,7 @@ mod tests {
     #[test]
     fn tracks_claude_subagent_lifecycle() {
         let mut session = PaneSession::default();
-        assert!(ingest_claude_event(
+        assert!(ingest_subagent_lifecycle_event(
             &mut session,
             "SubagentStart",
             &serde_json::json!({
@@ -730,7 +1031,7 @@ mod tests {
         assert_eq!(running.summary.status, "running");
         assert_eq!(running.summary.name, "Explore");
 
-        assert!(ingest_claude_event(
+        assert!(ingest_subagent_lifecycle_event(
             &mut session,
             "SubagentStop",
             &serde_json::json!({
@@ -746,7 +1047,7 @@ mod tests {
     #[test]
     fn empty_agent_type_on_stop_keeps_the_name_from_start() {
         let mut session = PaneSession::default();
-        ingest_claude_event(
+        ingest_subagent_lifecycle_event(
             &mut session,
             "SubagentStart",
             &serde_json::json!({
@@ -754,7 +1055,7 @@ mod tests {
                 "agent_type": "Explore"
             }),
         );
-        ingest_claude_event(
+        ingest_subagent_lifecycle_event(
             &mut session,
             "SubagentStop",
             &serde_json::json!({
@@ -770,7 +1071,7 @@ mod tests {
     #[test]
     fn stop_only_record_with_empty_agent_type_gets_placeholder_name() {
         let mut session = PaneSession::default();
-        ingest_claude_event(
+        ingest_subagent_lifecycle_event(
             &mut session,
             "SubagentStop",
             &serde_json::json!({
@@ -791,12 +1092,41 @@ mod tests {
     }
 
     #[test]
-    fn claude_subagent_payload_overrides_codex_pane_provider() {
+    fn codex_child_payload_keeps_the_codex_pane_provider() {
         let payload = serde_json::json!({
-            "session_id": "claude-session",
+            "session_id": "child-session",
             "agent_id": "agent-1"
         });
-        assert_eq!(detect_runtime_provider("codex", &payload, false), "claude");
+        assert_eq!(detect_runtime_provider("codex", &payload, false), "codex");
+    }
+
+    #[test]
+    fn live_codex_child_survives_until_its_rollout_is_persisted() {
+        let workspace = temp_workspace("codex-live-child");
+        let sessions = workspace.join(".impala/codex/sessions/2026/08/26");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(sessions.join("rollout-parent-session.jsonl"), "").unwrap();
+
+        let mut session = PaneSession {
+            session_id: "parent-session".to_string(),
+            provider: "codex".to_string(),
+            current_turn_started_at: 0,
+            agents: HashMap::new(),
+        };
+        ingest_subagent_lifecycle_event(
+            &mut session,
+            "SubagentStart",
+            &serde_json::json!({
+                "agent_id": "child-session",
+                "agent_type": "lawyer_story"
+            }),
+        );
+
+        let files = codex_session_files_in(workspace.to_str().unwrap(), "parent-session", None);
+        refresh_codex_session_from_files(&mut session, &files, workspace.to_str().unwrap());
+
+        assert_eq!(session.agents["child-session"].summary.status, "running");
+        fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
@@ -848,6 +1178,48 @@ mod tests {
         assert_eq!(child.summary.name, "reviewer");
         assert_eq!(child.summary.depth, 1);
         assert_eq!(child.summary.status, "done");
+
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn discovers_current_codex_subagent_activity_item() {
+        let workspace = temp_workspace("current-codex-activity");
+        let sessions = workspace.join(".impala/codex/sessions/2026/08/25");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(
+            sessions.join("rollout-parent-session.jsonl"),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "item_completed",
+                    "item": {
+                        "type": "SubAgentActivity",
+                        "kind": "started",
+                        "agent_thread_id": "child-session",
+                        "agent_path": "/root/reviewer"
+                    },
+                    "started_at_ms": 42
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(sessions.join("rollout-child-session.jsonl"), "").unwrap();
+
+        let mut session = PaneSession {
+            session_id: "parent-session".to_string(),
+            provider: "codex".to_string(),
+            current_turn_started_at: 0,
+            agents: HashMap::new(),
+        };
+        let files = codex_session_files(workspace.to_str().unwrap(), "parent-session");
+        assert!(refresh_codex_session_from_files(
+            &mut session,
+            &files,
+            workspace.to_str().unwrap(),
+        ));
+        assert_eq!(session.agents["child-session"].summary.name, "reviewer");
 
         fs::remove_dir_all(workspace).unwrap();
     }
@@ -932,6 +1304,152 @@ mod tests {
 
         fs::remove_dir_all(workspace).unwrap();
         fs::remove_dir_all(canonical).unwrap();
+    }
+
+    #[test]
+    fn discovers_codex_subagent_from_child_session_metadata() {
+        let workspace = temp_workspace("canonical-codex-child-metadata");
+        let canonical = temp_workspace("canonical-child-metadata-home");
+        let sessions = canonical.join(chrono::Utc::now().format("sessions/%Y/%m/%d").to_string());
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&sessions).unwrap();
+        let worktree = workspace.to_string_lossy().to_string();
+        fs::write(
+            sessions.join("rollout-parent-session.jsonl"),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": "parent-session",
+                    "cwd": worktree.clone(),
+                    "agent_path": null
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            sessions.join("rollout-child-session.jsonl"),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": "child-session",
+                    "timestamp": "2026-08-25T14:59:55.808Z",
+                    "cwd": worktree.clone(),
+                    "agent_path": "/root/reviewer",
+                    "parent_thread_id": "parent-session"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let mut session = PaneSession {
+            session_id: "parent-session".to_string(),
+            provider: "codex".to_string(),
+            current_turn_started_at: 0,
+            agents: HashMap::new(),
+        };
+        let files = codex_session_files_in(
+            workspace.to_str().unwrap(),
+            "parent-session",
+            Some(&canonical),
+        );
+        assert!(refresh_codex_session_from_files(
+            &mut session,
+            &files,
+            workspace.to_str().unwrap(),
+        ));
+        let child = &session.agents["child-session"];
+        assert_eq!(child.summary.name, "reviewer");
+        assert_eq!(child.summary.depth, 1);
+        assert_eq!(child.summary.status, "running");
+
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(canonical).unwrap();
+    }
+
+    #[test]
+    fn codex_child_hook_keeps_the_pane_root_session() {
+        let workspace = temp_workspace("codex-child-hook-root");
+        let sessions = workspace.join(".impala/codex/sessions/2026/08/25");
+        fs::create_dir_all(&sessions).unwrap();
+        let worktree = workspace.to_string_lossy().to_string();
+        fs::write(
+            sessions.join("rollout-parent-session.jsonl"),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": "parent-session",
+                    "cwd": worktree.clone(),
+                    "agent_path": null
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            sessions.join("rollout-child-session.jsonl"),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": "child-session",
+                    "cwd": worktree.clone(),
+                    "agent_path": "/root/lawyer_story",
+                    "parent_thread_id": "parent-session"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let files = codex_session_files_in(workspace.to_str().unwrap(), "parent-session", None);
+        assert!(codex_session_descends_from(
+            &files,
+            "child-session",
+            "parent-session",
+            workspace.to_str().unwrap(),
+        ));
+
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn transcript_access_is_scoped_to_its_codex_pane() {
+        let registry = SubagentRegistry::default();
+        registry.0.lock().unwrap().insert(
+            pane_key("/worktree", "agent-pane"),
+            PaneSession {
+                session_id: "parent-session".to_string(),
+                provider: "codex".to_string(),
+                current_turn_started_at: 0,
+                agents: HashMap::from([(
+                    "child-session".to_string(),
+                    SubagentRecord {
+                        summary: SubagentSummary {
+                            id: "child-session".to_string(),
+                            name: "reviewer".to_string(),
+                            status: "running".to_string(),
+                            depth: 1,
+                            updated_at: 0,
+                        },
+                        started_at: 0,
+                    },
+                )]),
+            },
+        );
+
+        assert!(registry.owns_codex_subagent("/worktree", "agent-pane", "child-session"));
+        assert!(!registry.owns_codex_subagent("/other", "agent-pane", "child-session"));
+        assert!(!registry.owns_codex_subagent("/worktree", "other-pane", "child-session"));
+        assert!(!registry.owns_codex_subagent("/worktree", "agent-pane", "other-child"));
+        registry
+            .0
+            .lock()
+            .unwrap()
+            .get_mut(&pane_key("/worktree", "agent-pane"))
+            .unwrap()
+            .provider = "claude".to_string();
+        assert!(!registry.owns_codex_subagent("/worktree", "agent-pane", "child-session"));
     }
 
     #[test]
@@ -1196,16 +1714,14 @@ mod tests {
             .unwrap();
         }
 
-        let registry = SubagentRegistry::default();
-        let key = pane_key(workspace.to_str().unwrap(), "agent-pane");
-        registry.0.lock().unwrap().insert(
-            key,
-            PaneSession {
+        let registry = SubagentRegistry::from_persisted(
+            vec![PersistedPaneSession {
+                worktree_path: workspace.to_string_lossy().into_owned(),
+                pane_id: "agent-pane".to_string(),
                 session_id: "parent-session".to_string(),
                 provider: "codex".to_string(),
-                current_turn_started_at: 0,
-                agents: HashMap::new(),
-            },
+            }],
+            false,
         );
 
         let snapshot = registry.snapshot(workspace.to_str().unwrap(), "agent-pane");

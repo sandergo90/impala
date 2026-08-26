@@ -24,6 +24,7 @@ const {
   getEffectiveAgentTabSplitTree,
   getEffectiveUserTabSplitTree,
   moveWorkspaceTab,
+  openSubagentsPane,
   shouldCreateTabInFocusedPane,
   renameUserTab,
   renamePaneGroupTab,
@@ -73,6 +74,30 @@ function setTabs(tabs, activeTerminalsTab, extra = {}) {
 
 beforeEach(() => {
   useUIStore.setState({ worktreeNavStates: {} });
+});
+
+describe("openSubagentsPane", () => {
+  test("opens beside its terminal and focuses the same pane on repeat", () => {
+    const firstId = openSubagentsPane(worktreePath, "tab-agent");
+
+    let nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    let leaves = getLeaves(getEffectiveAgentTabSplitTree(nav.agentTabSplitTree));
+    expect(leaves).toHaveLength(2);
+    expect(leaves[1].tabs[0].id).toBe(firstId);
+    expect(leaves[1].tabs[0].content).toEqual({
+      kind: "subagents",
+      sourcePaneId: "tab-agent",
+    });
+
+    const reopenedId = openSubagentsPane(worktreePath, "tab-agent");
+    nav = useUIStore.getState().getWorktreeNavState(worktreePath);
+    leaves = getLeaves(getEffectiveAgentTabSplitTree(nav.agentTabSplitTree));
+    expect(reopenedId).toBe(firstId);
+    expect(leaves).toHaveLength(2);
+    expect(leaves[1].tabs).toHaveLength(1);
+    expect(leaves[1].activeTabId).toBe(firstId);
+    expect(nav.agentTabFocusedPaneId).toBe(leaves[1].id);
+  });
 });
 
 describe("moveWorkspaceTab", () => {

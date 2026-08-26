@@ -77,6 +77,8 @@ for arg in "$@"; do
 done
 
 expect_value=false
+expect_resume_id=false
+resume_session_id=""
 for arg in "$@"; do
   if [ "$expect_value" = true ]; then
     expect_value=false
@@ -90,8 +92,14 @@ for arg in "$@"; do
     exec|e|review|login|logout|mcp|plugin|mcp-server|app-server|remote-control|app|completion|update|doctor|sandbox|debug|execpolicy|apply|a|archive|delete|migrate-rollouts|unarchive|cloud|cloud-tasks|responses-api-proxy|stdio-to-uds|exec-server|features|help)
       exec "$real_codex" "$@"
       ;;
+    resume) expect_resume_id=true ;;
     -*) ;;
-    *) break ;;
+    *)
+      if [ "$expect_resume_id" = true ]; then
+        resume_session_id="$arg"
+      fi
+      break
+      ;;
   esac
 done
 
@@ -105,6 +113,21 @@ done
 
 if [ "$has_explicit_remote" = true ]; then
   exec "$real_codex" "$@"
+fi
+
+if [ -n "${IMPALA_HOOK_PORT:-}" ] &&
+   [ -n "${IMPALA_WORKTREE_PATH:-}" ] &&
+   [ -n "${IMPALA_PANE_ID:-}" ]; then
+  while :; do
+    launch_status=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+      "http://127.0.0.1:${IMPALA_HOOK_PORT}/codex/launch" \
+      --url-query "worktree_path=${IMPALA_WORKTREE_PATH}" \
+      --url-query "pane_id=${IMPALA_PANE_ID}" \
+      --url-query "session_id=${resume_session_id}" \
+      --connect-timeout 1 --max-time 2 || true)
+    [ "$launch_status" = "409" ] || break
+    sleep 0.1
+  done
 fi
 
 # This list follows Codex's current command surface. A future subcommand is
@@ -376,6 +399,50 @@ mod tests {
             run_codex_wrapper(&["-C", "/elsewhere"], Some(remote)),
             ["codex", "--remote", remote, "-C", "/elsewhere"]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_wrapper_announces_the_source_pane_before_a_managed_launch() {
+        let tmp = TempDir::new().unwrap();
+        let paths = ensure_wrappers(tmp.path()).unwrap();
+        let worktree = tmp.path().join("worktree");
+        let tools = tmp.path().join("tools");
+        let curl_log = tmp.path().join("curl.log");
+        fs::create_dir_all(&worktree).unwrap();
+        fs::create_dir_all(&tools).unwrap();
+
+        let real_codex = tmp.path().join("real-codex");
+        write_executable_if_changed(&real_codex, "#!/bin/sh\nexit 0\n").unwrap();
+        write_executable_if_changed(
+            &tools.join("curl"),
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$IMPALA_CURL_LOG\"\n",
+        )
+        .unwrap();
+
+        let path = std::env::join_paths(std::iter::once(tools).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )))
+        .unwrap();
+        let output = Command::new(paths.root.join("bin/codex"))
+            .args(["--yolo", "resume", "session-1"])
+            .current_dir(&worktree)
+            .env("PATH", path)
+            .env("IMPALA_CODEX_BIN", real_codex)
+            .env("IMPALA_CODEX_APP_SERVER", "unix:///tmp/impala-codex.sock")
+            .env("IMPALA_HOOK_PORT", "60158")
+            .env("IMPALA_WORKTREE_PATH", &worktree)
+            .env("IMPALA_PANE_ID", "terminal-1")
+            .env("IMPALA_CURL_LOG", &curl_log)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output);
+
+        let request = fs::read_to_string(curl_log).unwrap();
+        assert!(request.contains("http://127.0.0.1:60158/codex/launch"));
+        assert!(request.contains(&format!("worktree_path={}", worktree.display())));
+        assert!(request.contains("pane_id=terminal-1"));
+        assert!(request.contains("session_id=session-1"));
     }
 
     #[cfg(unix)]

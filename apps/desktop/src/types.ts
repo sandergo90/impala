@@ -132,7 +132,15 @@ export type TerminalLaunchProfile = "shell" | "agent";
 export type PaneContent =
   | { kind: "terminal"; launch: TerminalLaunchProfile; codexResumeThreadId?: string }
   | { kind: "file"; path: string }
-  | { kind: "browser"; url?: string };
+  | { kind: "browser"; url?: string }
+  | { kind: "subagents"; sourcePaneId: string }
+  | {
+      kind: "subagent-transcript";
+      threadId: string;
+      sourcePaneId: string;
+      name: string;
+      running: boolean;
+    };
 
 export interface GroupTab {
   id: string;
@@ -162,7 +170,7 @@ export interface UserTab {
    * The top-level surface. Terminal startup is described by `terminalLaunch`;
    * File is a static viewer; Browser is a native child webview.
    */
-  kind: "terminal" | "file" | "browser";
+  kind: "terminal" | "file" | "browser" | "subagents" | "subagent-transcript";
   /** Initial process launched by a terminal tab. Live agent activity is runtime state. */
   terminalLaunch?: TerminalLaunchProfile;
   /** Display label shown on the tab. Auto-numbered at creation time (monotonic). */
@@ -177,6 +185,10 @@ export interface UserTab {
   pinned?: boolean;
   /** Current URL; only set when kind === "browser". Persisted so the tab restores. */
   url?: string;
+  /** Source agent identity for promoted subagent views and transcripts. */
+  subagentThreadId?: string;
+  subagentSourcePaneId?: string;
+  subagentRunning?: boolean;
   /**
    * Recursive split tree of panes inside this tab; the leaves' `content` is
    * the source of truth for what each pane shows. Optional for backward
@@ -201,10 +213,9 @@ export interface WorktreeNavState {
   selectedAgentRun: { paneId: string; label: string; contentRef?: string } | null;
   /**
    * ID of the currently active tab inside the terminals pane.
-   * `"tab-agent"` and `"tab-run"` refer to the system tabs. Any other
-   * value is a user-tab ID from `userTabs`. On restore, if the ID no
-   * longer resolves to a visible tab, `TabbedTerminals` falls back to
-   * `"tab-agent"`.
+   * `"tab-agent"` and `"tab-run"` refer to system tabs. Any other value is a
+   * user-tab ID from `userTabs`. On restore, if the ID no longer resolves to
+   * a visible tab, `TabbedTerminals` falls back to `"tab-agent"`.
    */
   activeTerminalsTab: string;
   /** Timestamp (ms) when the setup script was last auto-run; null if never. */

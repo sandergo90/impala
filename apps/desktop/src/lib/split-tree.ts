@@ -7,6 +7,8 @@ function defaultLabel(content: PaneContent): string {
     case "terminal": return content.launch === "agent" ? "Agent" : "Terminal";
     case "file": return content.path.split("/").pop() || content.path;
     case "browser": return "Browser";
+    case "subagents": return "Subagents";
+    case "subagent-transcript": return content.name;
   }
 }
 
@@ -17,7 +19,14 @@ function isCurrentPaneContent(content: unknown): content is PaneContent {
       (value.launch === "shell" || value.launch === "agent")) ||
     (value?.kind === "file" && typeof value.path === "string") ||
     (value?.kind === "browser" &&
-      (value.url === undefined || typeof value.url === "string"))
+      (value.url === undefined || typeof value.url === "string")) ||
+    (value?.kind === "subagents" &&
+      typeof value.sourcePaneId === "string") ||
+    (value?.kind === "subagent-transcript" &&
+      typeof value.threadId === "string" &&
+      typeof value.sourcePaneId === "string" &&
+      typeof value.name === "string" &&
+      typeof value.running === "boolean")
   );
 }
 
@@ -41,6 +50,26 @@ export function normalizePaneContent(
     return {
       kind: "browser",
       ...(typeof content.url === "string" ? { url: content.url } : {}),
+    };
+  }
+  if (
+    content?.kind === "subagents" &&
+    typeof content.sourcePaneId === "string"
+  ) {
+    return { kind: "subagents", sourcePaneId: content.sourcePaneId };
+  }
+  if (
+    content?.kind === "subagent-transcript" &&
+    typeof content.threadId === "string" &&
+    typeof content.sourcePaneId === "string" &&
+    typeof content.name === "string"
+  ) {
+    return {
+      kind: "subagent-transcript",
+      threadId: content.threadId,
+      sourcePaneId: content.sourcePaneId,
+      name: content.name,
+      running: content.running === true,
     };
   }
   return fallback;
