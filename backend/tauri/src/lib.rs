@@ -2423,7 +2423,13 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_, _| {});
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(state) = app.try_state::<codex_app_server::CodexAppServerState>() {
+                    state.shutdown();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

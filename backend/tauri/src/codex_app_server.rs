@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io::Write;
 use std::net::Shutdown;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tungstenite::{client, Message, WebSocket};
@@ -176,6 +179,7 @@ pub struct CodexAppServerState {
     sender: mpsc::Sender<WorkerCommand>,
     state: Arc<Mutex<AppServerState>>,
     model_catalog: Arc<Mutex<Option<CachedModelCatalog>>>,
+    local_process: Arc<Mutex<LocalProcessState>>,
 }
 
 enum WorkerCommand {
@@ -188,12 +192,89 @@ enum WorkerCommand {
         thread_id: String,
         reply: mpsc::Sender<Result<Value, String>>,
     },
+    Shutdown {
+        reply: mpsc::Sender<()>,
+    },
 }
 
 struct PendingCall {
     method: String,
     params: Value,
     reply: mpsc::Sender<Result<Value, String>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PersistedAppServerSource {
+    Managed(PathBuf),
+    Local,
+}
+
+#[derive(Clone)]
+struct LocalProcessControl {
+    child: Arc<Mutex<Child>>,
+    directory: PathBuf,
+    socket: PathBuf,
+}
+
+#[derive(Default)]
+struct LocalProcessState {
+    shutting_down: bool,
+    process: Option<LocalProcessControl>,
+}
+
+struct LocalAppServer {
+    control: LocalProcessControl,
+    process_state: Arc<Mutex<LocalProcessState>>,
+}
+
+struct WorkerConnection {
+    socket: Option<WebSocket<UnixStream>>,
+    local_server: Option<LocalAppServer>,
+    process_state: Arc<Mutex<LocalProcessState>>,
+}
+
+impl WorkerConnection {
+    fn new(process_state: Arc<Mutex<LocalProcessState>>) -> Self {
+        Self {
+            socket: None,
+            local_server: None,
+            process_state,
+        }
+    }
+}
+
+impl LocalAppServer {
+    fn remote(&self) -> String {
+        format!("unix://{}", self.control.socket.display())
+    }
+}
+
+impl LocalProcessControl {
+    fn stop(&self) {
+        if let Ok(mut child) = self.child.lock() {
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        let _ = fs::remove_file(&self.socket);
+        let _ = fs::remove_dir(&self.directory);
+    }
+}
+
+impl Drop for LocalAppServer {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.process_state.lock() {
+            if state
+                .process
+                .as_ref()
+                .is_some_and(|process| Arc::ptr_eq(&process.child, &self.control.child))
+            {
+                state.process = None;
+            }
+        }
+        self.control.stop();
+    }
 }
 
 impl CodexAppServerState {
@@ -207,11 +288,16 @@ impl CodexAppServerState {
             ..AppServerState::default()
         }));
         let worker_state = state.clone();
-        std::thread::spawn(move || app_server_worker(receiver, worker_state, app));
+        let local_process = Arc::new(Mutex::new(LocalProcessState::default()));
+        let worker_local_process = local_process.clone();
+        std::thread::spawn(move || {
+            app_server_worker(receiver, worker_state, worker_local_process, app)
+        });
         Self {
             sender,
             state,
             model_catalog: Arc::new(Mutex::new(None)),
+            local_process,
         }
     }
 
@@ -259,6 +345,25 @@ impl CodexAppServerState {
         self.dispatch("thread/start", params)
     }
 
+    pub fn shutdown(&self) {
+        let local_process = self
+            .local_process
+            .lock()
+            .map(|mut state| {
+                state.shutting_down = true;
+                state.process.clone()
+            })
+            .ok()
+            .flatten();
+        if let Some(process) = &local_process {
+            process.stop();
+        }
+        let (reply, receiver) = mpsc::channel();
+        if self.sender.send(WorkerCommand::Shutdown { reply }).is_ok() {
+            let _ = receiver.recv_timeout(Duration::from_secs(1));
+        }
+    }
+
     pub fn thread_read(&self, thread_id: &str) -> Result<Value, String> {
         self.ensure_owned_thread(thread_id)?;
         self.dispatch(
@@ -292,12 +397,13 @@ impl CodexAppServerState {
         thread_id: &str,
         cwd: &str,
     ) -> Result<String, String> {
+        let codex_home =
+            crate::agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
+        launch_environment(&codex_home)?;
         let thread = self.thread_read_persisted(thread_id)?;
         if !persisted_thread_matches(&thread, thread_id, cwd) {
             return Err("Codex thread/read does not match the MCP source".to_string());
         }
-        let codex_home =
-            crate::agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
         Ok(managed_remote(&codex_home))
     }
 
@@ -723,34 +829,41 @@ fn find_configured_mcp_server(servers: &[DiagnosticsMcpServer]) -> Option<&Diagn
 fn app_server_worker(
     receiver: mpsc::Receiver<WorkerCommand>,
     state: Arc<Mutex<AppServerState>>,
+    process_state: Arc<Mutex<LocalProcessState>>,
     app: tauri::AppHandle,
 ) {
-    let mut socket = None;
+    let mut connection = WorkerConnection::new(process_state);
     let mut pending = HashMap::new();
     let mut next_request_id = 1_u64;
 
     loop {
         while let Ok(command) = receiver.try_recv() {
-            handle_worker_command(
+            if !handle_worker_command(
                 command,
-                &mut socket,
+                &mut connection,
                 &mut pending,
                 &mut next_request_id,
                 &state,
                 &app,
-            );
+            ) {
+                return;
+            }
         }
 
-        let Some(active_socket) = socket.as_mut() else {
+        let Some(active_socket) = connection.socket.as_mut() else {
             match receiver.recv() {
-                Ok(command) => handle_worker_command(
-                    command,
-                    &mut socket,
-                    &mut pending,
-                    &mut next_request_id,
-                    &state,
-                    &app,
-                ),
+                Ok(command) => {
+                    if !handle_worker_command(
+                        command,
+                        &mut connection,
+                        &mut pending,
+                        &mut next_request_id,
+                        &state,
+                        &app,
+                    ) {
+                        return;
+                    }
+                }
                 Err(_) => break,
             }
             continue;
@@ -767,7 +880,7 @@ fn app_server_worker(
                 ),
             },
             Ok(Message::Close(_)) => disconnect(
-                &mut socket,
+                &mut connection.socket,
                 &mut pending,
                 &state,
                 "Codex app-server disconnected".to_string(),
@@ -775,7 +888,7 @@ fn app_server_worker(
             Ok(_) => {}
             Err(error) if is_poll_timeout(&error) => {}
             Err(error) => disconnect(
-                &mut socket,
+                &mut connection.socket,
                 &mut pending,
                 &state,
                 format!("read Codex app-server message: {error}"),
@@ -786,12 +899,12 @@ fn app_server_worker(
 
 fn handle_worker_command(
     command: WorkerCommand,
-    socket: &mut Option<WebSocket<UnixStream>>,
+    connection: &mut WorkerConnection,
     pending: &mut HashMap<String, PendingCall>,
     next_request_id: &mut u64,
     state: &Arc<Mutex<AppServerState>>,
     app: &tauri::AppHandle,
-) {
+) -> bool {
     match command {
         WorkerCommand::Request {
             method,
@@ -805,47 +918,73 @@ fn handle_worker_command(
                 let thread_id = params.get("threadId").and_then(Value::as_str);
                 if !thread_id.map(|id| is_owned(state, id)).unwrap_or(false) {
                     let _ = reply.send(Err("Codex thread is not Impala-owned".to_string()));
-                    return;
+                    return true;
                 }
             }
             send_worker_request(
-                method,
-                params,
-                reply,
-                socket,
+                PendingCall {
+                    method,
+                    params,
+                    reply,
+                },
+                false,
+                connection,
                 pending,
                 next_request_id,
                 state,
                 app,
             );
+            true
         }
         WorkerCommand::ReadPersistedThread { thread_id, reply } => {
             let (method, params) = persisted_thread_read_request(&thread_id);
             send_worker_request(
-                method.to_string(),
-                params,
-                reply,
-                socket,
+                PendingCall {
+                    method: method.to_string(),
+                    params,
+                    reply,
+                },
+                true,
+                connection,
                 pending,
                 next_request_id,
                 state,
                 app,
             );
+            true
+        }
+        WorkerCommand::Shutdown { reply } => {
+            connection.socket = None;
+            connection.local_server = None;
+            fail_pending_calls(pending, "Codex app-server worker stopped");
+            let _ = reply.send(());
+            false
         }
     }
 }
 
 fn send_worker_request(
-    method: String,
-    params: Value,
-    reply: mpsc::Sender<Result<Value, String>>,
-    socket: &mut Option<WebSocket<UnixStream>>,
+    call: PendingCall,
+    allow_local: bool,
+    connection: &mut WorkerConnection,
     pending: &mut HashMap<String, PendingCall>,
     next_request_id: &mut u64,
     state: &Arc<Mutex<AppServerState>>,
     app: &tauri::AppHandle,
 ) {
-    if let Err(error) = ensure_connection(socket, pending, state, app, next_request_id) {
+    let PendingCall {
+        method,
+        params,
+        reply,
+    } = call;
+    if let Err(error) = ensure_connection(
+        connection,
+        pending,
+        state,
+        app,
+        next_request_id,
+        allow_local,
+    ) {
         record_connection_error(state, error.clone());
         let _ = reply.send(Err(error));
         return;
@@ -859,12 +998,12 @@ fn send_worker_request(
             return;
         }
     };
-    if let Some(active_socket) = socket.as_mut() {
+    if let Some(active_socket) = connection.socket.as_mut() {
         if let Err(error) = send_json(
             active_socket,
             json!({ "id": id, "method": method, "params": params }),
         ) {
-            disconnect(socket, pending, state, error.clone());
+            disconnect(&mut connection.socket, pending, state, error.clone());
             let _ = reply.send(Err(error));
         } else {
             pending.insert(
@@ -880,20 +1019,56 @@ fn send_worker_request(
 }
 
 fn ensure_connection(
-    socket: &mut Option<WebSocket<UnixStream>>,
+    connection: &mut WorkerConnection,
     pending: &mut HashMap<String, PendingCall>,
     state: &Arc<Mutex<AppServerState>>,
     app: &tauri::AppHandle,
     next_request_id: &mut u64,
+    allow_local: bool,
 ) -> Result<(), String> {
-    if socket.is_some() {
-        return Ok(());
+    if connection.socket.is_some() {
+        if allow_local || connection.local_server.is_none() {
+            return Ok(());
+        }
+        connection.socket = None;
+        connection.local_server = None;
     }
     let codex_home =
         crate::agent_config::codex_home_path().ok_or_else(|| "no Codex home".to_string())?;
-    // This worker is the single launch gate for the managed CODEX_HOME.
-    launch_environment(&codex_home)?;
-    let remote = managed_remote(&codex_home);
+    let remote = match persisted_app_server_source(&codex_home) {
+        PersistedAppServerSource::Managed(_) => {
+            connection.local_server = None;
+            launch_environment(&codex_home)?;
+            managed_remote(&codex_home)
+        }
+        PersistedAppServerSource::Local if allow_local => {
+            let exited = match connection.local_server.as_mut() {
+                Some(server) => server
+                    .control
+                    .child
+                    .lock()
+                    .map_err(|_| "local Codex app-server process lock poisoned".to_string())?
+                    .try_wait()
+                    .map_err(|error| format!("check local Codex app-server: {error}"))?
+                    .is_some(),
+                None => false,
+            };
+            if exited {
+                connection.local_server = None;
+            }
+            if connection.local_server.is_none() {
+                connection.local_server = Some(launch_local_app_server(
+                    &codex_home,
+                    connection.process_state.clone(),
+                )?);
+            }
+            connection.local_server.as_ref().unwrap().remote()
+        }
+        PersistedAppServerSource::Local => {
+            launch_environment(&codex_home)?;
+            managed_remote(&codex_home)
+        }
+    };
     let mut connected = connect_with_poll_timeout(&remote)?;
     let initialize_id = Value::from(*next_request_id);
     *next_request_id += 1;
@@ -922,9 +1097,112 @@ fn ensure_connection(
         managed_state.connection.version = Some(initialized);
         managed_state.connection.last_error = None;
     }
-    *socket = Some(connected);
-    reconnect_owned_threads(socket, pending, state, app, next_request_id);
+    connection.socket = Some(connected);
+    if connection.local_server.is_none() {
+        reconnect_owned_threads(&mut connection.socket, pending, state, app, next_request_id);
+    }
     Ok(())
+}
+
+fn persisted_app_server_source(codex_home: &Path) -> PersistedAppServerSource {
+    let managed = codex_home.join("packages/standalone/current/codex");
+    if managed.is_file() {
+        PersistedAppServerSource::Managed(managed)
+    } else {
+        PersistedAppServerSource::Local
+    }
+}
+
+fn launch_local_app_server(
+    codex_home: &Path,
+    process_state: Arc<Mutex<LocalProcessState>>,
+) -> Result<LocalAppServer, String> {
+    if process_state
+        .lock()
+        .map_err(|_| "local Codex app-server process lock poisoned".to_string())?
+        .shutting_down
+    {
+        return Err("Codex app-server worker stopped".to_string());
+    }
+    let directory = fs::canonicalize("/tmp")
+        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+        .join(format!("impala-codex-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&directory)
+        .map_err(|error| format!("create {}: {error}", directory.display()))?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("secure {}: {error}", directory.display()))?;
+    let socket = directory.join("app-server.sock");
+    let remote = format!("unix://{}", socket.display());
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let child = Command::new(&shell)
+        .args(local_app_server_shell_args(Path::new(&shell)))
+        .env("IMPALA_CODEX_TRANSCRIPT_HOME", codex_home)
+        .env("IMPALA_CODEX_TRANSCRIPT_SERVER", &remote)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("launch local Codex app-server through {shell}: {error}"))?;
+    let control = LocalProcessControl {
+        child: Arc::new(Mutex::new(child)),
+        directory,
+        socket,
+    };
+    let server = LocalAppServer {
+        control: control.clone(),
+        process_state,
+    };
+    let mut stdin = server
+        .control
+        .child
+        .lock()
+        .map_err(|_| "local Codex app-server process lock poisoned".to_string())?
+        .stdin
+        .take()
+        .ok_or_else(|| "open local Codex app-server shell input".to_string())?;
+    stdin
+        .write_all(b"exec /usr/bin/env CODEX_HOME=\"$IMPALA_CODEX_TRANSCRIPT_HOME\" codex app-server --listen \"$IMPALA_CODEX_TRANSCRIPT_SERVER\"\n")
+        .map_err(|error| format!("start local Codex app-server: {error}"))?;
+    drop(stdin);
+    let mut state = server
+        .process_state
+        .lock()
+        .map_err(|_| "local Codex app-server process lock poisoned".to_string())?;
+    if state.shutting_down {
+        drop(state);
+        return Err("Codex app-server worker stopped".to_string());
+    }
+    state.process = Some(control);
+    drop(state);
+    let deadline = Instant::now() + REQUEST_TIMEOUT;
+    loop {
+        if server.control.socket.exists() {
+            return Ok(server);
+        }
+        if let Some(status) = server
+            .control
+            .child
+            .lock()
+            .map_err(|_| "local Codex app-server process lock poisoned".to_string())?
+            .try_wait()
+            .map_err(|error| format!("wait for local Codex app-server: {error}"))?
+        {
+            return Err(format!(
+                "Local Codex app-server exited with {status}; ensure `codex` is available in your login shell"
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err("Local Codex app-server did not create its socket".to_string());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn local_app_server_shell_args(shell: &Path) -> &'static [&'static str] {
+    match shell.file_name().and_then(|name| name.to_str()) {
+        Some("csh" | "tcsh") => &["-l"],
+        _ => &["-l", "-i"],
+    }
 }
 
 fn reconnect_owned_threads(
@@ -2222,6 +2500,62 @@ mod tests {
             "unix:///tmp/app-server-control/app-server-control.sock",
             codex_home,
         ));
+    }
+
+    #[test]
+    fn persisted_reads_fall_back_without_a_managed_standalone() {
+        let codex_home = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            persisted_app_server_source(codex_home.path()),
+            PersistedAppServerSource::Local
+        );
+    }
+
+    #[test]
+    fn local_transcript_server_does_not_launch_during_shutdown() {
+        let codex_home = tempfile::tempdir().unwrap();
+        let process_state = Arc::new(Mutex::new(LocalProcessState {
+            shutting_down: true,
+            process: None,
+        }));
+
+        assert_eq!(
+            launch_local_app_server(codex_home.path(), process_state).err(),
+            Some("Codex app-server worker stopped".to_string())
+        );
+    }
+
+    #[test]
+    fn local_transcript_server_uses_shell_specific_login_arguments() {
+        assert_eq!(local_app_server_shell_args(Path::new("/bin/tcsh")), &["-l"]);
+        assert_eq!(
+            local_app_server_shell_args(Path::new("/bin/zsh")),
+            &["-l", "-i"]
+        );
+    }
+
+    #[test]
+    #[ignore = "requires a local Codex CLI and persisted thread"]
+    fn reads_a_persisted_thread_through_the_local_cli() {
+        let codex_home = PathBuf::from(std::env::var("IMPALA_TEST_CODEX_HOME").unwrap());
+        let thread_id = std::env::var("IMPALA_TEST_CODEX_THREAD_ID").unwrap();
+        let server = launch_local_app_server(
+            &codex_home,
+            Arc::new(Mutex::new(LocalProcessState::default())),
+        )
+        .unwrap();
+        let mut socket = initialize_client(&server.remote()).unwrap();
+
+        let thread = request(
+            &mut socket,
+            2,
+            "thread/read",
+            json!({ "threadId": thread_id, "includeTurns": true }),
+        )
+        .unwrap();
+
+        assert_eq!(thread["thread"]["id"], thread_id);
     }
 
     #[test]
