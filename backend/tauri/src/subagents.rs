@@ -921,7 +921,7 @@ fn codex_session_is_complete(path: &Path) -> bool {
                 let value = serde_json::from_str::<Value>(line).ok()?;
                 (value["type"] == "event_msg")
                     .then(|| match value["payload"]["type"].as_str() {
-                        Some("task_complete") => Some(true),
+                        Some("task_complete") | Some("turn_aborted") => Some(true),
                         Some("task_started") => Some(false),
                         _ => None,
                     })
@@ -959,7 +959,7 @@ mod tests {
             &rollout,
             [
                 event("task_started"),
-                event("task_complete"),
+                event("turn_aborted"),
                 event("task_started"),
             ]
             .join("\n"),
@@ -971,7 +971,7 @@ mod tests {
             &rollout,
             [
                 event("task_started"),
-                event("task_complete"),
+                event("turn_aborted"),
                 event("task_started"),
                 event("task_complete"),
             ]
@@ -1550,8 +1550,8 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_refreshes_codex_completion_written_after_last_hook() {
-        let workspace = temp_workspace("codex-late-completion");
+    fn snapshot_marks_interrupted_codex_subagent_done() {
+        let workspace = temp_workspace("codex-interrupted");
         let sessions = workspace.join(".impala/codex/sessions/2026/07/22");
         fs::create_dir_all(&sessions).unwrap();
         fs::write(
@@ -1594,8 +1594,7 @@ mod tests {
             serde_json::json!({
                 "type": "event_msg",
                 "payload": {
-                    "type": "task_complete",
-                    "last_agent_message": "Codex."
+                    "type": "turn_aborted"
                 }
             })
             .to_string(),
