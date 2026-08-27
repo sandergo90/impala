@@ -727,6 +727,20 @@ fn codex_session_metadata(path: &Path) -> Option<Value> {
     None
 }
 
+pub(crate) fn codex_parent_session_id(
+    transcript_path: &str,
+    session_id: &str,
+    worktree_path: &str,
+) -> Option<String> {
+    let payload = codex_session_metadata(Path::new(transcript_path))?;
+    let file_session_id = payload["id"]
+        .as_str()
+        .or_else(|| payload["session_id"].as_str());
+    (file_session_id == Some(session_id) && payload["cwd"].as_str() == Some(worktree_path))
+        .then(|| payload["parent_thread_id"].as_str().map(str::to_owned))
+        .flatten()
+}
+
 fn codex_session_descends_from(
     files: &[PathBuf],
     session_id: &str,

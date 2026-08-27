@@ -1598,6 +1598,8 @@ struct PaneIdentity {
 struct PersistedCodexPane {
     worktree_path: String,
     pane_id: String,
+    #[serde(default)]
+    session_id: String,
     provider: String,
 }
 
@@ -1607,30 +1609,30 @@ impl PaneRegistry {
     }
 
     fn from_persisted(entries: Vec<PersistedCodexPane>) -> Self {
-        let panes = entries
-            .into_iter()
-            .filter(|entry| {
-                entry.provider == "codex"
-                    && !entry.worktree_path.is_empty()
-                    && !entry.pane_id.is_empty()
-                    && Path::new(&entry.worktree_path).is_dir()
-            })
-            .map(|entry| {
-                (
-                    format!("pty-{}-{}", entry.pane_id, entry.worktree_path),
-                    PaneIdentity {
-                        worktree_path: entry.worktree_path,
-                        pane_id: entry.pane_id,
-                        provider: entry.provider,
-                        attached: false,
-                    },
-                )
-            })
-            .collect();
-        Self(Mutex::new(PaneRegistryState {
-            panes,
-            ..PaneRegistryState::default()
-        }))
+        let mut state = PaneRegistryState::default();
+        for entry in entries.into_iter().filter(|entry| {
+            entry.provider == "codex"
+                && !entry.worktree_path.is_empty()
+                && !entry.pane_id.is_empty()
+                && Path::new(&entry.worktree_path).is_dir()
+        }) {
+            if !entry.session_id.is_empty() {
+                state.codex_sessions.insert(
+                    (entry.worktree_path.clone(), entry.session_id),
+                    entry.pane_id.clone(),
+                );
+            }
+            state.panes.insert(
+                format!("pty-{}-{}", entry.pane_id, entry.worktree_path),
+                PaneIdentity {
+                    worktree_path: entry.worktree_path,
+                    pane_id: entry.pane_id,
+                    provider: entry.provider,
+                    attached: false,
+                },
+            );
+        }
+        Self(Mutex::new(state))
     }
 
     #[cfg(test)]
@@ -1858,6 +1860,17 @@ fn hook_target_for_identity(
             return (target, "codex".to_string());
         }
     }
+    let parent_session_id = hook_identity.and_then(|value| {
+        crate::subagents::codex_parent_session_id(
+            value["transcript_path"].as_str()?,
+            session_id?,
+            cwd?,
+        )
+    });
+    let routing_session_id = parent_session_id.as_deref().or(session_id);
+    let is_subagent = hook_identity
+        .and_then(|value| value["agent_id"].as_str())
+        .is_some_and(|agent_id| !agent_id.is_empty());
     let worktree_path = params.get("worktree_path").cloned().unwrap_or_default();
     let pane_id = params.get("pane_id").cloned().unwrap_or_default();
     let provider = params.get("agent_provider").cloned().unwrap_or_default();
@@ -1865,7 +1878,7 @@ fn hook_target_for_identity(
         if let Some(cwd) = cwd {
             if let Some(target) = pane_registry.registered_codex_pane_for_hook(
                 cwd,
-                session_id,
+                routing_session_id,
                 params
                     .get("event_type")
                     .is_some_and(|event| event == "SessionStart"),
@@ -1880,6 +1893,9 @@ fn hook_target_for_identity(
             return ((worktree_path, pane_id), provider);
         }
         if let Some(cwd) = cwd {
+            if is_subagent {
+                return ((String::new(), String::new()), provider);
+            }
             if let Some(target) = pane_registry.codex_pane_for_hook(cwd, session_id) {
                 return (target, provider);
             }
@@ -1900,6 +1916,14 @@ fn hook_target_for_identity(
                 {
                     return (target, "codex".to_string());
                 }
+            }
+            if let Some(target) =
+                pane_registry.registered_codex_pane_for_hook(cwd, routing_session_id, false)
+            {
+                return (target, "codex".to_string());
+            }
+            if is_subagent {
+                return ((String::new(), String::new()), "codex".to_string());
             }
             if let Some(target) = pane_registry.codex_pane_for_hook(cwd, session_id) {
                 return (target, "codex".to_string());
@@ -3342,11 +3366,13 @@ mod tests {
             PersistedCodexPane {
                 worktree_path: worktree.to_string(),
                 pane_id: "stale-pane".to_string(),
+                session_id: "stale-thread".to_string(),
                 provider: "codex".to_string(),
             },
             PersistedCodexPane {
                 worktree_path: worktree.to_string(),
                 pane_id: "tab-agent".to_string(),
+                session_id: "thread-1".to_string(),
                 provider: "codex".to_string(),
             },
         ]);
@@ -3374,6 +3400,87 @@ mod tests {
                 (worktree.to_string(), "tab-agent".to_string()),
                 "codex".to_string(),
             )
+        );
+    }
+
+    #[test]
+    fn persisted_codex_sessions_keep_subagent_hooks_in_their_own_pane() {
+        let temp = tempfile::tempdir().unwrap();
+        let worktree = temp.path().to_str().unwrap();
+        let transcript = temp.path().join("child.jsonl");
+        fs::write(
+            &transcript,
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": "child-b",
+                    "cwd": worktree,
+                    "parent_thread_id": "thread-b",
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let persisted = serde_json::from_value(serde_json::json!([
+            {
+                "worktree_path": worktree,
+                "pane_id": "tab-agent",
+                "session_id": "thread-a",
+                "provider": "codex",
+            },
+            {
+                "worktree_path": worktree,
+                "pane_id": "pane-b",
+                "session_id": "thread-b",
+                "provider": "codex",
+            }
+        ]))
+        .unwrap();
+        let registry = PaneRegistry::from_persisted(persisted);
+        registry.record_spawn(
+            &format!("pty-tab-agent-{worktree}"),
+            worktree,
+            "tab-agent",
+            "codex",
+            true,
+        );
+        registry.record_spawn(
+            &format!("pty-pane-b-{worktree}"),
+            worktree,
+            "pane-b",
+            "codex",
+            true,
+        );
+
+        assert_eq!(
+            hook_target_for_identity(
+                &AgentDelegations::default(),
+                &registry,
+                &HashMap::new(),
+                Some(&serde_json::json!({
+                    "session_id": "child-b",
+                    "cwd": worktree,
+                    "transcript_path": transcript,
+                    "agent_id": "agent-b",
+                })),
+            ),
+            (
+                (worktree.to_string(), "pane-b".to_string()),
+                "codex".to_string(),
+            )
+        );
+        assert_eq!(
+            hook_target_for_identity(
+                &AgentDelegations::default(),
+                &registry,
+                &HashMap::new(),
+                Some(&serde_json::json!({
+                    "session_id": "unknown-child",
+                    "cwd": worktree,
+                    "agent_id": "unknown-agent",
+                })),
+            ),
+            ((String::new(), String::new()), "codex".to_string())
         );
     }
 
@@ -3602,6 +3709,7 @@ mod tests {
         let registry = PaneRegistry::from_persisted(vec![PersistedCodexPane {
             worktree_path: worktree.to_string(),
             pane_id: "tab-agent".to_string(),
+            session_id: "resumed-thread".to_string(),
             provider: "codex".to_string(),
         }]);
 
