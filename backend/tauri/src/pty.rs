@@ -130,9 +130,12 @@ pub async fn pty_resize(
 #[tauri::command]
 pub async fn pty_kill(
     state: tauri::State<'_, DaemonState>,
+    pane_registry: tauri::State<'_, std::sync::Arc<crate::hook_server::PaneRegistry>>,
     session_id: String,
 ) -> Result<(), String> {
-    kill_session(&state, &session_id).await
+    kill_session(&state, &session_id).await?;
+    pane_registry.detach(&session_id);
+    Ok(())
 }
 
 pub(crate) async fn kill_session(state: &DaemonState, session_id: &str) -> Result<(), String> {

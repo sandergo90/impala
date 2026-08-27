@@ -1591,6 +1591,7 @@ struct PaneIdentity {
     worktree_path: String,
     pane_id: String,
     provider: String,
+    attached: bool,
 }
 
 #[derive(Deserialize)]
@@ -1621,6 +1622,7 @@ impl PaneRegistry {
                         worktree_path: entry.worktree_path,
                         pane_id: entry.pane_id,
                         provider: entry.provider,
+                        attached: false,
                     },
                 )
             })
@@ -1652,14 +1654,44 @@ impl PaneRegistry {
                 worktree_path: worktree_path.to_owned(),
                 pane_id: pane_id.to_owned(),
                 provider: provider.to_owned(),
+                attached: true,
             };
             if reattached {
                 state
                     .panes
                     .entry(pty_session_id.to_owned())
+                    .and_modify(|pane| pane.attached = true)
                     .or_insert(identity);
             } else {
                 state.panes.insert(pty_session_id.to_owned(), identity);
+            }
+        }
+    }
+
+    pub fn detach(&self, pty_session_id: &str) {
+        let Ok(mut state) = self.0.lock() else {
+            return;
+        };
+        let Some(detached) = state.panes.remove(pty_session_id) else {
+            return;
+        };
+        if state.panes.values().any(|pane| {
+            pane.attached
+                && pane.worktree_path == detached.worktree_path
+                && pane.pane_id == detached.pane_id
+        }) {
+            return;
+        }
+        state.codex_sessions.retain(|(worktree, _), pane_id| {
+            worktree != &detached.worktree_path || pane_id != &detached.pane_id
+        });
+        if let Some(queue) = state
+            .pending_codex_launches
+            .get_mut(&detached.worktree_path)
+        {
+            queue.retain(|launch| launch.pane_id != detached.pane_id);
+            if queue.is_empty() {
+                state.pending_codex_launches.remove(&detached.worktree_path);
             }
         }
     }
@@ -1703,48 +1735,86 @@ impl PaneRegistry {
     /// announcement binds the new session first; legacy sessions retain the
     /// primary-pane fallback when the cwd alone is ambiguous.
     fn codex_pane_for_hook(&self, cwd: &str, session_id: Option<&str>) -> Option<(String, String)> {
+        self.codex_pane_for_hook_inner(cwd, session_id, false, true)
+    }
+
+    fn registered_codex_pane_for_hook(
+        &self,
+        cwd: &str,
+        session_id: Option<&str>,
+        consume_pending_launch: bool,
+    ) -> Option<(String, String)> {
+        self.codex_pane_for_hook_inner(cwd, session_id, consume_pending_launch, false)
+    }
+
+    fn codex_pane_for_hook_inner(
+        &self,
+        cwd: &str,
+        session_id: Option<&str>,
+        consume_pending_launch: bool,
+        allow_fallback: bool,
+    ) -> Option<(String, String)> {
         let mut state = self.0.lock().ok()?;
+        let worktree_path = state
+            .panes
+            .values()
+            .filter(|pane| {
+                pane.attached
+                    && pane.provider == "codex"
+                    && Path::new(cwd).starts_with(Path::new(&pane.worktree_path))
+            })
+            .max_by_key(|pane| Path::new(&pane.worktree_path).components().count())
+            .map(|pane| pane.worktree_path.clone())
+            .unwrap_or_else(|| cwd.to_owned());
+        if consume_pending_launch {
+            let now = chrono::Utc::now().timestamp_millis();
+            let pending = state
+                .pending_codex_launches
+                .get_mut(&worktree_path)
+                .and_then(|queue| {
+                    while queue
+                        .front()
+                        .is_some_and(|launch| now - launch.recorded_at > 30_000)
+                    {
+                        queue.pop_front();
+                    }
+                    queue.pop_front()
+                });
+            if let Some(pending) = pending {
+                if let Some(session_id) = session_id {
+                    state.codex_sessions.insert(
+                        (worktree_path.clone(), session_id.to_owned()),
+                        pending.pane_id.clone(),
+                    );
+                }
+                return Some((worktree_path, pending.pane_id));
+            }
+        }
+
         if let Some(session_id) = session_id {
             if let Some(pane_id) = state
                 .codex_sessions
-                .get(&(cwd.to_owned(), session_id.to_owned()))
+                .get(&(worktree_path.clone(), session_id.to_owned()))
             {
-                return Some((cwd.to_owned(), pane_id.clone()));
+                return Some((worktree_path, pane_id.clone()));
             }
         }
 
-        let now = chrono::Utc::now().timestamp_millis();
-        let pending = state.pending_codex_launches.get_mut(cwd).and_then(|queue| {
-            while queue
-                .front()
-                .is_some_and(|launch| now - launch.recorded_at > 30_000)
-            {
-                queue.pop_front();
-            }
-            queue.pop_front()
-        });
-        if let Some(pending) = pending {
-            if let Some(session_id) = session_id {
-                state.codex_sessions.insert(
-                    (cwd.to_owned(), session_id.to_owned()),
-                    pending.pane_id.clone(),
-                );
-            }
-            return Some((cwd.to_owned(), pending.pane_id));
+        if !allow_fallback {
+            return None;
         }
 
         let mut only: Option<&PaneIdentity> = None;
-        for pane in state
-            .panes
-            .values()
-            .filter(|pane| pane.provider == "codex" && pane.worktree_path == cwd)
-        {
+        for pane in state.panes.values().filter(|pane| {
+            pane.attached && pane.provider == "codex" && pane.worktree_path == worktree_path
+        }) {
             if pane.pane_id == "tab-agent" {
                 let target = (pane.worktree_path.clone(), pane.pane_id.clone());
                 if let Some(session_id) = session_id {
-                    state
-                        .codex_sessions
-                        .insert((cwd.to_owned(), session_id.to_owned()), target.1.clone());
+                    state.codex_sessions.insert(
+                        (worktree_path.clone(), session_id.to_owned()),
+                        target.1.clone(),
+                    );
                 }
                 return Some(target);
             }
@@ -1758,9 +1828,20 @@ impl PaneRegistry {
         if let (Some((_, pane_id)), Some(session_id)) = (&target, session_id) {
             state
                 .codex_sessions
-                .insert((cwd.to_owned(), session_id.to_owned()), pane_id.clone());
+                .insert((worktree_path, session_id.to_owned()), pane_id.clone());
         }
         target
+    }
+
+    fn is_attached_codex_pane(&self, worktree_path: &str, pane_id: &str) -> bool {
+        self.0.lock().is_ok_and(|state| {
+            state.panes.values().any(|pane| {
+                pane.attached
+                    && pane.provider == "codex"
+                    && pane.worktree_path == worktree_path
+                    && pane.pane_id == pane_id
+            })
+        })
     }
 }
 
@@ -1779,20 +1860,53 @@ fn hook_target_for_identity(
     }
     let worktree_path = params.get("worktree_path").cloned().unwrap_or_default();
     let pane_id = params.get("pane_id").cloned().unwrap_or_default();
+    let provider = params.get("agent_provider").cloned().unwrap_or_default();
+    if provider == "codex" {
+        if let Some(cwd) = cwd {
+            if let Some(target) = pane_registry.registered_codex_pane_for_hook(
+                cwd,
+                session_id,
+                params
+                    .get("event_type")
+                    .is_some_and(|event| event == "SessionStart"),
+            ) {
+                return (target, provider);
+            }
+        }
+        if !worktree_path.is_empty()
+            && !pane_id.is_empty()
+            && pane_registry.is_attached_codex_pane(&worktree_path, &pane_id)
+        {
+            return ((worktree_path, pane_id), provider);
+        }
+        if let Some(cwd) = cwd {
+            if let Some(target) = pane_registry.codex_pane_for_hook(cwd, session_id) {
+                return (target, provider);
+            }
+        }
+        return ((String::new(), String::new()), provider);
+    }
     // Empty identity params mean the hook ran outside a pane shell — for
     // Codex app-server sessions that's the daemon, whose env has no pane
     // vars. Recover the pane from the payload's cwd via the spawn registry.
     if worktree_path.is_empty() && pane_id.is_empty() {
         if let Some(cwd) = cwd {
+            if params
+                .get("event_type")
+                .is_some_and(|event| event == "SessionStart")
+            {
+                if let Some(target) =
+                    pane_registry.registered_codex_pane_for_hook(cwd, session_id, true)
+                {
+                    return (target, "codex".to_string());
+                }
+            }
             if let Some(target) = pane_registry.codex_pane_for_hook(cwd, session_id) {
                 return (target, "codex".to_string());
             }
         }
     }
-    (
-        (worktree_path, pane_id),
-        params.get("agent_provider").cloned().unwrap_or_default(),
-    )
+    ((worktree_path, pane_id), provider)
 }
 
 const IMPALA_REVIEW_SKILL: &str = r#"---
@@ -3183,6 +3297,8 @@ mod tests {
     #[test]
     fn unmatched_codex_hook_keeps_its_legacy_provider_and_pane() {
         let delegations = AgentDelegations::default();
+        let registry = PaneRegistry::default();
+        registry.record("pty-alternate-pane", "/worktree", "alternate-pane", "codex");
         let remote = format!(
             "unix://{}",
             crate::agent_config::codex_home_path()
@@ -3206,7 +3322,7 @@ mod tests {
         assert_eq!(
             hook_target_for_identity(
                 &delegations,
-                &PaneRegistry::default(),
+                &registry,
                 &params,
                 Some(&serde_json::json!({ "session_id": "alternate-thread", "cwd": "/worktree" })),
             ),
@@ -3214,6 +3330,130 @@ mod tests {
                 ("/worktree".to_string(), "alternate-pane".to_string()),
                 "codex".to_string(),
             )
+        );
+    }
+
+    #[test]
+    fn codex_hook_ignores_a_stale_unattached_app_server_pane() {
+        let delegations = AgentDelegations::default();
+        let worktree = std::env::temp_dir();
+        let worktree = worktree.to_str().unwrap();
+        let registry = PaneRegistry::from_persisted(vec![
+            PersistedCodexPane {
+                worktree_path: worktree.to_string(),
+                pane_id: "stale-pane".to_string(),
+                provider: "codex".to_string(),
+            },
+            PersistedCodexPane {
+                worktree_path: worktree.to_string(),
+                pane_id: "tab-agent".to_string(),
+                provider: "codex".to_string(),
+            },
+        ]);
+        registry.record_spawn(
+            &format!("pty-tab-agent-{worktree}"),
+            worktree,
+            "tab-agent",
+            "claude",
+            true,
+        );
+        let params = HashMap::from([
+            ("worktree_path".to_string(), worktree.to_string()),
+            ("pane_id".to_string(), "stale-pane".to_string()),
+            ("agent_provider".to_string(), "codex".to_string()),
+        ]);
+
+        assert_eq!(
+            hook_target_for_identity(
+                &delegations,
+                &registry,
+                &params,
+                Some(&serde_json::json!({ "session_id": "thread-1", "cwd": worktree })),
+            ),
+            (
+                (worktree.to_string(), "tab-agent".to_string()),
+                "codex".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn only_session_start_consumes_a_pending_interactive_resume() {
+        let registry = PaneRegistry::default();
+
+        assert!(registry.record_codex_launch("/worktree", "pane-1", None));
+        assert_eq!(
+            registry.registered_codex_pane_for_hook("/worktree", Some("thread-1"), true),
+            Some(("/worktree".to_string(), "pane-1".to_string()))
+        );
+        assert!(registry.record_codex_launch("/worktree", "pane-2", None));
+        // An ordinary hook from the existing session must not steal pane-2's
+        // pending launch.
+        assert_eq!(
+            registry.codex_pane_for_hook("/worktree", Some("thread-1")),
+            Some(("/worktree".to_string(), "pane-1".to_string()))
+        );
+        assert_eq!(
+            registry.registered_codex_pane_for_hook("/worktree", Some("thread-1"), true),
+            Some(("/worktree".to_string(), "pane-2".to_string()))
+        );
+    }
+
+    #[test]
+    fn codex_hook_from_subdirectory_uses_owning_worktree_launch() {
+        let delegations = AgentDelegations::default();
+        let registry = PaneRegistry::default();
+        let worktree = "/worktree";
+        registry.record("pty-terminal-1", worktree, "terminal-1", "codex");
+        assert!(registry.record_codex_launch(worktree, "terminal-1", None));
+
+        let params = HashMap::from([
+            ("event_type".to_string(), "SessionStart".to_string()),
+            ("worktree_path".to_string(), worktree.to_string()),
+            ("pane_id".to_string(), "stale-pane".to_string()),
+            ("agent_provider".to_string(), "codex".to_string()),
+        ]);
+        assert_eq!(
+            hook_target_for_identity(
+                &delegations,
+                &registry,
+                &params,
+                Some(&serde_json::json!({
+                    "session_id": "thread-1",
+                    "cwd": "/worktree/nested"
+                })),
+            ),
+            (
+                (worktree.to_string(), "terminal-1".to_string()),
+                "codex".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn closed_codex_pane_rejects_stale_app_server_hooks() {
+        let delegations = AgentDelegations::default();
+        let registry = PaneRegistry::default();
+        registry.record("pty-terminal-1", "/worktree", "terminal-1", "codex");
+        assert!(registry.record_codex_launch("/worktree", "terminal-1", Some("thread-1")));
+        registry.detach("pty-terminal-1");
+        let params = HashMap::from([
+            ("worktree_path".to_string(), "/worktree".to_string()),
+            ("pane_id".to_string(), "terminal-1".to_string()),
+            ("agent_provider".to_string(), "codex".to_string()),
+        ]);
+
+        assert_eq!(
+            hook_target_for_identity(
+                &delegations,
+                &registry,
+                &params,
+                Some(&serde_json::json!({
+                    "session_id": "thread-1",
+                    "cwd": "/worktree"
+                })),
+            ),
+            ((String::new(), String::new()), "codex".to_string())
         );
     }
 
@@ -3277,7 +3517,7 @@ mod tests {
             hook_target_for_identity(
                 &delegations,
                 &registry,
-                &empty_params,
+                &HashMap::from([("event_type".to_string(), "SessionStart".to_string())]),
                 Some(&terminal_identity),
             ),
             (
@@ -3292,7 +3532,7 @@ mod tests {
             hook_target_for_identity(
                 &delegations,
                 &registry,
-                &empty_params,
+                &HashMap::from([("event_type".to_string(), "SessionStart".to_string())]),
                 Some(&second_terminal_identity),
             ),
             (
