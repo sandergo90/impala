@@ -97,12 +97,12 @@ export function CommandPalette({
 
   return (
     <div className="fixed inset-0 z-50" onClick={onClose}>
-      <div className="fixed inset-0 bg-black/40" />
+      <div className="fixed inset-0 bg-black/40 animate-in fade-in-0 duration-100" />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-[640px]"
+        className="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-[640px] animate-in fade-in-0 zoom-in-95 duration-100"
         onClick={(e) => e.stopPropagation()}
       >
         <Command

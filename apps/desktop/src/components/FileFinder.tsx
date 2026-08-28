@@ -101,12 +101,12 @@ export function FileFinder({
 
   return (
     <div className="fixed inset-0 z-50" onClick={onClose}>
-      <div className="fixed inset-0 bg-black/40" aria-hidden="true" />
+      <div className="fixed inset-0 bg-black/40 animate-in fade-in-0 duration-100" aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Search files"
-        className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-[640px]"
+        className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-[640px] animate-in fade-in-0 zoom-in-95 duration-100"
         onClick={(e) => e.stopPropagation()}
       >
         <Command

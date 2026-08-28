@@ -172,7 +172,7 @@ This system explicitly rejects, per PRODUCT.md: *cramped low-contrast controls, 
 - **Hairline structure.** 1px `border-border`, frequently at `/40`–`/70` opacity, is the only divider vocabulary.
 - **Compact but not cramped.** Rows are 28–36px, panel headers 44px, the activity rail 40px wide.
 - **One family, four sizes.** Geist Variable at 12/14/16/18px carries the entire product UI; monospace appears only where content is code.
-- **Motion is state feedback only.** 150ms color transitions, 100ms overlay fades. Nothing choreographed.
+- **Motion is state feedback only.** 150ms color transitions, 100ms overlay fades, 200ms sidebar slides. Nothing choreographed.
 - **macOS-native affordances.** Scrollbars are hidden by default, vibrancy is a first-class theme parameter, `data-tauri-drag-region` defines the title bar.
 
 ## 2. Colors
@@ -347,12 +347,13 @@ Motion is state feedback and nothing else. There are no entrance animations, no 
 
 - **Color transitions** (`transition-colors`, 51 usages, Tailwind default 150ms): the universal hover/active response.
 - **Opacity transitions** (`transition-opacity`, 7 usages): reveal-on-hover affordances such as the markdown code-block copy button (`markdownComponents.tsx:78`).
-- **Overlay enter/exit** via `tw-animate-css` (`src/index.css:2`): `data-open:animate-in fade-in-0 zoom-in-95` / `data-closed:animate-out fade-out-0 zoom-out-95` at `duration-100`. Used in exactly three files — `ui/alert-dialog.tsx:33, 55`, `ui/context-menu.tsx:34`, `RunActionsButton.tsx:95-96`. Hand-rolled menus and the command palette have **no** enter/exit animation.
+- **Overlay enter/exit** via `tw-animate-css` (`src/index.css:2`): `data-open:animate-in fade-in-0 zoom-in-95` / `data-closed:animate-out fade-out-0 zoom-out-95` at `duration-100`. Used by `ui/alert-dialog.tsx`, `ui/dialog.tsx`, `ui/context-menu.tsx`, `RunActionsButton.tsx`, `OpenInEditorButton.tsx`, and the Changes popover in `MainView.tsx`. The command palette and file finder have an enter fade only — their early-return unmount precludes an exit animation.
+- **Sidebar open/close** (`MainView.tsx`): both sidebars animate `width` at `duration-200 ease-in-out`; the left sidebar cross-fades between the icon rail and the full sidebar while the container slides. Transitions are suppressed while a resize drag is active.
 - **Status pulses** (`animate-pulse`, 7 usages): agent-running dots in the activity rail (`Sidebar.tsx:312`), the browser "loading" chip (`BrowserPane.tsx:461`).
 - **Annotation flash** (`src/index.css:205-212`): the only custom keyframe — a 1.5s `ease-out` primary-tinted background fade to locate a jumped-to annotation.
 - **Button press**: `active:translate-y-px`.
-- **Not animated:** panel resize, tab switching, sidebar collapse, list reordering, diff expansion.
-- **`prefers-reduced-motion` appears nowhere in `src/`.** The only reduced-motion guard in the bundle is the one shipped inside `shadcn/tailwind.css` for its shimmer utility. PRODUCT.md asks for "reduced-motion-friendly state changes"; the codebase does not yet honor it.
+- **Not animated:** panel resize, tab switching, list reordering, diff expansion.
+- **`prefers-reduced-motion`** is honored globally (`src/index.css`): durations are clamped to 0.01ms rather than removed, so `transitionend`/`animationend` listeners still fire and nothing gets stuck mid-state.
 
 ### Scrollbars
 

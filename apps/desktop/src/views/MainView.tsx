@@ -12,9 +12,12 @@ const DEFAULT_SIDEBAR_WIDTH = 280;
 const MIN_SIDEBAR_WIDTH = 180;
 const DEFAULT_RIGHT_SIDEBAR_WIDTH = 300;
 const MIN_RIGHT_SIDEBAR_WIDTH = 220;
+// Matches CollapsedSidebar's w-10; rem so it tracks the UI font-size setting.
+const COLLAPSED_SIDEBAR_WIDTH = "2.5rem";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { OpenInEditorButton } from "../components/OpenInEditorButton";
 import { invoke } from "@/lib/invoke";
+import { cn } from "../lib/utils";
 import { toast } from "sonner";
 import { useUIStore, useDataStore } from "../store";
 import { WorktreeTerminals } from "../components/WorktreeTerminals";
@@ -50,6 +53,22 @@ export function MainView() {
     useUIStore((s) => s.rightSidebarWidth) ?? DEFAULT_RIGHT_SIDEBAR_WIDTH;
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [isRightSidebarResizing, setIsRightSidebarResizing] = useState(false);
+  // Open/close animation state, derived at render time from the previous
+  // toggle value and cleared by the container's own width transitionend.
+  // While true the container clips its fixed-width content; the right
+  // sidebar also stays mounted so it can slide out before unmounting.
+  const [sidebarAnimating, setSidebarAnimating] = useState(false);
+  const [prevSidebarCollapsed, setPrevSidebarCollapsed] = useState(sidebarCollapsed);
+  if (sidebarCollapsed !== prevSidebarCollapsed) {
+    setPrevSidebarCollapsed(sidebarCollapsed);
+    setSidebarAnimating(true);
+  }
+  const [rightSidebarAnimating, setRightSidebarAnimating] = useState(false);
+  const [prevShowSidebar, setPrevShowSidebar] = useState(showSidebar);
+  if (showSidebar !== prevShowSidebar) {
+    setPrevShowSidebar(showSidebar);
+    setRightSidebarAnimating(true);
+  }
   // Mirror sidebar drags into the store so the native browser webview can
   // hide during the drag (it would otherwise capture the cursor mid-drag).
   const handleSidebarResizing = useCallback((resizing: boolean) => {
@@ -383,7 +402,7 @@ export function MainView() {
                     <Popover.Popup
                       id="changes-popover"
                       finalFocus={changesButtonRef}
-                      className="flex h-[min(640px,calc(100vh-5rem))] w-[min(380px,calc(100vw-1rem))] flex-col overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-foreground/10 outline-none"
+                      className="flex h-[min(640px,calc(100vh-5rem))] w-[min(380px,calc(100vw-1rem))] flex-col overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-foreground/10 outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
                     >
                       <Popover.Title className="sr-only">Changes navigator</Popover.Title>
                       <CommitPanel
@@ -422,24 +441,54 @@ export function MainView() {
         highlighterOptions={{}}
       >
         <div className="flex flex-1 min-h-0 min-w-0">
-          {sidebarCollapsed ? (
-            <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
-          ) : (
-            <ResizablePanel
-              width={sidebarWidth}
-              onWidthChange={(w) => useUIStore.getState().setSidebarWidth(w)}
-              isResizing={isSidebarResizing}
-              onResizingChange={handleSidebarResizing}
-              minWidth={MIN_SIDEBAR_WIDTH}
-              maxWidth={window.innerWidth * 0.99}
-              handleSide="right"
-              onDoubleClickHandle={() =>
-                useUIStore.getState().setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
+          {/* The container animates width while the rail and the full sidebar
+              cross-fade as fixed-width layers, so neither squishes mid-flight.
+              Overflow clips only during the animation: at rest the resize
+              handle needs its 8px bleed outside the panel edge. */}
+          <div
+            className={cn(
+              "relative h-full shrink-0 bg-sidebar",
+              (sidebarCollapsed || sidebarAnimating) && "overflow-hidden",
+              !isSidebarResizing && "transition-[width] duration-200 ease-in-out",
+            )}
+            style={{ width: sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
+            onTransitionEnd={(e) => {
+              if (e.target === e.currentTarget && e.propertyName === "width") {
+                setSidebarAnimating(false);
               }
+            }}
+          >
+            <div
+              className={cn(
+                "absolute inset-y-0 left-0 transition-[opacity,visibility] duration-200",
+                sidebarCollapsed ? "visible opacity-100" : "invisible opacity-0",
+              )}
             >
-              <Sidebar />
-            </ResizablePanel>
-          )}
+              <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
+            </div>
+            <div
+              className={cn(
+                "absolute inset-y-0 left-0 transition-[opacity,visibility] duration-200",
+                sidebarCollapsed ? "invisible opacity-0" : "visible opacity-100",
+              )}
+              style={{ width: sidebarWidth }}
+            >
+              <ResizablePanel
+                width={sidebarWidth}
+                onWidthChange={(w) => useUIStore.getState().setSidebarWidth(w)}
+                isResizing={isSidebarResizing}
+                onResizingChange={handleSidebarResizing}
+                minWidth={MIN_SIDEBAR_WIDTH}
+                maxWidth={window.innerWidth * 0.99}
+                handleSide="right"
+                onDoubleClickHandle={() =>
+                  useUIStore.getState().setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
+                }
+              >
+                <Sidebar />
+              </ResizablePanel>
+            </div>
+          </div>
 
           {/* Content */}
           <div className="flex flex-1 min-w-0 min-h-0">
@@ -493,26 +542,47 @@ export function MainView() {
             )}
           </div>
 
-          {showSidebar && !generalTerminalActive && (
-            <ResizablePanel
-              width={rightSidebarWidth}
-              onWidthChange={(w) => useUIStore.getState().setRightSidebarWidth(w)}
-              isResizing={isRightSidebarResizing}
-              onResizingChange={handleRightSidebarResizing}
-              minWidth={MIN_RIGHT_SIDEBAR_WIDTH}
-              maxWidth={window.innerWidth * 0.99}
-              handleSide="left"
-              onDoubleClickHandle={() =>
-                useUIStore
-                  .getState()
-                  .setRightSidebarWidth(DEFAULT_RIGHT_SIDEBAR_WIDTH)
-              }
+          {/* Stays mounted at width 0 while closed so both open and close can
+              animate; the panel content unmounts once the close transition
+              ends. The panel keeps its full width inside, so shrinking the
+              container reads as a slide, not a squish. */}
+          {!generalTerminalActive && (
+            <div
+              className={cn(
+                "relative h-full shrink-0",
+                (!showSidebar || rightSidebarAnimating) && "overflow-hidden",
+                !isRightSidebarResizing &&
+                  "transition-[width] duration-200 ease-in-out",
+              )}
+              style={{ width: showSidebar ? rightSidebarWidth : 0 }}
+              onTransitionEnd={(e) => {
+                if (e.target === e.currentTarget && e.propertyName === "width") {
+                  setRightSidebarAnimating(false);
+                }
+              }}
             >
-              <RightSidebar
-                activeTab={rightSidebarTab}
-                onActiveTabChange={setRightSidebarTab}
-              />
-            </ResizablePanel>
+              {(showSidebar || rightSidebarAnimating) && (
+                <ResizablePanel
+                  width={rightSidebarWidth}
+                  onWidthChange={(w) => useUIStore.getState().setRightSidebarWidth(w)}
+                  isResizing={isRightSidebarResizing}
+                  onResizingChange={handleRightSidebarResizing}
+                  minWidth={MIN_RIGHT_SIDEBAR_WIDTH}
+                  maxWidth={window.innerWidth * 0.99}
+                  handleSide="left"
+                  onDoubleClickHandle={() =>
+                    useUIStore
+                      .getState()
+                      .setRightSidebarWidth(DEFAULT_RIGHT_SIDEBAR_WIDTH)
+                  }
+                >
+                  <RightSidebar
+                    activeTab={rightSidebarTab}
+                    onActiveTabChange={setRightSidebarTab}
+                  />
+                </ResizablePanel>
+              )}
+            </div>
           )}
         </div>
       </WorkerPoolContextProvider>
