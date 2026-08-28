@@ -25,6 +25,9 @@ export interface SubagentSummary {
   status: "running" | "waiting" | "done";
   depth: number;
   updatedAt: number;
+  model?: string;
+  reasoningEffort?: string;
+  serviceTier?: string;
 }
 
 interface SubagentSnapshot {
@@ -168,9 +171,19 @@ function SubagentWorkspacePaneForSource({
                 accentIndex={accentById.get(selected.id) ?? 0}
                 className="h-5 w-3"
               />
-              <span className="truncate text-base font-medium">
-                {formatSubagentName(selected.name)}
-              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-base font-medium">
+                  {formatSubagentName(selected.name)}
+                </p>
+                <p
+                  className="truncate text-xs text-muted-foreground"
+                  title={`Model: ${selected.model ?? "unknown"} · Thinking: ${selected.reasoningEffort ?? "unknown"} · Service tier: ${selected.serviceTier ?? "unknown"}`}
+                >
+                  Model: {selected.model ?? "unknown"} · Thinking:{" "}
+                  {selected.reasoningEffort ?? "unknown"} · Service tier:{" "}
+                  {selected.serviceTier ?? "unknown"}
+                </p>
+              </div>
             </>
           ) : null}
         </div>

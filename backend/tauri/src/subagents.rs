@@ -15,6 +15,12 @@ pub struct SubagentSummary {
     pub status: String,
     pub depth: usize,
     pub updated_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -369,6 +375,18 @@ fn ingest_subagent_lifecycle_event(
             status: status.to_string(),
             depth: 1,
             updated_at: now,
+            model: session
+                .agents
+                .get(agent_id)
+                .and_then(|record| record.summary.model.clone()),
+            reasoning_effort: session
+                .agents
+                .get(agent_id)
+                .and_then(|record| record.summary.reasoning_effort.clone()),
+            service_tier: session
+                .agents
+                .get(agent_id)
+                .and_then(|record| record.summary.service_tier.clone()),
         },
         started_at: session
             .agents
@@ -434,9 +452,10 @@ fn refresh_codex_session_from_files(
             worktree_path,
             Some(agent_path),
         );
-        let completed = transcript_path
+        let details = transcript_path
             .as_deref()
-            .is_some_and(codex_session_is_complete);
+            .map(codex_session_details)
+            .unwrap_or_default();
         let name = agent_path.rsplit('/').next().unwrap_or("Subagent");
         let depth = agent_path
             .split('/')
@@ -449,9 +468,12 @@ fn refresh_codex_session_from_files(
                 summary: SubagentSummary {
                     id: thread_id.to_string(),
                     name: name.to_string(),
-                    status: if completed { "done" } else { "running" }.to_string(),
+                    status: if details.complete { "done" } else { "running" }.to_string(),
                     depth,
                     updated_at: started_at,
+                    model: details.model,
+                    reasoning_effort: details.reasoning_effort,
+                    service_tier: details.service_tier,
                 },
                 started_at,
             },
@@ -491,20 +513,19 @@ fn refresh_codex_session_from_files(
                 .filter(|part| !part.is_empty())
                 .count()
                 .saturating_sub(1);
+            let details = codex_session_details(path);
             next.insert(
                 thread_id.to_string(),
                 SubagentRecord {
                     summary: SubagentSummary {
                         id: thread_id.to_string(),
                         name: name.to_string(),
-                        status: if codex_session_is_complete(path) {
-                            "done"
-                        } else {
-                            "running"
-                        }
-                        .to_string(),
+                        status: if details.complete { "done" } else { "running" }.to_string(),
                         depth,
                         updated_at: started_at,
+                        model: details.model,
+                        reasoning_effort: details.reasoning_effort,
+                        service_tier: details.service_tier,
                     },
                     started_at,
                 },
@@ -779,6 +800,9 @@ fn same_agent_state(
             right.get(id).is_some_and(|new| {
                 old.summary.status == new.summary.status
                     && old.summary.updated_at == new.summary.updated_at
+                    && old.summary.model == new.summary.model
+                    && old.summary.reasoning_effort == new.summary.reasoning_effort
+                    && old.summary.service_tier == new.summary.service_tier
                     && old.started_at == new.started_at
             })
         })
@@ -926,23 +950,58 @@ fn codex_session_metadata_identity_matches(
     Some(true)
 }
 
+#[derive(Default)]
+struct CodexSessionDetails {
+    complete: bool,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+    service_tier: Option<String>,
+}
+
+fn codex_session_details(path: &Path) -> CodexSessionDetails {
+    let Ok(file) = fs::File::open(path) else {
+        return CodexSessionDetails::default();
+    };
+    let mut details = CodexSessionDetails::default();
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let payload = &value["payload"];
+        if value["type"] == "turn_context" {
+            update_nonempty_string(&mut details.model, &payload["model"]);
+            update_nonempty_string(&mut details.reasoning_effort, &payload["effort"]);
+            continue;
+        }
+        if value["type"] != "event_msg" {
+            continue;
+        }
+        match payload["type"].as_str() {
+            Some("thread_settings_applied") => {
+                let settings = &payload["thread_settings"];
+                update_nonempty_string(&mut details.model, &settings["model"]);
+                update_nonempty_string(
+                    &mut details.reasoning_effort,
+                    &settings["reasoning_effort"],
+                );
+                update_nonempty_string(&mut details.service_tier, &settings["service_tier"]);
+            }
+            Some("task_complete") | Some("turn_aborted") => details.complete = true,
+            Some("task_started") => details.complete = false,
+            _ => {}
+        }
+    }
+    details
+}
+
+fn update_nonempty_string(target: &mut Option<String>, value: &Value) {
+    if let Some(value) = value.as_str().filter(|value| !value.is_empty()) {
+        *target = Some(value.to_string());
+    }
+}
+
 fn codex_session_is_complete(path: &Path) -> bool {
-    fs::read_to_string(path).is_ok_and(|contents| {
-        contents
-            .lines()
-            .rev()
-            .find_map(|line| {
-                let value = serde_json::from_str::<Value>(line).ok()?;
-                (value["type"] == "event_msg")
-                    .then(|| match value["payload"]["type"].as_str() {
-                        Some("task_complete") | Some("turn_aborted") => Some(true),
-                        Some("task_started") => Some(false),
-                        _ => None,
-                    })
-                    .flatten()
-            })
-            .unwrap_or(false)
-    })
+    codex_session_details(path).complete
 }
 
 #[cfg(test)]
@@ -993,6 +1052,49 @@ mod tests {
         )
         .unwrap();
         assert!(codex_session_is_complete(&rollout));
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn reads_codex_runtime_details_from_latest_settings() {
+        let workspace = temp_workspace("runtime-details");
+        fs::create_dir_all(&workspace).unwrap();
+        let rollout = workspace.join("rollout.jsonl");
+        fs::write(
+            &rollout,
+            [
+                serde_json::json!({
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.5", "effort": "high" }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "thread_settings_applied",
+                        "thread_settings": {
+                            "model": "gpt-5.6-luna",
+                            "reasoning_effort": "max",
+                            "service_tier": "fast"
+                        }
+                    }
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "task_complete" }
+                }),
+            ]
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        )
+        .unwrap();
+
+        let details = codex_session_details(&rollout);
+        assert!(details.complete);
+        assert_eq!(details.model.as_deref(), Some("gpt-5.6-luna"));
+        assert_eq!(details.reasoning_effort.as_deref(), Some("max"));
+        assert_eq!(details.service_tier.as_deref(), Some("fast"));
         fs::remove_dir_all(workspace).unwrap();
     }
 
@@ -1508,6 +1610,9 @@ mod tests {
                             status: "running".to_string(),
                             depth: 1,
                             updated_at: 0,
+                            model: None,
+                            reasoning_effort: None,
+                            service_tier: None,
                         },
                         started_at: 0,
                     },
@@ -1632,6 +1737,9 @@ mod tests {
                     status: status.to_string(),
                     depth: 1,
                     updated_at: started_at,
+                    model: None,
+                    reasoning_effort: None,
+                    service_tier: None,
                 },
                 started_at,
             }
@@ -1684,6 +1792,9 @@ mod tests {
                     status: status.to_string(),
                     depth: 1,
                     updated_at: started_at,
+                    model: None,
+                    reasoning_effort: None,
+                    service_tier: None,
                 },
                 started_at,
             }
